@@ -4,6 +4,9 @@ kind: Application
 metadata:
   name: data-kafka-cluster
   namespace: argocd
+  annotations:
+    # data-strimzi-operator(wave 0)가 CRD를 설치한 뒤 이 App이 sync되도록 순서 명시.
+    argocd.argoproj.io/sync-wave: "1"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
