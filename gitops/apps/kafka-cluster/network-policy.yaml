@@ -1,0 +1,22 @@
+---
+# 9092 plain 리스너 접근을 kafka 네임스페이스 내부 Pod로 제한.
+# 외부 서비스(서비스팀/보안팀/AI 튜터)가 붙을 때 namespaceSelector 추가.
+# 9093 tls 리스너는 mTLS 인증이 있으므로 별도 NetworkPolicy 불필요.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kafka-plain-listener
+  namespace: kafka
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kafka
+  policyTypes:
+    - Ingress
+  ingress:
+    - ports:
+        - port: 9092
+      from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kafka
