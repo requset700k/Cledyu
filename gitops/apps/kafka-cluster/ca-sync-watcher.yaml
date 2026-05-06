@@ -102,6 +102,14 @@ spec:
             capabilities:
               drop:
                 - ALL
+            readOnlyRootFilesystem: true
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
           volumeMounts:
             - name: tmp
               mountPath: /tmp
@@ -112,8 +120,6 @@ spec:
             - /bin/sh
             - -c
             - |
-              set -e
-
               run_sync() {
                 echo "[ca-sync-watcher] CA Secret 동기화 시작"
 
@@ -181,7 +187,11 @@ spec:
                 if [ "$CURRENT_HASH" != "$LAST_HASH" ]; then
                   # 해시가 달라지면 trust-manager가 CA 갱신을 반영한 것 → 동기화 실행
                   echo "[ca-sync-watcher] ConfigMap 변경 감지: $LAST_HASH → $CURRENT_HASH"
-                  run_sync
-                  LAST_HASH="$CURRENT_HASH"
+                  if run_sync; then
+                    LAST_HASH="$CURRENT_HASH"
+                  else
+                    # sync 실패 시 재시작 없이 다음 루프에서 재시도
+                    echo "[ca-sync-watcher] 동기화 실패 — 60초 후 재시도"
+                  fi
                 fi
               done
