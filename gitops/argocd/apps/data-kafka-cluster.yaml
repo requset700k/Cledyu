@@ -32,3 +32,14 @@ spec:
         duration: 30s
         factor: 2
         maxDuration: 5m
+  # Kafka / KafkaTopic CR의 .status 필드는 Strimzi가 런타임에 계속 업데이트한다.
+  # Git에 없는 필드라 ArgoCD가 OutOfSync로 잘못 감지하는 노이즈를 제거한다.
+  ignoreDifferences:
+    - group: kafka.strimzi.io
+      kind: Kafka
+      jsonPointers:
+        - /status
+    - group: kafka.strimzi.io
+      kind: KafkaTopic
+      jsonPointers:
+        - /status
