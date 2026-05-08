@@ -1,0 +1,41 @@
+---
+replicaCount: 1
+
+image:
+  registry: ghcr.io
+  repository: kafbat/kafka-ui
+  tag: v1.5.0@sha256:7cda86a33344160309fdb65146332e4da65db81a945614f2fe32e210803f6fd1
+
+yamlApplicationConfig:
+  kafka:
+    clusters:
+      - name: cledyu-kafka
+        bootstrapServers: cledyu-kafka-kafka-bootstrap.kafka.svc:9092
+
+ingress:
+  enabled: true
+  ingressClassName: traefik
+  host: kafka-ui.cledyu.local
+  tls:
+    enabled: true
+    secretName: kafka-ui-tls
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
