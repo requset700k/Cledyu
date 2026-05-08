@@ -23,11 +23,11 @@ metadata:
   name: kafka-ca-sync-watcher
   namespace: kafka
 rules:
-  # ConfigMap watch — trust-manager Bundle 변경 감지(ConfigMap 감시)
+  # ConfigMap read — 볼륨 마운트로 파일 직접 읽음. kubectl 직접 조회용 get만 필요.
   - apiGroups: [""]
     resources: ["configmaps"]
     resourceNames: ["cledyu-root-ca-bundle"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get"]
   # cert-manager 가 생성한 intermediate CA Secret을 읽을 수 있는 권한
   - apiGroups: [""]
     resources: ["secrets"]
