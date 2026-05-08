@@ -31,6 +31,10 @@ spec:
         port: 9092
         type: internal
         tls: false
+        networkPolicyPeers:
+          - namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: kafka
       # tls: mTLS 클라이언트용 — Validation Engine, 분석 파이프라인.
       - name: tls
         port: 9093
