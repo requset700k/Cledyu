@@ -79,8 +79,8 @@ git push
 ```bash
 # 컨슈머 그룹 확인
 kubectl run kcat-check --rm --attach --restart=Never -n kafka \
-  --image=edenhill/kcat:1.7.1 \
-  --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"kcat-check","image":"edenhill/kcat:1.7.1","command":["sh","-c","kcat -b cledyu-kafka-kafka-bootstrap.kafka.svc:9092 -L | grep <토픽-이름>"],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}]}}'
+  --image=confluentinc/cp-kcat:7.4.0 \
+  --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"kcat-check","image":"confluentinc/cp-kcat:7.4.0","command":["sh","-c","kcat -b cledyu-kafka-kafka-bootstrap.kafka.svc:9092 -L | grep <토픽-이름>"],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}]}}'
 ```
 
 ---
@@ -138,7 +138,35 @@ kubectl get pods -n kafka -w
 
 ---
 
-## 5. 동작 검증 (produce → consume 왕복)
+## 5. Kafka UI
+
+브라우저에서 토픽·메시지·컨슈머 그룹을 모니터링할 수 있는 kafbat kafka-ui.
+
+### 접속
+
+`https://kafka-ui.cledyu.local`
+
+처음 접속 시 hosts 파일에 아래 항목 추가 필요:
+
+| OS | 명령어 |
+|---|---|
+| macOS / Linux | `echo "10.10.0.101  kafka-ui.cledyu.local" \| sudo tee -a /etc/hosts` |
+| Windows (PowerShell 관리자) | `Add-Content C:\Windows\System32\drivers\etc\hosts "\`n10.10.0.101  kafka-ui.cledyu.local"` |
+
+### 주요 기능
+
+- 토픽 목록·파티션·offset 조회
+- 메시지 브라우징 (토픽별 최신/특정 offset부터 조회)
+- 컨슈머 그룹 lag 확인
+- 브로커 상태 확인
+
+### 검증
+
+브라우저에서 `https://kafka-ui.cledyu.local` 접속 후 cledyu-kafka 클러스터·토픽 목록이 표시되면 정상.
+
+---
+
+## 6. 동작 검증 (produce → consume 왕복)
 
 kafka 네임스페이스가 PodSecurity `restricted` 정책이므로 반드시 `-n kafka` 와 `--overrides` 를 함께 사용해야 한다.
 
@@ -146,23 +174,23 @@ kafka 네임스페이스가 PodSecurity `restricted` 정책이므로 반드시 `
 
 ```bash
 kubectl run kcat-prod --rm --attach --restart=Never -n kafka \
-  --image=edenhill/kcat:1.7.1 \
-  --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"kcat-prod","image":"edenhill/kcat:1.7.1","command":["sh","-c","echo test-message | kcat -b cledyu-kafka-kafka-bootstrap.kafka.svc:9092 -t lab-events -P -e"],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}]}}'
+  --image=confluentinc/cp-kcat:7.4.0 \
+  --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"kcat-prod","image":"confluentinc/cp-kcat:7.4.0","command":["sh","-c","echo test-message | kcat -b cledyu-kafka-kafka-bootstrap.kafka.svc:9092 -t lab-events -P -e"],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}]}}'
 ```
 
 **consume:**
 
 ```bash
 kubectl run kcat-cons --rm --attach --restart=Never -n kafka \
-  --image=edenhill/kcat:1.7.1 \
-  --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"kcat-cons","image":"edenhill/kcat:1.7.1","command":["sh","-c","kcat -b cledyu-kafka-kafka-bootstrap.kafka.svc:9092 -t lab-events -C -e -o beginning -c 1"],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}]}}'
+  --image=confluentinc/cp-kcat:7.4.0 \
+  --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"kcat-cons","image":"confluentinc/cp-kcat:7.4.0","command":["sh","-c","kcat -b cledyu-kafka-kafka-bootstrap.kafka.svc:9092 -t lab-events -C -e -o -1 -c 1"],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}]}}'
 ```
 
 `test-message` 출력되면 정상. `--rm` 옵션으로 pod는 자동 삭제됨.
 
 ---
 
-## 6. 트러블슈팅
+## 7. 트러블슈팅
 
 ### 브로커 Pod가 Pending 상태
 
