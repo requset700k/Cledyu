@@ -5,6 +5,8 @@ kind: Application
 metadata:
   name: data-strimzi-operator
   namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
   finalizers:
     # App 삭제 시 ArgoCD가 연관된 k8s 리소스까지 함께 정리
     - resources-finalizer.argocd.argoproj.io
