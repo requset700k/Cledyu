@@ -12,6 +12,89 @@ yamlApplicationConfig:
       - name: cledyu-kafka
         bootstrapServers: cledyu-kafka-kafka-bootstrap.kafka.svc:9092
 
+  auth:
+    type: OAUTH2
+    oauth2:
+      client:
+        keycloak:
+          clientId: kafka-ui
+          clientSecret: ${CLIENT_SECRET}
+          provider: keycloak
+          issuer-uri: https://keycloak.cledyu.local/realms/cledyu
+          scope: openid,roles
+          user-name-attribute: preferred_username
+          redirect-uri: https://kafka-ui.cledyu.local/login/oauth2/code/keycloak
+          authorization-grant-type: authorization_code
+          custom-params:
+            type: oauth
+
+  rbac:
+    roles:
+      - name: admins
+        clusters:
+          - cledyu-kafka
+        subjects:
+          - provider: oauth
+            type: role
+            value: kafka-admin
+        permissions:
+          - resource: applicationconfig
+            actions: all
+          - resource: clusterconfig
+            actions: all
+          - resource: topic
+            value: ".*"
+            actions: all
+          - resource: consumer
+            value: ".*"
+            actions: all
+          - resource: schema
+            value: ".*"
+            actions: all
+          - resource: connect
+            value: ".*"
+            actions: all
+          - resource: acl
+            actions: all
+          - resource: audit
+            actions: all
+      - name: viewers
+        clusters:
+          - cledyu-kafka
+        subjects:
+          - provider: oauth
+            type: role
+            value: kafka-viewer
+        permissions:
+          - resource: clusterconfig
+            actions:
+              - view
+          - resource: topic
+            value: ".*"
+            actions:
+              - VIEW
+              - MESSAGES_READ
+              - ANALYSIS_VIEW
+          - resource: consumer
+            value: ".*"
+            actions:
+              - view
+          - resource: schema
+            value: ".*"
+            actions:
+              - view
+          - resource: connect
+            value: ".*"
+            actions:
+              - view
+
+extraEnvs:
+  - name: CLIENT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: kafka-ui-oidc
+        key: client-secret
+
 ingress:
   enabled: true
   ingressClassName: traefik
