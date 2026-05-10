@@ -25,7 +25,7 @@ spec:
       targetRevision: main
       path: gitops/apps/kafka-ui
       directory:
-        include: "certificate.yaml"
+        include: "*.yaml"
   destination:
     server: https://kubernetes.default.svc
     namespace: kafka
