@@ -1,5 +1,4 @@
-// 서버 진입점 — 설정 로드, HTTP 서버 시작/종료를 순서대로 처리한다.
-// SIGINT/SIGTERM 수신 시 진행 중인 요청을 최대 10초 동안 기다린 후 graceful shutdown.
+// SIGINT/SIGTERM 수신 시 진행 중인 요청을 최대 10초 기다린 후 graceful shutdown.
 package main
 
 import (

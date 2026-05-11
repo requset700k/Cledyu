@@ -1,13 +1,10 @@
-// 로그인 페이지 — Keycloak SSO 연동 전까지는 mock 버튼으로 동작.
 // 버튼 클릭 시 /api/v1/auth/login → 백엔드가 Keycloak 인증 페이지로 리다이렉트.
-// Keycloak 실 연동은 Phase D 예정.
 import Link from 'next/link';
 
 export default function LoginPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        {/* Brand */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-500/20 rounded-2xl mb-4 border border-blue-500/30">
             <TerminalIcon />
@@ -16,7 +13,6 @@ export default function LoginPage() {
           <p className="text-slate-400 mt-2 text-sm">클라우드 엔지니어링 인터랙티브 실습 플랫폼</p>
         </div>
 
-        {/* Card */}
         <div className="bg-slate-800/60 backdrop-blur border border-slate-700 rounded-2xl p-8 shadow-2xl">
           <h2 className="text-lg font-semibold text-white mb-1">시작하기</h2>
           <p className="text-slate-400 text-sm mb-6">Cledyu 계정으로 로그인하세요</p>
@@ -28,7 +24,6 @@ export default function LoginPage() {
             Cledyu로 로그인
           </Link>
 
-          {/* Features */}
           <div className="mt-8 pt-6 border-t border-slate-700 space-y-3">
             <Feature
               icon={<TerminalSmIcon />}

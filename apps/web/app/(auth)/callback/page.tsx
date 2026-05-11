@@ -1,7 +1,3 @@
-// Keycloak OIDC 콜백 페이지.
-// 인증 완료 후 백엔드가 access_token 쿠키를 설정하고 이 페이지로 리다이렉트함.
-// 쿠키가 브라우저에 저장될 시간(500ms)을 준 뒤 /labs로 이동.
-
 'use client';
 
 import { useEffect } from 'react';

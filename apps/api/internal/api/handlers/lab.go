@@ -7,8 +7,6 @@ import (
 )
 
 // mockLabs는 Lab DSL 명세 확정 전까지 사용하는 하드코딩 데이터.
-// PR8(Labs 카탈로그) 에서 실 DB 조회로 교체 예정.
-// 프론트엔드 lib/types.ts의 Lab 타입과 필드명 일치.
 var mockLabs = []gin.H{
 	{
 		"id":               "lab-k8s-basics",
@@ -50,7 +48,6 @@ var mockLabs = []gin.H{
 	},
 }
 
-// ListLabs는 전체 Lab 목록을 반환한다.
 func (h *Handler) ListLabs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"labs":  mockLabs,
@@ -58,8 +55,6 @@ func (h *Handler) ListLabs(c *gin.Context) {
 	})
 }
 
-// GetLab은 id로 단건 Lab을 조회한다.
-// 존재하지 않으면 404를 반환한다.
 func (h *Handler) GetLab(c *gin.Context) {
 	id := c.Param("id")
 	for _, lab := range mockLabs {
