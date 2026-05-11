@@ -1,7 +1,15 @@
 param(
   [string]$Kubeconfig = "$env:USERPROFILE\Cledyu\.tmp\cledyu-oidc-work.yaml",
   [string]$BootstrapPath = "$env:USERPROFILE\Documents\Cledyu-Secrets\vault-bootstrap-20260428-150300.json",
-  [string]$VaultPod = "vault-0"
+  [string]$VaultPod = "vault-0",
+  [string]$VaultOidcClientId = "vault",
+  [string]$VaultOidcClientSecret = $env:VAULT_OIDC_CLIENT_SECRET,
+  [string]$VaultOidcDiscoveryUrl = "https://keycloak.cledyu.local/realms/cledyu",
+  [string]$VaultOidcCliRedirectUri = "http://localhost:8250/oidc/callback",
+  [string]$VaultOidcUiRedirectUri = "https://vault.cledyu.local/ui/vault/auth/oidc/oidc/callback",
+  [string]$VaultOidcCaNamespace = "cert-manager",
+  [string]$VaultOidcCaSecret = "cledyu-root-ca",
+  [string]$VaultOidcCaSecretKey = "tls.crt"
 )
 
 $ErrorActionPreference = "Stop"
@@ -83,6 +91,19 @@ function Write-VaultJson {
     -InputBody $payload
 }
 
+function Write-VaultRawJson {
+  param(
+    [string]$Path,
+    [hashtable]$Data
+  )
+
+  $payload = $Data | ConvertTo-Json -Depth 20 -Compress
+
+  Invoke-VaultCommand `
+    -Command "cat >/tmp/vault-payload.json && vault write $Path @/tmp/vault-payload.json >/dev/null && rm -f /tmp/vault-payload.json" `
+    -InputBody $payload
+}
+
 function Write-VaultPolicy {
   param(
     [string]$Name,
@@ -127,6 +148,7 @@ Write-VaultPolicy -Name "cledyu-argocd" -PolicyPath (Join-Path $policyDir "cledy
 Write-VaultPolicy -Name "cledyu-grafana" -PolicyPath (Join-Path $policyDir "cledyu-grafana.hcl")
 Write-VaultPolicy -Name "cledyu-keycloak-admin" -PolicyPath (Join-Path $policyDir "cledyu-keycloak-admin.hcl")
 Write-VaultPolicy -Name "cledyu-keycloak-db" -PolicyPath (Join-Path $policyDir "cledyu-keycloak-db.hcl")
+Write-VaultPolicy -Name "cledyu-operator" -PolicyPath (Join-Path $policyDir "cledyu-operator.hcl")
 Write-VaultPolicy -Name "cledyu-service-oidc" -PolicyPath (Join-Path $policyDir "cledyu-service-oidc.hcl")
 
 Write-Host "Create Kubernetes auth roles..."
@@ -134,6 +156,35 @@ Invoke-VaultCommand -Command "vault write auth/kubernetes/role/cledyu-argocd bou
 Invoke-VaultCommand -Command "vault write auth/kubernetes/role/cledyu-grafana bound_service_account_names=grafana bound_service_account_namespaces=monitoring policies=cledyu-grafana ttl=1h >/dev/null"
 Invoke-VaultCommand -Command "vault write auth/kubernetes/role/cledyu-keycloak bound_service_account_names=cledyu-keycloak bound_service_account_namespaces=keycloak policies=cledyu-keycloak-admin,cledyu-keycloak-db ttl=1h >/dev/null"
 Invoke-VaultCommand -Command "vault write auth/kubernetes/role/cledyu-services bound_service_account_names=web,api,tutor bound_service_account_namespaces=web,api,tutor policies=cledyu-service-oidc ttl=1h >/dev/null"
+
+if ([string]::IsNullOrWhiteSpace($VaultOidcClientSecret)) {
+  throw "Vault OIDC client secret not provided. Set VAULT_OIDC_CLIENT_SECRET or pass -VaultOidcClientSecret."
+}
+
+Write-Host "Configure Vault OIDC auth backend..."
+$vaultOidcCaPem = Get-SecretValue -Namespace $VaultOidcCaNamespace -Name $VaultOidcCaSecret -Key $VaultOidcCaSecretKey
+Invoke-VaultCommand -Command "vault auth enable oidc >/dev/null 2>&1 || true"
+Write-VaultRawJson -Path "auth/oidc/config" -Data @{
+  oidc_discovery_url = $VaultOidcDiscoveryUrl
+  oidc_client_id = $VaultOidcClientId
+  oidc_client_secret = $VaultOidcClientSecret
+  oidc_discovery_ca_pem = $vaultOidcCaPem
+  default_role = "cledyu-platform"
+  bound_issuer = $VaultOidcDiscoveryUrl
+}
+Write-VaultRawJson -Path "auth/oidc/role/cledyu-platform" -Data @{
+  role_type = "oidc"
+  user_claim = "sub"
+  groups_claim = "groups"
+  bound_audiences = @($VaultOidcClientId)
+  allowed_redirect_uris = @($VaultOidcCliRedirectUri, $VaultOidcUiRedirectUri)
+  oidc_scopes = @("openid", "profile", "email")
+  bound_claims = @{
+    groups = @("team-platform", "team-security")
+  }
+  policies = @("cledyu-operator")
+  ttl = "1h"
+}
 
 Write-Host "Migrate available bootstrap secrets to Vault..."
 $keycloakAdminUsername = Get-SecretValue -Namespace keycloak -Name cledyu-keycloak-initial-admin -Key username
@@ -176,6 +227,12 @@ Write-VaultJson -Path "cledyu/data/oidc/tutor" -Data @{
   access_type = "bearer-only"
   secret_required = "false"
 }
+Write-VaultJson -Path "cledyu/data/oidc/vault" -Data @{
+  client_id = $VaultOidcClientId
+  client_secret = $VaultOidcClientSecret
+  source = "VAULT_OIDC_CLIENT_SECRET"
+  access_type = "confidential"
+}
 
 $grafanaClientSecret = Get-SecretValue -Namespace monitoring -Name grafana -Key "client-secret" -Optional
 if ($grafanaClientSecret) {
@@ -201,6 +258,7 @@ Invoke-VaultCommand -Command "vault kv metadata get cledyu/oidc/argocd >/dev/nul
 Invoke-VaultCommand -Command "vault kv metadata get cledyu/oidc/web >/dev/null"
 Invoke-VaultCommand -Command "vault kv metadata get cledyu/oidc/api >/dev/null"
 Invoke-VaultCommand -Command "vault kv metadata get cledyu/oidc/tutor >/dev/null"
+Invoke-VaultCommand -Command "vault kv metadata get cledyu/oidc/vault >/dev/null"
 Invoke-VaultCommand -Command "vault kv metadata get cledyu/oidc/grafana >/dev/null"
 
 Write-Host "Vault bootstrap configuration completed."
