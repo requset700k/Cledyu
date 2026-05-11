@@ -43,7 +43,6 @@ func newTestRouter() *gin.Engine {
 	r.GET("/labs", h.ListLabs)
 	r.GET("/labs/:id", h.GetLab)
 	r.GET("/api/v1/auth/login", h.Login)
-	r.GET("/api/v1/auth/callback", h.Callback)
 	return r
 }
 
@@ -112,7 +111,7 @@ func TestGetMe(t *testing.T) {
 	}
 }
 
-func TestLogin_RedirectsToKeycloak(t *testing.T) {
+func TestLogin_SetsMockCookieAndRedirects(t *testing.T) {
 	r := newTestRouter()
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil))
@@ -121,42 +120,17 @@ func TestLogin_RedirectsToKeycloak(t *testing.T) {
 		t.Fatalf("expected 302, got %d", w.Code)
 	}
 	loc := w.Header().Get("Location")
-	if !strings.HasPrefix(loc, "https://keycloak.test/realms/test/protocol/openid-connect/auth") {
-		t.Errorf("unexpected redirect location: %s", loc)
+	if !strings.HasSuffix(loc, "/callback") {
+		t.Errorf("expected redirect to /callback, got %s", loc)
 	}
-}
-
-func TestCallback_MissingStateCookie(t *testing.T) {
-	r := newTestRouter()
-	w := httptest.NewRecorder()
-	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/auth/callback?code=test&state=abc", nil))
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", w.Code)
+	cookies := w.Result().Cookies()
+	var found bool
+	for _, c := range cookies {
+		if c.Name == "access_token" && c.Value == "mock-token" {
+			found = true
+		}
 	}
-}
-
-func TestCallback_StateMismatch(t *testing.T) {
-	r := newTestRouter()
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/callback?code=test&state=wrong", nil)
-	req.AddCookie(&http.Cookie{Name: "oauth_state", Value: "correct"})
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", w.Code)
-	}
-}
-
-func TestCallback_ValidState_TokenExchangeError(t *testing.T) {
-	r := newTestRouter()
-	w := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/callback?code=test&state=mystate", nil)
-	req.AddCookie(&http.Cookie{Name: "oauth_state", Value: "mystate"})
-	r.ServeHTTP(w, req)
-
-	// keycloak.test 는 실제로 존재하지 않으므로 token exchange 실패 → 500
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d", w.Code)
+	if !found {
+		t.Error("expected access_token=mock-token cookie")
 	}
 }

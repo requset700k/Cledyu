@@ -30,12 +30,8 @@ func NewRouter(cfg *config.Config, log *zap.Logger) *gin.Engine {
 
 	r.GET("/health", h.Health)
 
-	// 인증 불필요 — Keycloak OIDC 로그인/콜백
-	auth := r.Group("/api/v1/auth")
-	{
-		auth.GET("/login", h.Login)
-		auth.GET("/callback", h.Callback)
-	}
+	// 인증 불필요 — 로그인 (mock: 쿠키 설정 후 /callback 리다이렉트)
+	r.GET("/api/v1/auth/login", h.Login)
 
 	if cfg.Server.Mode == "release" {
 		log.Warn("JWT verification is running in STUB mode — replace with JWKS before handling real users")
