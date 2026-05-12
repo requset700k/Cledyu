@@ -25,14 +25,14 @@ terraform apply
 ## Requirements
 
 | Name | Version |
-| ---- | ------- |
+|------|---------|
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.5.0 |
 | <a name="requirement_keycloak"></a> [keycloak](#requirement\_keycloak) | ~> 4.4 |
 
 ## Providers
 
 | Name | Version |
-| ---- | ------- |
+|------|---------|
 | <a name="provider_keycloak"></a> [keycloak](#provider\_keycloak) | ~> 4.4 |
 
 ## Modules
@@ -42,7 +42,7 @@ No modules.
 ## Resources
 
 | Name | Type |
-| ---- | ---- |
+|------|------|
 | [keycloak_group.groups](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/group) | resource |
 | [keycloak_group_roles.group_roles](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/group_roles) | resource |
 | [keycloak_openid_client.clients](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/openid_client) | resource |
@@ -61,7 +61,7 @@ No modules.
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-| ---- | ----------- | ---- | ------- | :------: |
+|------|-------------|------|---------|:--------:|
 | <a name="input_keycloak_admin_password"></a> [keycloak\_admin\_password](#input\_keycloak\_admin\_password) | Terraform 실행에 사용하는 Keycloak admin 비밀번호. | `string` | n/a | yes |
 | <a name="input_keycloak_admin_username"></a> [keycloak\_admin\_username](#input\_keycloak\_admin\_username) | Terraform 실행에 사용하는 Keycloak admin 사용자명. | `string` | n/a | yes |
 | <a name="input_oidc_clients"></a> [oidc\_clients](#input\_oidc\_clients) | Cledyu realm에서 관리하는 OIDC client 목록. | <pre>map(object({<br/>    name                            = string<br/>    access_type                     = string<br/>    standard_flow_enabled           = bool<br/>    direct_access_grants_enabled    = bool<br/>    implicit_flow_enabled           = bool<br/>    service_accounts_enabled        = bool<br/>    pkce_code_challenge_method      = optional(string)<br/>    valid_redirect_uris             = optional(list(string), [])<br/>    valid_post_logout_redirect_uris = optional(list(string), [])<br/>    web_origins                     = optional(list(string), [])<br/>    root_url                        = optional(string)<br/>    base_url                        = optional(string)<br/>    admin_url                       = optional(string)<br/>  }))</pre> | n/a | yes |
@@ -80,7 +80,7 @@ No modules.
 ## Outputs
 
 | Name | Description |
-| ---- | ----------- |
+|------|-------------|
 | <a name="output_confidential_client_ids"></a> [confidential\_client\_ids](#output\_confidential\_client\_ids) | 보안 채널로 credential 전달이 필요한 confidential OIDC client 목록. |
 | <a name="output_groups"></a> [groups](#output\_groups) | Terraform이 관리하는 group 이름 목록. |
 | <a name="output_oidc_client_ids"></a> [oidc\_client\_ids](#output\_oidc\_client\_ids) | Terraform이 관리하는 OIDC client ID 목록. |

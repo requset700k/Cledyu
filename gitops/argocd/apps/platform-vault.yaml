@@ -26,7 +26,7 @@ spec:
       targetRevision: main
       path: gitops/apps/vault
       directory:
-        include: "{namespace.yaml,certificate.yaml,serverstransport.yaml,ingress.yaml}"
+        include: "{namespace.yaml,admin-serviceaccount.yaml,certificate.yaml,serverstransport.yaml,ingress.yaml}"
   destination:
     server: https://kubernetes.default.svc
     namespace: vault

@@ -87,7 +87,7 @@ function Write-VaultJson {
   } | ConvertTo-Json -Depth 20 -Compress
 
   Invoke-VaultCommand `
-    -Command "cat >/tmp/vault-payload.json && vault write $Path @/tmp/vault-payload.json >/dev/null && rm -f /tmp/vault-payload.json" `
+    -Command "vault write $Path @- >/dev/null" `
     -InputBody $payload
 }
 
@@ -100,7 +100,7 @@ function Write-VaultRawJson {
   $payload = $Data | ConvertTo-Json -Depth 20 -Compress
 
   Invoke-VaultCommand `
-    -Command "cat >/tmp/vault-payload.json && vault write $Path @/tmp/vault-payload.json >/dev/null && rm -f /tmp/vault-payload.json" `
+    -Command "vault write $Path @- >/dev/null" `
     -InputBody $payload
 }
 
@@ -148,14 +148,17 @@ Write-VaultPolicy -Name "cledyu-argocd" -PolicyPath (Join-Path $policyDir "cledy
 Write-VaultPolicy -Name "cledyu-grafana" -PolicyPath (Join-Path $policyDir "cledyu-grafana.hcl")
 Write-VaultPolicy -Name "cledyu-keycloak-admin" -PolicyPath (Join-Path $policyDir "cledyu-keycloak-admin.hcl")
 Write-VaultPolicy -Name "cledyu-keycloak-db" -PolicyPath (Join-Path $policyDir "cledyu-keycloak-db.hcl")
+Write-VaultPolicy -Name "cledyu-admin" -PolicyPath (Join-Path $policyDir "cledyu-admin.hcl")
 Write-VaultPolicy -Name "cledyu-operator" -PolicyPath (Join-Path $policyDir "cledyu-operator.hcl")
 Write-VaultPolicy -Name "cledyu-service-oidc" -PolicyPath (Join-Path $policyDir "cledyu-service-oidc.hcl")
+Write-VaultPolicy -Name "vault-admin" -PolicyPath (Join-Path $policyDir "vault-admin.hcl")
 
 Write-Host "Create Kubernetes auth roles..."
 Invoke-VaultCommand -Command "vault write auth/kubernetes/role/cledyu-argocd bound_service_account_names=argocd-server bound_service_account_namespaces=argocd policies=cledyu-argocd ttl=1h >/dev/null"
 Invoke-VaultCommand -Command "vault write auth/kubernetes/role/cledyu-grafana bound_service_account_names=grafana bound_service_account_namespaces=monitoring policies=cledyu-grafana ttl=1h >/dev/null"
 Invoke-VaultCommand -Command "vault write auth/kubernetes/role/cledyu-keycloak bound_service_account_names=cledyu-keycloak bound_service_account_namespaces=keycloak policies=cledyu-keycloak-admin,cledyu-keycloak-db ttl=1h >/dev/null"
 Invoke-VaultCommand -Command "vault write auth/kubernetes/role/cledyu-services bound_service_account_names=web,api,tutor bound_service_account_namespaces=web,api,tutor policies=cledyu-service-oidc ttl=1h >/dev/null"
+Invoke-VaultCommand -Command "vault write auth/kubernetes/role/vault-admin bound_service_account_names=vault-admin bound_service_account_namespaces=vault policies=vault-admin ttl=30m max_ttl=1h >/dev/null"
 
 if ([string]::IsNullOrWhiteSpace($VaultOidcClientSecret)) {
   throw "Vault OIDC client secret not provided. Set VAULT_OIDC_CLIENT_SECRET or pass -VaultOidcClientSecret."
@@ -169,10 +172,10 @@ Write-VaultRawJson -Path "auth/oidc/config" -Data @{
   oidc_client_id = $VaultOidcClientId
   oidc_client_secret = $VaultOidcClientSecret
   oidc_discovery_ca_pem = $vaultOidcCaPem
-  default_role = "cledyu-platform"
+  default_role = "cledyu-operator"
   bound_issuer = $VaultOidcDiscoveryUrl
 }
-Write-VaultRawJson -Path "auth/oidc/role/cledyu-platform" -Data @{
+Write-VaultRawJson -Path "auth/oidc/role/cledyu-operator" -Data @{
   role_type = "oidc"
   user_claim = "sub"
   groups_claim = "groups"
@@ -180,9 +183,22 @@ Write-VaultRawJson -Path "auth/oidc/role/cledyu-platform" -Data @{
   allowed_redirect_uris = @($VaultOidcCliRedirectUri, $VaultOidcUiRedirectUri)
   oidc_scopes = @("openid", "profile", "email")
   bound_claims = @{
-    groups = @("team-platform", "team-security")
+    groups = @("team-platform")
   }
   policies = @("cledyu-operator")
+  ttl = "1h"
+}
+Write-VaultRawJson -Path "auth/oidc/role/cledyu-admin" -Data @{
+  role_type = "oidc"
+  user_claim = "sub"
+  groups_claim = "groups"
+  bound_audiences = @($VaultOidcClientId)
+  allowed_redirect_uris = @($VaultOidcCliRedirectUri, $VaultOidcUiRedirectUri)
+  oidc_scopes = @("openid", "profile", "email")
+  bound_claims = @{
+    groups = @("team-security")
+  }
+  policies = @("cledyu-operator", "cledyu-admin")
   ttl = "1h"
 }
 
