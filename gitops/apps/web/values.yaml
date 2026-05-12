@@ -18,7 +18,7 @@ env:
   # Keycloak 미연동 상태이므로 false. Keycloak 연동 PR에서 true로 전환.
   AUTH_ENABLED: "false"
   # 백엔드 미배포 상태이므로 placeholder. Session API PR에서 실제 주소로 교체.
-  BACKEND_URL: "http://cledyu-api.api.svc.cluster.local:8080"
+  CLEDYU_BACKEND_URL: "http://cledyu-api.api.svc.cluster.local:8080"
 
 resources:
   requests:
