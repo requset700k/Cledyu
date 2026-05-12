@@ -43,7 +43,7 @@ func Load() (*Config, error) {
 	v.SetEnvPrefix("CLEDYU")
 	v.AutomaticEnv()
 	// viper가 중첩 키(keycloak.frontend_url 등)를 env로 못 읽는 문제 방지.
-	v.BindEnv("keycloak.frontend_url", "CLEDYU_FRONTEND_URL")   //nolint:errcheck
+	v.BindEnv("keycloak.frontend_url", "CLEDYU_FRONTEND_URL")            //nolint:errcheck
 	v.BindEnv("keycloak.client_secret", "CLEDYU_KEYCLOAK_CLIENT_SECRET") //nolint:errcheck
 	v.BindEnv("keycloak.cookie_domain", "CLEDYU_KEYCLOAK_COOKIE_DOMAIN") //nolint:errcheck
 
