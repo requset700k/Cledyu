@@ -34,6 +34,7 @@ func main() {
 
 	router := api.NewRouter(cfg, logger)
 
+	// Read/WriteTimeout: 느린 클라이언트로 인한 goroutine 고갈 방지. IdleTimeout: keep-alive 연결 유지 상한.
 	srv := &http.Server{
 		Addr:         cfg.Server.Addr,
 		Handler:      router,
@@ -42,6 +43,7 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
+	// ctx.Done() 대기를 위해 goroutine으로 분리.
 	go func() {
 		logger.Info("server started", zap.String("addr", cfg.Server.Addr))
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

@@ -48,6 +48,8 @@ var mockLabs = []gin.H{
 	},
 }
 
+// ListLabs는 전체 lab 목록과 총 개수를 반환한다. 인증 필요.
+// GET /api/v1/labs
 func (h *Handler) ListLabs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"labs":  mockLabs,
@@ -55,6 +57,8 @@ func (h *Handler) ListLabs(c *gin.Context) {
 	})
 }
 
+// GetLab은 id에 해당하는 lab을 반환한다. 없으면 404. 인증 필요.
+// GET /api/v1/labs/:id
 func (h *Handler) GetLab(c *gin.Context) {
 	id := c.Param("id")
 	for _, lab := range mockLabs {
