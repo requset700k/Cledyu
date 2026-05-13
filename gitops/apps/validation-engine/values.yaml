@@ -1,0 +1,17 @@
+image:
+  repository: ghcr.io/requset700k/validation-engine
+  tag: latest
+  pullPolicy: Always
+
+replicaCount: 1 # validation-engine Pod를 1개만 띄움
+
+env:
+  KAFKA_BROKERS: "cledyu-kafka-bootstrap.kafka.svc:9093"
+
+resources:
+  requests: # Pod 시작 시 Kubernetes가 보장해주는 최소 자원
+    cpu: 50m # CPU 0.05코어
+    memory: 64Mi # 메모리 64MB
+  limits: # Pod가 사용할 수 있는 최대 자원
+    cpu: 500m # CPU 0.5코어
+    memory: 256Mi # 메모리 256MB

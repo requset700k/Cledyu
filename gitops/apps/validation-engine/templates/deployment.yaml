@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  # Helm 배포 이름으로 자동 설정
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+
+spec:
+  # values.yaml의 replicaCount: 1
+  replicas: {{ .Values.replicaCount }}
+
+  # 이 Deployment가 관리할 Pod를 라벨로 식별
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+
+  template:
+    metadata:
+      # Pod에 라벨을 붙임 → 위 selector.matchLabels와 일치해야 Deployment가 관리
+      labels:
+        app: {{ .Release.Name }}
+
+    spec:
+      # 위에서 만든 ServiceAccount를 사용 → virtctl이 Kubernetes API에 접근 가능
+      serviceAccountName: validation-engine
+
+      # Pod 전체에 적용되는 보안 설정
+      securityContext:
+        runAsNonRoot: true # root 계정으로 실행 금지
+        runAsUser: 65532 # distroless 이미지의 기본 비root 사용자
+        seccompProfile:
+          type: RuntimeDefault # 컨테이너가 사용할 수 있는 시스템 콜을 제한(안전한 시스템 콜만 허용)
+
+      containers:
+        - name: validation-engine
+          # values.yaml에서 이미지 주소와 태그를 가져옴
+          # 결과: ghcr.io/requset700k/validation-engine:latest
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          # Always: Pod 시작 시 항상 최신 이미지를 새로 받아옴
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+
+          env:
+            # main.go의 getEnv("KAFKA_BROKERS", ...) 가 읽어가는 값
+            - name: KAFKA_BROKERS
+              value: {{ .Values.env.KAFKA_BROKERS | quote }}
+            # main.go의 loadTLS()가 읽어가는 인증서 경로들
+            - name: KAFKA_TLS_CERT
+              value: /etc/kafka-certs/tls.crt
+            - name: KAFKA_TLS_KEY
+              value: /etc/kafka-certs/tls.key
+            - name: KAFKA_CA_CERT
+              value: /etc/kafka-certs/ca.crt
+
+          volumeMounts:
+            # 아래 volumes에서 정의한 kafka-certs를 컨테이너 안 /etc/kafka-certs/에 마운트
+            - name: kafka-certs
+              mountPath: /etc/kafka-certs
+              readOnly: true
+
+          # values.yaml에서 리소스 제한값을 가져옴
+          resources:
+            requests:
+              cpu: {{ .Values.resources.requests.cpu }}
+              memory: {{ .Values.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.resources.limits.cpu }}
+              memory: {{ .Values.resources.limits.memory }}
+
+          # 컨테이너 개별 보안 설정
+          securityContext:
+            allowPrivilegeEscalation: false # 실행 중 권한 상승 금지
+            readOnlyRootFilesystem: true # 파일시스템 쓰기 금지 (해킹 시 피해 최소화)
+            capabilities:
+              drop:
+                - ALL # 모든 Linux 권한 제거 (필요한 것만 허용하는 최소 권한 원칙)
+
+      volumes:
+        - name: kafka-certs
+          secret:
+            secretName: validation-engine-kafka-client-tls
