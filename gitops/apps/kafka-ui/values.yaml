@@ -1,0 +1,161 @@
+---
+replicaCount: 1
+
+image:
+  registry: ghcr.io
+  repository: kafbat/kafka-ui
+  tag: v1.5.0@sha256:7cda86a33344160309fdb65146332e4da65db81a945614f2fe32e210803f6fd1
+
+yamlApplicationConfig:
+  kafka:
+    clusters:
+      - name: cledyu-kafka
+        bootstrapServers: cledyu-kafka-kafka-bootstrap.kafka.svc:9092
+
+  auth:
+    type: OAUTH2
+    oauth2:
+      client:
+        keycloak:
+          clientId: kafka-ui
+          clientSecret: ${CLIENT_SECRET}
+          provider: keycloak
+          issuer-uri: https://keycloak.cledyu.local/realms/cledyu
+          scope: openid,roles
+          user-name-attribute: preferred_username
+          redirect-uri: https://kafka-ui.cledyu.local/login/oauth2/code/keycloak
+          authorization-grant-type: authorization_code
+          custom-params:
+            type: oauth
+
+  rbac:
+    roles:
+      - name: admins
+        clusters:
+          - cledyu-kafka
+        subjects:
+          - provider: oauth
+            type: role
+            value: kafka-admin
+        permissions:
+          - resource: applicationconfig
+            actions: all
+          - resource: clusterconfig
+            actions: all
+          - resource: topic
+            value: ".*"
+            actions: all
+          - resource: consumer
+            value: ".*"
+            actions: all
+          - resource: schema
+            value: ".*"
+            actions: all
+          - resource: connect
+            value: ".*"
+            actions: all
+          - resource: acl
+            actions: all
+          - resource: audit
+            actions: all
+      - name: viewers
+        clusters:
+          - cledyu-kafka
+        subjects:
+          - provider: oauth
+            type: role
+            value: kafka-viewer
+        permissions:
+          - resource: clusterconfig
+            actions:
+              - view
+          - resource: topic
+            value: ".*"
+            actions:
+              - VIEW
+              - MESSAGES_READ
+              - ANALYSIS_VIEW
+          - resource: consumer
+            value: ".*"
+            actions:
+              - view
+          - resource: schema
+            value: ".*"
+            actions:
+              - view
+          - resource: connect
+            value: ".*"
+            actions:
+              - view
+
+extraEnvs:
+  - name: CLIENT_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: kafka-ui-oidc
+        key: client-secret
+  - name: JAVA_OPTS
+    value: "-Djavax.net.ssl.trustStore=/etc/ssl/certs/java/cacerts -Djavax.net.ssl.trustStorePassword=changeit"
+
+initContainers:
+  - name: import-ca
+    image: eclipse-temurin:11-jre
+    command:
+      - /bin/sh
+      - -c
+      - |
+        cp /etc/ssl/certs/java/cacerts /tmp/cacerts/cacerts \
+        && keytool -importcert -noprompt -trustcacerts \
+           -alias cledyu-root-ca \
+           -file /etc/ssl/certs-cledyu/ca.crt \
+           -keystore /tmp/cacerts/cacerts \
+           -storepass changeit
+    volumeMounts:
+      - name: java-cacerts
+        mountPath: /tmp/cacerts
+      - name: cledyu-ca
+        mountPath: /etc/ssl/certs-cledyu
+        readOnly: true
+
+volumeMounts:
+  - name: java-cacerts
+    mountPath: /etc/ssl/certs/java/cacerts
+    subPath: cacerts
+
+volumes:
+  - name: java-cacerts
+    emptyDir: {}
+  - name: cledyu-ca
+    configMap:
+      name: cledyu-root-ca-bundle
+      items:
+        - key: ca.crt
+          path: ca.crt
+
+ingress:
+  enabled: true
+  ingressClassName: traefik
+  host: kafka-ui.cledyu.local
+  tls:
+    enabled: true
+    secretName: kafka-ui-tls
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL

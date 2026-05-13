@@ -9,6 +9,8 @@ metadata:
   namespace: kafka
   labels:
     strimzi.io/cluster: cledyu-kafka
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
 spec:
   partitions: 6
   replicas: 3

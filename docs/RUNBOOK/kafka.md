@@ -30,7 +30,7 @@ kubectl get kafkatopic -n kafka
      labels:
        strimzi.io/cluster: cledyu-kafka
    spec:
-     partitions: 6        # 컨슈머 수에 맞게 조정
+     partitions: 6        # 컨슈머 수에 맞게 조정 (lab-events는 12, 나머지는 6)
      replicas: 3
      config:
        retention.ms: "604800000"    # 7일
@@ -77,8 +77,10 @@ git push
 > ⚠️ 토픽 삭제 시 데이터도 함께 삭제됨. 컨슈머 연결 여부 먼저 확인.
 
 ```bash
-# 컨슈머 그룹 확인 (kcat Pod 필요)
-kubectl exec -n kafka kcat -- kcat -b cledyu-kafka-kafka-bootstrap.kafka.svc:9092 -L | grep <토픽-이름>
+# 컨슈머 그룹 확인
+kubectl run kcat-check --rm --attach --restart=Never -n kafka \
+  --image=confluentinc/cp-kcat:7.4.0 \
+  --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"kcat-check","image":"confluentinc/cp-kcat:7.4.0","command":["sh","-c","kcat -b cledyu-kafka-kafka-bootstrap.kafka.svc:9092 -L | grep <토픽-이름>"],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}]}}'
 ```
 
 ---
@@ -111,43 +113,84 @@ kubectl get kafkanodepool -n kafka
 ---
 
 ## 4. CA 인증서 갱신 (CA Rotate)
-## 임시, 후속 조치 예정
 
-cert-manager가 cluster CA 또는 root CA를 갱신한 경우, `ca-secret-sync` Job을 재실행해야 Strimzi에 새 체인이 반영됨.
+`ca-sync-watcher` Deployment가 ConfigMap 해시를 60초마다 체크해 변경 감지 시 자동으로 Strimzi Secret에 새 체인을 반영한다. 수동 개입 불필요.
 
-> Job은 ArgoCD Sync hook으로만 실행되므로 인증서 갱신 시 자동 반영되지 않음.
+### 자동 갱신 흐름
 
-### 절차
-
-```bash
-# 1. 기존 Job 삭제
-kubectl delete job kafka-ca-secret-sync -n kafka
-
-# 2. ArgoCD force sync
-# ArgoCD UI → data-kafka-cluster → Sync → Force 체크 → Synchronize
-# 또는 CLI:
-argocd app sync data-kafka-cluster --force
+```
+cert-manager CA 갱신
+  → trust-manager Bundle이 cledyu-root-ca-bundle ConfigMap 업데이트
+  → ca-sync-watcher가 해시 변경 감지 (최대 60초 지연)
+  → Strimzi Secret 자동 재동기화
+  → Strimzi rolling restart
 ```
 
 ### 검증
 
 ```bash
-# Job 완료 확인
-kubectl get job kafka-ca-secret-sync -n kafka
+# watcher 동작 확인
+kubectl logs -n kafka deploy/kafka-ca-sync-watcher
 
-# 브로커 재시작 확인 (Strimzi가 새 인증서 감지 후 rolling restart)
+# 브로커 재시작 확인
 kubectl get pods -n kafka -w
-```
-
-기대 출력:
-
-```
-kafka-ca-secret-sync   1/1   Complete   ...
 ```
 
 ---
 
-## 5. 트러블슈팅
+## 5. Kafka UI
+
+브라우저에서 토픽·메시지·컨슈머 그룹을 모니터링할 수 있는 kafbat kafka-ui.
+
+### 접속
+
+`https://kafka-ui.cledyu.local`
+
+처음 접속 시 hosts 파일에 아래 항목 추가 필요:
+
+| OS | 명령어 |
+|---|---|
+| macOS / Linux | `echo "10.10.0.101  kafka-ui.cledyu.local" \| sudo tee -a /etc/hosts` |
+| Windows (PowerShell 관리자) | `Add-Content C:\Windows\System32\drivers\etc\hosts "\`n10.10.0.101  kafka-ui.cledyu.local"` |
+
+### 주요 기능
+
+- 토픽 목록·파티션·offset 조회
+- 메시지 브라우징 (토픽별 최신/특정 offset부터 조회)
+- 컨슈머 그룹 lag 확인
+- 브로커 상태 확인
+
+### 검증
+
+브라우저에서 `https://kafka-ui.cledyu.local` 접속 후 cledyu-kafka 클러스터·토픽 목록이 표시되면 정상.
+
+---
+
+## 6. 동작 검증 (produce → consume 왕복)
+
+kafka 네임스페이스가 PodSecurity `restricted` 정책이므로 반드시 `-n kafka` 와 `--overrides` 를 함께 사용해야 한다.
+
+**produce:**
+
+```bash
+kubectl run kcat-prod --rm --attach --restart=Never -n kafka \
+  --image=confluentinc/cp-kcat:7.4.0 \
+  --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"kcat-prod","image":"confluentinc/cp-kcat:7.4.0","command":["sh","-c","echo test-message | kcat -b cledyu-kafka-kafka-bootstrap.kafka.svc:9092 -t lab-events -P -e"],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}]}}'
+```
+
+**consume:**
+
+```bash
+kubectl run kcat-cons --rm --attach --restart=Never -n kafka \
+  --image=confluentinc/cp-kcat:7.4.0 \
+  --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":1000,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"kcat-cons","image":"confluentinc/cp-kcat:7.4.0","command":["sh","-c","kcat -b cledyu-kafka-kafka-bootstrap.kafka.svc:9092 -t lab-events -C -e -o -1 -c 1"],"securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]}}}]}}'
+```
+
+`test-message` 출력되면 정상. `--rm` 옵션으로 pod는 자동 삭제됨.
+
+---
+
+## 7. 트러블슈팅
 
 ### 브로커 Pod가 Pending 상태
 
@@ -173,7 +216,7 @@ kubectl logs <pod-name> -n kafka --previous
 
 | 원인 | 해결 |
 |---|---|
-| CA Secret 없음 또는 라벨 누락 | `ca-secret-sync` Job 재실행 (4번 절차) |
+| CA Secret 없음 또는 라벨 누락 | `kubectl logs -n kafka deploy/kafka-ca-sync-watcher` 로 watcher 동작 확인. 실패 시 watcher pod 재시작 |
 | PVC 권한 오류 | `fsGroup: 1000` 설정 확인, PVC 재생성 필요할 수 있음 |
 | JVM 메모리 부족 | `jvmOptions` `-Xmx` 값 조정 |
 
@@ -190,9 +233,13 @@ kubectl logs -n kafka -l app.kubernetes.io/name=entity-operator -c topic-operato
 ```
 
 ### ArgoCD OutOfSync 노이즈
-### N-1: data-kafka-cluster.yaml 에 ignoreDifferences 추가 예정 (Kafka / KafkaTopic CR 의 .status drift 노이즈 제거)
 
-Kafka CR `.status` 필드 drift로 인한 OutOfSync는 정상. 실제 변경사항이 없으면 무시.
+`data-kafka-cluster` Application에 `ignoreDifferences`가 적용돼 있어 Kafka / KafkaTopic CR의 `.status` drift는 무시됨. OutOfSync가 표시되면 실제 변경사항이 있는 리소스를 확인할 것.
+
+```bash
+kubectl get application data-kafka-cluster -n argocd -o json \
+  | python3 -c "import json,sys; [print(r['kind']+'/'+r['name']) for r in json.load(sys.stdin)['status']['resources'] if r.get('status')=='OutOfSync']"
+```
 
 ---
 
@@ -203,4 +250,5 @@ Kafka CR `.status` 필드 drift로 인한 OutOfSync는 정상. 실제 변경사�
   - `gitops/apps/kafka-cluster/` — Kafka 클러스터 매니페스트
   - `gitops/apps/kafka-cluster/topics/` — 토픽 yaml
   - `gitops/apps/trust-manager/` — CA 공개키 분배
-  - `gitops/apps/kafka-cluster/ca-secret-sync.yaml` — CA Secret 변환 Job
+  - `gitops/apps/kafka-cluster/ca-secret-sync.yaml` — CA Secret 변환 Job (최초 배포 시)
+  - `gitops/apps/kafka-cluster/ca-sync-watcher.yaml` — CA 자동 갱신 감지 Deployment

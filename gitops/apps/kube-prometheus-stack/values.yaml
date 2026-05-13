@@ -81,6 +81,9 @@ alertmanager:
         - matchers:
             - alertname = "Watchdog" # Watchdog 알림 무시 설정
           receiver: "null"
+        - matchers:
+            - alertname = "CDIDefaultStorageClassDegraded" # Longhorn CSI clone 미지원으로 인한 false alert — external-snapshotter 도입 시 제거
+          receiver: "null"
 
     receivers:
       - name: "null"

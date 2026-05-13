@@ -4,6 +4,9 @@ kind: Application
 metadata:
   name: data-kafka-cluster
   namespace: argocd
+  annotations:
+    # data-strimzi-operator(wave 0)가 CRD를 설치한 뒤 이 App이 sync되도록 순서 명시.
+    argocd.argoproj.io/sync-wave: "1"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
@@ -32,3 +35,22 @@ spec:
         duration: 30s
         factor: 2
         maxDuration: 5m
+  # Strimzi / Cilium이 런타임에 자동 생성하는 리소스는 Git에 없어도 정상이므로
+  # ArgoCD가 OutOfSync로 잘못 감지하는 노이즈를 제거한다.
+  ignoreDifferences:
+    - group: kafka.strimzi.io
+      kind: Kafka
+      jsonPointers:
+        - /status
+    - group: kafka.strimzi.io
+      kind: KafkaTopic
+      jsonPointers:
+        - /status
+    - group: ""
+      kind: PersistentVolumeClaim
+      jsonPointers:
+        - /status
+    - group: cilium.io
+      kind: CiliumIdentity
+      jsonPointers:
+        - /status
