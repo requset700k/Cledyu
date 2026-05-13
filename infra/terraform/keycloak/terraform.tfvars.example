@@ -56,6 +56,18 @@ oidc_clients = {
     web_origins                     = ["https://grafana.cledyu.local"]
   }
 
+  vault = {
+    name                            = "Cledyu Vault"
+    access_type                     = "CONFIDENTIAL"
+    standard_flow_enabled           = true
+    direct_access_grants_enabled    = false
+    implicit_flow_enabled           = false
+    service_accounts_enabled        = false
+    valid_redirect_uris             = ["http://localhost:8250/oidc/callback", "https://vault.cledyu.local/ui/vault/auth/oidc/oidc/callback"]
+    valid_post_logout_redirect_uris = ["https://vault.cledyu.local/"]
+    web_origins                     = ["https://vault.cledyu.local"]
+  }
+
   kubectl = {
     name                         = "Cledyu kubectl (oidc-login)"
     access_type                  = "PUBLIC"
@@ -76,6 +88,7 @@ oidc_clients = {
 oidc_client_secrets = {
   argocd  = "REPLACE_WITH_ARGOCD_CLIENT_SECRET"
   grafana = "REPLACE_WITH_GRAFANA_CLIENT_SECRET"
+  vault   = "REPLACE_WITH_VAULT_CLIENT_SECRET"
 }
 
 team_members = {
