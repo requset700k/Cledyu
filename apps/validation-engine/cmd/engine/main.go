@@ -5,6 +5,8 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -18,13 +20,25 @@ import (
 	"go.uber.org/zap"
 )
 
+const maxChecks = 20
+
 func main() {
 	// Uber의 zap 라이브러리를 사용하여 로그를 출력할 수 있게 고성능 로거를 초기화
 	log, _ := zap.NewProduction()
 	defer log.Sync() //nolint:errcheck
 
 	// Kafka 서버 주소
-	brokers := []string{getEnv("KAFKA_BROKERS", "cledyu-kafka-bootstrap.kafka.svc:9093")}
+	brokers := []string{getEnv("KAFKA_BROKERS", "cledyu-kafka-kafka-bootstrap.kafka.svc:9093")}
+
+	// 헬스체크 엔드포인트 — Kubernetes liveness probe가 여기로 요청을 보낸다
+	go func() {
+		http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		})
+		if err := http.ListenAndServe(":8080", nil); err != nil {
+			log.Error("헬스 서버 종료", zap.Error(err))
+		}
+	}()
 
 	// Kafka와 안전하게 통신하기 위해 TLS 인증서를 로드
     // cert-manager가 생성하여 컨테이너의 /etc/kafka-certs 경로에 마운트한 파일을 사용
@@ -70,6 +84,11 @@ func handle(prod *producer.Producer, log *zap.Logger) consumer.HandleFunc {
 			zap.Int("step_id", req.StepID),
 			zap.String("vm_type", string(req.VM.Type)),
 		)
+
+		// 체크 수가 너무 많으면 거부 — 무한 루프나 리소스 고갈 방지
+		if len(req.Checks) > maxChecks {
+			return fmt.Errorf("체크 수 초과: %d > %d", len(req.Checks), maxChecks)
+		}
 
 		// 요청에 적힌 VM에 접속, executor는 VM에 명령을 내리는 도구
 		exe, err := executor.New(req.VM)

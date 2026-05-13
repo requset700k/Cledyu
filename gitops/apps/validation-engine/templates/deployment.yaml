@@ -58,6 +58,14 @@ spec:
               mountPath: /etc/kafka-certs
               readOnly: true
 
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            failureThreshold: 3
+
           # values.yaml에서 리소스 제한값을 가져옴
           resources:
             requests:
