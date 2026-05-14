@@ -71,6 +71,10 @@ type Check struct {
 // ValidationRequest는 validation-requests 토픽에 들어가는 메시지
 // Session API가 발행하고, Validation Engine이 소비
 type ValidationRequest struct {
+	// TraceID: 요청 하나의 전체 흐름을 추적하는 ID — Session API가 생성해서 넣어준다
+	// 없으면 빈 문자열로 처리하며 session_id + step_id로 추적 가능
+	TraceID string `json:"trace_id,omitempty"`
+
 	// SessionID: 어느 수강생 세션인지 (예: "sess-abc123")
 	SessionID string `json:"session_id"`
 
@@ -94,6 +98,9 @@ type CheckResult struct {
 // ValidationResult는 validation-results 토픽에 들어가는 메시지
 // Validation Engine이 발행하고, Session API가 소비
 type ValidationResult struct {
+	// TraceID: 요청의 trace_id를 그대로 넘겨 Session API가 추적할 수 있게 한다
+	TraceID string `json:"trace_id,omitempty"`
+
 	// SessionID, StepID: 요청과 동일하게 그대로 넘긴다
 	SessionID string `json:"session_id"`
 	StepID    int    `json:"step_id"`

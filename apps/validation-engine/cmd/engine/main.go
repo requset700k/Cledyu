@@ -80,6 +80,7 @@ func handle(prod *producer.Producer, log *zap.Logger) consumer.HandleFunc {
 
 		// 어떤 요청이 들어왔는지 로그로 남김
 		log.Info("검증 시작",
+			zap.String("trace_id", req.TraceID),
 			zap.String("session_id", req.SessionID),
 			zap.Int("step_id", req.StepID),
 			zap.String("vm_type", string(req.VM.Type)),
@@ -102,6 +103,7 @@ func handle(prod *producer.Producer, log *zap.Logger) consumer.HandleFunc {
 		results, allPassed := checker.RunAll(ctx, exe, req.Checks)
 
 		result := model.ValidationResult{
+			TraceID:    req.TraceID,
 			SessionID:  req.SessionID,
 			StepID:     req.StepID,
 			Passed:     allPassed,
@@ -115,6 +117,7 @@ func handle(prod *producer.Producer, log *zap.Logger) consumer.HandleFunc {
 		}
 
 		log.Info("검증 완료",
+			zap.String("trace_id", req.TraceID),
 			zap.String("session_id", req.SessionID),
 			zap.Int("step_id", req.StepID),
 			zap.Bool("passed", allPassed),
