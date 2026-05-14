@@ -66,6 +66,16 @@ func TestRunCommand_Fail_EmptyCommand(t *testing.T) {
 	}
 }
 
+func TestRunCommand_Fail_Injection(t *testing.T) {
+	result := Run(context.Background(), mockOk(""), model.Check{
+		Type:    model.CheckCommand,
+		Command: "ls; rm -rf /",
+	})
+	if result.Passed {
+		t.Error("인젝션 시도는 실패해야 함")
+	}
+}
+
 func TestRunCommand_Fail_ExecError(t *testing.T) {
 	result := Run(context.Background(), mockFail("connection refused"), model.Check{
 		Type:   model.CheckCommand,

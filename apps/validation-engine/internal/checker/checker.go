@@ -21,6 +21,9 @@ var safeNameRe = regexp.MustCompile(`^[a-zA-Z0-9.\-]+$`)
 // 허용되는 URL 패턴 — http/https만 허용
 var safeURLRe = regexp.MustCompile(`^https?://[a-zA-Z0-9/._:\-]+$`)
 
+// 허용되는 명령어 패턴 — 셸 메타문자(; | & ` $ > < 등) 금지
+var safeCommandRe = regexp.MustCompile(`^[a-zA-Z0-9 /._\-=:@]+$`)
+
 // Run은 체크 항목 하나를 VM에서 실행하고 결과를 돌려준다.
 func Run(ctx context.Context, exe executor.VMExecutor, check model.Check) model.CheckResult {
 	switch check.Type {
@@ -60,6 +63,9 @@ func RunAll(ctx context.Context, exe executor.VMExecutor, checks []model.Check) 
 func runCommand(ctx context.Context, exe executor.VMExecutor, check model.Check) model.CheckResult {
 	if check.Command == "" {
 		return fail(check.Type, "cmd가 비어있음")
+	}
+	if !safeCommandRe.MatchString(check.Command) {
+		return fail(check.Type, fmt.Sprintf("허용되지 않는 명령어: %s", check.Command))
 	}
 
 	// VM에서 명령어를 실행
