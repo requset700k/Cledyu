@@ -22,7 +22,8 @@ var safeNameRe = regexp.MustCompile(`^[a-zA-Z0-9.\-]+$`)
 var safeURLRe = regexp.MustCompile(`^https?://[a-zA-Z0-9/._:\-]+$`)
 
 // 허용되는 명령어 패턴 — 셸 메타문자(; | & ` $ > < 등) 금지
-var safeCommandRe = regexp.MustCompile(`^[a-zA-Z0-9 /._\-=:@]+$`)
+// %는 stat -c %a 같은 명령에서 사용하므로 허용 — Lab DSL 확정 후 재검토
+var safeCommandRe = regexp.MustCompile(`^[a-zA-Z0-9 /._\-=:@%]+$`)
 
 // Run은 체크 항목 하나를 VM에서 실행하고 결과를 돌려준다.
 func Run(ctx context.Context, exe executor.VMExecutor, check model.Check) model.CheckResult {
