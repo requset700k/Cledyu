@@ -1,6 +1,4 @@
 // 버튼 클릭 시 /api/v1/auth/login → 백엔드가 Keycloak 인증 페이지로 리다이렉트.
-import Link from 'next/link';
-
 export default function LoginPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
@@ -17,12 +15,12 @@ export default function LoginPage() {
           <h2 className="text-lg font-semibold text-white mb-1">시작하기</h2>
           <p className="text-slate-400 text-sm mb-6">Cledyu 계정으로 로그인하세요</p>
 
-          <Link
+          <a
             href="/api/v1/auth/login"
             className="flex items-center justify-center gap-2 w-full bg-brand-500 hover:bg-brand-600 text-white font-medium py-3 px-4 rounded-xl transition-colors duration-150"
           >
             Cledyu로 로그인
-          </Link>
+          </a>
 
           <div className="mt-8 pt-6 border-t border-slate-700 space-y-3">
             <Feature

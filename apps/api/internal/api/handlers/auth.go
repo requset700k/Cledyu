@@ -13,5 +13,5 @@ import (
 func (h *Handler) Login(c *gin.Context) {
 	secure := h.cfg.Server.Mode == "release"
 	c.SetCookie("access_token", "mock-token", 3600, "/", h.cfg.Keycloak.CookieDomain, secure, true)
-	c.Redirect(http.StatusFound, h.cfg.Keycloak.FrontendURL+"/callback")
+	c.Redirect(http.StatusFound, h.cfg.FrontendURL+"/callback")
 }

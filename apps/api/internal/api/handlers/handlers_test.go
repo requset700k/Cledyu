@@ -15,13 +15,13 @@ import (
 
 func newTestConfig() *config.Config {
 	return &config.Config{
-		Server: config.ServerConfig{Mode: "debug"},
+		Server:      config.ServerConfig{Mode: "debug"},
+		FrontendURL: "https://app.test",
 		Keycloak: config.KeycloakConfig{
 			URL:          "https://keycloak.test",
 			Realm:        "test",
 			ClientID:     "test-client",
 			RedirectURI:  "https://api.test/api/v1/auth/callback",
-			FrontendURL:  "https://app.test",
 			CookieDomain: ".test",
 		},
 	}

@@ -4,14 +4,16 @@ package config
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/spf13/viper"
 )
 
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server"`
-	Redis    RedisConfig    `mapstructure:"redis"`
-	Keycloak KeycloakConfig `mapstructure:"keycloak"`
+	Server      ServerConfig   `mapstructure:"server"`
+	Redis       RedisConfig    `mapstructure:"redis"`
+	Keycloak    KeycloakConfig `mapstructure:"keycloak"`
+	FrontendURL string         `mapstructure:"frontend_url"`
 }
 
 type KeycloakConfig struct {
@@ -20,7 +22,6 @@ type KeycloakConfig struct {
 	ClientID     string `mapstructure:"client_id"`
 	ClientSecret string `mapstructure:"client_secret"`
 	RedirectURI  string `mapstructure:"redirect_uri"`
-	FrontendURL  string `mapstructure:"frontend_url"`
 	CookieDomain string `mapstructure:"cookie_domain"`
 }
 
@@ -41,11 +42,9 @@ func Load() (*Config, error) {
 	v.SetConfigType("yaml")
 	v.AddConfigPath(".")
 	v.SetEnvPrefix("CLEDYU")
+	// "." → "_" 변환으로 중첩 키를 env로 자동 매핑 (keycloak.client_secret → CLEDYU_KEYCLOAK_CLIENT_SECRET).
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
-	// viper가 중첩 키(keycloak.frontend_url 등)를 env로 못 읽는 문제 방지.
-	v.BindEnv("keycloak.frontend_url", "CLEDYU_FRONTEND_URL")            //nolint:errcheck
-	v.BindEnv("keycloak.client_secret", "CLEDYU_KEYCLOAK_CLIENT_SECRET") //nolint:errcheck
-	v.BindEnv("keycloak.cookie_domain", "CLEDYU_KEYCLOAK_COOKIE_DOMAIN") //nolint:errcheck
 
 	v.SetDefault("server.addr", ":8080")
 	v.SetDefault("server.mode", "debug")
@@ -54,7 +53,7 @@ func Load() (*Config, error) {
 	v.SetDefault("keycloak.realm", "cledyu")
 	v.SetDefault("keycloak.client_id", "cledyu-web")
 	v.SetDefault("keycloak.redirect_uri", "https://api.cledyu.local/api/v1/auth/callback")
-	v.SetDefault("keycloak.frontend_url", "https://app.cledyu.local")
+	v.SetDefault("frontend_url", "https://app.cledyu.local")
 	v.SetDefault("keycloak.cookie_domain", ".cledyu.local")
 
 	if err := v.ReadInConfig(); err != nil {
