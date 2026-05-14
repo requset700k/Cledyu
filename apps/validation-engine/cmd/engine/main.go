@@ -41,15 +41,15 @@ func main() {
 	}()
 
 	// Kafka와 안전하게 통신하기 위해 TLS 인증서를 로드
-    // cert-manager가 생성하여 컨테이너의 /etc/kafka-certs 경로에 마운트한 파일을 사용
-    tlsCfg, err := loadTLS(
-        getEnv("KAFKA_TLS_CERT", "/etc/kafka-certs/tls.crt"),
-        getEnv("KAFKA_TLS_KEY", "/etc/kafka-certs/tls.key"),
-        getEnv("KAFKA_CA_CERT", "/etc/kafka-certs/ca.crt"),
-    )
-    if err != nil {
-        log.Fatal("TLS 인증서 로드 실패", zap.Error(err))
-    }
+	// cert-manager가 생성하여 컨테이너의 /etc/kafka-certs 경로에 마운트한 파일을 사용
+	tlsCfg, err := loadTLS(
+		getEnv("KAFKA_TLS_CERT", "/etc/kafka-certs/tls.crt"),
+		getEnv("KAFKA_TLS_KEY", "/etc/kafka-certs/tls.key"),
+		getEnv("KAFKA_CA_CERT", "/etc/kafka-certs/ca.crt"),
+	)
+	if err != nil {
+		log.Fatal("TLS 인증서 로드 실패", zap.Error(err))
+	}
 
 	// consumer: Kafka 토픽에서 검증 요청 메시지를 읽어오는 인스턴스
 	// producer: 검증 결과를 Kafka 토픽으로 내보내는 인스턴스
