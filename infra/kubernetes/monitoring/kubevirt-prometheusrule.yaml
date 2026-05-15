@@ -11,7 +11,7 @@ spec:
     - name: kubevirt.vmi
       rules:
         - alert: KubevirtVMIHighCPU
-          expr: rate(kubevirt_vmi_vcpu_seconds_total[5m]) > 0.9
+          expr: rate(kubevirt_vmi_vcpu_seconds_total{state="running"}[5m]) > 0.9
           for: 10m
           labels:
             severity: warning
