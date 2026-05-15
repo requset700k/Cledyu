@@ -20,7 +20,7 @@ spec:
             description: "VMI {{ $labels.name }}의 vCPU 사용률이 10분 이상 90% 초과"
 
         - alert: KubevirtVMIMemorySwap
-          expr: rate(kubevirt_vmi_memory_swap_in_traffic_bytes_total[5m]) > 0
+          expr: rate(kubevirt_vmi_memory_swap_in_traffic_bytes_total[5m]) > 1048576
           for: 5m
           labels:
             severity: warning
