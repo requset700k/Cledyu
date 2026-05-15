@@ -16,7 +16,7 @@ rules:
   # virtctl이 KubeVirt VM에 SSH 접속하기 위한 권한
   - apiGroups: ["subresources.kubevirt.io"]
     resources: ["virtualmachineinstances/portforward"]
-    verbs: ["get"] # 포트포워드 연결을 열 수 있음
+    verbs: ["get", "update"] # get: 연결 조회, update: 양방향 스트리밍에 필요
   # VM 정보를 조회할 수 있는 권한
   - apiGroups: ["kubevirt.io"]
     resources: ["virtualmachineinstances", "virtualmachines"]
