@@ -16,7 +16,7 @@ import (
 var safePathRe = regexp.MustCompile(`^/[a-zA-Z0-9/_.\-]+$`)
 
 // 허용되는 프로세스 이름 패턴 — 영문/숫자/하이픈만 허용
-var safeNameRe = regexp.MustCompile(`^[a-zA-Z0-9.\-]+$`)
+var safeNameRe = regexp.MustCompile(`^[a-zA-Z0-9._\-]+$`)
 
 // 허용되는 URL 패턴 — http/https만 허용
 var safeURLRe = regexp.MustCompile(`^https?://[a-zA-Z0-9/._:\-]+$`)
