@@ -14,6 +14,7 @@ const (
 // CheckType은 검증 항목의 종류다.
 type CheckType string
 
+// 추가 타입이 필요하면 message.go와 checker.go를 같이 확장
 const (
 	// CheckCommand: VM에서 명령을 실행하고 출력에 특정 문자열이 있는지 확인
 	// 예) kubectl get pods 실행 → "nginx" 포함 여부
@@ -34,6 +35,10 @@ const (
 	// CheckHTTPResponse: VM 안에서 HTTP 요청을 보내고 응답 코드가 맞는지 확인
 	// 예) localhost:80 에 curl 날려서 200이 오는지
 	CheckHTTPResponse CheckType = "http_response"
+
+	// CheckRequestError: 요청 자체가 유효하지 않을 때 사용하는 타입
+	// session_id 없음, checks 비어있음, VM 스펙 오류 등 — VM 실행과 무관한 요청 레벨 오류
+	CheckRequestError CheckType = "request_error"
 )
 
 // VMSpec은 접속할 VM의 정보

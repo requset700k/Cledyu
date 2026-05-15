@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,13 +23,19 @@ import (
 
 const maxChecks = 20
 
+// publisher는 검증 결과를 Kafka에 발행하는 인터페이스.
+// 실제 코드에서는 *producer.Producer가 쓰이고, 테스트에서는 mock으로 교체한다.
+type publisher interface {
+	Publish(ctx context.Context, result model.ValidationResult) error
+}
+
 func main() {
 	// Uber의 zap 라이브러리를 사용하여 로그를 출력할 수 있게 고성능 로거를 초기화
 	log, _ := zap.NewProduction()
 	defer log.Sync() //nolint:errcheck
 
-	// Kafka 서버 주소
-	brokers := []string{getEnv("KAFKA_BROKERS", "cledyu-kafka-kafka-bootstrap.kafka.svc:9093")}
+	// Kafka 서버 주소 — 콤마로 구분된 다중 broker 지원 (예: "broker1:9093,broker2:9093")
+	brokers := strings.Split(getEnv("KAFKA_BROKERS", "cledyu-kafka-kafka-bootstrap.kafka.svc:9093"), ",")
 
 	// 헬스체크 엔드포인트 — Kubernetes liveness probe가 여기로 요청을 보낸다
 	go func() {
@@ -66,7 +73,7 @@ func main() {
 
 	// Kafka를 계속 바라보면서 요청이 오면 handle()을 실행(컨슈머)
 	// 종료 신호가 오거나 오류가 발생하면 여기서 멈춘다
-	if err := cons.Run(ctx, handle(prod, log)); err != nil {
+	if err := cons.Run(ctx, handle(prod, executor.New, log)); err != nil {
 		log.Error("consumer 오류", zap.Error(err))
 		os.Exit(1)
 	}
@@ -74,7 +81,10 @@ func main() {
 
 // handle은 Kafka로부터 받은 각 메시지를 어떻게 처리할지 정의
 // 요청을 받아 → VM에서 검증하고 → 결과를 Kafka로 돌려보낸다
-func handle(prod *producer.Producer, log *zap.Logger) consumer.HandleFunc {
+//
+// pub: 결과를 발행하는 인터페이스 (실제: *producer.Producer, 테스트: mock)
+// newExec: VM 종류에 맞는 executor를 만드는 함수 (실제: executor.New, 테스트: mock)
+func handle(pub publisher, newExec func(model.VMSpec) (executor.VMExecutor, error), log *zap.Logger) consumer.HandleFunc {
 	return func(ctx context.Context, req model.ValidationRequest) error {
 		start := time.Now()
 
@@ -86,15 +96,46 @@ func handle(prod *producer.Producer, log *zap.Logger) consumer.HandleFunc {
 			zap.String("vm_type", string(req.VM.Type)),
 		)
 
-		// 체크 수가 너무 많으면 거부 — 무한 루프나 리소스 고갈 방지
-		if len(req.Checks) > maxChecks {
-			return fmt.Errorf("체크 수 초과: %d > %d", len(req.Checks), maxChecks)
+		// publishFailed는 재처리해도 변하지 않는 영구 요청 오류를 처리한다.
+		// 실패 결과를 Kafka에 발행해 Session API에 알리고 nil을 반환해 오프셋을 커밋한다.
+		// 발행 자체가 실패하면 시스템 오류이므로 에러를 그대로 반환해 재시도한다.
+		publishFailed := func(reason string) error {
+			log.Warn("요청 오류 — 실패 결과 발행",
+				zap.String("trace_id", req.TraceID),
+				zap.String("session_id", req.SessionID),
+				zap.Int("step_id", req.StepID),
+				zap.String("reason", reason),
+			)
+			return pub.Publish(ctx, model.ValidationResult{
+				TraceID:   req.TraceID,
+				SessionID: req.SessionID,
+				StepID:    req.StepID,
+				Passed:    false,
+				Checks: []model.CheckResult{
+					// reason을 Checks에 담아 Session API / UI가 실패 이유를 알 수 있게 한다
+					{Type: model.CheckRequestError, Passed: false, Detail: reason},
+				},
+				DurationMS: time.Since(start).Milliseconds(),
+			})
+		}
+
+		// 요청 필드 검증 — 아래 조건은 재시도해도 절대 성공하지 않는 영구 오류다
+		switch {
+		case req.SessionID == "":
+			return publishFailed("session_id가 비어있음")
+		case req.StepID <= 0:
+			return publishFailed(fmt.Sprintf("step_id가 유효하지 않음: %d", req.StepID))
+		case len(req.Checks) == 0:
+			return publishFailed("checks가 비어있음")
+		case len(req.Checks) > maxChecks:
+			return publishFailed(fmt.Sprintf("체크 수 초과: %d > %d", len(req.Checks), maxChecks))
 		}
 
 		// 요청에 적힌 VM에 접속, executor는 VM에 명령을 내리는 도구
-		exe, err := executor.New(req.VM)
+		// VM 스펙이 잘못됐거나 알 수 없는 타입이면 재시도해도 변하지 않는 요청 오류
+		exe, err := newExec(req.VM)
 		if err != nil {
-			return err
+			return publishFailed(err.Error())
 		}
 		defer exe.Close()
 
@@ -111,8 +152,9 @@ func handle(prod *producer.Producer, log *zap.Logger) consumer.HandleFunc {
 			DurationMS: time.Since(start).Milliseconds(),
 		}
 
-		// 검증 결과를 다시 Kafka의 결과 토픽으로 발행(Publish)
-		if err := prod.Publish(ctx, result); err != nil {
+		// 검증 결과를 Kafka의 결과 토픽으로 발행
+		// 실패하면 시스템 오류 — consumer가 종료되고 Pod 재시작 후 재시도한다
+		if err := pub.Publish(ctx, result); err != nil {
 			return err
 		}
 
