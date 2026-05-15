@@ -1,0 +1,52 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: cert-manager-expiry-alerts
+  namespace: monitoring
+  labels:
+    release: kps
+spec:
+  groups:
+    - name: cert-manager.expiry
+      rules:
+        - alert: CertificateExpiry14d
+          expr: |
+            (certmanager_certificate_expiration_timestamp_seconds - time()) < (14 * 24 * 3600)
+            and
+            (certmanager_certificate_expiration_timestamp_seconds - time()) >= (7 * 24 * 3600)
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "14일 후 만료 예정 ({{ $labels.name }})"
+            description: "{{ $labels.namespace }}/{{ $labels.name }} 인증서가 14일 이내에 만료됩니다."
+        - alert: CertificateExpiry7d
+          expr: |
+            (certmanager_certificate_expiration_timestamp_seconds - time()) < (7 * 24 * 3600)
+            and
+            (certmanager_certificate_expiration_timestamp_seconds - time()) >= (1 * 24 * 3600)
+          for: 1h
+          labels:
+            severity: warning
+          annotations:
+            summary: "7일 후 만료 예정 ({{ $labels.name }})"
+            description: "{{ $labels.namespace }}/{{ $labels.name }} 인증서가 7일 이내에 만료됩니다."
+        - alert: CertificateExpiry1d
+          expr: |
+            (certmanager_certificate_expiration_timestamp_seconds - time()) < (1 * 24 * 3600)
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "24시간 내 만료! ({{ $labels.name }})"
+            description: "{{ $labels.namespace }}/{{ $labels.name }} 인증서가 24시간 이내에 만료됩니다."
+        - alert: CertificateNotReady
+          expr: |
+            certmanager_certificate_ready_status{condition="True"} == 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "인증서 발급 실패 ({{ $labels.name }})"
+            description: "{{ $labels.namespace }}/{{ $labels.name }} 인증서가 Ready 상태가 아닙니다."
