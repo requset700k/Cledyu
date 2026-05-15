@@ -4,17 +4,33 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/requset700k/cledyu/api/internal/api/handlers"
+	"github.com/requset700k/cledyu/api/internal/config"
 	"go.uber.org/zap"
 )
+
+func newTestConfig() *config.Config {
+	return &config.Config{
+		Server:      config.ServerConfig{Mode: "debug"},
+		FrontendURL: "https://app.test",
+		Keycloak: config.KeycloakConfig{
+			URL:          "https://keycloak.test",
+			Realm:        "test",
+			ClientID:     "test-client",
+			RedirectURI:  "https://api.test/api/v1/auth/callback",
+			CookieDomain: ".test",
+		},
+	}
+}
 
 func newTestRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	h := handlers.New(zap.NewNop())
+	h := handlers.New(newTestConfig(), zap.NewNop())
 
 	r.GET("/health", h.Health)
 	r.GET("/me", func(c *gin.Context) {
@@ -26,6 +42,7 @@ func newTestRouter() *gin.Engine {
 	})
 	r.GET("/labs", h.ListLabs)
 	r.GET("/labs/:id", h.GetLab)
+	r.GET("/api/v1/auth/login", h.Login)
 	return r
 }
 
@@ -91,5 +108,29 @@ func TestGetMe(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&body)
 	if body["id"] != "test-user" {
 		t.Errorf("expected id=test-user, got %v", body["id"])
+	}
+}
+
+func TestLogin_SetsMockCookieAndRedirects(t *testing.T) {
+	r := newTestRouter()
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil))
+
+	if w.Code != http.StatusFound {
+		t.Fatalf("expected 302, got %d", w.Code)
+	}
+	loc := w.Header().Get("Location")
+	if !strings.HasSuffix(loc, "/callback") {
+		t.Errorf("expected redirect to /callback, got %s", loc)
+	}
+	cookies := w.Result().Cookies()
+	var found bool
+	for _, c := range cookies {
+		if c.Name == "access_token" && c.Value == "mock-token" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected access_token=mock-token cookie")
 	}
 }

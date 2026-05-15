@@ -7,8 +7,7 @@ import (
 	"go.uber.org/zap"
 )
 
-// Logger는 모든 요청/응답을 구조화 JSON 로그로 기록한다.
-// method, path, status, latency, IP를 필드로 포함해 로그 집계 도구에서 쿼리 가능.
+// method, path, status, latency, IP 필드 포함 — 로그 집계 도구에서 쿼리 가능.
 func Logger(log *zap.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
