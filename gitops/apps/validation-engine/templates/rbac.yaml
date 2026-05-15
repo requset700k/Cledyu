@@ -8,10 +8,11 @@ metadata:
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-# ClusterRole — 무엇을 할 수 있는지 정의
-kind: ClusterRole
+# Role — Lab VM 네임스페이스 안에서 무엇을 할 수 있는지 정의
+kind: Role
 metadata:
   name: validation-engine
+  namespace: {{ .Values.labVMNamespace }}
 rules:
   # virtctl이 KubeVirt VM에 SSH 접속하기 위한 권한
   - apiGroups: ["subresources.kubevirt.io"]
@@ -31,7 +32,7 @@ metadata:
   namespace: {{ .Values.labVMNamespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: validation-engine
 subjects:
   - kind: ServiceAccount
