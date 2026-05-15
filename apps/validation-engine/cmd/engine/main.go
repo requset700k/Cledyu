@@ -131,6 +131,13 @@ func handle(pub publisher, newExec func(model.VMSpec) (executor.VMExecutor, erro
 			return publishFailed(fmt.Sprintf("체크 수 초과: %d > %d", len(req.Checks), maxChecks))
 		}
 
+		// 체크 항목별 필수 필드 검증 — 타입마다 필요한 필드가 다르다
+		for i, check := range req.Checks {
+			if err := validateCheck(check); err != nil {
+				return publishFailed(fmt.Sprintf("checks[%d] (%s): %s", i, check.Type, err))
+			}
+		}
+
 		// 요청에 적힌 VM에 접속, executor는 VM에 명령을 내리는 도구
 		// VM 스펙이 잘못됐거나 알 수 없는 타입이면 재시도해도 변하지 않는 요청 오류
 		exe, err := newExec(req.VM)
@@ -197,4 +204,43 @@ func getEnv(key, defaultVal string) string {
 		return v
 	}
 	return defaultVal
+}
+
+// validateCheck는 체크 항목 하나의 필수 필드가 채워져 있는지 확인한다.
+// 타입마다 필요한 필드가 다르기 때문에 switch로 분기한다.
+func validateCheck(c model.Check) error {
+	switch c.Type {
+	case model.CheckCommand:
+		if c.Command == "" {
+			return fmt.Errorf("cmd가 비어있음")
+		}
+	case model.CheckFileExists:
+		if c.Path == "" {
+			return fmt.Errorf("path가 비어있음")
+		}
+	case model.CheckFileContent:
+		if c.Path == "" {
+			return fmt.Errorf("path가 비어있음")
+		}
+		// command는 Expect="" 가 "실행만 되면 통과"로 의도된 동작이지만,
+		// file_content는 Expect="" 면 strings.Contains(output, "") = true 로 항상 통과한다.
+		// 확인할 문자열 없이 파일 내용 체크는 의미가 없으므로 필수로 요구한다.
+		if c.Expect == "" {
+			return fmt.Errorf("expect가 비어있음 — 파일에서 찾을 문자열을 지정해야 합니다")
+		}
+	case model.CheckProcessRunning:
+		if c.Name == "" {
+			return fmt.Errorf("name이 비어있음")
+		}
+	case model.CheckHTTPResponse:
+		if c.URL == "" {
+			return fmt.Errorf("url이 비어있음")
+		}
+		// ExpectCode=0 은 JSON에서 필드를 아예 안 적었을 때의 기본값이다.
+		// HTTP 상태코드 0은 실제로 존재하지 않으므로 기대값 누락으로 판단한다.
+		if c.ExpectCode == 0 {
+			return fmt.Errorf("expect_code가 0 — 기대하는 HTTP 상태코드를 지정해야 합니다")
+		}
+	}
+	return nil
 }

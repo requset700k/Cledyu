@@ -177,6 +177,58 @@ func TestHandle_ValidRequest_PublishResult(t *testing.T) {
 	}
 }
 
+// ── 체크 필드 검증 테스트 ─────────────────────────────────────────────────────────
+
+// file_content에 Expect=""이면 strings.Contains(output, "")=true라 항상 통과하는 버그.
+// validateCheck에서 request_error로 잡아야 한다.
+func TestHandle_FileContentEmptyExpect_PublishFailed(t *testing.T) {
+	pub := &mockPublisher{}
+	h := handle(pub, mockExecFactory("anything"), zap.NewNop())
+
+	req := baseRequest()
+	req.Checks = []model.Check{
+		{Type: model.CheckFileContent, Path: "/etc/nginx.conf", Expect: ""},
+	}
+
+	if err := h(context.Background(), req); err != nil {
+		t.Fatalf("영구 오류는 nil을 반환해야 함, got: %v", err)
+	}
+	assertPublishedFailed(t, pub, "expect가 비어있음")
+}
+
+// http_response에 ExpectCode=0이면 JSON에서 필드를 안 적은 것.
+// HTTP 상태코드 0은 없으므로 request_error로 잡아야 한다.
+func TestHandle_HTTPResponseZeroExpectCode_PublishFailed(t *testing.T) {
+	pub := &mockPublisher{}
+	h := handle(pub, mockExecFactory("200"), zap.NewNop())
+
+	req := baseRequest()
+	req.Checks = []model.Check{
+		{Type: model.CheckHTTPResponse, URL: "http://localhost:80", ExpectCode: 0},
+	}
+
+	if err := h(context.Background(), req); err != nil {
+		t.Fatalf("영구 오류는 nil을 반환해야 함, got: %v", err)
+	}
+	assertPublishedFailed(t, pub, "expect_code가 0")
+}
+
+// command에 cmd=""이면 request_error로 잡아야 한다.
+func TestHandle_CommandEmptyCmd_PublishFailed(t *testing.T) {
+	pub := &mockPublisher{}
+	h := handle(pub, mockExecFactory(""), zap.NewNop())
+
+	req := baseRequest()
+	req.Checks = []model.Check{
+		{Type: model.CheckCommand, Command: ""},
+	}
+
+	if err := h(context.Background(), req); err != nil {
+		t.Fatalf("영구 오류는 nil을 반환해야 함, got: %v", err)
+	}
+	assertPublishedFailed(t, pub, "cmd가 비어있음")
+}
+
 // ── 공통 단언 함수 ──────────────────────────────────────────────────────────────
 
 // assertPublishedFailed는 published 결과가 하나이고, passed=false이며,
