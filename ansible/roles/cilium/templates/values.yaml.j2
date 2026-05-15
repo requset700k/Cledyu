@@ -50,10 +50,12 @@ hubble:
       - port-distribution
       - httpV2:exemplars=true;labelsContext=source_namespace,source_workload,destination_namespace,destination_workload,traffic_direction
     serviceMonitor:
-      enabled: false
+      enabled: true
+      interval: "30s"
+      honorLabels: true
     dashboards:
       enabled: false
 
 # MetalLB(Phase 4) 와의 충돌 방지 — Cilium L2 Announcements/LB-IPAM 은 비활성
 l2announcements:
-  enabled: falsea
+  enabled: false
