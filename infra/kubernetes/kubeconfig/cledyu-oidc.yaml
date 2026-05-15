@@ -30,7 +30,7 @@ users:
           - --oidc-client-id=kubectl
           - --oidc-extra-scope=email
           - --oidc-extra-scope=profile
-          - --certificate-authority=/Users/kylekim1223/request700k/cledyu/infra/kubernetes/kubeconfig/cledyu-root-ca.pem
+          - --certificate-authority=~/.kube/cledyu-root-ca.pem
         installHint: |
           kubectl-oidc_login (kubelogin) 미설치.
           macOS:  brew install int128/kubelogin/kubelogin
