@@ -186,11 +186,6 @@ func handle(pub publisher, newExec func(model.VMSpec) (executor.VMExecutor, erro
 
 // loadTLS는 cert-manager가 발급한 클라이언트 인증서, 개인키, CA 인증서를 읽어 mTLS 설정을 구성
 func loadTLS(certFile, keyFile, caFile string) (*tls.Config, error) {
-	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-	if err != nil {
-		return nil, err
-	}
-
 	caPEM, err := os.ReadFile(caFile)
 	if err != nil {
 		return nil, err
@@ -199,10 +194,23 @@ func loadTLS(certFile, keyFile, caFile string) (*tls.Config, error) {
 	caPool := x509.NewCertPool()
 	caPool.AppendCertsFromPEM(caPEM)
 
+	// 시작 시 인증서 유효성 확인
+	if _, err := tls.LoadX509KeyPair(certFile, keyFile); err != nil {
+		return nil, err
+	}
+
 	return &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		RootCAs:      caPool,
-		MinVersion:   tls.VersionTLS13,
+		// cert-manager가 인증서를 갱신하면 Secret 볼륨이 자동 업데이트된다.
+		// GetClientCertificate는 매 TLS 연결마다 호출되므로 Pod 재시작 없이 갱신된 인증서를 사용한다.
+		GetClientCertificate: func(*tls.CertificateRequestInfo) (*tls.Certificate, error) {
+			cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+			if err != nil {
+				return nil, err
+			}
+			return &cert, nil
+		},
+		RootCAs:    caPool,
+		MinVersion: tls.VersionTLS13,
 	}, nil
 }
 
@@ -248,6 +256,8 @@ func validateCheck(c model.Check) error {
 		if c.ExpectCode == 0 {
 			return fmt.Errorf("expect_code가 0 — 기대하는 HTTP 상태코드를 지정해야 합니다")
 		}
+	default:
+		return fmt.Errorf("알 수 없는 체크 타입: %s", c.Type)
 	}
 	return nil
 }
