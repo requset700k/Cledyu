@@ -149,6 +149,7 @@ Write-VaultPolicy -Name "cledyu-grafana" -PolicyPath (Join-Path $policyDir "cled
 Write-VaultPolicy -Name "cledyu-keycloak-admin" -PolicyPath (Join-Path $policyDir "cledyu-keycloak-admin.hcl")
 Write-VaultPolicy -Name "cledyu-keycloak-db" -PolicyPath (Join-Path $policyDir "cledyu-keycloak-db.hcl")
 Write-VaultPolicy -Name "cledyu-admin" -PolicyPath (Join-Path $policyDir "cledyu-admin.hcl")
+Write-VaultPolicy -Name "cledyu-eso-reader" -PolicyPath (Join-Path $policyDir "cledyu-eso-reader.hcl")
 Write-VaultPolicy -Name "cledyu-operator" -PolicyPath (Join-Path $policyDir "cledyu-operator.hcl")
 Write-VaultPolicy -Name "cledyu-service-oidc" -PolicyPath (Join-Path $policyDir "cledyu-service-oidc.hcl")
 Write-VaultPolicy -Name "vault-admin" -PolicyPath (Join-Path $policyDir "vault-admin.hcl")
@@ -158,6 +159,7 @@ Invoke-VaultCommand -Command "vault write auth/kubernetes/role/cledyu-argocd bou
 Invoke-VaultCommand -Command "vault write auth/kubernetes/role/cledyu-grafana bound_service_account_names=grafana bound_service_account_namespaces=monitoring policies=cledyu-grafana ttl=1h >/dev/null"
 Invoke-VaultCommand -Command "vault write auth/kubernetes/role/cledyu-keycloak bound_service_account_names=cledyu-keycloak bound_service_account_namespaces=keycloak policies=cledyu-keycloak-admin,cledyu-keycloak-db ttl=1h >/dev/null"
 Invoke-VaultCommand -Command "vault write auth/kubernetes/role/cledyu-services bound_service_account_names=web,api,tutor bound_service_account_namespaces=web,api,tutor policies=cledyu-service-oidc ttl=1h >/dev/null"
+Invoke-VaultCommand -Command "vault write auth/kubernetes/role/external-secrets-operator bound_service_account_names=eso-controller bound_service_account_namespaces=external-secrets policies=cledyu-eso-reader ttl=1h >/dev/null"
 Invoke-VaultCommand -Command "vault write auth/kubernetes/role/vault-admin bound_service_account_names=vault-admin bound_service_account_namespaces=vault policies=vault-admin ttl=30m max_ttl=1h >/dev/null"
 
 if ([string]::IsNullOrWhiteSpace($VaultOidcClientSecret)) {

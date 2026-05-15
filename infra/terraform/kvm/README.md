@@ -2,14 +2,14 @@
 ## Requirements
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.5.0 |
 | <a name="requirement_libvirt"></a> [libvirt](#requirement\_libvirt) | ~> 0.8.0 |
 
 ## Providers
 
 | Name | Version |
-|------|---------|
+| ---- | ------- |
 | <a name="provider_libvirt"></a> [libvirt](#provider\_libvirt) | ~> 0.8.0 |
 
 ## Modules
@@ -19,7 +19,7 @@ No modules.
 ## Resources
 
 | Name | Type |
-|------|------|
+| ---- | ---- |
 | [libvirt_cloudinit_disk.ci](https://registry.terraform.io/providers/dmacvicar/libvirt/latest/docs/resources/cloudinit_disk) | resource |
 | [libvirt_domain.node](https://registry.terraform.io/providers/dmacvicar/libvirt/latest/docs/resources/domain) | resource |
 | [libvirt_pool.wp](https://registry.terraform.io/providers/dmacvicar/libvirt/latest/docs/resources/pool) | resource |
@@ -29,7 +29,7 @@ No modules.
 ## Inputs
 
 | Name | Description | Type | Default | Required |
-|------|-------------|------|---------|:--------:|
+| ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_ssh_authorized_key"></a> [ssh\_authorized\_key](#input\_ssh\_authorized\_key) | cloud-init 으로 주입할 SSH 공개키 (예: file("~/.ssh/id\_ed25519.pub")) | `string` | n/a | yes |
 | <a name="input_base_image_source"></a> [base\_image\_source](#input\_base\_image\_source) | 우분투 22.04 클라우드 이미지 소스(URL 또는 로컬 경로). provider가 받아서 pool에 업로드. | `string` | `"https://cloud-images.ubuntu.com/releases/22.04/release/ubuntu-22.04-server-cloudimg-amd64.img"` | no |
 | <a name="input_cluster_name"></a> [cluster\_name](#input\_cluster\_name) | 클러스터 이름 prefix. VM·pool·disk 이름이 여기서 파생됨. | `string` | `"cledyu"` | no |
@@ -43,7 +43,7 @@ No modules.
 ## Outputs
 
 | Name | Description |
-|------|-------------|
+| ---- | ----------- |
 | <a name="output_ansible_inventory_snippet"></a> [ansible\_inventory\_snippet](#output\_ansible\_inventory\_snippet) | ansible/inventory.yml 에 붙여넣을 k8s\_nodes 정의 |
 | <a name="output_control_plane_ips"></a> [control\_plane\_ips](#output\_control\_plane\_ips) | 컨트롤플레인 IP 목록 (kubeadm init/join 대상) |
 | <a name="output_nodes"></a> [nodes](#output\_nodes) | 노드 이름 → 고정 IP |
