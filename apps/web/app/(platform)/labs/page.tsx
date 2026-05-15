@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { LabCard } from '@/components/lab/LabCard';
@@ -13,8 +14,20 @@ const DIFFICULTIES: { value: Difficulty | 'all'; label: string }[] = [
   { value: 'advanced', label: '고급' },
 ];
 
-export default function LabsPage() {
-  const [filter, setFilter] = useState<Difficulty | 'all'>('all');
+function LabsCatalog() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const filter = (searchParams.get('difficulty') ?? 'all') as Difficulty | 'all';
+
+  function setFilter(value: Difficulty | 'all') {
+    const params = new URLSearchParams(searchParams.toString());
+    if (value === 'all') {
+      params.delete('difficulty');
+    } else {
+      params.set('difficulty', value);
+    }
+    router.replace(`/labs?${params.toString()}`);
+  }
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ['labs'],
@@ -77,6 +90,14 @@ export default function LabsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function LabsPage() {
+  return (
+    <Suspense>
+      <LabsCatalog />
+    </Suspense>
   );
 }
 
