@@ -8,6 +8,8 @@ replicaCount: 1 # validation-engine Pod를 1개만 띄움
 env:
   KAFKA_BROKERS: "cledyu-kafka-kafka-bootstrap.kafka.svc:9093"
 
+labVMNamespace: lab-sessions
+
 resources:
   requests: # Pod 시작 시 Kubernetes가 보장해주는 최소 자원
     cpu: 50m # CPU 0.05코어
