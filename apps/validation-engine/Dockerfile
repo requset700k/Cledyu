@@ -10,9 +10,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /engine ./cmd/engine
 FROM alpine:3.21 AS virtctl-downloader
 ARG KUBEVIRT_VERSION=v1.8.2
 RUN apk add --no-cache curl && \
-    curl -sL -o /virtctl \
+    curl -fsSL --retry 3 --retry-delay 5 -o /virtctl \
       "https://github.com/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/virtctl-${KUBEVIRT_VERSION}-linux-amd64" && \
-    curl -sL -o /virtctl.sha256sum \
+    curl -fsSL --retry 3 --retry-delay 5 -o /virtctl.sha256sum \
       "https://github.com/kubevirt/kubevirt/releases/download/${KUBEVIRT_VERSION}/virtctl-${KUBEVIRT_VERSION}-linux-amd64.sha256sum" && \
     echo "$(awk '{print $1}' /virtctl.sha256sum)  /virtctl" | sha256sum -c - && \
     rm /virtctl.sha256sum && \
