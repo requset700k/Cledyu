@@ -1,0 +1,49 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: kubevirt
+  namespace: monitoring
+  labels:
+    release: kps
+spec:
+  groups:
+    - name: kubevirt.vmi
+      rules:
+        - alert: KubevirtVMIHighCPU
+          expr: rate(kubevirt_vmi_vcpu_seconds_total{state="running"}[5m]) > 0.9
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "VMI CPU 높음 ({{ $labels.name }})"
+            description: "VMI {{ $labels.name }}의 vCPU 사용률이 10분 이상 90% 초과"
+
+        - alert: KubevirtVMIMemorySwap
+          expr: rate(kubevirt_vmi_memory_swap_in_traffic_bytes_total[5m]) > 1048576
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "VMI 스왑 발생 ({{ $labels.name }})"
+            description: "VMI {{ $labels.name }}에서 메모리 스왑 감지"
+
+    - name: kubevirt.components
+      rules:
+        - alert: KubevirtComponentDown
+          expr: up{job="kubevirt-prometheus-metrics", namespace="kubevirt"} == 0
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "KubeVirt 컴포넌트 다운 ({{ $labels.pod }})"
+            description: "{{ $labels.pod }} 메트릭 수집 5분 이상 중단"
+
+        - alert: KubevirtVirtControllerNotReady
+          expr: kubevirt_virt_controller_ready == 0
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "virt-controller not ready"
+            description: "virt-controller가 2분 이상 not ready 상태"
