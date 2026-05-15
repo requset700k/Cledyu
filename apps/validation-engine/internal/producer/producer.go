@@ -25,7 +25,7 @@ func New(brokers []string, tlsCfg *tls.Config, log *zap.Logger) *Producer {
 
 	writer := &kafka.Writer{
 		Addr:      kafka.TCP(brokers...), // 어느 Kafka 서버에 보낼지
-		Topic:     "validation-results", // 어느 토픽에 넣을지
+		Topic:     "validation-results",  // 어느 토픽에 넣을지
 		Transport: transport,
 	}
 

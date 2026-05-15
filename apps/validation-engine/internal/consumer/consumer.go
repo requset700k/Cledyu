@@ -23,10 +23,10 @@ type Consumer struct {
 // brokers: Kafka 주소 목록 (예: ["cledyu-kafka-bootstrap.kafka.svc:9093"])
 func New(brokers []string, tlsCfg *tls.Config, log *zap.Logger) *Consumer {
 	reader := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:     brokers,
-		Topic:       "validation-requests",
-		GroupID:     "validation-engine",
-		Dialer:      &kafka.Dialer{TLS: tlsCfg},
+		Brokers: brokers,
+		Topic:   "validation-requests",
+		GroupID: "validation-engine",
+		Dialer:  &kafka.Dialer{TLS: tlsCfg},
 	})
 
 	return &Consumer{
@@ -53,7 +53,7 @@ func (c *Consumer) Run(ctx context.Context, handler HandleFunc) error {
 		if err != nil {
 			if ctx.Err() != nil {
 				c.log.Info("consumer 종료")
-				return nil
+				return nil //nolint:nilerr // context 취소는 정상 종료
 			}
 			return fmt.Errorf("메시지 읽기 실패: %w", err)
 		}

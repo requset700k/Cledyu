@@ -39,10 +39,17 @@ func main() {
 
 	// 헬스체크 엔드포인트 — Kubernetes liveness probe가 여기로 요청을 보낸다
 	go func() {
-		http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 		})
-		if err := http.ListenAndServe(":8080", nil); err != nil {
+		srv := &http.Server{
+			Addr:         ":8080",
+			Handler:      mux,
+			ReadTimeout:  5 * time.Second,
+			WriteTimeout: 5 * time.Second,
+		}
+		if err := srv.ListenAndServe(); err != nil {
 			log.Error("헬스 서버 종료", zap.Error(err))
 		}
 	}()

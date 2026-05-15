@@ -15,7 +15,7 @@ import (
 // SSM은 AWS가 제공하는 원격 명령 실행 서비스로, EC2 인스턴스에 SSM Agent가 설치돼 있으면
 // SSH 없이도 AWS API를 통해 명령을 보낼 수 있다.
 type EC2Executor struct {
-	instanceID string     // 명령을 실행할 EC2 인스턴스 ID (예: "i-0abc1234567890")
+	instanceID string      // 명령을 실행할 EC2 인스턴스 ID (예: "i-0abc1234567890")
 	client     *ssm.Client // AWS SSM API 클라이언트
 }
 

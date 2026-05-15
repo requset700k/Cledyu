@@ -20,16 +20,16 @@ func (m *mockExecutor) Exec(_ context.Context, _ string) (string, error) {
 
 func (m *mockExecutor) Close() {}
 
-func mockOk(output string) *mockExecutor  { return &mockExecutor{output: output} }
-func mockFail(msg string) *mockExecutor   { return &mockExecutor{err: errors.New(msg)} }
+func mockOk(output string) *mockExecutor { return &mockExecutor{output: output} }
+func mockFail(msg string) *mockExecutor  { return &mockExecutor{err: errors.New(msg)} }
 
 // --- command ---
 
 func TestRunCommand_Pass(t *testing.T) {
 	result := Run(context.Background(), mockOk("nginx is running"), model.Check{
-		Type:   model.CheckCommand,
+		Type:    model.CheckCommand,
 		Command: "systemctl status nginx",
-		Expect: "running",
+		Expect:  "running",
 	})
 	if !result.Passed {
 		t.Errorf("통과해야 하는데 실패: %s", result.Detail)
@@ -38,9 +38,9 @@ func TestRunCommand_Pass(t *testing.T) {
 
 func TestRunCommand_Fail_OutputMismatch(t *testing.T) {
 	result := Run(context.Background(), mockOk("stopped"), model.Check{
-		Type:   model.CheckCommand,
+		Type:    model.CheckCommand,
 		Command: "systemctl status nginx",
-		Expect: "running",
+		Expect:  "running",
 	})
 	if result.Passed {
 		t.Error("출력에 기대값 없으면 실패해야 함")
@@ -49,7 +49,7 @@ func TestRunCommand_Fail_OutputMismatch(t *testing.T) {
 
 func TestRunCommand_Pass_NoExpect(t *testing.T) {
 	result := Run(context.Background(), mockOk("anything"), model.Check{
-		Type:   model.CheckCommand,
+		Type:    model.CheckCommand,
 		Command: "ls /tmp",
 	})
 	if !result.Passed {
@@ -78,7 +78,7 @@ func TestRunCommand_Fail_Injection(t *testing.T) {
 
 func TestRunCommand_Fail_ExecError(t *testing.T) {
 	result := Run(context.Background(), mockFail("connection refused"), model.Check{
-		Type:   model.CheckCommand,
+		Type:    model.CheckCommand,
 		Command: "ls",
 	})
 	if result.Passed {

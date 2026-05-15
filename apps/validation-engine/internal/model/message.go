@@ -48,8 +48,8 @@ type VMSpec struct {
 	Type VMType `json:"type"`
 
 	// KubeVirt VM일 때만 사용
-	Name      string `json:"name,omitempty"`       // VM 이름 (예: "lab-vm-abc123")
-	Namespace string `json:"namespace,omitempty"`  // K8s 네임스페이스 (예: "lab-sessions")
+	Name      string `json:"name,omitempty"`      // VM 이름 (예: "lab-vm-abc123")
+	Namespace string `json:"namespace,omitempty"` // K8s 네임스페이스 (예: "lab-sessions")
 
 	// EC2 VM일 때만 사용
 	InstanceID string `json:"instance_id,omitempty"` // EC2 인스턴스 ID (예: "i-0abc1234567890")
@@ -63,10 +63,10 @@ type Check struct {
 	Type CheckType `json:"type"`
 
 	// command, file_content, http_response 에서 사용
-	Command  string `json:"cmd,omitempty"`    // 실행할 명령어
-	Path     string `json:"path,omitempty"`   // 파일 경로
-	URL      string `json:"url,omitempty"`    // HTTP URL
-	Name     string `json:"name,omitempty"`   // 프로세스 이름
+	Command string `json:"cmd,omitempty"`  // 실행할 명령어
+	Path    string `json:"path,omitempty"` // 파일 경로
+	URL     string `json:"url,omitempty"`  // HTTP URL
+	Name    string `json:"name,omitempty"` // 프로세스 이름
 
 	// 기대값
 	Expect     string `json:"expect,omitempty"`      // 출력/내용에 포함돼야 할 문자열
