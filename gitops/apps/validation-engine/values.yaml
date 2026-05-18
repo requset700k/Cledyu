@@ -1,7 +1,7 @@
 image:
   repository: ghcr.io/requset700k/validation-engine
-  tag: latest
-  pullPolicy: Always
+  tag: latest # CI가 main push 시 sha-<short>로 자동 업데이트
+  pullPolicy: IfNotPresent
 
 replicaCount: 1 # validation-engine Pod를 1개만 띄움
 
