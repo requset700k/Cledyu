@@ -1,0 +1,39 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress: [] # 인입 트래픽 전면 차단 — 외부에서 이 서비스를 호출하는 경우 없음
+  egress:
+    # DNS 조회 — 서비스 도메인을 IP로 변환할 때 kube-system의 CoreDNS에 쿼리
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Kafka TLS — validation-requests 수신, validation-results 발행
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kafka
+      ports:
+        - port: 9093
+          protocol: TCP
+    # Kubernetes API — virtctl이 VM portforward에 사용. ClusterIP(가상 IP)라 ipBlock으로 지정
+    - to:
+        - ipBlock:
+            cidr: 10.43.0.1/32
+      ports:
+        - port: 443
+          protocol: TCP
