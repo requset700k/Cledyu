@@ -1,0 +1,42 @@
+name: build-apps
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - apps/**
+      - .github/workflows/build-image.yml
+      - .github/workflows/build-apps.yml
+  push:
+    branches: [main]
+    paths:
+      - apps/**
+      - .github/workflows/build-image.yml
+      - .github/workflows/build-apps.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - context: apps/api
+            name: api
+            trivyignores: apps/api/.trivyignore
+          - context: apps/web
+            name: web
+            trivyignores: apps/web/.trivyignore
+          - context: apps/dummy
+            name: dummy
+            trivyignores: ""
+    uses: ./.github/workflows/build-image.yml
+    with:
+      context: ${{ matrix.context }}
+      image-name: ${{ matrix.name }}
+      trivyignores: ${{ matrix.trivyignores }}
+    secrets: inherit
