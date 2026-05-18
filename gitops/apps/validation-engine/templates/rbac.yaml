@@ -5,6 +5,7 @@ kind: ServiceAccount
 metadata:
   name: validation-engine
   namespace: {{ .Release.Namespace }}
+automountServiceAccountToken: true # virtctl이 K8s API(portforward)에 접근하기 위해 필요
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
