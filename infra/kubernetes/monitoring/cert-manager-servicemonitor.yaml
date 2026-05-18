@@ -19,4 +19,4 @@ spec:
     - port: tcp-prometheus-servicemonitor
       interval: 30s
       scrapeTimeout: 10s
-      honorLabels: true
+      honorLabels: true # cert-manager가 붙이는 namespace/name 레이블 보존
