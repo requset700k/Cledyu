@@ -19,11 +19,13 @@ var safePathRe = regexp.MustCompile(`^/[a-zA-Z0-9/_.\-]+$`)
 var safeNameRe = regexp.MustCompile(`^[a-zA-Z0-9._\-]+$`)
 
 // 허용되는 URL 패턴 — http/https만 허용
-var safeURLRe = regexp.MustCompile(`^https?://[a-zA-Z0-9/._:\-]+$`)
+// ?, =, &, # 허용 — 쿼리스트링 지원. Lab DSL 확정 후 허용 범위 재검토
+var safeURLRe = regexp.MustCompile(`^https?://[a-zA-Z0-9/._:\-?=&#]+$`)
 
 // 허용되는 명령어 패턴 — 셸 메타문자(; | & ` $ > < 등) 금지
-// %는 stat -c %a 같은 명령에서 사용하므로 허용 — Lab DSL 확정 후 재검토
-var safeCommandRe = regexp.MustCompile(`^[a-zA-Z0-9 /._\-=:@%]+$`)
+// %는 stat -c %a 같은 명령에서 사용하므로 허용
+// ", '는 echo "hello world", grep 'pattern' file 같은 명령에서 사용 — Lab DSL 확정 후 재검토
+var safeCommandRe = regexp.MustCompile(`^[a-zA-Z0-9 /._\-=:@%"']+$`)
 
 // Run은 체크 항목 하나를 VM에서 실행하고 결과를 돌려준다.
 func Run(ctx context.Context, exe executor.VMExecutor, check model.Check) model.CheckResult {
@@ -109,6 +111,10 @@ func runFileContent(ctx context.Context, exe executor.VMExecutor, check model.Ch
 		return fail(check.Type, fmt.Sprintf("허용되지 않는 경로: %s", check.Path))
 	}
 
+	if check.Expect == "" {
+		return fail(check.Type, "expect가 비어있음")
+	}
+
 	// 'cat' 명령어로 파일 내용을 읽어온다
 	output, err := exe.Exec(ctx, "cat "+check.Path)
 	if err != nil {
@@ -139,6 +145,9 @@ func runProcessRunning(ctx context.Context, exe executor.VMExecutor, check model
 
 // HTTP 응답 상태 검사
 func runHTTPResponse(ctx context.Context, exe executor.VMExecutor, check model.Check) model.CheckResult {
+	if check.ExpectCode == 0 {
+		return fail(check.Type, "expect_code가 0")
+	}
 	if !safeURLRe.MatchString(check.URL) {
 		return fail(check.Type, fmt.Sprintf("허용되지 않는 URL: %s", check.URL))
 	}
