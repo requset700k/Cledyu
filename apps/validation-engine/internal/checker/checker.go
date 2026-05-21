@@ -77,9 +77,8 @@ func runCommand(ctx context.Context, exe executor.VMExecutor, check model.Check)
 		return fail(check.Type, fmt.Sprintf("명령어 실행 실패: %s", err))
 	}
 
-	// 기대값(Expect)이 없으면 실행 성공만으로 통과
 	if check.Expect == "" {
-		return pass(check.Type)
+		return fail(check.Type, "expect가 비어있음")
 	}
 
 	// 명령어 결과값에 기대하는 문자열이 포함되어 있는지 확인
