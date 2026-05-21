@@ -47,13 +47,13 @@ func TestRunCommand_Fail_OutputMismatch(t *testing.T) {
 	}
 }
 
-func TestRunCommand_Pass_NoExpect(t *testing.T) {
+func TestRunCommand_Fail_NoExpect(t *testing.T) {
 	result := Run(context.Background(), mockOk("anything"), model.Check{
 		Type:    model.CheckCommand,
 		Command: "ls /tmp",
 	})
-	if !result.Passed {
-		t.Error("Expect 없으면 실행 성공만으로 통과해야 함")
+	if result.Passed {
+		t.Error("Expect 없으면 실패해야 함")
 	}
 }
 
