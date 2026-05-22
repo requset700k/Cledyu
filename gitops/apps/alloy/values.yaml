@@ -32,11 +32,6 @@ alloy:
         }
       }
 
-      loki.source.kubernetes "pods" {
-        targets    = discovery.relabel.pods.output
-        forward_to = [loki.write.default.receiver]
-      }
-
       loki.write "default" {
         endpoint {
           url = "http://loki-gateway.loki.svc.cluster.local/loki/api/v1/push"
