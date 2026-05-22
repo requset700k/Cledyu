@@ -19,11 +19,6 @@ spec:
     - repoURL: https://github.com/requset700k/cledyu.git
       targetRevision: main
       ref: values
-    - repoURL: https://github.com/requset700k/cledyu.git
-      targetRevision: main
-      path: gitops/apps/tempo
-      directory:
-        include: "namespace.yaml"
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring
