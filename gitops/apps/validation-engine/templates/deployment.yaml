@@ -37,7 +37,7 @@ spec:
           # values.yaml에서 이미지 주소와 태그를 가져옴
           # 결과: ghcr.io/requset700k/validation-engine:latest
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          # Always: Pod 시작 시 항상 최신 이미지를 새로 받아옴
+          # IfNotPresent: 노드에 해당 태그의 이미지가 없을 때만 pull
           imagePullPolicy: {{ .Values.image.pullPolicy }}
 
           env:
