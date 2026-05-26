@@ -162,6 +162,9 @@ Invoke-VaultCommand -Command "vault write auth/kubernetes/role/cledyu-services b
 Invoke-VaultCommand -Command "vault write auth/kubernetes/role/external-secrets-operator bound_service_account_names=eso-controller bound_service_account_namespaces=external-secrets policies=cledyu-eso-reader ttl=1h >/dev/null"
 Invoke-VaultCommand -Command "vault write auth/kubernetes/role/vault-admin bound_service_account_names=vault-admin bound_service_account_namespaces=vault policies=vault-admin ttl=30m max_ttl=1h >/dev/null"
 
+# Cleanup: remove legacy cledyu-eso role replaced by external-secrets-operator (PR #40)
+Invoke-VaultCommand -Command "vault delete auth/kubernetes/role/cledyu-eso 2>/dev/null || true"
+
 if ([string]::IsNullOrWhiteSpace($VaultOidcClientSecret)) {
   throw "Vault OIDC client secret not provided. Set VAULT_OIDC_CLIENT_SECRET or pass -VaultOidcClientSecret."
 }
