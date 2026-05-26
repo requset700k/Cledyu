@@ -1,6 +1,6 @@
 module github.com/requset700k/cledyu/api
 
-go 1.24
+go 1.26
 
 require (
 	github.com/gin-contrib/cors v1.7.2
