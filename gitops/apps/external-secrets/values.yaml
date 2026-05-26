@@ -1,5 +1,9 @@
 installCRDs: true
 
+serviceAccount:
+  create: true
+  name: eso-controller
+
 resources:
   requests:
     cpu: 50m
