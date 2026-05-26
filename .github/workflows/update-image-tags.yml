@@ -1,0 +1,51 @@
+name: update-image-tags
+
+# build-apps 가 main 에 성공적으로 완료된 후 gitops values.yaml 의 image.tag 를
+# 새 sha-<short> 태그로 자동 업데이트한다. ArgoCD 가 변경을 감지해 자동 sync.
+
+on:
+  workflow_run:
+    workflows: [build-apps]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-image-tags
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: bump gitops image tags
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Compute sha tag
+        id: tag
+        run: |
+          sha="${{ github.event.workflow_run.head_sha }}"
+          echo "value=sha-${sha::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Update values.yaml image tags
+        run: |
+          TAG="${{ steps.tag.outputs.value }}"
+          sed -i "s|^  tag:.*|  tag: ${TAG}|" gitops/apps/api/values.yaml
+          sed -i "s|^  tag:.*|  tag: ${TAG}|" gitops/apps/web/values.yaml
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add gitops/apps/api/values.yaml gitops/apps/web/values.yaml
+          if git diff --cached --quiet; then
+            echo "태그 변경 없음 — skip"
+            exit 0
+          fi
+          git commit -m "chore(gitops): bump image tag to ${{ steps.tag.outputs.value }}"
+          git push

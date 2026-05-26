@@ -1,14 +1,14 @@
 import { PHASE_PRODUCTION_BUILD } from 'next/constants.js';
 
-// BACKEND_URL: K8s deployment.yaml에서 런타임 주입.
+// CLEDYU_BACKEND_URL: K8s deployment.yaml에서 런타임 주입.
 // 빌드 단계에서는 미주입이 정상(placeholder 사용). 런타임 기동 시 미주입이면 throw.
 export default function config(phase) {
   const BACKEND_URL =
-    process.env.BACKEND_URL ??
+    process.env.CLEDYU_BACKEND_URL ??
     (phase === PHASE_PRODUCTION_BUILD
       ? 'http://localhost:8080'
       : (() => {
-          throw new Error('BACKEND_URL is not set');
+          throw new Error('CLEDYU_BACKEND_URL is not set');
         })());
 
   /** @type {import('next').NextConfig} */
