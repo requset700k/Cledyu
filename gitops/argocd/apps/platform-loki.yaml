@@ -16,10 +16,10 @@ spec:
         releaseName: loki
         valueFiles:
           - $values/gitops/apps/loki/values.yaml
-    - repoURL: https://github.com/requset700k/cledyu.git
+    - repoURL: https://github.com/requset700k/Cledyu.git
       targetRevision: main
       ref: values
-    - repoURL: https://github.com/requset700k/cledyu.git
+    - repoURL: https://github.com/requset700k/Cledyu.git
       targetRevision: main
       path: gitops/apps/loki
       directory:
