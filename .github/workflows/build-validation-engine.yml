@@ -1,0 +1,53 @@
+name: build-validation-engine
+
+# apps/validation-engine 코드가 바뀔 때만 실행 (불필요한 빌드 방지)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - apps/validation-engine/**
+      - .github/workflows/build-image.yml
+      - .github/workflows/build-validation-engine.yml
+  push:
+    branches: [main]
+    paths:
+      - apps/validation-engine/**
+      - .github/workflows/build-image.yml
+      - .github/workflows/build-validation-engine.yml
+  workflow_dispatch: # GitHub UI에서 수동 실행
+
+permissions:
+  contents: read
+  packages: write # GHCR에 이미지 push하기 위한 권한
+
+jobs:
+  image:
+    # 공통 빌드 워크플로우 재사용 — 빌드, GHCR push, Trivy 보안 스캔 포함
+    uses: ./.github/workflows/build-image.yml
+    with:
+      context: apps/validation-engine       # Dockerfile이 있는 폴더
+      image-name: validation-engine         # ghcr.io/requset700k/validation-engine
+      trivyignores: ""
+    secrets: inherit
+
+  update-tag:
+    needs: image
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update image tag in values.yaml
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          sed -i "s/^  tag: .*/  tag: sha-${SHORT_SHA}/" gitops/apps/validation-engine/values.yaml
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add gitops/apps/validation-engine/values.yaml
+          git diff --cached --quiet && echo "tag unchanged, skip commit" && exit 0
+          git commit -m "chore(cd): validation-engine 이미지 태그 sha-${SHORT_SHA}로 업데이트"
+          git push

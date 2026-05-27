@@ -1,0 +1,23 @@
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: kafka-ui-kafka-client
+  namespace: kafka
+spec:
+  secretName: kafka-ui-kafka-client-tls
+  duration: "2160h"
+  renewBefore: "720h"
+  commonName: kafka-ui  # Strimzi가 이 CN을 KafkaUser 이름과 매핑해서 ACL을 적용한다.
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always
+  usages:
+    - client auth
+    - digital signature
+    - key encipherment
+  issuerRef:
+    name: cledyu-ca
+    kind: ClusterIssuer
+    group: cert-manager.io
