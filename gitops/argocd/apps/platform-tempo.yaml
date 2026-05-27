@@ -16,7 +16,7 @@ spec:
         releaseName: tempo
         valueFiles:
           - $values/gitops/apps/tempo/values.yaml
-    - repoURL: https://github.com/requset700k/cledyu.git
+    - repoURL: https://github.com/requset700k/Cledyu.git
       targetRevision: main
       ref: values
   destination:
