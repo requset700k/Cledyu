@@ -4,23 +4,35 @@ replicaCount: 1
 image:
   registry: ghcr.io
   repository: kafbat/kafka-ui
+  # sha256 다이제스트를 함께 고정 — 태그만 쓰면 이미지가 몰래 교체돼도 모른다.
+  # 태그 + 다이제스트 조합으로 "이 바이너리 그대로" 를 보장한다.
   tag: v1.5.0@sha256:7cda86a33344160309fdb65146332e4da65db81a945614f2fe32e210803f6fd1
 
+# kafbat/kafka-ui 애플리케이션 설정을 YAML로 직접 주입하는 블록.
+# 이 내용은 컨테이너 안에 application.yaml 파일로 마운트된다.
 yamlApplicationConfig:
   kafka:
     clusters:
       - name: cledyu-kafka
-        bootstrapServers: cledyu-kafka-kafka-bootstrap.kafka.svc:9092
+        # 9092: plain 리스너 (TLS 없음, 인증 없음)
+        # 9093: tls 리스너 (mTLS 필수) ← authorization: simple 활성화 이후 여기만 ACL 통과 가능
+        bootstrapServers: cledyu-kafka-kafka-bootstrap.kafka.svc:9093
 
+  # kafka-ui 웹 UI 로그인 방식 설정.
+  # 브라우저로 접속하는 사용자(사람)의 인증 — Kafka 브로커 연결과는 별개다.
   auth:
     type: OAUTH2
     oauth2:
       client:
         keycloak:
           clientId: kafka-ui
+          # ${CLIENT_SECRET}은 Spring Boot placeholder.
+          # 아래 envs.secretMappings에서 CLIENT_SECRET 환경변수로 주입되면
+          # 런타임에 이 자리에 실제 값이 채워진다.
           clientSecret: ${CLIENT_SECRET}
           provider: keycloak
           issuer-uri: https://keycloak.cledyu.local/realms/cledyu
+          # openid: ID 토큰 발급 요청, roles: Keycloak 역할 정보 포함 요청
           scope: openid,roles
           user-name-attribute: preferred_username
           redirect-uri: https://kafka-ui.cledyu.local/login/oauth2/code/keycloak
@@ -28,22 +40,26 @@ yamlApplicationConfig:
           custom-params:
             type: oauth
 
+  # kafka-ui 안에서 로그인한 사용자가 무엇을 볼 수 있는지 결정하는 권한 설정.
+  # Kafka 브로커 ACL(KafkaUser)과 완전히 별개 — 이건 kafka-ui 화면 내 권한이다.
   rbac:
     roles:
+      # admins: Keycloak에서 kafka-admin 역할을 가진 사용자
       - name: admins
         clusters:
           - cledyu-kafka
         subjects:
           - provider: oauth
             type: role
-            value: kafka-admin
+            value: kafka-admin  # Keycloak 토큰의 roles에 이 값이 있으면 admins로 인정
         permissions:
+          # kafka-ui 화면에서 할 수 있는 모든 작업 허용
           - resource: applicationconfig
             actions: all
           - resource: clusterconfig
             actions: all
           - resource: topic
-            value: ".*"
+            value: ".*"  # 모든 토픽 (정규식)
             actions: all
           - resource: consumer
             value: ".*"
@@ -58,6 +74,7 @@ yamlApplicationConfig:
             actions: all
           - resource: audit
             actions: all
+      # viewers: Keycloak에서 kafka-viewer 역할을 가진 사용자 — 읽기 전용
       - name: viewers
         clusters:
           - cledyu-kafka
@@ -72,9 +89,9 @@ yamlApplicationConfig:
           - resource: topic
             value: ".*"
             actions:
-              - VIEW
-              - MESSAGES_READ
-              - ANALYSIS_VIEW
+              - VIEW           # 토픽 목록/설정 조회
+              - MESSAGES_READ  # 메시지 내용 조회
+              - ANALYSIS_VIEW  # 토픽 분석 화면 조회
           - resource: consumer
             value: ".*"
             actions:
@@ -88,15 +105,69 @@ yamlApplicationConfig:
             actions:
               - view
 
+# Kafka Java 클라이언트 SSL 설정을 환경변수로 주입하는 블록.
+# kafbat/kafka-ui는 KAFKA_CLUSTERS_0_PROPERTIES_* 형태의 환경변수를
+# kafka.clusters[0].properties.* 설정으로 매핑해서 Kafka 클라이언트에 전달한다.
+env:
+  # Kafka 브로커와의 통신을 SSL(mTLS)로 한다는 선언.
+  # PLAINTEXT(암호화 없음) / SSL(TLS) / SASL_PLAINTEXT / SASL_SSL 중 선택.
+  - name: KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL
+    value: SSL
+
+  # 클라이언트 인증서(keystore) 형식을 PEM으로 지정.
+  # 기본값은 JKS(Java KeyStore)인데, cert-manager가 발급하는 형식이 PEM이라 맞춰준다.
+  - name: KAFKA_CLUSTERS_0_PROPERTIES_SSL_KEYSTORE_TYPE
+    value: PEM
+
+  # 서버(Kafka 브로커) 인증서를 검증할 때 쓸 신뢰 저장소(truststore) 형식도 PEM으로 지정.
+  - name: KAFKA_CLUSTERS_0_PROPERTIES_SSL_TRUSTSTORE_TYPE
+    value: PEM
+
+  # kafka-ui의 클라이언트 인증서 (tls.crt).
+  # "나는 kafka-ui다" 라고 브로커에 증명하는 인증서.
+  # cert-manager가 발급한 Secret kafka-ui-kafka-client-tls의 tls.crt 키를 그대로 주입.
+  # PEM 파일 경로(file:...)가 아닌 PEM 내용 문자열을 직접 넣어야 한다.
+  - name: KAFKA_CLUSTERS_0_PROPERTIES_SSL_KEYSTORE_CERTIFICATE_CHAIN
+    valueFrom:
+      secretKeyRef:
+        name: kafka-ui-kafka-client-tls  # kafka-client-certificate.yaml이 만든 Secret
+        key: tls.crt
+
+  # 클라이언트 인증서의 개인키 (tls.key).
+  # 인증서와 쌍을 이루는 키. 브로커가 인증서를 검증할 때 이 키로 서명을 확인한다.
+  - name: KAFKA_CLUSTERS_0_PROPERTIES_SSL_KEYSTORE_KEY
+    valueFrom:
+      secretKeyRef:
+        name: kafka-ui-kafka-client-tls
+        key: tls.key
+
+  # 브로커 인증서를 검증할 때 신뢰할 CA 인증서 (ca.crt).
+  # "이 CA가 서명한 브로커 인증서라면 믿겠다"는 설정.
+  # cert-manager Secret에 ca.crt가 포함되어 있으므로 따로 ConfigMap을 만들 필요 없다.
+  - name: KAFKA_CLUSTERS_0_PROPERTIES_SSL_TRUSTSTORE_CERTIFICATES
+    valueFrom:
+      secretKeyRef:
+        name: kafka-ui-kafka-client-tls
+        key: ca.crt
+
+# kafbat 헬름 차트 전용 Secret 주입 방식.
+# secretMappings의 키(CLIENT_SECRET)가 환경변수 이름이 되고,
+# name/keyName으로 어떤 Secret의 어떤 키를 쓸지 지정한다.
+# 위의 env[].valueFrom.secretKeyRef와 동일한 역할이지만 kafbat 차트가 제공하는 편의 기능이다.
 envs:
   secretMappings:
-    CLIENT_SECRET:
-      name: kafka-ui-oidc
-      keyName: client-secret
+    CLIENT_SECRET:           # 환경변수 이름 → yamlApplicationConfig의 ${CLIENT_SECRET}에 주입됨
+      name: kafka-ui-oidc    # Secret 이름
+      keyName: client-secret # Secret 안의 키 이름
 
+# 메인 컨테이너가 뜨기 전에 실행되는 초기화 컨테이너.
+# kafka-ui는 Java 앱이라 HTTPS 통신 시 Java 자체 신뢰 저장소(cacerts)를 본다.
+# 기본 cacerts에는 cledyu-ca가 없으므로, 미리 넣어두는 작업을 여기서 한다.
+# (Kafka 브로커 SSL은 위의 env로 처리하므로 이 initContainer와 관계없다.
+#  이건 kafka-ui ↔ Keycloak HTTPS 통신용이다.)
 initContainers:
   - name: import-ca
-    image: eclipse-temurin:11-jre
+    image: eclipse-temurin:11-jre  # keytool 명령이 있는 JRE 이미지
     command:
       - /bin/sh
       - -c
@@ -107,21 +178,29 @@ initContainers:
            -file /etc/ssl/certs-cledyu/ca.crt \
            -keystore /tmp/cacerts/cacerts \
            -storepass changeit
+        # 1. 기존 Java cacerts를 /tmp/cacerts/에 복사 (원본 유지)
+        # 2. keytool로 cledyu-root-ca를 복사본에 추가
+        # 결과물은 메인 컨테이너가 /etc/ssl/certs/java/cacerts로 마운트해서 사용
     volumeMounts:
       - name: java-cacerts
-        mountPath: /tmp/cacerts
+        mountPath: /tmp/cacerts           # 복사본을 여기에 저장
       - name: cledyu-ca
-        mountPath: /etc/ssl/certs-cledyu
+        mountPath: /etc/ssl/certs-cledyu  # trust-manager가 배포한 CA 번들을 여기서 읽음
         readOnly: true
 
+# 메인 컨테이너(kafka-ui)에 마운트할 볼륨 경로.
 volumeMounts:
   - name: java-cacerts
-    mountPath: /etc/ssl/certs/java/cacerts
-    subPath: cacerts
+    mountPath: /etc/ssl/certs/java/cacerts  # Java가 기본으로 읽는 truststore 경로
+    subPath: cacerts  # emptyDir 안의 cacerts 파일 하나만 이 경로에 덮어씌운다
 
 volumes:
+  # initContainer가 수정한 cacerts를 메인 컨테이너로 전달하는 임시 공간.
+  # emptyDir는 Pod 안에서만 존재하는 휘발성 볼륨이다.
   - name: java-cacerts
     emptyDir: {}
+  # trust-manager가 클러스터 전체에 배포한 cledyu 루트 CA 번들.
+  # initContainer가 이걸 읽어서 Java cacerts에 추가한다.
   - name: cledyu-ca
     configMap:
       name: cledyu-root-ca-bundle
@@ -129,13 +208,14 @@ volumes:
         - key: ca.crt
           path: ca.crt
 
+# 외부에서 kafka-ui.cledyu.local 로 접근하기 위한 Ingress 설정.
 ingress:
   enabled: true
   ingressClassName: traefik
   host: kafka-ui.cledyu.local
   tls:
     enabled: true
-    secretName: kafka-ui-tls
+    secretName: kafka-ui-tls  # certificate.yaml(Ingress용 서버 인증서)이 만든 Secret
 
 resources:
   requests:
@@ -145,14 +225,16 @@ resources:
     cpu: 500m
     memory: 512Mi
 
+# Pod 전체에 적용되는 보안 설정.
 podSecurityContext:
-  runAsNonRoot: true
+  runAsNonRoot: true   # root로 실행 금지
   runAsUser: 1000
   seccompProfile:
-    type: RuntimeDefault
+    type: RuntimeDefault  # 허용된 시스템 콜만 사용하도록 제한
 
+# 컨테이너 개별 보안 설정.
 securityContext:
-  allowPrivilegeEscalation: false
+  allowPrivilegeEscalation: false  # 실행 중 권한 상승 금지
   capabilities:
     drop:
-      - ALL
+      - ALL  # 모든 Linux 권한 제거

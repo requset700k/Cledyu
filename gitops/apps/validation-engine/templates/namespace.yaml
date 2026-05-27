@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Release.Namespace }} # service-validation-engine.yaml에 적힌 namespace: validation-engine
+  labels:
+    app.kubernetes.io/name: {{ .Release.Name }}
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
