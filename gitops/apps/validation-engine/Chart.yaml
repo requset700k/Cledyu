@@ -1,0 +1,6 @@
+apiVersion: v2
+name: validation-engine
+description: Cledyu Validation Engine — Kafka 기반 Lab 검증 워커
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

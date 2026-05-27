@@ -1,0 +1,39 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: service-validation-engine
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/requset700k/Cledyu.git
+    targetRevision: main
+    path: gitops/apps/validation-engine
+    helm:
+      releaseName: validation-engine
+  # 어디에 배포할지
+  destination:
+    server: https://kubernetes.default.svc # 현재 클러스터에 배포(ArgoCD가 실행 중인 클러스터 자기 자신을 가리킨다)
+    namespace: validation-engine # 이 네임스페이스에 배포
+
+  syncPolicy:
+    automated:
+      # GitHub에서 파일이 삭제되면 Kubernetes에서도 삭제
+      prune: true
+      # 누군가 kubectl로 직접 수정하면 GitHub 상태로 자동 복구
+      selfHeal: true
+    syncOptions:
+      # validation-engine 네임스페이스가 없으면 자동으로 생성
+      - CreateNamespace=true
+      # 리소스 충돌 방지(ArgoCD가 원하는 상태만 전송 → Kubernetes가 직접 병합 처리, OutOfSync 해결)
+      - ServerSideApply=true
+    # 배포 실패 시 재시도 설정
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s # 최대 5번 재시도
+        factor: 2 # 실패할수록 대기시간 2배씩 증가
+        maxDuration: 3m # 대기시간이 아무리 길어져도 3분
