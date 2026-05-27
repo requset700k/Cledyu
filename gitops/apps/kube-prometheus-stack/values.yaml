@@ -150,6 +150,7 @@ grafana:
   additionalDataSources:
     - name: Loki
       type: loki
+      uid: loki
       url: http://loki-gateway.loki.svc.cluster.local
       isDefault: false
       jsonData:
