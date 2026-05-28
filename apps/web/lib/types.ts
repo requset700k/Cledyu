@@ -40,6 +40,7 @@ export interface Lab {
   vm_type: string; // Lab 실행에 필요한 VM 사양 (kt-lab-small | medium)
   step_count: number;
   steps?: StepContent[]; // GET /api/v1/labs/:id 에서만 채워짐 (목록 응답엔 없음)
+  environment?: string; // 세션 VM 환경 (ubuntu | k3s). ubuntu만 실시간 터미널 제공(Phase-1).
 }
 
 /** 수강생 1명이 특정 Lab을 수행하는 동안 유지되는 세션 */

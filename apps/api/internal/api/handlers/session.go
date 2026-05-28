@@ -45,6 +45,7 @@ func newSessionID() string {
 
 // sessionResponse는 kubevirt.Session에 핸들러 레벨 보강 필드를 덧붙여 프론트 Session 계약에 맞춘다.
 //   - current_step : 스텝 진행은 stepStore(in-memory STUB)에서 조회.
+//   - terminal_url : lab.environment == "ubuntu" 일 때만(실시간 KubeVirt 터미널 제공 랩).
 //   - vm_provider  : Phase-1 단일 프로바이더(kubevirt).
 func (h *Handler) sessionResponse(s *kubevirt.Session) gin.H {
 	out := gin.H{
@@ -63,6 +64,10 @@ func (h *Handler) sessionResponse(s *kubevirt.Session) gin.H {
 		out["current_step"] = 0
 	}
 	h.steps.mu.Unlock()
+	// 라이브 터미널 랩만 WS 경로 제공.
+	if lc, ok := h.labs[s.LabID]; ok && lc.HasLiveTerminal() {
+		out["terminal_url"] = "/api/v1/sessions/" + s.ID + "/ws"
+	}
 	return out
 }
 
@@ -115,7 +120,7 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	c.JSON(http.StatusCreated, h.sessionResponse(sess))
 }
 
-// GetSession은 세션 상태를 반환한다(current_step은 sessionResponse에서 보강).
+// GetSession은 세션 상태를 반환한다(current_step·terminal_url은 sessionResponse에서 보강).
 // GET /api/v1/sessions/:id
 func (h *Handler) GetSession(c *gin.Context) {
 	if h.sessions == nil {

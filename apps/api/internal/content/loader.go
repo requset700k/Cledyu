@@ -48,7 +48,16 @@ type LabContent struct {
 	DurationMin int      `yaml:"duration_min" json:"duration_min"`
 	VMType      string   `yaml:"vm_type" json:"vm_type"`
 	Tags        []string `yaml:"tags" json:"tags"`
-	Steps       []Step   `yaml:"steps" json:"steps"`
+	// Environment는 세션 VM 실행 환경(예: "ubuntu", "k3s").
+	// Phase-1에서는 "ubuntu" 랩만 실시간 터미널을 제공한다(k3s는 미구현).
+	Environment string `yaml:"environment,omitempty" json:"environment,omitempty"`
+	Steps       []Step `yaml:"steps" json:"steps"`
+}
+
+// HasLiveTerminal은 이 랩이 실시간 KubeVirt 터미널을 제공하는지 반환한다.
+// Phase-1: 순수 Ubuntu 환경만 실제 셸 연결을 지원한다.
+func (lc LabContent) HasLiveTerminal() bool {
+	return lc.Environment == "ubuntu"
 }
 
 // Load는 임베드된 labs/*.yaml 을 모두 파싱해 lab id → LabContent 맵으로 반환한다.

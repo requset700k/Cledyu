@@ -10,6 +10,16 @@ import (
 // steps 상세는 실습 상세 페이지(PR 11) 구현 시 추가.
 var mockLabs = []gin.H{
 	{
+		"id":           "lab-linux-basics",
+		"title":        "Linux 기초",
+		"description":  "파일·디렉터리, 권한, 프로세스 등 리눅스 셸 기본기 실습",
+		"difficulty":   "beginner",
+		"duration_min": 45,
+		"tags":         []string{"linux", "shell", "ubuntu"},
+		"vm_type":      "lab-small",
+		"step_count":   3,
+	},
+	{
 		"id":           "lab-k8s-basics",
 		"title":        "Kubernetes 기초",
 		"description":  "Pod, Deployment, Service 기본 개념 실습",
@@ -79,13 +89,14 @@ func (h *Handler) GetLab(c *gin.Context) {
 		if lab["id"] != id {
 			continue
 		}
-		// mockLabs를 변경하지 않도록 복사 후 steps를 덧붙인다.
-		resp := make(gin.H, len(lab)+1)
+		// mockLabs를 변경하지 않도록 복사 후 steps/environment를 덧붙인다.
+		resp := make(gin.H, len(lab)+2)
 		for k, v := range lab {
 			resp[k] = v
 		}
 		if lc, ok := h.labs[id]; ok {
 			resp["steps"] = lc.Steps
+			resp["environment"] = lc.Environment
 		}
 		c.JSON(http.StatusOK, resp)
 		return
