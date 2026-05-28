@@ -1,0 +1,55 @@
+---
+# ArgoCD self-managed Application.
+# helm 으로 직접 설치돼 있던 ArgoCD 를 ArgoCD 가 스스로 관리(self-managed)하도록 등록.
+# - argocd-secret 껍데기를 chart 가 정의 → argocd app desired state 에 포함 →
+#   ESO/argocd-server 가 채우는 data 는 ignoreDifferences(/data)로 보존, prune 대상 제외.
+# - metadata.name 을 'argocd' 로 두어 helm releaseName/instance 라벨과 정합
+#   (ESO 가 argocd-secret 에 쓰는 instance: argocd 와도 일치 → 소유권 충돌 제거).
+# - finalizer 의도적 생략: 이 Application 삭제가 ArgoCD 자기 자신(server/repo-server
+#   /redis 등)을 cascade 삭제하지 않도록.
+#
+# 적용 순서(adoption): 본 매니페스트는 syncPolicy.automated 를 두지 않는다.
+#   root-apps 가 app 을 생성하면 OutOfSync(manual) 상태 → diff 검토 → 수동 Sync 로
+#   기존 helm 리소스를 ServerSideApply 인수 → 검증 후 별도 PR 로 automated 활성화.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+spec:
+  project: default
+  sources:
+    - repoURL: https://argoproj.github.io/argo-helm
+      chart: argo-cd
+      targetRevision: 7.7.10
+      helm:
+        releaseName: argocd
+        valueFiles:
+          - $values/gitops/apps/argocd/values.yaml
+    - repoURL: https://github.com/requset700k/Cledyu.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    syncOptions:
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+  ignoreDifferences:
+    # argocd-secret 의 data(server.secretkey/admin.password/oidc.keycloak.clientSecret)는
+    # argocd-server 와 ESO 가 런타임에 채운다. chart 의 빈 껍데기로 덮어쓰지 않도록 무시.
+    - group: ""
+      kind: Secret
+      name: argocd-secret
+      jsonPointers:
+        - /data
