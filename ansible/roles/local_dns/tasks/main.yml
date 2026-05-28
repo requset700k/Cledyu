@@ -48,24 +48,21 @@
     - local_dns_macos_resolver is changed
 
 # ----- Linux (systemd-resolved) -----
-- name: Linux systemd-resolved 가용성 확인
-  ansible.builtin.command: systemctl is-active systemd-resolved
-  register: local_dns_linux_resolved_state
-  changed_when: false
-  failed_when: false
+- name: Linux service facts 수집
+  ansible.builtin.service_facts:
   when: ansible_system == "Linux"
 
 - name: Linux systemd-resolved 필수 확인
   ansible.builtin.fail:
     msg: >-
       systemd-resolved 가 활성 상태가 아닙니다.
-      ({{ local_dns_linux_resolved_state.stdout | default('미설치') }})
+      (현재 state: {{ (ansible_facts.services['systemd-resolved.service'] | default({})).state | default('미설치') }})
       cledyu split-DNS 는 systemd-resolved 백엔드를 가정합니다.
       필요 시 systemd-resolved 설치 후 재실행하거나, 본 role 의 Linux 분기를
       NetworkManager dnsmasq.d 방식으로 확장하세요.
   when:
     - ansible_system == "Linux"
-    - local_dns_linux_resolved_state.stdout | default('') != "active"
+    - (ansible_facts.services['systemd-resolved.service'] | default({})).state | default('inactive') != 'running'
 
 - name: Linux resolved drop-in 디렉터리 보장
   ansible.builtin.file:
