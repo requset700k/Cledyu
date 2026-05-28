@@ -1,0 +1,30 @@
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  name: kafka-ui  # certificate.yaml의 commonName과 반드시 일치해야 한다.
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: cledyu-kafka
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      # 모든 토픽 읽기/조회 — prefix "" 는 모든 이름에 매칭된다.
+      - resource:
+          type: topic
+          name: ""
+          patternType: prefix
+        operations: [Read, Describe]
+      # 모든 컨슈머 그룹 조회 — kafka-ui 가 컨슈머 lag 등을 표시하는 데 필요하다.
+      - resource:
+          type: group
+          name: ""
+          patternType: prefix
+        operations: [Read, Describe]
+      # 클러스터 정보 조회 — 브로커 목록, 설정 등 kafka-ui 대시보드에 필요하다.
+      - resource:
+          type: cluster
+        operations: [Describe, DescribeConfigs]

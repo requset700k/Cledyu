@@ -43,6 +43,9 @@ spec:
         authentication:
           type: tls
 
+    authorization:
+      type: simple
+
     config:
       # 복제 안전성: 내부 토픽과 사용자 토픽 모두 RF=3 기본값 적용.
       offsets.topic.replication.factor: "3"
