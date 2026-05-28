@@ -12,12 +12,13 @@ import (
 	"go.uber.org/zap"
 )
 
-// newSessionRouter는 세션/랩 라우트만 가진 테스트 라우터를 만든다.
-// JWT stub 대신 user_id를 직접 주입한다.
+// newSessionRouter는 세션/랩 라우트를 가진 테스트 라우터를 만든다.
+// sessions에 nil을 전달해 클러스터 없이 빌드/단위 테스트가 통과하도록 한다 —
+// 실제 세션 생성/스텝/검증 흐름은 KubeVirt 클러스터가 필요하므로 통합 테스트로 분리한다.
 func newSessionRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	h := handlers.New(newTestConfig(), zap.NewNop())
+	h := handlers.New(newTestConfig(), zap.NewNop(), nil)
 	r.Use(func(c *gin.Context) {
 		c.Set("user_id", "test-user")
 		c.Next()
@@ -50,6 +51,8 @@ func doJSON(t *testing.T, r *gin.Engine, method, path string, body any) (*httpte
 	return w, out
 }
 
+// TestGetLab_IncludesSteps는 GetLab 응답에 DSL 콘텐츠의 steps가 머지되는지 검증한다.
+// sessions 매니저는 필요 없다(콘텐츠 로드만 사용).
 func TestGetLab_IncludesSteps(t *testing.T) {
 	r := newSessionRouter()
 	w, body := doJSON(t, r, http.MethodGet, "/labs/lab-k8s-basics", nil)
@@ -65,75 +68,15 @@ func TestGetLab_IncludesSteps(t *testing.T) {
 	}
 }
 
-func TestCreateSession_AndSteps(t *testing.T) {
+// TestCreateSession_NoKubeVirt는 sessions 매니저가 nil일 때(클러스터 미연결) 503을 반환하는지 검증한다.
+// 실제 VM 생성/세션 흐름은 KubeVirt가 필요하므로 통합 테스트에서 다룬다.
+func TestCreateSession_NoKubeVirt(t *testing.T) {
 	r := newSessionRouter()
-
 	w, body := doJSON(t, r, http.MethodPost, "/sessions", map[string]string{"lab_id": "lab-k8s-basics"})
-	if w.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d", w.Code)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 when sessions=nil, got %d", w.Code)
 	}
-	sid, _ := body["id"].(string)
-	if sid == "" {
-		t.Fatal("expected session id")
-	}
-	if body["status"] != "ready" {
-		t.Errorf("expected status=ready, got %v", body["status"])
-	}
-
-	w, steps := doJSON(t, r, http.MethodGet, "/sessions/"+sid+"/steps", nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-	if int(steps["total"].(float64)) != 3 {
-		t.Errorf("expected 3 steps, got %v", steps["total"])
-	}
-	items := steps["items"].([]any)
-	first := items[0].(map[string]any)
-	if first["status"] != "active" {
-		t.Errorf("expected first step active, got %v", first["status"])
-	}
-}
-
-func TestValidateStep_AdvancesAndCompletes(t *testing.T) {
-	r := newSessionRouter()
-	_, body := doJSON(t, r, http.MethodPost, "/sessions", map[string]string{"lab_id": "lab-k8s-basics"})
-	sid := body["id"].(string)
-
-	// 1단계 검증 → 통과, 2단계 active로 진행.
-	w, res := doJSON(t, r, http.MethodPost, "/sessions/"+sid+"/validate", map[string]int{"step_id": 1})
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-	if res["status"] != "passed" {
-		t.Errorf("expected passed, got %v", res["status"])
-	}
-
-	_, steps := doJSON(t, r, http.MethodGet, "/sessions/"+sid+"/steps", nil)
-	items := steps["items"].([]any)
-	if items[0].(map[string]any)["status"] != "passed" {
-		t.Error("expected step 1 passed")
-	}
-	if items[1].(map[string]any)["status"] != "active" {
-		t.Error("expected step 2 active")
-	}
-
-	// 2, 3단계까지 검증 → 세션 completed.
-	doJSON(t, r, http.MethodPost, "/sessions/"+sid+"/validate", map[string]int{"step_id": 2})
-	doJSON(t, r, http.MethodPost, "/sessions/"+sid+"/validate", map[string]int{"step_id": 3})
-
-	w, sess := doJSON(t, r, http.MethodGet, "/sessions/"+sid, nil)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d", w.Code)
-	}
-	if sess["status"] != "completed" {
-		t.Errorf("expected session completed, got %v", sess["status"])
-	}
-}
-
-func TestCreateSession_BadLab(t *testing.T) {
-	r := newSessionRouter()
-	w, _ := doJSON(t, r, http.MethodPost, "/sessions", map[string]string{"lab_id": "nope"})
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for unknown lab, got %d", w.Code)
+	if body["error"] == nil {
+		t.Error("expected error payload")
 	}
 }

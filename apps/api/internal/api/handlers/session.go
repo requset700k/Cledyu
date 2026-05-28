@@ -3,17 +3,15 @@ package handlers
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/requset700k/cledyu/api/internal/kubevirt"
+	"go.uber.org/zap"
 )
-
-// STUB: 아래 세션 핸들러는 실제 Session API / VM 오케스트레이터(별도 도메인) 구현 전까지의
-// 임시 in-memory mock이다. VM 프로비저닝·xterm 터미널·Kafka 검증엔진 연동이 없으며,
-// 서버 재기동 시 상태가 초기화된다. 프론트엔드가 실제 api.sessions.* 계약을 검증/시연할 수 있게 하는 것이 목적이다.
 
 // stepState는 세션 내 한 단계의 진행 상태다(프론트 StepProgress와 대응).
 type stepState struct {
@@ -22,128 +20,156 @@ type stepState struct {
 	Attempts int
 }
 
-// mockSession은 메모리에 보관되는 mock 랩 세션이다.
-type mockSession struct {
-	ID          string
-	LabID       string
-	UserID      string
-	Status      string // provisioning | ready | active | completed | failed
-	CurrentStep int
-	StartedAt   time.Time
-	ExpiresAt   time.Time
+// sessionSteps는 한 세션의 스텝 진행 상태(전체 목록 + 현재 단계 id)를 묶어 보관한다.
+type sessionSteps struct {
 	Steps       []stepState
+	CurrentStep int
 }
 
-// sessionStore는 mock 세션을 동시성 안전하게 보관한다.
-type sessionStore struct {
+// stepStore는 sessionID → 스텝 진행 상태 맵을 동시성 안전하게 관리한다.
+// STUB(검증엔진 미연동): 검증 결과는 항상 통과 처리. 실 검증엔진 연동 시 본 스토어를 제거하고
+// 검증 결과 토픽을 구독하도록 교체할 예정.
+type stepStore struct {
 	mu sync.Mutex
-	m  map[string]*mockSession
+	m  map[string]*sessionSteps
 }
 
-func newSessionStore() *sessionStore {
-	return &sessionStore{m: make(map[string]*mockSession)}
-}
+func newStepStore() *stepStore { return &stepStore{m: make(map[string]*sessionSteps)} }
 
-// newSessionID는 충돌 가능성이 낮은 mock 세션 id를 생성한다.
+// newSessionID는 짧은 hex 세션 id를 생성한다.
 func newSessionID() string {
-	b := make([]byte, 6)
-	if _, err := rand.Read(b); err != nil {
-		return "sess-" + strconv.FormatInt(time.Now().UnixNano(), 16)
-	}
-	return "sess-" + hex.EncodeToString(b)
+	b := make([]byte, 4)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
-func sessionJSON(s *mockSession) gin.H {
-	return gin.H{
-		"id":           s.ID,
-		"lab_id":       s.LabID,
-		"user_id":      s.UserID,
-		"status":       s.Status,
-		"vm_provider":  "kubevirt",
-		"current_step": s.CurrentStep,
-		"started_at":   s.StartedAt.UTC().Format(time.RFC3339),
-		"expires_at":   s.ExpiresAt.UTC().Format(time.RFC3339),
+// sessionResponse는 kubevirt.Session에 핸들러 레벨 보강 필드를 덧붙여 프론트 Session 계약에 맞춘다.
+//   - current_step : 스텝 진행은 stepStore(in-memory STUB)에서 조회.
+//   - vm_provider  : Phase-1 단일 프로바이더(kubevirt).
+func (h *Handler) sessionResponse(s *kubevirt.Session) gin.H {
+	out := gin.H{
+		"id":          s.ID,
+		"lab_id":      s.LabID,
+		"user_id":     s.UserID,
+		"status":      s.Status,
+		"started_at":  s.StartedAt.UTC().Format(time.RFC3339),
+		"expires_at":  s.ExpiresAt.UTC().Format(time.RFC3339),
+		"vm_provider": "kubevirt",
 	}
+	h.steps.mu.Lock()
+	if ss, ok := h.steps.m[s.ID]; ok {
+		out["current_step"] = ss.CurrentStep
+	} else {
+		out["current_step"] = 0
+	}
+	h.steps.mu.Unlock()
+	return out
 }
 
-// CreateSession은 mock 랩 세션을 생성한다. STUB — 실제 VM 프로비저닝 없이 즉시 ready 상태가 된다.
+// CreateSession은 lab 콘텐츠를 확인한 뒤 KubeVirt VM 세션을 생성하고 스텝 진행 상태를 초기화한다.
 // POST /api/v1/sessions  body: { "lab_id": "lab-k8s-basics" }
 func (h *Handler) CreateSession(c *gin.Context) {
-	var req struct {
-		LabID string `json:"lab_id"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil || req.LabID == "" {
-		h.err(c, http.StatusBadRequest, "lab_id is required")
+	if h.sessions == nil {
+		h.err(c, http.StatusServiceUnavailable, "kubevirt not configured")
 		return
 	}
-
+	var req struct {
+		LabID string `json:"lab_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.err(c, http.StatusBadRequest, err.Error())
+		return
+	}
+	// 콘텐츠가 없는 lab은 세션을 시작할 수 없다(스텝/검증 흐름 진행 불가).
 	lc, ok := h.labs[req.LabID]
 	if !ok {
-		// 스텝 콘텐츠가 없는 랩은 mock 세션을 시작할 수 없다.
 		h.err(c, http.StatusNotFound, "lab content not found")
 		return
 	}
-
 	userID, _ := c.Get("user_id")
 	uid, _ := userID.(string)
 
-	now := time.Now()
-	sess := &mockSession{
-		ID:          newSessionID(),
-		LabID:       req.LabID,
-		UserID:      uid,
-		Status:      "ready", // mock: 프로비저닝 즉시 완료
-		CurrentStep: 1,
-		StartedAt:   now,
-		ExpiresAt:   now.Add(3 * time.Hour), // 세션 최대 유지 3시간
+	sess, err := h.sessions.Create(c.Request.Context(), newSessionID(), req.LabID, uid)
+	if err != nil {
+		h.log.Error("create session", zap.Error(err))
+		h.err(c, http.StatusInternalServerError, "create session failed")
+		return
 	}
+
+	// 스텝 진행 상태 초기화 — 첫 스텝 active, 나머지 pending.
+	ss := &sessionSteps{}
 	for i, st := range lc.Steps {
 		status := "pending"
 		if i == 0 {
 			status = "active"
 		}
-		sess.Steps = append(sess.Steps, stepState{StepID: st.ID, Status: status})
+		ss.Steps = append(ss.Steps, stepState{StepID: st.ID, Status: status})
 	}
-	if len(sess.Steps) > 0 {
-		sess.CurrentStep = sess.Steps[0].StepID
+	if len(ss.Steps) > 0 {
+		ss.CurrentStep = ss.Steps[0].StepID
 	}
+	h.steps.mu.Lock()
+	h.steps.m[sess.ID] = ss
+	h.steps.mu.Unlock()
 
-	h.sessions.mu.Lock()
-	h.sessions.m[sess.ID] = sess
-	body := sessionJSON(sess)
-	h.sessions.mu.Unlock()
-
-	c.JSON(http.StatusCreated, body)
+	c.JSON(http.StatusCreated, h.sessionResponse(sess))
 }
 
-// GetSession은 세션 상태를 반환한다.
+// GetSession은 세션 상태를 반환한다(current_step은 sessionResponse에서 보강).
 // GET /api/v1/sessions/:id
 func (h *Handler) GetSession(c *gin.Context) {
-	h.sessions.mu.Lock()
-	defer h.sessions.mu.Unlock()
-
-	s, ok := h.sessions.m[c.Param("id")]
-	if !ok {
-		h.err(c, http.StatusNotFound, "session not found")
+	if h.sessions == nil {
+		h.err(c, http.StatusServiceUnavailable, "kubevirt not configured")
 		return
 	}
-	c.JSON(http.StatusOK, sessionJSON(s))
+	sess, err := h.sessions.Get(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		if errors.Is(err, kubevirt.ErrNotFound) {
+			h.err(c, http.StatusNotFound, "session not found")
+			return
+		}
+		h.log.Error("get session", zap.Error(err))
+		h.err(c, http.StatusInternalServerError, "get session failed")
+		return
+	}
+	c.JSON(http.StatusOK, h.sessionResponse(sess))
+}
+
+// DeleteSession은 세션 네임스페이스를 삭제한다(VM cascade 삭제) + 스텝 상태도 정리한다.
+// DELETE /api/v1/sessions/:id
+func (h *Handler) DeleteSession(c *gin.Context) {
+	if h.sessions == nil {
+		h.err(c, http.StatusServiceUnavailable, "kubevirt not configured")
+		return
+	}
+	id := c.Param("id")
+	if err := h.sessions.Delete(c.Request.Context(), id); err != nil {
+		if errors.Is(err, kubevirt.ErrNotFound) {
+			h.err(c, http.StatusNotFound, "session not found")
+			return
+		}
+		h.log.Error("delete session", zap.Error(err))
+		h.err(c, http.StatusInternalServerError, "delete session failed")
+		return
+	}
+	h.steps.mu.Lock()
+	delete(h.steps.m, id)
+	h.steps.mu.Unlock()
+	c.Status(http.StatusNoContent)
 }
 
 // GetSessionSteps는 세션의 단계별 진행 상태 목록을 반환한다(프론트 StepProgress[]).
 // GET /api/v1/sessions/:id/steps
 func (h *Handler) GetSessionSteps(c *gin.Context) {
-	h.sessions.mu.Lock()
-	defer h.sessions.mu.Unlock()
-
-	s, ok := h.sessions.m[c.Param("id")]
+	h.steps.mu.Lock()
+	defer h.steps.mu.Unlock()
+	ss, ok := h.steps.m[c.Param("id")]
 	if !ok {
 		h.err(c, http.StatusNotFound, "session not found")
 		return
 	}
-
-	items := make([]gin.H, 0, len(s.Steps))
-	for _, st := range s.Steps {
+	items := make([]gin.H, 0, len(ss.Steps))
+	for _, st := range ss.Steps {
 		items = append(items, gin.H{"step_id": st.StepID, "status": st.Status, "attempts": st.Attempts})
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items, "total": len(items)})
@@ -160,19 +186,16 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 		h.err(c, http.StatusBadRequest, "step_id is required")
 		return
 	}
-
-	h.sessions.mu.Lock()
-	defer h.sessions.mu.Unlock()
-
-	s, ok := h.sessions.m[c.Param("id")]
+	h.steps.mu.Lock()
+	defer h.steps.mu.Unlock()
+	ss, ok := h.steps.m[c.Param("id")]
 	if !ok {
 		h.err(c, http.StatusNotFound, "session not found")
 		return
 	}
-
 	idx := -1
-	for i := range s.Steps {
-		if s.Steps[i].StepID == req.StepID {
+	for i := range ss.Steps {
+		if ss.Steps[i].StepID == req.StepID {
 			idx = i
 			break
 		}
@@ -181,19 +204,13 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 		h.err(c, http.StatusNotFound, "step not found")
 		return
 	}
-
-	s.Steps[idx].Attempts++
-	s.Steps[idx].Status = "passed"
-
-	if idx+1 < len(s.Steps) {
-		if s.Steps[idx+1].Status == "pending" {
-			s.Steps[idx+1].Status = "active"
+	ss.Steps[idx].Attempts++
+	ss.Steps[idx].Status = "passed"
+	if idx+1 < len(ss.Steps) {
+		if ss.Steps[idx+1].Status == "pending" {
+			ss.Steps[idx+1].Status = "active"
 		}
-		s.CurrentStep = s.Steps[idx+1].StepID
-		s.Status = "active"
-	} else {
-		s.Status = "completed"
+		ss.CurrentStep = ss.Steps[idx+1].StepID
 	}
-
 	c.JSON(http.StatusOK, gin.H{"status": "passed", "message": "검증을 통과했습니다 (mock)"})
 }

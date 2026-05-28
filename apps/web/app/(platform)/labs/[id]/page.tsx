@@ -80,7 +80,9 @@ function LabDetail() {
               )}
             </>
           ) : (
-            <p className="text-slate-500 text-sm">이 Lab은 아직 실습 콘텐츠가 준비되지 않았습니다.</p>
+            <p className="text-slate-500 text-sm">
+              이 Lab은 아직 실습 콘텐츠가 준비되지 않았습니다.
+            </p>
           )}
         </div>
       )}
@@ -114,7 +116,10 @@ function LabHeader({ lab }: { lab: Lab }) {
 
 function BackLink({ className = '' }: { className?: string }) {
   return (
-    <Link href="/labs" className={`text-slate-400 hover:text-white text-sm transition-colors ${className}`}>
+    <Link
+      href="/labs"
+      className={`text-slate-400 hover:text-white text-sm transition-colors ${className}`}
+    >
       ← Lab 카탈로그
     </Link>
   );

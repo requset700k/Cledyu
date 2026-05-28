@@ -11,6 +11,7 @@ import (
 
 	api "github.com/requset700k/cledyu/api/internal/api"
 	"github.com/requset700k/cledyu/api/internal/config"
+	"github.com/requset700k/cledyu/api/internal/kubevirt"
 	"go.uber.org/zap"
 )
 
@@ -32,7 +33,14 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	router := api.NewRouter(cfg, logger)
+	// kubevirt Manager: 클러스터 외부 실행 시 nil로 폴백 — 세션 API가 503을 반환한다.
+	sessions, err := kubevirt.NewManager(&cfg.KubeVirt)
+	if err != nil {
+		logger.Warn("kubevirt manager init failed, sessions disabled", zap.Error(err))
+		sessions = nil
+	}
+
+	router := api.NewRouter(cfg, logger, sessions)
 
 	// Read/WriteTimeout: 느린 클라이언트로 인한 goroutine 고갈 방지. IdleTimeout: keep-alive 연결 유지 상한.
 	srv := &http.Server{

@@ -7,7 +7,9 @@ export function TerminalPlaceholder({ commands }: { commands: string[] }) {
         <span className="w-2.5 h-2.5 rounded-full bg-red-500/70" />
         <span className="w-2.5 h-2.5 rounded-full bg-amber-500/70" />
         <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/70" />
-        <span className="ml-2 text-slate-500 text-xs">terminal — VM 오케스트레이터 연동 후 실제 입력 가능</span>
+        <span className="ml-2 text-slate-500 text-xs">
+          terminal — VM 오케스트레이터 연동 후 실제 입력 가능
+        </span>
       </div>
       <pre className="p-4 text-sm text-slate-300 font-mono leading-relaxed overflow-x-auto">
         {commands.length === 0 ? (

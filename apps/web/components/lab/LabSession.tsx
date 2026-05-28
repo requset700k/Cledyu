@@ -49,7 +49,12 @@ export function LabSession({ sessionId, lab }: { sessionId: string; lab: Lab }) 
     <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-6 mt-6">
       <div>
         <h2 className="text-slate-400 text-xs font-medium mb-2 px-3">진행 단계</h2>
-        <StepList steps={steps} statusOf={statusOf} currentId={currentStep.id} onSelect={setSelectedId} />
+        <StepList
+          steps={steps}
+          statusOf={statusOf}
+          currentId={currentStep.id}
+          onSelect={setSelectedId}
+        />
       </div>
 
       <div className="space-y-4">
@@ -64,7 +69,9 @@ export function LabSession({ sessionId, lab }: { sessionId: string; lab: Lab }) 
             <span className="text-brand-400 text-xs font-semibold">STEP {currentStep.id}</span>
             <h3 className="text-white font-semibold">{currentStep.title}</h3>
           </div>
-          <p className="text-slate-300 text-sm whitespace-pre-line mb-4">{currentStep.description}</p>
+          <p className="text-slate-300 text-sm whitespace-pre-line mb-4">
+            {currentStep.description}
+          </p>
 
           <TerminalPlaceholder commands={currentStep.commands ?? []} />
 
@@ -80,7 +87,9 @@ export function LabSession({ sessionId, lab }: { sessionId: string; lab: Lab }) 
               {currentStatus === 'passed' ? '완료됨' : validate.isPending ? '검증 중...' : '검증'}
             </button>
             {currentStatus === 'passed' && <span className="text-emerald-400 text-xs">통과</span>}
-            {validate.isError && <span className="text-red-400 text-xs">검증 요청에 실패했습니다.</span>}
+            {validate.isError && (
+              <span className="text-red-400 text-xs">검증 요청에 실패했습니다.</span>
+            )}
           </div>
         </div>
       </div>

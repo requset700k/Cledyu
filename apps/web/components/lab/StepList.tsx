@@ -37,7 +37,9 @@ export function StepList({
             >
               <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${STATUS_DOT[status]}`} />
               <span className="text-slate-500 text-xs">STEP {s.id}</span>
-              <span className={`text-sm ${status === 'passed' ? 'text-slate-400 line-through' : 'text-white'}`}>
+              <span
+                className={`text-sm ${status === 'passed' ? 'text-slate-400 line-through' : 'text-white'}`}
+              >
                 {s.title}
               </span>
             </button>

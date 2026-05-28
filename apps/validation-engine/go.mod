@@ -1,6 +1,6 @@
 module github.com/requset700k/cledyu/validation-engine
 
-go 1.24
+go 1.26
 
 // 직접 쓰는 외부 라이브러리
 require (
