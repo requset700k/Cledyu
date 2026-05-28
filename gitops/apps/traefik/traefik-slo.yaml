@@ -1,0 +1,64 @@
+---
+apiVersion: sloth.slok.dev/v1
+kind: PrometheusServiceLevel
+metadata:
+  name: traefik-slo
+  namespace: monitoring
+  labels:
+    app: traefik
+    team: platform
+spec:
+  service: traefik
+  labels:
+    app: traefik
+    team: platform
+  slos:
+    # ───────────────────────────────────────────
+    # 가용성 SLO: 99.9% (5xx 에러율 기준)
+    # ───────────────────────────────────────────
+    - name: requests-availability
+      objective: 99.9
+      description: "Traefik이 처리하는 전체 요청 중 5xx 에러가 0.1% 미만이어야 한다."
+      sli:
+        events:
+          error_query: |
+            sum(rate(traefik_service_requests_total{code=~"5.."}[{{.window}}]))
+          total_query: |
+            sum(rate(traefik_service_requests_total[{{.window}}]))
+      alerting:
+        name: TraefikAvailabilitySLO
+        labels:
+          service: traefik
+          slo: availability
+        page_alert:
+          labels:
+            severity: critical
+        ticket_alert:
+          labels:
+            severity: warning
+
+    # ───────────────────────────────────────────
+    # 지연시간 SLO: 99.9% (p99 < 1.2s 기준)
+    # ───────────────────────────────────────────
+    - name: requests-latency
+      objective: 99.9
+      description: "Traefik이 처리하는 전체 요청 중 99.9%는 1.2초 이내에 응답해야 한다."
+      sli:
+        events:
+          error_query: |
+            sum(rate(traefik_service_request_duration_seconds_count[{{.window}}]))
+            -
+            sum(rate(traefik_service_request_duration_seconds_bucket{le="1.2"}[{{.window}}]))
+          total_query: |
+            sum(rate(traefik_service_request_duration_seconds_count[{{.window}}]))
+      alerting:
+        name: TraefikLatencySLO
+        labels:
+          service: traefik
+          slo: latency
+        page_alert:
+          labels:
+            severity: critical
+        ticket_alert:
+          labels:
+            severity: warning
