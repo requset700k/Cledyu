@@ -8,9 +8,10 @@
 # - finalizer 의도적 생략: 이 Application 삭제가 ArgoCD 자기 자신(server/repo-server
 #   /redis 등)을 cascade 삭제하지 않도록.
 #
-# 적용 순서(adoption): 본 매니페스트는 syncPolicy.automated 를 두지 않는다.
-#   root-apps 가 app 을 생성하면 OutOfSync(manual) 상태 → diff 검토 → 수동 Sync 로
-#   기존 helm 리소스를 ServerSideApply 인수 → 검증 후 별도 PR 로 automated 활성화.
+# adoption(manual Sync)으로 기존 helm 리소스를 ServerSideApply 인수 완료 후,
+# automated{prune,selfHeal} 를 활성화해 argocd-secret 껍데기를 비롯한 self 리소스가
+# drift 시 자동 복구되도록 한다(완전 self-managed). argocd-secret data 는 위
+# ignoreDifferences(/data)로 보존되므로 selfHeal 이 비우지 않는다.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -35,6 +36,9 @@ spec:
     server: https://kubernetes.default.svc
     namespace: argocd
   syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
     syncOptions:
       - ServerSideApply=true
       - RespectIgnoreDifferences=true
