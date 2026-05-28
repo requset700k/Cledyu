@@ -1,0 +1,21 @@
+---
+# 세션 VM PVC 클론 원본. CDI가 이 DataVolume을 임포트하면 동명 PVC(ubuntu-2204-base)가 생성된다.
+# 세션 VM의 dataVolumeTemplates.source.pvc는 이 PVC를 복제한다.
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: DataVolume
+metadata:
+  name: ubuntu-2204-base
+  namespace: kubevirt
+  annotations:
+    argocd.argoproj.io/sync-wave: "30"
+spec:
+  source:
+    http:
+      url: "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
+  storage:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: 10Gi
+    storageClassName: longhorn
