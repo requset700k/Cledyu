@@ -150,10 +150,30 @@ grafana:
   additionalDataSources:
     - name: Loki
       type: loki
+      uid: loki
       url: http://loki-gateway.loki.svc.cluster.local
       isDefault: false
       jsonData:
         maxLines: 1000
+
+    - name: Tempo
+      type: tempo
+      uid: tempo
+      access: proxy
+      url: http://tempo.monitoring.svc.cluster.local:3100
+      isDefault: false
+      jsonData:
+        httpMethod: GET
+        tracesToLogsV2:
+          datasourceUid: loki
+          spanStartTimeShift: "-1m"
+          spanEndTimeShift: "1m"
+          filterByTraceID: true
+          filterBySpanID: false
+        serviceMap:
+          datasourceUid: prometheus
+        nodeGraph:
+          enabled: true
 
   # ── Keycloak OIDC ──
   # client_secret 은 env var (GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET) 로 덮어쓴다.

@@ -5,7 +5,6 @@ alloy:
       discovery.kubernetes "pods" {
         role = "pod"
       }
-
       discovery.relabel "pods" {
         targets = discovery.kubernetes.pods.targets
         rule {
@@ -31,37 +30,30 @@ alloy:
           target_label  = "job"
         }
       }
-
       loki.source.kubernetes "pods" {
         targets    = discovery.relabel.pods.output
         forward_to = [loki.write.default.receiver]
       }
-
       loki.write "default" {
         endpoint {
           url = "http://loki-gateway.loki.svc.cluster.local/loki/api/v1/push"
         }
       }
-
   securityContext:
     runAsNonRoot: true
     runAsUser: 10001
     runAsGroup: 10001
     seccompProfile:
       type: RuntimeDefault
-
   mounts:
     varlog: true
-
 controller:
   type: daemonset
-
   securityContext:
     allowPrivilegeEscalation: false
     readOnlyRootFilesystem: true
     capabilities:
       drop: ["ALL"]
-
   resources:
     requests:
       cpu: 50m
@@ -69,8 +61,6 @@ controller:
     limits:
       cpu: 200m
       memory: 256Mi
-
-# config-reloader 컨테이너 보안 설정
 configReloader:
   securityContext:
     runAsNonRoot: true
