@@ -75,10 +75,9 @@ cd cledyu
 # 3. 내부 CA 배치 (kubelogin이 Keycloak TLS 검증에 사용)
 cp infra/kubernetes/kubeconfig/cledyu-root-ca.pem ~/.kube/cledyu-root-ca.pem
 
-# 4. /etc/hosts 에 Keycloak 도메인 추가 (브라우저가 Keycloak에 접근하기 위해 필요)
-#    macOS/Linux:
-echo "10.10.0.101 keycloak.cledyu.local" | sudo tee -a /etc/hosts
-#    Windows: C:\Windows\System32\drivers\etc\hosts 에 동일 라인 추가 (관리자 권한)
+# 4. *.cledyu.local 와일드카드 split-DNS 설정 (브라우저가 Keycloak 에 접근하기 위해 필요)
+#    한 번만 실행하면 신규 호스트 추가 시 추가 작업 불요. macOS/Linux/Windows 자동 분기.
+ansible-playbook -i ansible/inventory.yml ansible/playbooks/80-local-dns.yml --limit <hostname>
 
 # 5. 첫 kubectl 호출 — 브라우저 자동 열림 → Keycloak 로그인
 export KUBECONFIG=$(pwd)/infra/kubernetes/kubeconfig/cledyu-oidc.yaml
@@ -114,7 +113,7 @@ echo "export KUBECONFIG=$(pwd)/infra/kubernetes/kubeconfig/cledyu-oidc.yaml" >> 
 | `error: interactiveMode must be specified for keycloak to use exec authentication plugin` | kubectl >= 1.26 의 exec credential 새 요건 | kubeconfig 의 user.exec 에 `interactiveMode: IfAvailable` |
 | Pod 가 새 manifest 인식 안 함 | kubelet 의 manifest 변경 감지 누락 | `sudo touch /etc/kubernetes/manifests/kube-apiserver.yaml` |
 | `kubectl-oidc_login: command not found` | kubelogin 미설치 | `brew install int128/kubelogin/kubelogin` |
-| `authcode-browser error: context deadline exceeded` | 로컬 `/etc/hosts`에 `keycloak.cledyu.local` 없음 → 브라우저가 Keycloak에 접근 못 해 콜백 타임아웃 | `echo "10.10.0.101 keycloak.cledyu.local" \| sudo tee -a /etc/hosts` |
+| `authcode-browser error: context deadline exceeded` | `*.cledyu.local` 와일드카드 split-DNS 미적용 → 브라우저가 Keycloak 에 접근 못 해 콜백 타임아웃 | `ansible-playbook -i ansible/inventory.yml ansible/playbooks/80-local-dns.yml --limit <hostname>` (또는 macOS: `dscacheutil -q host -a name keycloak.cledyu.local` 로 resolve 확인) |
 | `x509: certificate signed by unknown authority` (kubelogin) | `~/.kube/cledyu-root-ca.pem` 없음 | `cp infra/kubernetes/kubeconfig/cledyu-root-ca.pem ~/.kube/cledyu-root-ca.pem` |
 
 ## 6. 롤백

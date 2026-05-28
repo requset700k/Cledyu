@@ -1,94 +1,172 @@
 ---
-- name: Validate local DNS entries
+- name: Validate split-DNS parameters
   ansible.builtin.assert:
     that:
-      - local_dns_entries | length > 0
-      - item.ip | length > 0
-      - item.hostname | length > 0
-    fail_msg: "local_dns_entries must include ip and hostname."
-  loop: "{{ local_dns_entries }}"
+      - local_dns_resolver_ip | length > 0
+      - local_dns_search_domain | length > 0
+    fail_msg: "local_dns_resolver_ip and local_dns_search_domain must be set."
 
-- name: Register local DNS entries on Linux and macOS
-  ansible.builtin.lineinfile:
-    path: "{{ local_dns_unix_hosts_file }}"
-    regexp: '^\s*\S+\s+{{ item.hostname | regex_escape }}(\s|$)'
-    line: "{{ item.ip }}  {{ item.hostname }}"
-    state: present
-    create: false
-    backup: true
-  loop: "{{ local_dns_entries }}"
-  become: true
-  when: ansible_system in ["Linux", "Darwin"]
-
-- name: Register local DNS entries on Windows
-  ansible.windows.win_powershell:
-    script: |
-      $hostsPath = "{{ local_dns_windows_hosts_file }}"
-      $ip = "{{ item.ip }}"
-      $hostname = "{{ item.hostname }}"
-      $line = "$ip  $hostname"
-      $pattern = "^\s*\S+\s+$([regex]::Escape($hostname))(\s|$)"
-      $content = Get-Content -Path $hostsPath -ErrorAction Stop
-
-      if ($content -match $pattern) {
-        $updated = $content | ForEach-Object {
-          if ($_ -match $pattern) { $line } else { $_ }
-        }
-      } else {
-        $updated = @($content) + $line
-      }
-
-      $before = ($content -join "`n")
-      $after = ($updated -join "`n")
-      if ($before -ne $after) {
-        Set-Content -Path $hostsPath -Value $updated -Encoding ASCII
-        $Ansible.Changed = $true
-      } else {
-        $Ansible.Changed = $false
-      }
-  loop: "{{ local_dns_entries }}"
-  when: ansible_os_family == "Windows"
-
-- name: Flush DNS cache on macOS
-  ansible.builtin.command: dscacheutil -flushcache
-  changed_when: false
+# ----- macOS -----
+- name: macOS resolver 디렉터리 보장
+  ansible.builtin.file:
+    path: "{{ local_dns_macos_resolver_dir }}"
+    state: directory
+    owner: root
+    group: wheel
+    mode: "0755"
   become: true
   when: ansible_system == "Darwin"
 
-- name: Reset mDNSResponder on macOS
+- name: macOS per-suffix resolver 파일 설치
+  ansible.builtin.copy:
+    dest: "{{ local_dns_macos_resolver_dir }}/{{ local_dns_search_domain }}"
+    content: |
+      # Managed by ansible role: local_dns
+      # *.{{ local_dns_search_domain }} 쿼리를 클러스터 CoreDNS 로 위임.
+      nameserver {{ local_dns_resolver_ip }}
+    owner: root
+    group: wheel
+    mode: "0644"
+  become: true
+  when: ansible_system == "Darwin"
+  register: local_dns_macos_resolver
+
+- name: macOS mDNSResponder 리셋(resolver 파일 변경 시)
   ansible.builtin.command: killall -HUP mDNSResponder
   changed_when: false
   become: true
-  when: ansible_system == "Darwin"
+  when:
+    - ansible_system == "Darwin"
+    - local_dns_macos_resolver is changed
 
-- name: Flush DNS cache on Windows
-  ansible.windows.win_command: ipconfig /flushdns
+- name: macOS DNS 캐시 flush
+  ansible.builtin.command: dscacheutil -flushcache
   changed_when: false
-  when: ansible_os_family == "Windows"
+  become: true
+  when:
+    - ansible_system == "Darwin"
+    - local_dns_macos_resolver is changed
 
-- name: Verify local DNS entries on Linux
-  ansible.builtin.command: getent hosts {{ item.hostname }}
-  register: local_dns_linux_getent
+# ----- Linux (systemd-resolved) -----
+- name: Linux systemd-resolved 가용성 확인
+  ansible.builtin.command: systemctl is-active systemd-resolved
+  register: local_dns_linux_resolved_state
   changed_when: false
-  failed_when: item.ip not in local_dns_linux_getent.stdout
-  loop: "{{ local_dns_entries }}"
+  failed_when: false
   when: ansible_system == "Linux"
 
-- name: Verify local DNS entries on macOS
-  ansible.builtin.command: dscacheutil -q host -a name {{ item.hostname }}
-  register: local_dns_macos_lookup
+- name: Linux systemd-resolved 필수 확인
+  ansible.builtin.fail:
+    msg: >-
+      systemd-resolved 가 활성 상태가 아닙니다.
+      ({{ local_dns_linux_resolved_state.stdout | default('미설치') }})
+      cledyu split-DNS 는 systemd-resolved 백엔드를 가정합니다.
+      필요 시 systemd-resolved 설치 후 재실행하거나, 본 role 의 Linux 분기를
+      NetworkManager dnsmasq.d 방식으로 확장하세요.
+  when:
+    - ansible_system == "Linux"
+    - local_dns_linux_resolved_state.stdout | default('') != "active"
+
+- name: Linux resolved drop-in 디렉터리 보장
+  ansible.builtin.file:
+    path: "{{ local_dns_linux_resolved_dropin_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  when: ansible_system == "Linux"
+
+- name: Linux split-DNS drop-in 설치
+  ansible.builtin.copy:
+    dest: "{{ local_dns_linux_resolved_dropin_dir }}/cledyu.conf"
+    content: |
+      # Managed by ansible role: local_dns
+      # *.{{ local_dns_search_domain }} 쿼리를 클러스터 CoreDNS({{ local_dns_resolver_ip }}) 로 위임.
+      # '~' prefix = routing-only domain (검색 도메인이 아닌 라우팅 전용).
+      [Resolve]
+      DNS={{ local_dns_resolver_ip }}
+      Domains=~{{ local_dns_search_domain }}
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  when: ansible_system == "Linux"
+  register: local_dns_linux_dropin
+
+- name: Linux systemd-resolved 재시작(drop-in 변경 시)
+  ansible.builtin.systemd:
+    name: systemd-resolved
+    state: restarted
+  become: true
+  when:
+    - ansible_system == "Linux"
+    - local_dns_linux_dropin is changed
+
+# ----- Windows (NRPT) -----
+- name: Windows NRPT 룰 idempotent 적용
+  ansible.windows.win_powershell:
+    script: |
+      $namespace = ".{{ local_dns_search_domain }}"
+      $nameServer = "{{ local_dns_resolver_ip }}"
+
+      $existing = Get-DnsClientNrptRule | Where-Object {
+        $_.Namespace -contains $namespace
+      }
+
+      if ($null -eq $existing) {
+        Add-DnsClientNrptRule -Namespace $namespace -NameServers $nameServer `
+          -Comment "Managed by ansible role local_dns" | Out-Null
+        $Ansible.Changed = $true
+      } else {
+        $needsUpdate = $false
+        foreach ($rule in $existing) {
+          if (($rule.NameServers -join ',') -ne $nameServer) {
+            $needsUpdate = $true
+          }
+        }
+        if ($needsUpdate) {
+          $existing | ForEach-Object {
+            Set-DnsClientNrptRule -Name $_.Name -NameServers $nameServer | Out-Null
+          }
+          $Ansible.Changed = $true
+        } else {
+          $Ansible.Changed = $false
+        }
+      }
+  when: ansible_os_family == "Windows"
+  register: local_dns_windows_nrpt
+
+- name: Windows DNS 캐시 flush
+  ansible.windows.win_command: ipconfig /flushdns
   changed_when: false
-  failed_when: item.ip not in local_dns_macos_lookup.stdout
-  loop: "{{ local_dns_entries }}"
+  when:
+    - ansible_os_family == "Windows"
+    - local_dns_windows_nrpt is changed
+
+# ----- 검증 (와일드카드 응답 확인) -----
+- name: Linux 와일드카드 검증
+  ansible.builtin.command: "getent hosts {{ local_dns_probe_host }}"
+  register: local_dns_linux_probe
+  changed_when: false
+  failed_when: local_dns_probe_expected_ip not in local_dns_linux_probe.stdout
+  when: ansible_system == "Linux"
+
+- name: macOS 와일드카드 검증
+  ansible.builtin.command: "dscacheutil -q host -a name {{ local_dns_probe_host }}"
+  register: local_dns_macos_probe
+  changed_when: false
+  failed_when: local_dns_probe_expected_ip not in local_dns_macos_probe.stdout
   when: ansible_system == "Darwin"
 
-- name: Verify local DNS entries on Windows
-  ansible.windows.win_command: >-
-    powershell.exe -NoProfile -Command
-    "[System.Net.Dns]::GetHostAddresses('{{ item.hostname }}') |
-    ForEach-Object { $_.IPAddressToString }"
-  register: local_dns_windows_lookup
+- name: Windows 와일드카드 검증
+  ansible.windows.win_powershell:
+    script: |
+      $addrs = (Resolve-DnsName -Name "{{ local_dns_probe_host }}" -Type A -ErrorAction Stop |
+        Where-Object { $_.IPAddress } | Select-Object -ExpandProperty IPAddress)
+      $Ansible.Result = ($addrs -join ',')
+      if ($addrs -notcontains "{{ local_dns_probe_expected_ip }}") {
+        throw "Expected {{ local_dns_probe_expected_ip }} but got $($addrs -join ',')"
+      }
   changed_when: false
-  failed_when: item.ip not in local_dns_windows_lookup.stdout
-  loop: "{{ local_dns_entries }}"
   when: ansible_os_family == "Windows"
