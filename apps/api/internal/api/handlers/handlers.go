@@ -4,6 +4,7 @@ package handlers
 import (
 	"github.com/gin-gonic/gin"
 	"github.com/requset700k/cledyu/api/internal/config"
+	"github.com/requset700k/cledyu/api/internal/content"
 	"github.com/requset700k/cledyu/api/internal/kubevirt"
 	"go.uber.org/zap"
 )
@@ -12,12 +13,27 @@ import (
 type Handler struct {
 	cfg      *config.Config
 	log      *zap.Logger
-	sessions *kubevirt.Manager
+	labs     map[string]content.LabContent // lab id → DSL 콘텐츠(스텝). GetLab/세션에서 사용.
+	sessions *kubevirt.Manager             // nil 허용 — 클러스터 미연결 시 세션 API가 503.
+	steps    *stepStore                    // STUB(검증엔진 연동 전): 세션별 스텝 진행 상태 in-memory.
 }
 
-// New는 sessions에 nil을 허용한다 — kubevirt 없이 실행 시 세션 API가 503을 반환한다.
+// New는 설정/로거/세션 매니저를 받아 Handler를 생성한다. sessions는 nil 허용.
+// 시작 시 임베드된 Lab DSL 콘텐츠를 로드한다. 로드 실패해도 서버는 기동하되,
+// 상세 페이지에 스텝이 비게 되므로 에러를 로깅한다.
 func New(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager) *Handler {
-	return &Handler{cfg: cfg, log: log, sessions: sessions}
+	labs, err := content.Load()
+	if err != nil {
+		log.Error("lab content load failed; detail pages will lack steps", zap.Error(err))
+		labs = map[string]content.LabContent{}
+	}
+	return &Handler{
+		cfg:      cfg,
+		log:      log,
+		labs:     labs,
+		sessions: sessions,
+		steps:    newStepStore(),
+	}
 }
 
 // 프론트엔드 lib/api.ts의 ApiError 타입과 대응.

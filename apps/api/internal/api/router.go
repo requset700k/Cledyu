@@ -45,9 +45,15 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager) 
 		v1.GET("/me", h.GetMe)
 		v1.GET("/labs", h.ListLabs)
 		v1.GET("/labs/:id", h.GetLab)
+
+		// 랩 세션 — KubeVirt VM 수명주기.
 		v1.POST("/sessions", h.CreateSession)
 		v1.GET("/sessions/:id", h.GetSession)
 		v1.DELETE("/sessions/:id", h.DeleteSession)
+
+		// 스텝 진행/검증 — STUB(검증엔진 연동 전까지 in-memory mock).
+		v1.GET("/sessions/:id/steps", h.GetSessionSteps)
+		v1.POST("/sessions/:id/validate", h.ValidateStep)
 	}
 
 	return r
