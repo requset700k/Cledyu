@@ -30,7 +30,7 @@ func newTestConfig() *config.Config {
 func newTestRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	h := handlers.New(newTestConfig(), zap.NewNop())
+	h := handlers.New(newTestConfig(), zap.NewNop(), nil)
 
 	r.GET("/health", h.Health)
 	r.GET("/me", func(c *gin.Context) {
