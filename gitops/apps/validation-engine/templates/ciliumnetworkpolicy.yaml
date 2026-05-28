@@ -1,0 +1,20 @@
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: "{{ .Release.Name }}-kube-apiserver"
+  namespace: {{ .Release.Namespace }}
+spec:
+  endpointSelector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  egress:
+    # Kubernetes API — virtctl이 VM portforward에 사용
+    # toEntities는 Cilium 전용 필드라 CiliumNetworkPolicy로 분리한다.
+    # HA 환경에서 컨트롤플레인 IP가 바뀌어도 정확히 동작한다.
+    - toEntities:
+        - kube-apiserver
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
