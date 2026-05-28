@@ -12,6 +12,7 @@ import type { Lab } from '@/lib/types';
 function LabDetail() {
   const { id } = useParams<{ id: string }>();
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [terminalUrl, setTerminalUrl] = useState<string | null>(null);
 
   const {
     data: lab,
@@ -25,7 +26,10 @@ function LabDetail() {
 
   const start = useMutation({
     mutationFn: () => api.sessions.create(id),
-    onSuccess: (s) => setSessionId(s.id),
+    onSuccess: (s) => {
+      setSessionId(s.id);
+      setTerminalUrl(s.terminal_url ?? null);
+    },
   });
 
   if (isLoading) return <DetailSkeleton />;
@@ -50,7 +54,7 @@ function LabDetail() {
       <LabHeader lab={lab} />
 
       {sessionId ? (
-        <LabSession sessionId={sessionId} lab={lab} />
+        <LabSession sessionId={sessionId} lab={lab} terminalUrl={terminalUrl} />
       ) : (
         <div className="mt-6 bg-slate-800/50 border border-slate-700 rounded-xl p-6">
           {hasContent ? (

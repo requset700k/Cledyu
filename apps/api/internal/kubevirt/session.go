@@ -100,6 +100,16 @@ chpasswd:
   expire: false
   list: |
     lab:lab
+write_files:
+  - path: /etc/systemd/system/serial-getty@ttyS0.service.d/override.conf
+    permissions: "0644"
+    content: |
+      [Service]
+      ExecStart=
+      ExecStart=-/sbin/agetty --autologin lab --noclear --keep-baud 115200,38400,9600 ttyS0 xterm-256color
+runcmd:
+  - systemctl daemon-reload
+  - systemctl restart serial-getty@ttyS0.service
 `, "session-"+sessionID),
 		},
 	}, metav1.CreateOptions{})

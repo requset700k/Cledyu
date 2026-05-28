@@ -54,6 +54,9 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager) 
 		// 스텝 진행/검증 — STUB(검증엔진 연동 전까지 in-memory mock).
 		v1.GET("/sessions/:id/steps", h.GetSessionSteps)
 		v1.POST("/sessions/:id/validate", h.ValidateStep)
+
+		// 실시간 터미널 — VM serial console을 WebSocket으로 프록시(JWT가 ?token= 처리).
+		v1.GET("/sessions/:id/ws", h.Console)
 	}
 
 	return r

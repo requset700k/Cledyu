@@ -8,6 +8,8 @@ description: Pod, Deployment, Service 기본 개념 실습
 difficulty: beginner
 duration_min: 60
 vm_type: lab-small
+# k3s-in-VM 환경 — 아직 미구현이라 실시간 터미널 비활성(콘텐츠 전용).
+environment: k3s
 tags:
   - kubernetes
   - pod
