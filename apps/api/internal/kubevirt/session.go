@@ -70,8 +70,8 @@ func (m *Manager) Create(ctx context.Context, sessionID, labID, userID string) (
 		ObjectMeta: metav1.ObjectMeta{
 			Name: ns,
 			Annotations: map[string]string{
-				"cledyu.io/lab-id":    labID,
-				"cledyu.io/user-id":   userID,
+				"cledyu.io/lab-id":     labID,
+				"cledyu.io/user-id":    userID,
 				"cledyu.io/started-at": now.Format(time.RFC3339),
 				"cledyu.io/expires-at": expires.Format(time.RFC3339),
 			},
