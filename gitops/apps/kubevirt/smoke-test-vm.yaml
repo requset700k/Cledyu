@@ -1,0 +1,80 @@
+---
+# Month 1 마일스톤 검증용 스모크 테스트 VM.
+# running: false — ArgoCD sync 시 자동 기동하지 않음.
+#
+# 기동:   virtctl start smoke-test -n kubevirt
+# 콘솔:   virtctl console smoke-test -n kubevirt   (lab / lab)
+# 삭제:   kubectl delete vm smoke-test -n kubevirt
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: smoke-test
+  namespace: kubevirt
+  annotations:
+    argocd.argoproj.io/sync-wave: "40"
+  labels:
+    cledyu.io/purpose: smoke-test
+spec:
+  running: false
+  instancetype:
+    kind: VirtualMachineClusterInstancetype
+    name: lab-small
+  preference:
+    kind: VirtualMachineClusterPreference
+    name: ubuntu
+  dataVolumeTemplates:
+    - metadata:
+        name: smoke-test-rootdisk
+      spec:
+        source:
+          http:
+            url: "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
+        storage:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 10Gi
+          storageClassName: longhorn
+  template:
+    metadata:
+      labels:
+        cledyu.io/purpose: smoke-test
+    spec:
+      terminationGracePeriodSeconds: 180
+      domain:
+        devices:
+          disks:
+            - name: rootdisk
+              disk:
+                bus: virtio
+            - name: cloudinitdisk
+              disk:
+                bus: virtio
+          interfaces:
+            - name: default
+              masquerade: {}
+      networks:
+        - name: default
+          pod: {}
+      volumes:
+        - name: rootdisk
+          dataVolume:
+            name: smoke-test-rootdisk
+        - name: cloudinitdisk
+          cloudInitNoCloud:
+            userData: |
+              #cloud-config
+              hostname: smoke-test
+              ssh_pwauth: true
+              users:
+                - name: lab
+                  lock_passwd: false
+                  shell: /bin/bash
+                  sudo: ALL=(ALL) NOPASSWD:ALL
+              chpasswd:
+                expire: false
+                list: |
+                  lab:lab
+              package_update: false
+              package_upgrade: false
