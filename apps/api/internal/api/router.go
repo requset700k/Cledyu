@@ -44,6 +44,12 @@ func NewRouter(cfg *config.Config, log *zap.Logger) *gin.Engine {
 		v1.GET("/me", h.GetMe)
 		v1.GET("/labs", h.ListLabs)
 		v1.GET("/labs/:id", h.GetLab)
+
+		// 랩 세션 — STUB(in-memory mock). 실제 VM 오케스트레이션/검증엔진 연동 전까지 사용.
+		v1.POST("/sessions", h.CreateSession)
+		v1.GET("/sessions/:id", h.GetSession)
+		v1.GET("/sessions/:id/steps", h.GetSessionSteps)
+		v1.POST("/sessions/:id/validate", h.ValidateStep)
 	}
 
 	return r

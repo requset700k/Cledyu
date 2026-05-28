@@ -71,14 +71,24 @@ func (h *Handler) ListLabs(c *gin.Context) {
 }
 
 // GetLab은 id에 해당하는 lab을 반환한다. 없으면 404. 인증 필요.
+// 해당 lab의 DSL 콘텐츠가 있으면 응답에 steps(스텝 상세)를 머지한다.
 // GET /api/v1/labs/:id
 func (h *Handler) GetLab(c *gin.Context) {
 	id := c.Param("id")
 	for _, lab := range mockLabs {
-		if lab["id"] == id {
-			c.JSON(http.StatusOK, lab)
-			return
+		if lab["id"] != id {
+			continue
 		}
+		// mockLabs를 변경하지 않도록 복사 후 steps를 덧붙인다.
+		resp := make(gin.H, len(lab)+1)
+		for k, v := range lab {
+			resp[k] = v
+		}
+		if lc, ok := h.labs[id]; ok {
+			resp["steps"] = lc.Steps
+		}
+		c.JSON(http.StatusOK, resp)
+		return
 	}
 	h.err(c, http.StatusNotFound, "lab not found")
 }

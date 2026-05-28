@@ -1,11 +1,6 @@
 import Link from 'next/link';
-import type { Lab, Difficulty } from '@/lib/types';
-
-const DIFFICULTY_CONFIG: Record<Difficulty, { label: string; classes: string }> = {
-  beginner: { label: '입문', classes: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' },
-  intermediate: { label: '중급', classes: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
-  advanced: { label: '고급', classes: 'bg-red-500/15 text-red-400 border-red-500/30' },
-};
+import type { Lab } from '@/lib/types';
+import { DIFFICULTY_CONFIG } from './difficulty';
 
 export function LabCard({ lab }: { lab: Lab }) {
   const diff = DIFFICULTY_CONFIG[lab.difficulty];
