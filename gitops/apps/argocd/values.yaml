@@ -98,6 +98,9 @@ configs:
       requestedIDTokenClaims:
         groups:
           essential: true
+      # cledyu-root-ca public 인증서 (cert-manager). public CA cert 라 git 평문 저장 OK.
+      # CA 회전 시: kubectl -n cert-manager get secret cledyu-root-ca \
+      #   -o jsonpath='{.data.tls\.crt}' | base64 -d | sed 's/^/        /' 로 본문 갱신.
       rootCA: |
         -----BEGIN CERTIFICATE-----
         MIIFXDCCA0SgAwIBAgIUAdbfCoY4XJ9ov6m5rAzdcSZemrwwDQYJKoZIhvcNAQEN
@@ -106,11 +109,29 @@ configs:
         NDIxMDYyNDA2WjBGMQ8wDQYDVQQKEwZDbGVkeXUxGjAYBgNVBAsTEVBsYXRmb3Jt
         IFNlY3VyaXR5MRcwFQYDVQQDEw5DbGVkeXUgUm9vdCBDQTCCAiIwDQYJKoZIhvcN
         AQEBBQADggIPADCCAgoCggIBAJ/UWq4VpRLdBd7oCdeQ1Y8CHeLbGmwAo7EvcnIx
-        # NOTE: 실제 PEM 본문은 deploy 시점에 cert-manager Secret 에서 추출해 채움.
-        #   ROOT_CA_PEM=$(kubectl -n cert-manager get secret cledyu-root-ca \
-        #     -o jsonpath='{.data.tls\.crt}' | base64 -d)
-        #   sed 등으로 이 placeholder 자리에 PEM 8-space indent 삽입 후 helm upgrade.
-        # 본 매니페스트는 placeholder 만 보존 (root CA 가 후속 회전 시 변경되므로).
+        NZp+w2REPV62NW+YNklsQwEWXI4x9RiBXI4okbQbGnyw2q0Ic3JirewMNXNYW0OD
+        EChNyidiNtYyyiL44keHjS2n+ZJx356xx4gOYaF2KjA72O/I3GbUqPBT02X9w7K8
+        khTx7Ud+SsqUg1beGHhOWtzoaEYbgVw40I264zJrrZuDj9glxEC4gE26QGLByaK6
+        FkWqhMKskqERMqcGtt+vX7EFfWqYW4yRP3a7qW5lVXKNlKeHziyAX2B7oRppq669
+        IYjaHUfo67uQw8MxH2yggJNqHCEF+oYFmcRGbc/Zl7CZNh3XqDu08s2MOjU0xTxW
+        Ccdr6YuTzncm8ZCPYAG2q+P/wfPCGJrRyIP/64RpcoeIPphbouEWTW2jL6VdCtoS
+        Qkgs3y+1r8ni4XqIyCA4PpM+GC+RBHN2OruMRKEVjLOczYNutw8ovEt+jQEbib6J
+        Roh1IrZIzSK600T2EARWuqfDhG/xW8fWlrs8gq9SoE1OJ/4PkjEqYdM7m7x3GNok
+        jHQOobzuChuiYzSURIM4zdls9BzGmincdis/HotI0ldsCPKPb5CWRI7DhvicoulJ
+        /VKfBGAH9o1crC8zLxcNsg6crs8lWf0BaSCHlnW9K4sKZNvVIhYJYRUpkitI6xFx
+        MpbPAgMBAAGjQjBAMA4GA1UdDwEB/wQEAwIBBjAPBgNVHRMBAf8EBTADAQH/MB0G
+        A1UdDgQWBBS+O6HpaOFtSLurla1p/yRV4vzq0TANBgkqhkiG9w0BAQ0FAAOCAgEA
+        ZH3GA0xluQFMudZ08TXornuXJEVjR8XGyVDS9BVznj8kek1YHTxaLh9eL1VgSGnl
+        37XH+qqolFueE3j75NGV0lnOjzSuGGyGSOQIR9RqBcKAEqdXgy8EUABvhUsRwFHr
+        e8jiv7PEngYmiW8h3Ibgp1W7FMKMMYl+X81oeVsTZQxesb0Sa/Rd31d6bJ/khUV0
+        TG3hfHNvboY/43I8Ye7SGaFL0MI4ylYMtO7nGnGbWCKt3fV9OfrNG3W1jn16l6LZ
+        adiSdfyM8jjAF6AbKDwjVpSy4nEcRHkiip/stz9sfT2eUwau8GpX+zJA8mkzU+Cy
+        nP2LmAXaN9L5EkgHnSJuNv6RYpOHyzgf00O7nolNa2+KHd0MZxrCki9kwkKGy3BY
+        mlLojpZJAI7/69uflGgIC28uIJyELFIu1nczCR61DhzEgs7ZcPRfZZiSdYBVtgGN
+        +4H9GlRdKwVuAdoWtkS45G6svLtW2JrX1DnkO/9X+sewNEnHj8qlkHaUM3iWj7Gg
+        u1x72IcD+gAaopQjoO8fpK5Eq+onI449h97BBu6I9853rs6/yJFC1pD97nzA8/0g
+        Wh/ahIP8XHfbeg9h/iQFncC2kA+5YgoMngHu6Pkod1uzsc7vnIb7vmkqnS/RBf+a
+        R5+zxpPx2DYdQKLRAWedF6t3gAa/ogftyBMPNMtLcPU=
         -----END CERTIFICATE-----
   params:
     server.insecure: true
