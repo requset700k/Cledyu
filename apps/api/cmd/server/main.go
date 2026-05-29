@@ -40,6 +40,7 @@ func main() {
 		sessions = nil
 	}
 
+	// validator nil: Kafka publisher 미연결 — 후속 PR에서 실제 구현체 주입.
 	router := api.NewRouter(cfg, logger, sessions, nil)
 
 	// Read/WriteTimeout: 느린 클라이언트로 인한 goroutine 고갈 방지. IdleTimeout: keep-alive 연결 유지 상한.

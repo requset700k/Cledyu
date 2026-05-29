@@ -29,7 +29,7 @@ type sessionSteps struct {
 }
 
 // stepStore는 sessionID → 스텝 진행 상태 맵을 동시성 안전하게 관리한다.
-// STUB(검증엔진 미연동): 검증 결과는 항상 통과 처리. 실 검증엔진 연동 시 본 스토어를 제거하고
+// publisher 미연결 시 mock 통과로 동작. 실 검증엔진 연동 시 본 스토어를 제거하고
 // 검증 결과 토픽을 구독하도록 교체할 예정.
 type stepStore struct {
 	mu sync.Mutex

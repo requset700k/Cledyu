@@ -3,10 +3,12 @@ package validation
 
 import "context"
 
+// Publisher sends validation requests to validation-engine.
 type Publisher interface {
 	PublishRequest(ctx context.Context, req ValidationRequest) error
 }
 
+// VMType identifies the VM provider that validation-engine should use.
 type VMType string
 
 const (
@@ -14,6 +16,7 @@ const (
 	VMTypeEC2      VMType = "ec2"
 )
 
+// CheckType is aligned with apps/validation-engine/internal/model.CheckType.
 type CheckType string
 
 const (
@@ -24,6 +27,7 @@ const (
 	CheckHTTPResponse   CheckType = "http_response"
 )
 
+// VMSpec tells validation-engine which lab VM to inspect.
 type VMSpec struct {
 	Type       VMType `json:"type"`
 	Name       string `json:"name,omitempty"`
@@ -32,6 +36,7 @@ type VMSpec struct {
 	Region     string `json:"region,omitempty"`
 }
 
+// Check is one validation assertion.
 type Check struct {
 	Type       CheckType `json:"type"`
 	Command    string    `json:"cmd,omitempty"`
@@ -42,6 +47,7 @@ type Check struct {
 	ExpectCode int       `json:"expect_code,omitempty"`
 }
 
+// ValidationRequest is published to the validation-requests Kafka topic.
 type ValidationRequest struct {
 	TraceID   string  `json:"trace_id,omitempty"`
 	SessionID string  `json:"session_id"`
