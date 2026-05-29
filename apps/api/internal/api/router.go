@@ -9,10 +9,11 @@ import (
 	"github.com/requset700k/cledyu/api/internal/config"
 	"github.com/requset700k/cledyu/api/internal/kubevirt"
 	"github.com/requset700k/cledyu/api/internal/middleware"
+	"github.com/requset700k/cledyu/api/internal/validation"
 	"go.uber.org/zap"
 )
 
-func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager) *gin.Engine {
+func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, validator validation.Publisher) *gin.Engine {
 	gin.SetMode(cfg.Server.Mode)
 
 	r := gin.New()
@@ -27,7 +28,7 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager) 
 		AllowCredentials: true,
 	}))
 
-	h := handlers.New(cfg, log, sessions)
+	h := handlers.New(cfg, log, sessions, validator)
 
 	r.GET("/health", h.Health)
 

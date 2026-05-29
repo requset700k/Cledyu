@@ -40,7 +40,7 @@ func main() {
 		sessions = nil
 	}
 
-	router := api.NewRouter(cfg, logger, sessions)
+	router := api.NewRouter(cfg, logger, sessions, nil)
 
 	// Read/WriteTimeout: 느린 클라이언트로 인한 goroutine 고갈 방지. IdleTimeout: keep-alive 연결 유지 상한.
 	srv := &http.Server{

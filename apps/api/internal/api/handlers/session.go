@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/requset700k/cledyu/api/internal/content"
 	"github.com/requset700k/cledyu/api/internal/kubevirt"
+	"github.com/requset700k/cledyu/api/internal/validation"
 	"go.uber.org/zap"
 )
 
@@ -39,6 +41,12 @@ func newStepStore() *stepStore { return &stepStore{m: make(map[string]*sessionSt
 // newSessionID는 짧은 hex 세션 id를 생성한다.
 func newSessionID() string {
 	b := make([]byte, 4)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+func newTraceID() string {
+	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
@@ -180,33 +188,124 @@ func (h *Handler) GetSessionSteps(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": items, "total": len(items)})
 }
 
-// ValidateStep은 한 단계의 검증을 수행한다.
-// STUB — 검증엔진(Kafka) 미연동. 데모용으로 항상 통과 처리하고 다음 단계를 활성화한다.
+// ValidateStep은 한 단계의 검증 요청을 validation-engine으로 발행한다.
+// Kafka publisher가 없으면 기존 mock 통과 동작을 유지한다(실제 publisher 연결은 후속 PR).
 // POST /api/v1/sessions/:id/validate  body: { "step_id": 1 }
 func (h *Handler) ValidateStep(c *gin.Context) {
 	var req struct {
-		StepID int `json:"step_id"`
+		StepID int `json:"step_id" binding:"required,min=1"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		h.err(c, http.StatusBadRequest, "step_id is required")
 		return
 	}
-	h.steps.mu.Lock()
-	defer h.steps.mu.Unlock()
-	ss, ok := h.steps.m[c.Param("id")]
-	if !ok {
-		h.err(c, http.StatusNotFound, "session not found")
+
+	sessionID := c.Param("id")
+	idx, err := h.findStepIndex(sessionID, req.StepID)
+	if err != nil {
+		if errors.Is(err, errStepSessionNotFound) {
+			h.err(c, http.StatusNotFound, "session not found")
+		} else {
+			h.err(c, http.StatusNotFound, "step not found")
+		}
 		return
 	}
-	idx := -1
+
+	if h.validator == nil {
+		h.markStepPassed(sessionID, idx)
+		c.JSON(http.StatusOK, gin.H{"status": "passed", "message": "검증을 통과했습니다 (mock)"})
+		return
+	}
+	if h.sessions == nil {
+		h.err(c, http.StatusServiceUnavailable, "kubevirt not configured")
+		return
+	}
+
+	sess, err := h.sessions.Get(c.Request.Context(), sessionID)
+	if err != nil {
+		if errors.Is(err, kubevirt.ErrNotFound) {
+			h.err(c, http.StatusNotFound, "session not found")
+			return
+		}
+		h.log.Error("get session for validation", zap.Error(err))
+		h.err(c, http.StatusInternalServerError, "get session failed")
+		return
+	}
+
+	lc, ok := h.labs[sess.LabID]
+	if !ok {
+		h.err(c, http.StatusNotFound, "lab content not found")
+		return
+	}
+	step, ok := findContentStep(lc, req.StepID)
+	if !ok {
+		h.err(c, http.StatusNotFound, "step content not found")
+		return
+	}
+	if len(step.Checks) == 0 {
+		h.err(c, http.StatusBadRequest, "step has no validation checks")
+		return
+	}
+
+	traceID := newTraceID()
+	msg := validation.ValidationRequest{
+		TraceID:   traceID,
+		SessionID: sessionID,
+		StepID:    req.StepID,
+		VM: validation.VMSpec{
+			Type:      validation.VMTypeKubeVirt,
+			Name:      "session-vm",
+			Namespace: "lab-" + sessionID,
+		},
+		Checks: toValidationChecks(step.Checks),
+	}
+	if err := h.validator.PublishRequest(c.Request.Context(), msg); err != nil {
+		h.log.Error("publish validation request", zap.Error(err), zap.String("session_id", sessionID), zap.Int("step_id", req.StepID))
+		h.err(c, http.StatusBadGateway, "publish validation request failed")
+		return
+	}
+
+	h.recordStepAttempt(sessionID, idx)
+	c.JSON(http.StatusAccepted, gin.H{
+		"status":   "accepted",
+		"message":  "검증 요청을 접수했습니다",
+		"trace_id": traceID,
+	})
+}
+
+var errStepSessionNotFound = errors.New("session not found")
+var errStepNotFound = errors.New("step not found")
+
+func (h *Handler) findStepIndex(sessionID string, stepID int) (int, error) {
+	h.steps.mu.Lock()
+	defer h.steps.mu.Unlock()
+	ss, ok := h.steps.m[sessionID]
+	if !ok {
+		return -1, errStepSessionNotFound
+	}
 	for i := range ss.Steps {
-		if ss.Steps[i].StepID == req.StepID {
-			idx = i
-			break
+		if ss.Steps[i].StepID == stepID {
+			return i, nil
 		}
 	}
-	if idx == -1 {
-		h.err(c, http.StatusNotFound, "step not found")
+	return -1, errStepNotFound
+}
+
+func (h *Handler) recordStepAttempt(sessionID string, idx int) {
+	h.steps.mu.Lock()
+	defer h.steps.mu.Unlock()
+	ss, ok := h.steps.m[sessionID]
+	if !ok || idx < 0 || idx >= len(ss.Steps) {
+		return
+	}
+	ss.Steps[idx].Attempts++
+}
+
+func (h *Handler) markStepPassed(sessionID string, idx int) {
+	h.steps.mu.Lock()
+	defer h.steps.mu.Unlock()
+	ss, ok := h.steps.m[sessionID]
+	if !ok || idx < 0 || idx >= len(ss.Steps) {
 		return
 	}
 	ss.Steps[idx].Attempts++
@@ -217,5 +316,29 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 		}
 		ss.CurrentStep = ss.Steps[idx+1].StepID
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "passed", "message": "검증을 통과했습니다 (mock)"})
+}
+
+func findContentStep(lc content.LabContent, stepID int) (content.Step, bool) {
+	for _, step := range lc.Steps {
+		if step.ID == stepID {
+			return step, true
+		}
+	}
+	return content.Step{}, false
+}
+
+func toValidationChecks(checks []content.Check) []validation.Check {
+	out := make([]validation.Check, 0, len(checks))
+	for _, check := range checks {
+		out = append(out, validation.Check{
+			Type:       validation.CheckType(check.Type),
+			Command:    check.Command,
+			Path:       check.Path,
+			URL:        check.URL,
+			Name:       check.Name,
+			Expect:     check.Expect,
+			ExpectCode: check.ExpectCode,
+		})
+	}
+	return out
 }
