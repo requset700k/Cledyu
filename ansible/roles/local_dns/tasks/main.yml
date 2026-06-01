@@ -6,6 +6,16 @@
       - local_dns_search_domain | length > 0
     fail_msg: "local_dns_resolver_ip and local_dns_search_domain must be set."
 
+# ----- /etc/hosts 잔류 엔트리 정리 -----
+- name: /etc/hosts cledyu.local 수동 엔트리 제거 (split-DNS 로 대체됨)
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^\s*\S+\s+\S+\.cledyu\.local(\s.*)?$'
+    state: absent
+    backup: true
+  become: true
+  when: ansible_system in ["Darwin", "Linux"]
+
 # ----- macOS -----
 - name: macOS resolver 디렉터리 보장
   ansible.builtin.file:
@@ -154,6 +164,9 @@
   register: local_dns_macos_probe
   changed_when: false
   failed_when: local_dns_probe_expected_ip not in local_dns_macos_probe.stdout
+  retries: 5
+  delay: 2
+  until: local_dns_probe_expected_ip in local_dns_macos_probe.stdout
   when: ansible_system == "Darwin"
 
 - name: Windows 와일드카드 검증
