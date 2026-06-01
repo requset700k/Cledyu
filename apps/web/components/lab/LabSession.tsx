@@ -57,19 +57,14 @@ export function LabSession({ sessionId, lab }: { sessionId: string; lab: Lab }) 
 
   // ── 분기 계산 ──────────────────────────────────────────────────────────
   const status = session?.status;
-  const inGrace =
-    readyAtRef.current !== null && Date.now() - readyAtRef.current < BOOT_GRACE_MS;
+  const inGrace = readyAtRef.current !== null && Date.now() - readyAtRef.current < BOOT_GRACE_MS;
   const booting = !status || status === 'provisioning' || inGrace;
   const wantsLiveTerminal = !!session?.terminal_url;
 
   // 라이브 터미널 랩은 부팅 동안 학생에게 로그인 프롬프트가 노출되지 않도록 SessionBoot로 가린다.
   if (booting && wantsLiveTerminal) {
     return (
-      <SessionBoot
-        status={status}
-        graceStartedAt={readyAtRef.current}
-        graceMs={BOOT_GRACE_MS}
-      />
+      <SessionBoot status={status} graceStartedAt={readyAtRef.current} graceMs={BOOT_GRACE_MS} />
     );
   }
 
@@ -216,11 +211,7 @@ function SessionBoot({
 
       <ul className="space-y-2 text-sm">
         <BootStage done={stage1Done} label="세션 생성" />
-        <BootStage
-          done={stage2Done}
-          inProgress={!stage2Done && stage1Done}
-          label="VM 프로비저닝"
-        />
+        <BootStage done={stage2Done} inProgress={!stage2Done && stage1Done} label="VM 프로비저닝" />
         <BootStage done={false} inProgress={stage2Done} label="자동 로그인 활성화" />
       </ul>
     </div>
