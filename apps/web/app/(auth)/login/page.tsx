@@ -15,6 +15,7 @@ export default function LoginPage() {
           <h2 className="text-lg font-semibold text-white mb-1">시작하기</h2>
           <p className="text-slate-400 text-sm mb-6">Cledyu 계정으로 로그인하세요</p>
 
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
           <a
             href="/api/v1/auth/login"
             className="flex items-center justify-center gap-2 w-full bg-brand-500 hover:bg-brand-600 text-white font-medium py-3 px-4 rounded-xl transition-colors duration-150"

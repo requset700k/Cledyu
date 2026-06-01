@@ -1,5 +1,5 @@
 // 백엔드 API 클라이언트.
-// 모든 HTTP 요청은 Next.js rewrite를 통해 /api/* → BACKEND_URL/api/*로 프록시됨.
+// 모든 HTTP 요청은 Next.js route handler를 통해 /api/* → BACKEND_URL/api/*로 프록시됨.
 // WebSocket은 rewrite 대상이 아니므로 Terminal 컴포넌트에서 NEXT_PUBLIC_WS_URL로 직접 연결.
 
 import type { Lab, Session, StepProgress, User } from './types';
