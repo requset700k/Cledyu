@@ -146,12 +146,8 @@ kubectl get pods -n kafka -w
 
 `https://kafka-ui.cledyu.local`
 
-처음 접속 시 hosts 파일에 아래 항목 추가 필요:
-
-| OS | 명령어 |
-|---|---|
-| macOS / Linux | `echo "10.10.0.101  kafka-ui.cledyu.local" \| sudo tee -a /etc/hosts` |
-| Windows (PowerShell 관리자) | `Add-Content C:\Windows\System32\drivers\etc\hosts "\`n10.10.0.101  kafka-ui.cledyu.local"` |
+`*.cledyu.local` 와일드카드 split-DNS 가 적용된 머신은 별도 hosts 수정 불요.
+미적용 머신은 한 번만 `ansible-playbook -i ansible/inventory.yml ansible/playbooks/80-local-dns.yml --limit <hostname>` 실행하면 이후 모든 `*.cledyu.local` 호스트가 자동 해석됨.
 
 ### 주요 기능
 
