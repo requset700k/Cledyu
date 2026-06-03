@@ -12,19 +12,21 @@ spec:
   authorization:
     type: simple
     acls:
-      # 모든 토픽 읽기/조회 — prefix "" 는 모든 이름에 매칭된다.
+      # 모든 토픽 읽기/조회 — literal "*" 는 Kafka 와일드카드로 모든 토픽에 매칭된다.
+      # prefix "" 는 Kafka 3.8 KRaft에서 빈 이름으로 거부되므로 literal "*" 사용.
       - resource:
           type: topic
-          name: ""
-          patternType: prefix
+          name: "*"
+          patternType: literal
         operations: [Read, Describe]
       # 모든 컨슈머 그룹 조회 — kafka-ui 가 컨슈머 lag 등을 표시하는 데 필요하다.
       - resource:
           type: group
-          name: ""
-          patternType: prefix
+          name: "*"
+          patternType: literal
         operations: [Read, Describe]
       # 클러스터 정보 조회 — 브로커 목록, 설정 등 kafka-ui 대시보드에 필요하다.
       - resource:
           type: cluster
+          name: kafka-cluster
         operations: [Describe, DescribeConfigs]
