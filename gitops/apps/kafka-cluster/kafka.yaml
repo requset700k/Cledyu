@@ -25,6 +25,13 @@ spec:
     # KRaft 모드에서는 log.message.format.version, inter.broker.protocol.version 사용 금지.
     metadataVersion: "3.8-IV0"
 
+    metricsConfig:
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef:
+          name: kafka-metrics
+          key: kafka-metrics-config.yml
+
     listeners:
       # plain: 인증서 관리가 불필요한 클러스터 내부 클라이언트용 (개발 도구 등).
       - name: plain
@@ -87,6 +94,33 @@ spec:
             drop:
               - ALL
       userOperatorContainer:
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
+
+  # kafka_exporter: consumer group lag 메트릭 수집용.
+  # Strimzi가 관리하므로 별도 Deployment 불필요하며 plain 리스너로 브로커에 접속한다.
+  kafkaExporter:
+    topicRegex: ".*"
+    groupRegex: ".*"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 128Mi
+    # kafka 네임스페이스 PSA restricted 적용을 위해 securityContext 명시.
+    template:
+      pod:
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          seccompProfile:
+            type: RuntimeDefault
+      container:
         securityContext:
           allowPrivilegeEscalation: false
           capabilities:
