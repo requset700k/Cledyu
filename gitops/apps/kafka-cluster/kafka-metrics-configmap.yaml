@@ -1,0 +1,74 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-metrics
+  namespace: kafka
+data:
+  kafka-metrics-config.yml: |
+    lowercaseOutputName: true
+    rules:
+      # [클러스터 가용성] ActiveController가 1이어야 정상, OfflinePartitions > 0이면 데이터 손실 위험
+      - pattern: kafka.controller<type=KafkaController, name=(ActiveControllerCount|OfflinePartitionsCount|GlobalPartitionCount|GlobalTopicCount)><>Value
+        name: kafka_controller_$1
+        type: GAUGE
+
+      # [복제 상태] UnderReplicatedPartitions > 0이면 내구성 저하, ISR 변동은 네트워크/브로커 부하 지표
+      - pattern: kafka.server<type=ReplicaManager, name=(IsrShrinksPerSec|IsrExpandsPerSec|UnderReplicatedPartitions|UnderMinIsrPartitionCount|OfflineReplicaCount)><>(\w+)
+        name: kafka_server_replicamanager_$1_$2
+        type: GAUGE
+
+      # [처리량 - 토픽별] topic 라벨 포함, BytesRejected는 produce 거부율(quota 초과 등) 감지용
+      - pattern: kafka.server<type=BrokerTopicMetrics, name=(BytesInPerSec|BytesOutPerSec|MessagesInPerSec|BytesRejectedPerSec), topic=(.+)><>(\w+)
+        name: kafka_server_brokertopicmetrics_$1_$3
+        type: GAUGE
+        labels:
+          topic: "$2"
+
+      # [처리량 - 브로커 전체] 토픽 라벨 없는 집계값, 브로커 전체 부하 파악용
+      - pattern: kafka.server<type=BrokerTopicMetrics, name=(BytesInPerSec|BytesOutPerSec|MessagesInPerSec|BytesRejectedPerSec)><>(\w+)
+        name: kafka_server_brokertopicmetrics_$1_$2
+        type: GAUGE
+
+      # [요청 처리율] request 라벨로 Produce/Fetch/Metadata 등 종류별 구분 가능
+      - pattern: kafka.network<type=RequestMetrics, name=RequestsPerSec, request=(.+)><>(\w+)
+        name: kafka_network_requestmetrics_requestspersec_$2
+        type: GAUGE
+        labels:
+          request: "$1"
+
+      # [요청 레이턴시] 브로커별 순간 분위수 스냅샷. 전체 p99는 max(브로커별 p99)로 보수적으로 집계한다
+      - pattern: kafka.network<type=RequestMetrics, name=TotalTimeMs, request=(.+)><>(\w+)
+        name: kafka_network_requestmetrics_totaltimems_$2
+        type: GAUGE
+        labels:
+          request: "$1"
+
+      # [Consumer Lag 계산] LogEndOffset만 수집한다. CommittedOffset은 별도 exporter 필요 (lag = LogEndOffset - CommittedOffset)
+      - pattern: kafka.log<type=Log, name=LogEndOffset, topic=(.+), partition=(.+)><>Value
+        name: kafka_log_log_end_offset
+        type: GAUGE
+        labels:
+          topic: "$1"
+          partition: "$2"
+
+      # [디스크 사용량] 파티션별 로그 크기, 디스크 포화 예측용
+      - pattern: kafka.log<type=Log, name=Size, topic=(.+), partition=(.+)><>Value
+        name: kafka_log_log_size_bytes
+        type: GAUGE
+        labels:
+          topic: "$1"
+          partition: "$2"
+
+      # [JVM 메모리] Heap used 상승 추세는 GC 빈도 증가 및 OOM 예측 지표
+      - pattern: java.lang<type=Memory><HeapMemoryUsage>(\w+)
+        name: jvm_memory_heap_$1
+        type: GAUGE
+      - pattern: java.lang<type=Memory><NonHeapMemoryUsage>(\w+)
+        name: jvm_memory_nonheap_$1
+        type: GAUGE
+
+      # [JVM 스레드] 스레드 수 급증은 스레드 풀 누수 또는 요청 폭주 신호
+      - pattern: java.lang<type=Threading><>(\w+)
+        name: jvm_threading_$1
+        type: GAUGE
