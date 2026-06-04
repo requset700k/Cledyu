@@ -1,57 +1,65 @@
-# cledyu Go 모듈 공용 linter 설정.
-# 적용 범위: apps/<service>/ 하위의 모든 Go 모듈 (go.mod 단위로 자동 감지).
-# 호출 경로: pre-commit local hook + .github/workflows/go-lint.yml.
-
+version: "2"
 run:
-  timeout: 5m
   tests: true
-
 linters:
-  disable-all: true
+  default: none
   enable:
-    # 정확성
+    - bodyclose
     - errcheck
     - errorlint
+    - gosec
     - govet
     - ineffassign
-    - nilerr
-    - staticcheck
-    - unused
-    # 위생/스타일
-    - gofmt
-    - goimports
     - misspell
-    - unconvert
+    - nilerr
     - revive
-    # 보안
-    - gosec
-    # 자원/리소스
-    - bodyclose
     - rowserrcheck
     - sqlclosecheck
-
-linters-settings:
-  gosec:
-    excludes:
-      - G104  # 미처리 에러는 errcheck 가 더 정밀
-  revive:
+    - staticcheck
+    - unconvert
+    - unused
+  settings:
+    gosec:
+      excludes:
+        - G104
+    revive:
+      rules:
+        - name: var-naming
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: receiver-naming
+        - name: indent-error-flow
+        - name: superfluous-else
+        - name: empty-block
+        - name: range
+        - name: increment-decrement
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
     rules:
-      - { name: var-naming }
-      - { name: error-return }
-      - { name: error-strings }
-      - { name: error-naming }
-      - { name: receiver-naming }
-      - { name: indent-error-flow }
-      - { name: superfluous-else }
-      - { name: empty-block }
-      - { name: range }
-      - { name: increment-decrement }
-
+      - linters:
+          - errcheck
+          - gosec
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 issues:
-  exclude-rules:
-    # 테스트 코드는 보안 룰/에러체크 일부 완화
-    - path: _test\.go
-      linters: [gosec, errcheck]
-  # 같은 메시지 동일 라인 반복 표시 방지
-  max-same-issues: 0
   max-issues-per-linter: 0
+  max-same-issues: 0
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

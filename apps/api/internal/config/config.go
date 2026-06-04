@@ -13,7 +13,15 @@ type Config struct {
 	Server      ServerConfig   `mapstructure:"server"`
 	Redis       RedisConfig    `mapstructure:"redis"`
 	Keycloak    KeycloakConfig `mapstructure:"keycloak"`
+	KubeVirt    KubeVirtConfig `mapstructure:"kubevirt"`
 	FrontendURL string         `mapstructure:"frontend_url"`
+}
+
+type KubeVirtConfig struct {
+	Kubeconfig      string `mapstructure:"kubeconfig"`
+	BaseImageNS     string `mapstructure:"base_image_ns"`
+	BaseImageName   string `mapstructure:"base_image_name"`
+	SessionTTLHours int    `mapstructure:"session_ttl_hours"`
 }
 
 type KeycloakConfig struct {
@@ -55,6 +63,9 @@ func Load() (*Config, error) {
 	v.SetDefault("keycloak.redirect_uri", "https://api.cledyu.local/api/v1/auth/callback")
 	v.SetDefault("frontend_url", "https://app.cledyu.local")
 	v.SetDefault("keycloak.cookie_domain", ".cledyu.local")
+	v.SetDefault("kubevirt.base_image_ns", "kubevirt")
+	v.SetDefault("kubevirt.base_image_name", "ubuntu-2204-base")
+	v.SetDefault("kubevirt.session_ttl_hours", 3)
 
 	if err := v.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError

@@ -35,8 +35,7 @@ spec:
         duration: 30s
         factor: 2
         maxDuration: 5m
-  # Strimzi / Cilium이 런타임에 자동 생성하는 리소스는 Git에 없어도 정상이므로
-  # ArgoCD가 OutOfSync로 잘못 감지하는 노이즈를 제거한다.
+  # PVC prune 방지는 kafka-nodepool.yaml의 어노테이션으로 처리
   ignoreDifferences:
     - group: kafka.strimzi.io
       kind: Kafka

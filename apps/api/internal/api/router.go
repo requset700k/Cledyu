@@ -7,11 +7,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/requset700k/cledyu/api/internal/api/handlers"
 	"github.com/requset700k/cledyu/api/internal/config"
+	"github.com/requset700k/cledyu/api/internal/kubevirt"
 	"github.com/requset700k/cledyu/api/internal/middleware"
 	"go.uber.org/zap"
 )
 
-func NewRouter(cfg *config.Config, log *zap.Logger) *gin.Engine {
+func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager) *gin.Engine {
 	gin.SetMode(cfg.Server.Mode)
 
 	r := gin.New()
@@ -26,7 +27,7 @@ func NewRouter(cfg *config.Config, log *zap.Logger) *gin.Engine {
 		AllowCredentials: true,
 	}))
 
-	h := handlers.New(cfg, log)
+	h := handlers.New(cfg, log, sessions)
 
 	r.GET("/health", h.Health)
 
@@ -44,6 +45,18 @@ func NewRouter(cfg *config.Config, log *zap.Logger) *gin.Engine {
 		v1.GET("/me", h.GetMe)
 		v1.GET("/labs", h.ListLabs)
 		v1.GET("/labs/:id", h.GetLab)
+
+		// 랩 세션 — KubeVirt VM 수명주기.
+		v1.POST("/sessions", h.CreateSession)
+		v1.GET("/sessions/:id", h.GetSession)
+		v1.DELETE("/sessions/:id", h.DeleteSession)
+
+		// 스텝 진행/검증 — STUB(검증엔진 연동 전까지 in-memory mock).
+		v1.GET("/sessions/:id/steps", h.GetSessionSteps)
+		v1.POST("/sessions/:id/validate", h.ValidateStep)
+
+		// 실시간 터미널 — VM serial console을 WebSocket으로 프록시(JWT가 ?token= 처리).
+		v1.GET("/sessions/:id/ws", h.Console)
 	}
 
 	return r

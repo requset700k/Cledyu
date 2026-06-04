@@ -1,0 +1,31 @@
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  name: validation-engine
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: cledyu-kafka
+spec:
+  authentication:
+    type: tls  # CN=validation-engine 인증서로 인증
+  authorization:
+    type: simple
+    acls:
+      # validation-requests 토픽 읽기 권한
+      - resource:
+          type: topic
+          name: validation-requests
+          patternType: literal
+        operations: [Read, Describe]
+      # validation-results 토픽 쓰기 권한
+      - resource:
+          type: topic
+          name: validation-results
+          patternType: literal
+        operations: [Write, Describe]
+      # 컨슈머 그룹 권한 — GroupID "validation-engine" 사용 권한
+      - resource:
+          type: group
+          name: validation-engine
+          patternType: literal
+        operations: [Read]

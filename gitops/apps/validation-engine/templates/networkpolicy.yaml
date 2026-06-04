@@ -1,0 +1,39 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  podSelector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - ports:
+        - port: 8080
+          protocol: TCP
+      # Flannel은 Pod 간 트래픽만 제어하기 때문에 호스트(kubelet)에서 오는 트래픽은 NetworkPolicy를 우회하지만,
+      # Cilium은 eBPF가 Linux 커널 안에서 동작하기 때문에 호스트에서 오는 트래픽도 포함해 모든 트래픽을 커널 레벨에서 검사해 Network Policy 통과가 불가능하다.
+      # kubelet이 Pod가 살아있는지 확인하기 위해 주기적으로 liveness probe 요청을 보내는데 차단될 시 Pod가 재시작을 반복하므로 8080 port를 개방해야 한다.
+  egress:
+    # DNS 조회 — 서비스 도메인을 IP로 변환할 때 kube-system의 CoreDNS에 쿼리
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Kafka TLS — validation-requests 수신, validation-results 발행
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kafka
+      ports:
+        - port: 9093
+          protocol: TCP

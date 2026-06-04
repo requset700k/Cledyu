@@ -1,0 +1,18 @@
+---
+# Ubuntu 22.04 cloud image 기반 Lab VM 기본 설정.
+# headless 환경이므로 그래픽 디바이스 비활성화, virtio 드라이버 강제 적용.
+apiVersion: instancetype.kubevirt.io/v1beta1
+kind: VirtualMachineClusterPreference
+metadata:
+  name: ubuntu
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+spec:
+  devices:
+    preferredAutoattachGraphicsDevice: false
+    preferredDiskBus: virtio
+    preferredInterfaceModel: virtio
+    preferredInputBus: virtio
+    preferredInputType: tablet
+    preferredRng: {}
+  preferredTerminationGracePeriodSeconds: 180

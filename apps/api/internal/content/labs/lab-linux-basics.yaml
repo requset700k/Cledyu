@@ -1,0 +1,50 @@
+# Linux 기초 — 순수 Ubuntu 셸 환경(실시간 KubeVirt 터미널 제공).
+# autologin 사용자는 `lab`(홈: /home/lab). checks[]는 검증엔진 Check 스키마/화이트리스트와 정렬.
+id: lab-linux-basics
+title: Linux 기초
+description: 파일·디렉터리, 권한, 프로세스 등 리눅스 셸 기본기 실습
+difficulty: beginner
+duration_min: 45
+vm_type: lab-small
+environment: ubuntu
+tags:
+  - linux
+  - shell
+  - ubuntu
+steps:
+  - id: 1
+    title: 디렉터리와 파일 만들기
+    description: >
+      홈 디렉터리 아래에 작업 폴더 work 를 만들고 빈 파일 notes.txt 를 생성합니다.
+      mkdir 는 디렉터리를, touch 는 빈 파일을 만듭니다.
+    commands:
+      - mkdir -p ~/work
+      - touch ~/work/notes.txt
+    hint: "mkdir -p <경로> 로 폴더를, touch <파일> 로 빈 파일을 만듭니다."
+    checks:
+      - type: file_exists
+        path: /home/lab/work/notes.txt
+  - id: 2
+    title: 파일에 내용 쓰기
+    description: >
+      리다이렉션(>)으로 notes.txt 에 텍스트를 기록합니다. > 는 파일을 새로 쓰고,
+      >> 는 뒤에 덧붙입니다.
+    commands:
+      - echo "hello cledyu" > ~/work/notes.txt
+    hint: 'echo "내용" > <파일> 형태로 파일에 텍스트를 씁니다.'
+    checks:
+      - type: file_content
+        path: /home/lab/work/notes.txt
+        expect: cledyu
+  - id: 3
+    title: 파일 권한 바꾸기
+    description: >
+      chmod 로 notes.txt 의 권한을 소유자만 읽고 쓰도록(600) 변경하고, stat 으로 확인합니다.
+    commands:
+      - chmod 600 ~/work/notes.txt
+      - stat -c %a ~/work/notes.txt
+    hint: "chmod 600 <파일> 후 stat -c %a <파일> 로 권한 숫자를 확인합니다."
+    checks:
+      - type: command
+        command: stat -c %a /home/lab/work/notes.txt
+        expect: "600"

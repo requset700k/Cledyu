@@ -1,0 +1,24 @@
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: validation-engine-kafka-client
+  namespace: {{ .Release.Namespace }}
+
+spec:
+  secretName: validation-engine-kafka-client-tls # 발급된 인증서를 저장할 Secret 이름
+  duration: "2160h" # 인증서 유효기간 (90일)
+  renewBefore: "720h" # 만료 30일 전에 자동으로 갱신
+  commonName: validation-engine # 인증서 이름, Strimzi KafkaUser 이름이랑 같아야 Kafka 인증이 된다.
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always
+  usages: # 인증서 용도
+    - client auth # Kafka 서버에 내 신원을 증명하는 용도
+    - digital signature # 데이터에 서명
+    - key encipherment # 데이터를 암호화
+  issuerRef:
+    name: kafka-clients-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

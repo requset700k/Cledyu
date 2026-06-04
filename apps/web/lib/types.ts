@@ -20,6 +20,15 @@ export type StepStatus = 'pending' | 'active' | 'passed' | 'failed';
 /** instructor 역할은 /instructor 대시보드 접근 + 강사 API 사용 가능 */
 export type UserRole = 'student' | 'instructor' | 'admin';
 
+/** 실습 상세/세션 페이지에서 표시하는 단계 콘텐츠. 백엔드 Lab DSL(content.Step)과 대응. */
+export interface StepContent {
+  id: number;
+  title: string;
+  description: string;
+  commands?: string[];
+  hint?: string;
+}
+
 /** Lab 카탈로그에 표시되는 실습 항목 */
 export interface Lab {
   id: string;
@@ -30,6 +39,8 @@ export interface Lab {
   tags: string[];
   vm_type: string; // Lab 실행에 필요한 VM 사양 (kt-lab-small | medium)
   step_count: number;
+  steps?: StepContent[]; // GET /api/v1/labs/:id 에서만 채워짐 (목록 응답엔 없음)
+  environment?: string; // 세션 VM 환경 (ubuntu | k3s). ubuntu만 실시간 터미널 제공(Phase-1).
 }
 
 /** 수강생 1명이 특정 Lab을 수행하는 동안 유지되는 세션 */

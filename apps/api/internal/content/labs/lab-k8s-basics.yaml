@@ -1,0 +1,53 @@
+# Kubernetes 기초 — 임시 Lab DSL (정식 스키마 확정 전까지 사용).
+# checks[] 필드는 검증엔진(apps/validation-engine)의 Check 스키마와 정렬되어 있어
+# 실제 검증엔진 연동 시 그대로 publish 가능하다.
+# checks[].command 는 검증엔진의 command 화이트리스트(영숫자/공백/ /._-=:@%"')만 사용한다.
+id: lab-k8s-basics
+title: Kubernetes 기초
+description: Pod, Deployment, Service 기본 개념 실습
+difficulty: beginner
+duration_min: 60
+vm_type: lab-small
+# k3s-in-VM 환경 — 아직 미구현이라 실시간 터미널 비활성(콘텐츠 전용).
+environment: k3s
+tags:
+  - kubernetes
+  - pod
+  - deployment
+steps:
+  - id: 1
+    title: Pod 생성
+    description: >
+      nginx 이미지로 단일 Pod를 생성합니다. Pod는 쿠버네티스에서 배포 가능한
+      가장 작은 단위로, 하나 이상의 컨테이너를 감쌉니다.
+    commands:
+      - kubectl run nginx --image=nginx --restart=Never
+    hint: "kubectl run <이름> --image=<이미지> 형태입니다. --restart=Never 로 단일 Pod가 생성됩니다."
+    checks:
+      - type: command
+        command: kubectl get pods
+        expect: nginx
+  - id: 2
+    title: Deployment 생성
+    description: >
+      replica 3개를 유지하는 Deployment를 생성합니다. Deployment는 ReplicaSet을
+      통해 원하는 수의 Pod를 선언적으로 관리하며, 장애 시 자동으로 복구합니다.
+    commands:
+      - kubectl create deployment web --image=nginx --replicas=3
+    hint: "kubectl create deployment <이름> --image=<이미지> --replicas=3"
+    checks:
+      - type: command
+        command: kubectl get deployment web
+        expect: web
+  - id: 3
+    title: Service 노출
+    description: >
+      Deployment를 ClusterIP Service로 노출해 클러스터 내부에서 안정적인
+      엔드포인트(서비스명:포트)로 Pod 집합에 접근할 수 있게 합니다.
+    commands:
+      - kubectl expose deployment web --port=80 --target-port=80
+    hint: "kubectl expose deployment <이름> --port=<포트> 로 Service를 만듭니다."
+    checks:
+      - type: command
+        command: kubectl get service web
+        expect: web

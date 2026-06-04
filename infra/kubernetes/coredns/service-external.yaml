@@ -1,0 +1,42 @@
+---
+# CoreDNS 외부 노출 Service.
+# 이유:
+#   팀 dev 머신(macOS / Linux / Windows) 이 Tailscale 망 너머에서 *.cledyu.local 을
+#   해석할 수 있도록 클러스터 CoreDNS 를 LoadBalancer 로 노출. selector 는 kubeadm
+#   이 만든 CoreDNS Deployment(label k8s-app=kube-dns) 와 동일 pod 를 가리킴.
+#
+# 도달:
+#   Tailscale subnet router(hv01) 가 10.10.0.0/24 를 광고하므로 팀원 머신은
+#   Tailscale 연결만 되어 있으면 10.10.0.102:53 직접 쿼리 가능.
+#
+# 적용:
+#   kubectl apply -f infra/kubernetes/coredns/service-external.yaml
+#
+# 주의:
+#   기존 kube-dns ClusterIP Service 는 그대로 유지(클러스터 내부 해석용).
+#   본 매니페스트는 별도 Service 로 외부 노출만 담당.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: coredns-external
+  namespace: kube-system
+  labels:
+    k8s-app: kube-dns
+    app.kubernetes.io/component: dns-external
+  annotations:
+    metallb.io/loadBalancerIPs: "10.10.0.102"
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Cluster
+  selector:
+    k8s-app: kube-dns
+  ports:
+    - name: dns
+      protocol: UDP
+      port: 53
+      targetPort: 53
+    - name: dns-tcp
+      protocol: TCP
+      port: 53
+      targetPort: 53
