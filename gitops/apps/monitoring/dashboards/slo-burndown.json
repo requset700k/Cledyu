@@ -2,7 +2,7 @@
   "title": "SLO Burndown Dashboard",
   "uid": "slo-burndown-cledyu",
   "schemaVersion": 36,
-  "version": 2,
+  "version": 3,
   "refresh": "1m",
   "style": "dark",
   "tags": ["slo", "sloth", "platform"],
@@ -608,15 +608,74 @@
     },
     {
       "type": "row",
-      "title": "Kafka SLO (메트릭 수집 셋업 후 추가 예정)",
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 30
-      },
-      "collapsed": true,
+      "title": "Kafka SLO",
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 30 },
+      "collapsed": false,
       "id": 300
+    },
+    {
+      "type": "gauge",
+      "title": "Kafka Availability — Error Budget Remaining",
+      "id": 301,
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 31 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.25 },
+              { "color": "green", "value": 0.5 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "targets": [
+        {
+          "expr": "avg(slo:period_error_budget_remaining:ratio{sloth_service=\"kafka\", sloth_slo=\"kafka-availability\"})",
+          "legendFormat": "Availability Budget",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "gauge",
+      "title": "Kafka Latency (Fetch) — Error Budget Remaining",
+      "id": 302,
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 31 },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "orange", "value": 0.25 },
+              { "color": "green", "value": 0.5 }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] }
+      },
+      "targets": [
+        {
+          "expr": "avg(slo:period_error_budget_remaining:ratio{sloth_service=\"kafka\", sloth_slo=\"kafka-latency\"})",
+          "legendFormat": "Latency Budget",
+          "refId": "A"
+        }
+      ]
     }
   ]
 }
