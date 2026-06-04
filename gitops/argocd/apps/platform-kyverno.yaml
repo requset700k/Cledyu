@@ -25,7 +25,10 @@ spec:
       targetRevision: main
       path: gitops/apps/kyverno
       directory:
-        include: namespace.yaml
+        recurse: true
+        # namespace + background-controller RBAC + policies/ 하위 정책을 포함한다.
+        # values.yaml 은 위 helm source 가 $values 로 따로 읽으므로 여기서 제외된다.
+        include: "{namespace.yaml,background-controller-rbac.yaml,policies/*.yaml}"
   destination:
     server: https://kubernetes.default.svc
     namespace: kyverno

@@ -1,0 +1,52 @@
+---
+# lab-{sessionID} 세션 네임스페이스가 생성되면, validation-engine 이 그 세션 VM 에만
+# portforward 할 수 있도록 validation-engine RoleBinding 을 자동 생성한다.
+# 이로써 Session API 가 직접 RoleBinding 을 만들 필요가 없고(앱에 RBAC 생성 권한 불필요),
+# validation-engine 은 활성 세션 네임스페이스로만 한정된다(최소권한).
+# RoleBinding 이 참조하는 ClusterRole(validation-engine)은 validation-engine 차트에서 정의한다.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: validation-engine-session-rolebinding
+  annotations:
+    # Kyverno CRD(차트 sync-wave 0) 가 먼저 설치된 뒤 정책이 적용되도록 한 wave 뒤로 둔다.
+    argocd.argoproj.io/sync-wave: "1"
+    policies.kyverno.io/title: validation-engine session RoleBinding
+    policies.kyverno.io/category: Lab Session RBAC
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: >-
+      lab-* 세션 네임스페이스가 생성될 때마다 validation-engine ClusterRole 을 바인딩하는
+      RoleBinding 을 자동 생성한다. 동적으로 만들어지는 세션 네임스페이스에 대해
+      validation-engine 접근 권한을 per-session 으로 부여하기 위한 정책이다.
+spec:
+  # 정책 적용 시점에 이미 떠 있는 lab-* 네임스페이스에도 소급 생성한다(기존 세션 백필).
+  generateExisting: true
+  rules:
+    - name: generate-validation-engine-rolebinding
+      match:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+              names:
+                - "lab-*"
+      generate:
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: RoleBinding
+        name: validation-engine
+        namespace: "{{request.object.metadata.name}}"
+        # source(아래 data)가 바뀌면 생성된 RoleBinding 도 동기화하고, 누가 지우면 재생성한다.
+        synchronize: true
+        data:
+          metadata:
+            labels:
+              app.kubernetes.io/managed-by: kyverno
+              app.kubernetes.io/part-of: validation-engine
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: validation-engine
+          subjects:
+            - kind: ServiceAccount
+              name: validation-engine
+              namespace: validation-engine
