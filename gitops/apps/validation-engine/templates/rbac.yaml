@@ -9,11 +9,15 @@ automountServiceAccountToken: true # virtctl이 K8s API(portforward)에 접근�
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-# Role — Lab VM 네임스페이스 안에서 무엇을 할 수 있는지 정의
-kind: Role
+# ClusterRole — VM 접근 권한 "집합"만 정의한다(바인딩 없음).
+# 세션 VM은 lab-{sessionID} 네임스페이스에 동적으로 생성되므로 특정 네임스페이스에
+# 고정된 Role로는 닿을 수 없다. 실제 바인딩은 Kyverno generate 정책
+# (gitops/apps/kyverno/policies/validation-engine-rolebinding.yaml)이 lab-* 네임스페이스 생성 시
+# 이 ClusterRole을 참조하는 RoleBinding을 자동 생성해, validation-engine을 활성 세션
+# 네임스페이스로만 한정한다(최소권한).
+kind: ClusterRole
 metadata:
   name: validation-engine
-  namespace: {{ .Values.labVMNamespace }}
 rules:
   # virtctl이 KubeVirt VM에 SSH 접속하기 위한 권한
   - apiGroups: ["subresources.kubevirt.io"]
@@ -23,19 +27,3 @@ rules:
   - apiGroups: ["kubevirt.io"]
     resources: ["virtualmachineinstances", "virtualmachines"]
     verbs: ["get", "list"] # 조회만 가능, 생성/삭제는 불가
-
----
-apiVersion: rbac.authorization.k8s.io/v1
-# RoleBinding — Lab VM 네임스페이스 안에서만 위 권한을 연결
-kind: RoleBinding
-metadata:
-  name: validation-engine
-  namespace: {{ .Values.labVMNamespace }}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: validation-engine
-subjects:
-  - kind: ServiceAccount
-    name: validation-engine
-    namespace: {{ .Release.Namespace }}
