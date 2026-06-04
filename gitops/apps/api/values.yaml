@@ -15,6 +15,7 @@ ingress:
 env:
   CLEDYU_SERVER_MODE: "release"
   CLEDYU_REDIS_ADDR: "redis-master.redis.svc.cluster.local:6379"
+  CLEDYU_KAFKA_BROKERS: "cledyu-kafka-kafka-bootstrap.kafka.svc:9093"
 
 resources:
   requests:

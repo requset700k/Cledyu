@@ -14,7 +14,18 @@ type Config struct {
 	Redis       RedisConfig    `mapstructure:"redis"`
 	Keycloak    KeycloakConfig `mapstructure:"keycloak"`
 	KubeVirt    KubeVirtConfig `mapstructure:"kubevirt"`
+	Kafka       KafkaConfig    `mapstructure:"kafka"`
 	FrontendURL string         `mapstructure:"frontend_url"`
+}
+
+// KafkaConfig는 validation-requests 토픽 발행용 Kafka 연결 설정이다.
+// 인증서 경로의 파일이 없으면(로컬/CI) publisher가 비활성화되고 검증은 mock으로 동작한다.
+type KafkaConfig struct {
+	Brokers string `mapstructure:"brokers"` // 쉼표로 구분된 broker 주소 목록
+	Topic   string `mapstructure:"topic"`
+	TLSCert string `mapstructure:"tls_cert"`
+	TLSKey  string `mapstructure:"tls_key"`
+	TLSCA   string `mapstructure:"tls_ca"`
 }
 
 type KubeVirtConfig struct {
@@ -66,6 +77,11 @@ func Load() (*Config, error) {
 	v.SetDefault("kubevirt.base_image_ns", "kubevirt")
 	v.SetDefault("kubevirt.base_image_name", "ubuntu-2204-base")
 	v.SetDefault("kubevirt.session_ttl_hours", 3)
+	v.SetDefault("kafka.brokers", "cledyu-kafka-kafka-bootstrap.kafka.svc:9093")
+	v.SetDefault("kafka.topic", "validation-requests")
+	v.SetDefault("kafka.tls_cert", "/etc/kafka-certs/tls.crt")
+	v.SetDefault("kafka.tls_key", "/etc/kafka-certs/tls.key")
+	v.SetDefault("kafka.tls_ca", "/etc/kafka-certs/ca.crt")
 
 	if err := v.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError
