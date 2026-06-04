@@ -26,7 +26,7 @@ spec:
           patternType: literal
         operations: [Read, Describe]
       # 클러스터 정보 조회 — 브로커 목록, 설정 등 kafka-ui 대시보드에 필요하다.
+      # cluster는 singleton이라 name 필드가 없다. Strimzi가 내부적으로 kafka-cluster를 사용한다.
       - resource:
           type: cluster
-          name: kafka-cluster
         operations: [Describe, DescribeConfigs]
