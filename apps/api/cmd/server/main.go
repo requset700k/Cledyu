@@ -6,12 +6,14 @@ import (
 	"log"
 	"net/http"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	api "github.com/requset700k/cledyu/api/internal/api"
 	"github.com/requset700k/cledyu/api/internal/config"
 	"github.com/requset700k/cledyu/api/internal/kubevirt"
+	"github.com/requset700k/cledyu/api/internal/validation"
 	"go.uber.org/zap"
 )
 
@@ -40,7 +42,20 @@ func main() {
 		sessions = nil
 	}
 
-	router := api.NewRouter(cfg, logger, sessions)
+	// validation publisher: Kafka mTLS 인증서가 있으면 연결하고, 없으면(로컬/CI) nil로 두어
+	// ValidateStep 핸들러가 mock 검증으로 폴백한다.
+	var validator validation.Publisher
+	if tlsCfg, tlsErr := validation.LoadTLS(cfg.Kafka.TLSCert, cfg.Kafka.TLSKey, cfg.Kafka.TLSCA); tlsErr != nil {
+		logger.Warn("kafka mTLS 인증서 없음 — validation publisher 비활성(mock 모드)", zap.Error(tlsErr))
+	} else {
+		brokers := strings.Split(cfg.Kafka.Brokers, ",")
+		pub := validation.NewKafkaPublisher(brokers, cfg.Kafka.Topic, tlsCfg, logger)
+		defer pub.Close() //nolint:errcheck
+		validator = pub
+		logger.Info("validation publisher 연결", zap.Strings("brokers", brokers), zap.String("topic", cfg.Kafka.Topic))
+	}
+
+	router := api.NewRouter(cfg, logger, sessions, validator)
 
 	// Read/WriteTimeout: 느린 클라이언트로 인한 goroutine 고갈 방지. IdleTimeout: keep-alive 연결 유지 상한.
 	srv := &http.Server{

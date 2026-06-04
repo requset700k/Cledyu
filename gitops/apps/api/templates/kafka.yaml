@@ -1,0 +1,47 @@
+---
+# Session API 가 Kafka(validation-requests) 에 mTLS 로 발행하기 위한 클라이언트 인증서.
+# validation-engine 과 동일하게 kafka-clients-ca ClusterIssuer 로 발급한다.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: api-kafka-client
+  namespace: {{ .Release.Namespace }}
+spec:
+  secretName: api-kafka-client-tls # 발급 인증서를 저장할 Secret (deployment 가 마운트)
+  duration: "2160h" # 90일
+  renewBefore: "720h" # 만료 30일 전 자동 갱신
+  commonName: api # Strimzi KafkaUser 이름과 같아야 Kafka 인증/ACL 매칭이 된다
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always
+  usages:
+    - client auth
+    - digital signature
+    - key encipherment
+  issuerRef:
+    name: kafka-clients-ca
+    kind: ClusterIssuer
+    group: cert-manager.io
+
+---
+# Strimzi KafkaUser — CN=api 인증서로 인증하고, validation-requests 토픽에 발행만 허용한다(최소권한).
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  name: api
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: cledyu-kafka
+spec:
+  authentication:
+    type: tls # CN=api 인증서로 인증
+  authorization:
+    type: simple
+    acls:
+      # validation-requests 토픽 발행 권한
+      - resource:
+          type: topic
+          name: validation-requests
+          patternType: literal
+        operations: [Write, Describe]
