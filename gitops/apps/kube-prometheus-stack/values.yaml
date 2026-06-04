@@ -175,6 +175,13 @@ grafana:
         nodeGraph:
           enabled: true
 
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+
   # ── Keycloak OIDC ──
   # client_secret 은 env var (GF_AUTH_GENERIC_OAUTH_CLIENT_SECRET) 로 덮어쓴다.
   # Secret grafana-oidc(client-secret 키) 를 monitoring namespace 에 미리 생성해야 한다.
