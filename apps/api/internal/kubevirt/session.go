@@ -7,7 +7,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	rbacv1 "k8s.io/api/rbac/v1"
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -19,14 +18,6 @@ import (
 )
 
 var ErrNotFound = errors.New("session not found")
-
-// validationEngineName 은 validation-engine 의 ServiceAccount/ClusterRole 이름,
-// validationEngineNamespace 는 그 ServiceAccount 가 사는 네임스페이스다.
-// gitops/apps/validation-engine 차트와 반드시 일치해야 한다.
-const (
-	validationEngineName      = "validation-engine"
-	validationEngineNamespace = "validation-engine"
-)
 
 var (
 	vmGVR  = schema.GroupVersionResource{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachines"}
@@ -90,32 +81,7 @@ func (m *Manager) Create(ctx context.Context, sessionID, labID, userID string) (
 		return nil, fmt.Errorf("create namespace: %w", err)
 	}
 
-	// 2. RoleBinding — validation-engine 이 이 세션 VM 에만 portforward 하도록 권한을 부여한다.
-	// 공유 ClusterRole(validation-engine)을 이 세션 네임스페이스에만 바인딩해 최소권한을 유지한다.
-	// Delete 가 네임스페이스를 지우면 함께 cascade 삭제되므로 별도 정리는 불필요하다.
-	_, err = m.core.RbacV1().RoleBindings(ns).Create(ctx, &rbacv1.RoleBinding{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      validationEngineName,
-			Namespace: ns,
-		},
-		RoleRef: rbacv1.RoleRef{
-			APIGroup: "rbac.authorization.k8s.io",
-			Kind:     "ClusterRole",
-			Name:     validationEngineName,
-		},
-		Subjects: []rbacv1.Subject{
-			{
-				Kind:      "ServiceAccount",
-				Name:      validationEngineName,
-				Namespace: validationEngineNamespace,
-			},
-		},
-	}, metav1.CreateOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("create validation-engine rolebinding: %w", err)
-	}
-
-	// 3. cloud-init Secret
+	// 2. cloud-init Secret
 	_, err = m.core.CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "session-cloudinit",
@@ -151,7 +117,7 @@ runcmd:
 		return nil, fmt.Errorf("create cloud-init secret: %w", err)
 	}
 
-	// 4. VirtualMachine — dataVolumeTemplates.source.pvc로 base 이미지를 복제한다.
+	// 3. VirtualMachine — dataVolumeTemplates.source.pvc로 base 이미지를 복제한다.
 	vm := &unstructured.Unstructured{
 		Object: map[string]interface{}{
 			"apiVersion": "kubevirt.io/v1",

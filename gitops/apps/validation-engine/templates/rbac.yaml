@@ -11,9 +11,10 @@ automountServiceAccountToken: true # virtctl이 K8s API(portforward)에 접근�
 apiVersion: rbac.authorization.k8s.io/v1
 # ClusterRole — VM 접근 권한 "집합"만 정의한다(바인딩 없음).
 # 세션 VM은 lab-{sessionID} 네임스페이스에 동적으로 생성되므로 특정 네임스페이스에
-# 고정된 Role로는 닿을 수 없다. 실제 연결은 Session API(apps/api/internal/kubevirt/session.go)가
-# 세션 생성 시 해당 lab-{sessionID} 네임스페이스에 이 ClusterRole을 참조하는 RoleBinding을 만들어
-# validation-engine을 활성 세션 네임스페이스로만 한정한다(최소권한).
+# 고정된 Role로는 닿을 수 없다. 실제 바인딩은 Kyverno generate 정책
+# (gitops/apps/kyverno/policies/validation-engine-rolebinding.yaml)이 lab-* 네임스페이스 생성 시
+# 이 ClusterRole을 참조하는 RoleBinding을 자동 생성해, validation-engine을 활성 세션
+# 네임스페이스로만 한정한다(최소권한).
 kind: ClusterRole
 metadata:
   name: validation-engine
