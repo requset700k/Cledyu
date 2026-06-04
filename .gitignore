@@ -62,7 +62,6 @@ build/
 scratch/
 .tmp/
 .kubelogin-cache/
-\
 
 # 도구 로컬 상태 / 로컬 계획서
 .omc/
