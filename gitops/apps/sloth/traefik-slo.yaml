@@ -21,19 +21,19 @@ spec:
       description: "Traefik이 처리하는 전체 요청 중 5xx 에러가 0.1% 미만이어야 한다."
       sli:
         events:
-          error_query: |
+          errorQuery: |
             sum(rate(traefik_service_requests_total{code=~"5.."}[{{.window}}]))
-          total_query: |
+          totalQuery: |
             sum(rate(traefik_service_requests_total[{{.window}}]))
       alerting:
         name: TraefikAvailabilitySLO
         labels:
           service: traefik
           slo: availability
-        page_alert:
+        pageAlert:
           labels:
             severity: critical
-        ticket_alert:
+        ticketAlert:
           labels:
             severity: warning
 
@@ -45,20 +45,20 @@ spec:
       description: "Traefik이 처리하는 전체 요청 중 99.9%는 1.2초 이내에 응답해야 한다."
       sli:
         events:
-          error_query: |
+          errorQuery: |
             sum(rate(traefik_service_request_duration_seconds_count[{{.window}}]))
             -
             sum(rate(traefik_service_request_duration_seconds_bucket{le="1.2"}[{{.window}}]))
-          total_query: |
+          totalQuery: |
             sum(rate(traefik_service_request_duration_seconds_count[{{.window}}]))
       alerting:
         name: TraefikLatencySLO
         labels:
           service: traefik
           slo: latency
-        page_alert:
+        pageAlert:
           labels:
             severity: critical
-        ticket_alert:
+        ticketAlert:
           labels:
             severity: warning
