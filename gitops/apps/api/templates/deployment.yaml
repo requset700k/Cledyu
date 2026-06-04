@@ -13,6 +13,7 @@ spec:
       labels:
         app: {{ .Release.Name }}
     spec:
+      serviceAccountName: {{ .Release.Name }} # 세션 프로비저닝 RBAC(rbac.yaml)이 붙은 전용 SA
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
