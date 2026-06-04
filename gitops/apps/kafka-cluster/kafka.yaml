@@ -99,3 +99,30 @@ spec:
           capabilities:
             drop:
               - ALL
+
+  # kafka_exporter: consumer group lag 메트릭 수집용.
+  # Strimzi가 관리하므로 별도 Deployment 불필요하며 plain 리스너로 브로커에 접속한다.
+  kafkaExporter:
+    topicRegex: ".*"
+    groupRegex: ".*"
+    resources:
+      requests:
+        cpu: 100m
+        memory: 64Mi
+      limits:
+        cpu: 500m
+        memory: 128Mi
+    # kafka 네임스페이스 PSA restricted 적용을 위해 securityContext 명시.
+    template:
+      pod:
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          seccompProfile:
+            type: RuntimeDefault
+      container:
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+              - ALL
