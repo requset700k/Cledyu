@@ -25,6 +25,13 @@ spec:
     # KRaft 모드에서는 log.message.format.version, inter.broker.protocol.version 사용 금지.
     metadataVersion: "3.8-IV0"
 
+    metricsConfig:
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef:
+          name: kafka-metrics
+          key: kafka-metrics-config.yml
+
     listeners:
       # plain: 인증서 관리가 불필요한 클러스터 내부 클라이언트용 (개발 도구 등).
       - name: plain
