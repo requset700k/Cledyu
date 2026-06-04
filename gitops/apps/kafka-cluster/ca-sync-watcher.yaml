@@ -202,7 +202,10 @@ spec:
 
                 echo "[ca-sync-watcher] CA Secret 동기화 완료"
                 # 민감한 키 파일은 즉시 삭제 (tmpfs라 재시작 시 자동 소멸되지만 명시적으로 정리)
-                rm -f /tmp/cluster-ca.key /tmp/cluster-ca.crt /tmp/clients-ca.key /tmp/clients-ca.crt /tmp/root-ca.crt /tmp/clients-split-1.crt /tmp/clients-split-2.crt /tmp/clients-split-3.crt
+                rm -f /tmp/cluster-ca.key /tmp/cluster-ca.crt \
+                      /tmp/clients-ca.key /tmp/clients-ca.crt \
+                      /tmp/root-ca.crt /tmp/clients-split-1.crt \
+                      /tmp/clients-split-2.crt /tmp/clients-split-3.crt
               }
 
               # 시작 시점의 ConfigMap 해시를 기준값으로 저장
