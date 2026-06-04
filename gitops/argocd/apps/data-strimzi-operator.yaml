@@ -50,10 +50,14 @@ spec:
         factor: 2        # 재시도마다 대기 시간을 2배씩 증가
         maxDuration: 3m
   # Strimzi CRD는 최초 설치 후 .status와 .spec.preserveUnknownFields에 diff가 쌓인다.
-  # 이를 무시하지 않으면 app이 영구적으로 OutOfSync 상태가 된다.
+  # 또한 Helm 차트가 생성하는 CRD 스키마에 포함된 "required: []" 빈 배열을
+  # Kubernetes API 서버가 apply 시 제거하여 영구적인 schema diff가 발생한다.
+  # 스키마는 Helm 차트 버전이 결정하므로 openAPIV3Schema 전체를 비교에서 제외한다.
   ignoreDifferences:
     - group: apiextensions.k8s.io
       kind: CustomResourceDefinition
       jsonPointers:
         - /spec/preserveUnknownFields
         - /status
+      jqPathExpressions:
+        - .spec.versions[].schema.openAPIV3Schema

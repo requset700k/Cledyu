@@ -168,11 +168,20 @@ envs:
 initContainers:
   - name: import-ca
     image: eclipse-temurin:11-jre  # keytool 명령이 있는 JRE 이미지
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+      runAsNonRoot: true
+      runAsUser: 1000
+      seccompProfile:
+        type: RuntimeDefault
     command:
       - /bin/sh
       - -c
       - |
-        cp /etc/ssl/certs/java/cacerts /tmp/cacerts/cacerts \
+        cp /opt/java/openjdk/lib/security/cacerts /tmp/cacerts/cacerts \
         && keytool -importcert -noprompt -trustcacerts \
            -alias cledyu-root-ca \
            -file /etc/ssl/certs-cledyu/ca.crt \

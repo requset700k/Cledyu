@@ -17,7 +17,7 @@ spec:
   privateKey:
     algorithm: RSA
     size: 4096
-    rotationPolicy: Always
+    rotationPolicy: Never
   subject:
     organizations:
       - Cledyu
@@ -49,7 +49,7 @@ spec:
   privateKey:
     algorithm: RSA
     size: 4096
-    rotationPolicy: Always
+    rotationPolicy: Never
   subject:
     organizations:
       - Cledyu
