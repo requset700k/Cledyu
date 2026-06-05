@@ -1,6 +1,12 @@
 // Package contentverify는 실제 랩 콘텐츠(apps/api/internal/content/labs/*.yaml)를
 // 검증 엔진(checker/model)에 그대로 흘려보내, 정답 상태는 통과·오답 상태는 실패로
-// 올바르게 판별하는지 검증하는 골든 하니스다.
+// 올바르게 판별하는지 확인하는 회귀 테스트다.
+//
+// 무엇을 막아주나:
+//   - Session API 가 Kafka(validation-requests)로 발행하는 Check 의 JSON 표현과
+//     검증 엔진이 소비하는 model.Check 의 JSON 표현이 어긋나면, 직렬화 과정에서
+//     필드가 조용히 유실되어 체크가 깨진다(예: command 가 cmd 로 정렬되지 않으면
+//     command 타입 체크 전부 실패). 이 테스트가 그 드리프트를 컴파일/CI 단계에서 잡는다.
 //
 // 왜 여기(validation-engine 모듈) 안에 있나:
 //   - apps/api 와 apps/validation-engine 은 별도 Go 모듈이고, checker/model 은
@@ -27,14 +33,12 @@ import (
 // 와이어 표현을 재현한다.
 //
 //   - yaml 태그 : 랩 DSL 키(랩 저자가 작성하는 필드명)와 일치한다.
-//   - json 태그 : apps/api/internal/content/loader.go 의 content.Check 와 반드시 동일해야 한다.
-//     이 하니스의 핵심 목적이 "API 가 실제로 내보내는 바이트"를 그대로 재현하는 것이기 때문이다.
-//     => content.Check 의 json 태그를 바꾸면 이 구조체도 같이 바꿔야 한다.
+//   - json 태그 : Session API 가 실제로 내보내는 바이트(message.Check)와 동일해야 한다.
+//     이 테스트의 핵심 목적이 "API 가 실제로 내보내는 바이트"를 그대로 재현하는 것이기 때문이다.
 type wireCheck struct {
 	Type string `yaml:"type" json:"type"`
-	// content.Check(apps/api/internal/content/loader.go)와 동일하게 json:"cmd" 를 써서
-	// 엔진 model.Check 의 cmd 와 정렬한다. 이 두 태그가 어긋나면 와이어 직렬화 후 Command 가
-	// 유실되며, 아래 TestLabContent_WirePreservesFields 가 그 드리프트를 잡는다.
+	// 엔진 model.Check 의 cmd 와 정렬하려고 json:"cmd" 를 쓴다. 이 둘이 어긋나면
+	// 와이어 직렬화 후 Command 가 유실되며, 아래 TestLabContent_WirePreservesFields 가 잡는다.
 	Command    string `yaml:"command,omitempty" json:"cmd,omitempty"`
 	Path       string `yaml:"path,omitempty" json:"path,omitempty"`
 	URL        string `yaml:"url,omitempty" json:"url,omitempty"`
@@ -61,7 +65,7 @@ func labsDir(t *testing.T) string {
 	if !ok {
 		t.Fatal("runtime.Caller 로 테스트 파일 경로를 구하지 못함")
 	}
-	// thisFile = .../apps/validation-engine/internal/contentverify/golden_test.go
+	// thisFile = .../apps/validation-engine/internal/contentverify/lab_content_wire_test.go
 	// 목표      = .../apps/api/internal/content/labs
 	dir := filepath.Dir(thisFile)
 	return filepath.Join(dir, "..", "..", "..", "api", "internal", "content", "labs")
@@ -97,7 +101,7 @@ func loadLabs(t *testing.T) []wireLab {
 }
 
 // toModelCheck 는 API 발행→엔진 소비의 실제 와이어 경로를 재현한다:
-// content.Check(JSON marshal) → Kafka → model.Check(JSON unmarshal).
+// wireCheck(JSON marshal) → Kafka → model.Check(JSON unmarshal).
 func toModelCheck(t *testing.T, wc wireCheck) model.Check {
 	t.Helper()
 	b, err := json.Marshal(wc) // Session API 가 발행하는 바이트
@@ -161,7 +165,7 @@ func TestLabContent_WirePreservesFields(t *testing.T) {
 				switch model.CheckType(wc.Type) {
 				case model.CheckCommand:
 					if mc.Command == "" {
-						t.Errorf("%s: command 가 와이어 직렬화 후 비어버림 — content.Check 와 엔진 model.Check 의 JSON 태그 불일치(command vs cmd)", where())
+						t.Errorf("%s: command 가 와이어 직렬화 후 비어버림 — API 의 발행 Check 와 엔진 model.Check 의 JSON 태그 불일치(command vs cmd)", where())
 					}
 					if mc.Expect == "" {
 						t.Errorf("%s: expect 가 비어있음", where())
@@ -211,7 +215,7 @@ func TestLabContent_JudgesCorrectly(t *testing.T) {
 	}
 }
 
-// TestLabContent_StepFailsIfAnyCheckWrong 는 스텝 단위(RunAll)에서, 모든 체크가 정답이면
+// TestLabContent_StepFailsIfAnyCheckWrong 는 스텝 단위에서, 모든 체크가 정답이면
 // 통과하고 한 체크라도 오답이면 스텝이 실패하는지(AND 판정) 검증한다.
 func TestLabContent_StepFailsIfAnyCheckWrong(t *testing.T) {
 	ctx := context.Background()
