@@ -46,9 +46,9 @@ spec:
       sli:
         events:
           errorQuery: |
-            sum(rate(traefik_service_request_duration_seconds_count[{{.window}}]))
+            (sum(rate(traefik_service_request_duration_seconds_count[{{.window}}])) or vector(0))
             -
-            sum(rate(traefik_service_request_duration_seconds_bucket{le="1.2"}[{{.window}}]))
+            (sum(rate(traefik_service_request_duration_seconds_bucket{le="1.2"}[{{.window}}])) or vector(0))
           totalQuery: |
             sum(rate(traefik_service_request_duration_seconds_count[{{.window}}]))
       alerting:
