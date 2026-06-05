@@ -35,11 +35,11 @@ spec:
     # ───────────────────────────────────────────
     - name: kafka-latency
       objective: 99.5
-      description: "Kafka 브로커의 Fetch 요청 지연시간 50th 퍼센타일이 500ms를 초과하는 비율"
+      description: "Kafka 브로커의 Fetch 요청 지연시간 50th 퍼센타일이 1000ms를 초과하는 비율"
       sli:
         raw:
           errorRatioQuery: |
-            avg(avg_over_time(kafka_network_requestmetrics_totaltimems_50thpercentile{request="Fetch"}[{{.window}}])) > bool 500
+            avg(avg_over_time(kafka_network_requestmetrics_totaltimems_50thpercentile{request="Fetch"}[{{ .window }}]) > bool 1000)
       alerting:
         name: KafkaLatencySLO
         pageAlert: { labels: { severity: critical } }

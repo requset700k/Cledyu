@@ -2,7 +2,7 @@
   "title": "SLO Burndown Dashboard",
   "uid": "slo-burndown-cledyu",
   "schemaVersion": 36,
-  "version": 3,
+  "version": 5,
   "refresh": "1m",
   "style": "dark",
   "tags": ["slo", "sloth", "platform"],
@@ -674,6 +674,83 @@
           "expr": "avg(slo:period_error_budget_remaining:ratio{sloth_service=\"kafka\", sloth_slo=\"kafka-latency\"})",
           "legendFormat": "Latency Budget",
           "refId": "A"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Kafka — Error Budget Burndown (7d)",
+      "id": 303,
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 37
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 15
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Availability Budget"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#73BF69",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Latency Budget"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "#5794F2",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "tooltip": {
+          "mode": "multi"
+        },
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "targets": [
+        {
+          "expr": "avg(slo:period_error_budget_remaining:ratio{sloth_service=\"kafka\", sloth_slo=\"kafka-availability\"})",
+          "legendFormat": "Availability Budget",
+          "refId": "A"
+        },
+        {
+          "expr": "avg(slo:period_error_budget_remaining:ratio{sloth_service=\"kafka\", sloth_slo=\"kafka-latency\"})",
+          "legendFormat": "Latency Budget",
+          "refId": "B"
         }
       ]
     }
