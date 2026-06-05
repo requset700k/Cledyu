@@ -28,9 +28,17 @@ spec:
               value: {{ .Values.env.CLEDYU_SERVER_MODE | quote }}
             - name: CLEDYU_REDIS_ADDR
               value: {{ .Values.env.CLEDYU_REDIS_ADDR | quote }}
-            # validation-requests Kafka 발행 — 인증서는 아래 kafka-certs 볼륨(기본 경로 /etc/kafka-certs).
+            # validation-requests Kafka 발행 — 인증서는 아래 kafka-certs 볼륨.
+            - name: CLEDYU_KAFKA_ENABLED
+              value: {{ .Values.env.CLEDYU_KAFKA_ENABLED | quote }}
             - name: CLEDYU_KAFKA_BROKERS
               value: {{ .Values.env.CLEDYU_KAFKA_BROKERS | quote }}
+            - name: CLEDYU_KAFKA_TLS_CERT
+              value: /etc/kafka-certs/tls.crt
+            - name: CLEDYU_KAFKA_TLS_KEY
+              value: /etc/kafka-certs/tls.key
+            - name: CLEDYU_KAFKA_CA_CERT
+              value: /etc/kafka-certs/ca.crt
             # Keycloak OIDC (학습자 realm cledyu-learn). client_secret 은 Vault→ESO Secret 에서.
             - name: CLEDYU_KEYCLOAK_URL
               value: {{ .Values.keycloak.url | quote }}
