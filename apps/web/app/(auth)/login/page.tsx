@@ -20,8 +20,18 @@ export default function LoginPage() {
             href="/api/v1/auth/login"
             className="flex items-center justify-center gap-2 w-full bg-brand-500 hover:bg-brand-600 text-white font-medium py-3 px-4 rounded-xl transition-colors duration-150"
           >
-            Cledyu로 로그인
+            로그인 / 소셜 로그인
           </a>
+
+          <p className="text-center text-slate-400 text-sm mt-4">
+            처음이신가요?{' '}
+            <a
+              href="/api/v1/auth/login?screen=register"
+              className="text-brand-400 hover:text-brand-300 font-medium"
+            >
+              회원가입
+            </a>
+          </p>
 
           <div className="mt-8 pt-6 border-t border-slate-700 space-y-3">
             <Feature

@@ -16,9 +16,9 @@ export function Navbar() {
   // 모바일(xs) 햄버거 메뉴 토글 상태. sm 이상에서는 항상 데스크톱 네비를 노출.
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  async function handleLogout() {
-    await api.auth.logout().catch(() => {});
-    window.location.href = '/login';
+  function handleLogout() {
+    // 백엔드 GET /auth/logout 으로 전체 페이지 이동 → 쿠키 삭제 + Keycloak SSO 로그아웃.
+    api.auth.logout();
   }
 
   return (
