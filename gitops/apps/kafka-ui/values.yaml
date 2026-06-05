@@ -13,6 +13,10 @@ image:
 yamlApplicationConfig:
   kafka:
     clusters:
+      # ⚠️ name/bootstrapServers의 실효 소스는 아래 env(KAFKA_CLUSTERS_0_*)다.
+      # Spring Boot 3 바인딩상 env가 있으면 config.yml의 이 값들은 무시되므로
+      # 둘을 항상 같은 값으로 유지할 것(드리프트 주의). 여기 값은 rbac.roles[].clusters
+      # 참조 해석과 가독성을 위해 남겨둔다.
       - name: cledyu-kafka
         # 9092: plain 리스너 (TLS 없음, 인증 없음)
         # 9093: tls 리스너 (mTLS 필수) ← authorization: simple 활성화 이후 여기만 ACL 통과 가능
@@ -208,7 +212,10 @@ initContainers:
 # 메인 컨테이너(kafka-ui)에 마운트할 볼륨 경로.
 volumeMounts:
   - name: java-cacerts
-    mountPath: /usr/lib/jvm/zulu25-ca/lib/security/cacerts  # kafka-ui v1.5.0 Azul Zulu JVM 실제 truststore 경로
+    # JVM이 실제로 읽는 기본 truststore = $java.home/lib/security/cacerts.
+    # v1.5.0 이미지는 java.home=/usr/lib/jvm/zulu25-ca(Azul Zulu 25) 라 이 경로여야 적용된다.
+    # ⚠️ 이미지 태그를 올릴 때(예: zulu25→zulu26) 이 경로가 바뀔 수 있으니 java.home을 재확인할 것.
+    mountPath: /usr/lib/jvm/zulu25-ca/lib/security/cacerts
     subPath: cacerts
 
 volumes:
