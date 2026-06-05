@@ -3,6 +3,19 @@
 Cledyu Keycloak의 realm, OIDC client, realm role, group, 팀원 초기 계정을
 선언적으로 관리하는 Terraform 스택.
 
+## Realm 구조 (2-realm)
+
+운영자와 외부 학습자를 realm 수준에서 격리한다 (ADR `docs/ADR/learner-realm-split.md`).
+
+| Realm | 파일 | 용도 |
+|---|---|---|
+| `cledyu` (내부) | `realm.tf`, `clients.tf`, `roles.tf`(=`locals.tf`), `groups.tf`, `users.tf` | 팀원 + 운영자 SSO(ArgoCD/Grafana/Kafka-UI/kube-apiserver/Vault). `registration_allowed=false`. |
+| `cledyu-learn` (외부) | `realm-learn.tf`, `clients-learn.tf`, `roles-learn.tf`, `idp-learn.tf` | 학습자 자가가입 + 소셜 IdP(구글/카카오/네이버) + `web`/`api`/`tutor` 클라이언트. |
+
+- 운영자 realm 이름·issuer(`…/realms/cledyu`)는 절대 바꾸지 않는다 — SSO 소비자 5종이 의존.
+- 소셜 IdP 는 `enable_social_idp`, 이메일 인증은 `learn_verify_email` 로 게이트(실 발급/SMTP 설정 전 false).
+- 운영 절차는 RUNBOOK `docs/RUNBOOK/learner-auth.md`.
+
 ## 시크릿 관리
 
 실제 `terraform.tfvars`, `oidc_client_secrets`,

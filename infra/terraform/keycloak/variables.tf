@@ -109,3 +109,91 @@ variable "master_admin_initial_passwords" {
   default     = {}
   sensitive   = true
 }
+
+# ─────────────────────────────────────────────────────────────────────────
+# cledyu-learn realm — 외부 학습자 자가가입 + 소셜 로그인
+# ─────────────────────────────────────────────────────────────────────────
+
+variable "learn_realm_name" {
+  description = "외부 학습자용 realm 이름."
+  type        = string
+  default     = "cledyu-learn"
+}
+
+variable "learn_realm_display_name" {
+  description = "학습자 realm 화면 표시 이름."
+  type        = string
+  default     = "Cledyu"
+}
+
+variable "learn_verify_email" {
+  description = "학습자 realm 이메일 인증 요구 여부. SMTP(learn_smtp) 설정 후에만 true."
+  type        = bool
+  default     = false
+}
+
+variable "learn_smtp" {
+  description = "학습자 realm SMTP 설정. null 이면 SMTP 미설정(verify_email/비번재설정 메일 발송 불가)."
+  type = object({
+    host              = string
+    port              = string
+    from              = string
+    from_display_name = optional(string, "Cledyu")
+    ssl               = optional(bool, false)
+    starttls          = optional(bool, true)
+    auth_username     = optional(string)
+  })
+  default = null
+}
+
+variable "learn_smtp_password" {
+  description = "학습자 realm SMTP 인증 비밀번호. 실제 값은 보안 저장소에만 보관."
+  type        = string
+  default     = null
+  sensitive   = true
+}
+
+variable "learn_oidc_clients" {
+  description = "cledyu-learn realm에서 관리하는 OIDC client 목록(web/api/tutor)."
+  type = map(object({
+    name                            = string
+    access_type                     = string
+    standard_flow_enabled           = bool
+    direct_access_grants_enabled    = bool
+    implicit_flow_enabled           = bool
+    service_accounts_enabled        = bool
+    pkce_code_challenge_method      = optional(string)
+    valid_redirect_uris             = optional(list(string), [])
+    valid_post_logout_redirect_uris = optional(list(string), [])
+    web_origins                     = optional(list(string), [])
+    root_url                        = optional(string)
+    base_url                        = optional(string)
+    admin_url                       = optional(string)
+  }))
+}
+
+variable "learn_oidc_client_secrets" {
+  description = "cledyu-learn realm confidential client secret. 실제 값은 보안 저장소/Vault에만 보관."
+  type        = map(string)
+  default     = {}
+  sensitive   = true
+}
+
+variable "enable_social_idp" {
+  description = "소셜 IdP(구글/카카오/네이버) 생성 여부. 실 client 발급 전까지 false."
+  type        = bool
+  default     = false
+}
+
+variable "idp_client_ids" {
+  description = "소셜 IdP client id(공개값). google/kakao/naver 키."
+  type        = map(string)
+  default     = {}
+}
+
+variable "idp_client_secrets" {
+  description = "소셜 IdP client secret. 실제 값은 보안 저장소/Vault에만 보관."
+  type        = map(string)
+  default     = {}
+  sensitive   = true
+}

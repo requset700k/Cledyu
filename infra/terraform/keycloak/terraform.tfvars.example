@@ -1,37 +1,8 @@
 keycloak_admin_username = "temp-admin"
 keycloak_admin_password = "REPLACE_WITH_1PASSWORD_VALUE"
 
+# 운영자(내부) realm 클라이언트만. 학습자 앱(web/api/tutor)은 learn_oidc_clients 참조.
 oidc_clients = {
-  web = {
-    name                         = "Cledyu Web"
-    access_type                  = "PUBLIC"
-    standard_flow_enabled        = true
-    direct_access_grants_enabled = false
-    implicit_flow_enabled        = false
-    service_accounts_enabled     = false
-    pkce_code_challenge_method   = "S256"
-    valid_redirect_uris          = ["https://app.cledyu.local/*"]
-    web_origins                  = ["https://app.cledyu.local"]
-  }
-
-  api = {
-    name                         = "Cledyu API"
-    access_type                  = "BEARER-ONLY"
-    standard_flow_enabled        = false
-    direct_access_grants_enabled = false
-    implicit_flow_enabled        = false
-    service_accounts_enabled     = false
-  }
-
-  tutor = {
-    name                         = "Cledyu Tutor API"
-    access_type                  = "BEARER-ONLY"
-    standard_flow_enabled        = false
-    direct_access_grants_enabled = false
-    implicit_flow_enabled        = false
-    service_accounts_enabled     = false
-  }
-
   argocd = {
     name                            = "Cledyu ArgoCD"
     access_type                     = "CONFIDENTIAL"
@@ -89,6 +60,77 @@ oidc_client_secrets = {
   argocd  = "REPLACE_WITH_ARGOCD_CLIENT_SECRET"
   grafana = "REPLACE_WITH_GRAFANA_CLIENT_SECRET"
   vault   = "REPLACE_WITH_VAULT_CLIENT_SECRET"
+}
+
+# ─────────────────────────────────────────────────────────────────────────
+# cledyu-learn realm — 외부 학습자 자가가입 + 소셜 로그인 (운영자 realm과 분리)
+# ─────────────────────────────────────────────────────────────────────────
+
+# 학습자 앱 클라이언트. web 은 백엔드 BFF(code 교환 대행)라 confidential.
+learn_oidc_clients = {
+  web = {
+    name                            = "Cledyu Web"
+    access_type                     = "CONFIDENTIAL"
+    standard_flow_enabled           = true
+    direct_access_grants_enabled    = false
+    implicit_flow_enabled           = false
+    service_accounts_enabled        = false
+    pkce_code_challenge_method      = "S256"
+    valid_redirect_uris             = ["https://api.cledyu.local/api/v1/auth/callback"]
+    valid_post_logout_redirect_uris = ["https://app.cledyu.local/"]
+    web_origins                     = ["https://app.cledyu.local"]
+    root_url                        = "https://app.cledyu.local"
+    base_url                        = "/"
+  }
+
+  api = {
+    name                         = "Cledyu API"
+    access_type                  = "BEARER-ONLY"
+    standard_flow_enabled        = false
+    direct_access_grants_enabled = false
+    implicit_flow_enabled        = false
+    service_accounts_enabled     = false
+  }
+
+  tutor = {
+    name                         = "Cledyu Tutor API"
+    access_type                  = "BEARER-ONLY"
+    standard_flow_enabled        = false
+    direct_access_grants_enabled = false
+    implicit_flow_enabled        = false
+    service_accounts_enabled     = false
+  }
+}
+
+learn_oidc_client_secrets = {
+  web = "REPLACE_WITH_WEB_CLIENT_SECRET"
+}
+
+# 소셜 IdP 게이트. 카카오/네이버/구글 개발자 콘솔에서 client 발급 후 true.
+enable_social_idp = false
+
+# 이메일 인증. learn_smtp 설정 후 true 로.
+learn_verify_email = false
+
+# (선택) 학습자 realm SMTP — verify_email / 비번재설정 메일 발송용.
+# learn_smtp = {
+#   host          = "smtp.example.com"
+#   port          = "587"
+#   from          = "no-reply@cledyu.io"
+#   auth_username = "no-reply@cledyu.io"
+# }
+# learn_smtp_password = "REPLACE_WITH_SMTP_PASSWORD"
+
+idp_client_ids = {
+  google = "REPLACE_WITH_GOOGLE_OAUTH_CLIENT_ID"
+  kakao  = "REPLACE_WITH_KAKAO_REST_API_KEY"
+  naver  = "REPLACE_WITH_NAVER_CLIENT_ID"
+}
+
+idp_client_secrets = {
+  google = "REPLACE_WITH_GOOGLE_OAUTH_CLIENT_SECRET"
+  kakao  = "REPLACE_WITH_KAKAO_CLIENT_SECRET"
+  naver  = "REPLACE_WITH_NAVER_CLIENT_SECRET"
 }
 
 team_members = {
