@@ -20,8 +20,11 @@ var labsFS embed.FS
 // 필드 구성은 검증엔진(apps/validation-engine/internal/model)의 Check 와 정렬되어 있어,
 // 실제 검증엔진으로 그대로 전달(publish)할 수 있다.
 type Check struct {
-	Type       string `yaml:"type" json:"type"`
-	Command    string `yaml:"command,omitempty" json:"command,omitempty"`
+	Type string `yaml:"type" json:"type"`
+	// Command 의 JSON 태그는 검증엔진 model.Check(json:"cmd")와 일치시켜야 한다.
+	// YAML 태그는 랩 DSL 키(랩 저자는 계속 `command:` 작성)를 유지한다.
+	// 불일치 시 Kafka 발행→소비 과정에서 cmd 가 유실돼 command 타입 체크가 전부 깨진다.
+	Command    string `yaml:"command,omitempty" json:"cmd,omitempty"`
 	Path       string `yaml:"path,omitempty" json:"path,omitempty"`
 	URL        string `yaml:"url,omitempty" json:"url,omitempty"`
 	Name       string `yaml:"name,omitempty" json:"name,omitempty"`
