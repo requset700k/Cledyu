@@ -13,6 +13,10 @@ image:
 yamlApplicationConfig:
   kafka:
     clusters:
+      # ⚠️ name/bootstrapServers의 실효 소스는 아래 env(KAFKA_CLUSTERS_0_*)다.
+      # Spring Boot 3 바인딩상 env가 있으면 config.yml의 이 값들은 무시되므로
+      # 둘을 항상 같은 값으로 유지할 것(드리프트 주의). 여기 값은 rbac.roles[].clusters
+      # 참조 해석과 가독성을 위해 남겨둔다.
       - name: cledyu-kafka
         # 9092: plain 리스너 (TLS 없음, 인증 없음)
         # 9093: tls 리스너 (mTLS 필수) ← authorization: simple 활성화 이후 여기만 ACL 통과 가능
@@ -109,6 +113,14 @@ yamlApplicationConfig:
 # kafbat/kafka-ui는 KAFKA_CLUSTERS_0_PROPERTIES_* 형태의 환경변수를
 # kafka.clusters[0].properties.* 설정으로 매핑해서 Kafka 클라이언트에 전달한다.
 env:
+  # Spring Boot 3는 KAFKA_CLUSTERS_0_* env var가 있으면 clusters[0] 전체를 env var 소스로 간주한다.
+  # config.yml의 name/bootstrapServers는 무시되어 @NotBlank 검증 실패 → CrashLoopBackOff.
+  # 따라서 name/bootstrapServers도 env var로 명시해야 한다.
+  - name: KAFKA_CLUSTERS_0_NAME
+    value: cledyu-kafka
+  - name: KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS
+    value: cledyu-kafka-kafka-bootstrap.kafka.svc:9093
+
   # Kafka 브로커와의 통신을 SSL(mTLS)로 한다는 선언.
   # PLAINTEXT(암호화 없음) / SSL(TLS) / SASL_PLAINTEXT / SASL_SSL 중 선택.
   - name: KAFKA_CLUSTERS_0_PROPERTIES_SECURITY_PROTOCOL
@@ -189,7 +201,7 @@ initContainers:
            -storepass changeit
         # 1. 기존 Java cacerts를 /tmp/cacerts/에 복사 (원본 유지)
         # 2. keytool로 cledyu-root-ca를 복사본에 추가
-        # 결과물은 메인 컨테이너가 /etc/ssl/certs/java/cacerts로 마운트해서 사용
+        # 결과물은 메인 컨테이너가 /usr/lib/jvm/zulu25-ca/lib/security/cacerts로 마운트해서 사용
     volumeMounts:
       - name: java-cacerts
         mountPath: /tmp/cacerts           # 복사본을 여기에 저장
@@ -200,8 +212,11 @@ initContainers:
 # 메인 컨테이너(kafka-ui)에 마운트할 볼륨 경로.
 volumeMounts:
   - name: java-cacerts
-    mountPath: /etc/ssl/certs/java/cacerts  # Java가 기본으로 읽는 truststore 경로
-    subPath: cacerts  # emptyDir 안의 cacerts 파일 하나만 이 경로에 덮어씌운다
+    # JVM이 실제로 읽는 기본 truststore = $java.home/lib/security/cacerts.
+    # v1.5.0 이미지는 java.home=/usr/lib/jvm/zulu25-ca(Azul Zulu 25) 라 이 경로여야 적용된다.
+    # ⚠️ 이미지 태그를 올릴 때(예: zulu25→zulu26) 이 경로가 바뀔 수 있으니 java.home을 재확인할 것.
+    mountPath: /usr/lib/jvm/zulu25-ca/lib/security/cacerts
+    subPath: cacerts
 
 volumes:
   # initContainer가 수정한 cacerts를 메인 컨테이너로 전달하는 임시 공간.
