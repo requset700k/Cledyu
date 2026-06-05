@@ -38,6 +38,29 @@ type stepStore struct {
 
 func newStepStore() *stepStore { return &stepStore{m: make(map[string]*sessionSteps)} }
 
+// userLocks는 유저별 mutex를 보관해 같은 유저의 동시 세션 생성을 직렬화한다.
+// 단일 세션 제약은 "활성 세션 조회 → 없으면 생성" 두 단계라, 더블클릭 등 동시 요청이
+// 둘 다 조회를 통과하는 TOCTOU 경합이 가능하다. 유저별 락으로 단일 API 인스턴스 내에서는 이를 막는다
+// (다중 레플리카에서는 best-effort — 완전 차단엔 별도 분산 락이 필요).
+type userLocks struct {
+	mu sync.Mutex
+	m  map[string]*sync.Mutex
+}
+
+func newUserLocks() *userLocks { return &userLocks{m: make(map[string]*sync.Mutex)} }
+
+// get은 userID 전용 mutex를 반환한다(없으면 생성).
+func (u *userLocks) get(userID string) *sync.Mutex {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	lk, ok := u.m[userID]
+	if !ok {
+		lk = &sync.Mutex{}
+		u.m[userID] = lk
+	}
+	return lk
+}
+
 // newSessionID는 짧은 hex 세션 id를 생성한다.
 func newSessionID() string {
 	b := make([]byte, 4)
@@ -101,6 +124,29 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	}
 	userID, _ := c.Get("user_id")
 	uid, _ := userID.(string)
+
+	// 한 유저당 활성 세션 1개로 제한한다. uid가 있으면 유저별 락으로 동시요청을 직렬화하고
+	// (락은 생성 완료까지 유지), 이미 활성 세션이 있으면 409로 거부한다.
+	if uid != "" {
+		lk := h.userLocks.get(uid)
+		lk.Lock()
+		defer lk.Unlock()
+
+		existing, err := h.sessions.FindActiveByUser(c.Request.Context(), uid)
+		if err != nil {
+			h.log.Error("find active session", zap.Error(err))
+			h.err(c, http.StatusInternalServerError, "check active session failed")
+			return
+		}
+		if existing != "" {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":      "active session already exists",
+				"code":       "session_exists",
+				"session_id": existing,
+			})
+			return
+		}
+	}
 
 	sess, err := h.sessions.Create(c.Request.Context(), newSessionID(), req.LabID, uid)
 	if err != nil {

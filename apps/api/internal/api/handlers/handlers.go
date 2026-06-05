@@ -23,6 +23,7 @@ type Handler struct {
 	steps     *stepStore                    // STUB(검증엔진 연동 전): 세션별 스텝 진행 상태 in-memory.
 	virt      kubecli.KubevirtClient        // VM serial console 접속용 KubeVirt 클라이언트. nil이면 콘솔 비활성.
 	validator validation.Publisher          // validation-requests Kafka 발행기. nil이면 debug 모드에서 mock 검증.
+	userLocks *userLocks                    // 유저별 세션 생성 직렬화 — 단일 세션 제약의 동시요청 경합 완화.
 }
 
 // New는 설정/로거/세션 매니저/OIDC provider를 받아 Handler를 생성한다. sessions·authProvider는 nil 허용.
@@ -50,6 +51,7 @@ func New(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, valida
 		steps:     newStepStore(),
 		virt:      virt,
 		validator: validator,
+		userLocks: newUserLocks(),
 	}
 }
 
