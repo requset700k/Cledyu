@@ -25,7 +25,7 @@ spec:
     group: cert-manager.io
 
 ---
-# Strimzi KafkaUser — CN=api 인증서로 인증하고, validation-requests 토픽에 발행만 허용한다(최소권한).
+# Strimzi KafkaUser — CN=api 인증서로 인증하고, validation-requests 발행 + validation-results 구독을 허용한다(최소권한).
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaUser
 metadata:
@@ -45,3 +45,15 @@ spec:
           name: validation-requests
           patternType: literal
         operations: [Write, Describe]
+      # validation-results 토픽 구독 권한
+      - resource:
+          type: topic
+          name: validation-results
+          patternType: literal
+        operations: [Read, Describe]
+      # 컨슈머 그룹 권한 — GroupID "api" 사용 권한
+      - resource:
+          type: group
+          name: api
+          patternType: literal
+        operations: [Read]
