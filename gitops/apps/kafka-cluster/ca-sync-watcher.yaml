@@ -28,13 +28,6 @@ rules:
     resources: ["configmaps"]
     resourceNames: ["cledyu-root-ca-bundle"]
     verbs: ["get"]
-  # cert-manager 가 생성한 intermediate CA Secret을 읽을 수 있는 권한
-  - apiGroups: [""]
-    resources: ["secrets"]
-    resourceNames:
-      - kafka-cluster-ca-cm
-      - kafka-clients-ca-cm
-    verbs: ["get"]
   # Strimzi가 참조하는 Secret을 생성/수정할 수 있는 권한
   - apiGroups: [""]
     resources: ["secrets"]
@@ -57,6 +50,37 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
   name: kafka-ca-sync-watcher
+subjects:
+  - kind: ServiceAccount
+    name: kafka-ca-sync-watcher
+    namespace: kafka
+---
+# cert-manager 네임스페이스의 CA Secret read 권한.
+# kafka-cluster-ca-cm, kafka-clients-ca-cm이 cert-manager 네임스페이스에 있으므로
+# kafka-ca-sync-watcher가 거기서 읽어야 한다.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kafka-ca-sync-watcher-reader
+  namespace: cert-manager
+rules:
+  # kafka-cluster-ca-cm, kafka-clients-ca-cm 모두 cert-manager 네임스페이스에 있음
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames:
+      - kafka-cluster-ca-cm
+      - kafka-clients-ca-cm
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kafka-ca-sync-watcher-reader
+  namespace: cert-manager
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kafka-ca-sync-watcher-reader
 subjects:
   - kind: ServiceAccount
     name: kafka-ca-sync-watcher
@@ -130,9 +154,9 @@ spec:
                 # cert-manager가 만든 cluster intermediate CA Secret에서 키/인증서 추출
                 # tls.key → ca.key, tls.crt + root CA → ca.crt (전체 체인)
                 # Strimzi는 openssl verify로 전체 체인을 검증하기 때문에 root까지 붙여야 함
-                kubectl get secret kafka-cluster-ca-cm -n kafka \
+                kubectl get secret kafka-cluster-ca-cm -n cert-manager \
                   -o jsonpath='{.data.tls\.key}' | base64 -d > /tmp/cluster-ca.key
-                kubectl get secret kafka-cluster-ca-cm -n kafka \
+                kubectl get secret kafka-cluster-ca-cm -n cert-manager \
                   -o jsonpath='{.data.tls\.crt}' | base64 -d > /tmp/cluster-ca.crt
                 cat /tmp/root-ca.crt >> /tmp/cluster-ca.crt
 
@@ -151,11 +175,15 @@ spec:
                   | kubectl apply -f -
 
                 # clients intermediate CA도 동일한 방식으로 처리
-                kubectl get secret kafka-clients-ca-cm -n kafka \
+                kubectl get secret kafka-clients-ca-cm -n cert-manager \
                   -o jsonpath='{.data.tls\.key}' | base64 -d > /tmp/clients-ca.key
-                kubectl get secret kafka-clients-ca-cm -n kafka \
+                kubectl get secret kafka-clients-ca-cm -n cert-manager \
                   -o jsonpath='{.data.tls\.crt}' | base64 -d > /tmp/clients-ca.crt
                 cat /tmp/root-ca.crt >> /tmp/clients-ca.crt
+
+                # PEM 체인을 개별 파일로 분리 — keytool은 파일당 첫 번째 cert만 읽으므로
+                # Strimzi의 for CRT in /opt/kafka/client-ca-certs/*.crt 루프가 CA마다 따로 import
+                awk 'BEGIN{i=0} /-----BEGIN CERTIFICATE-----/{i++; file="/tmp/clients-split-"i".crt"} {print > file}' /tmp/clients-ca.crt
 
                 kubectl create secret generic cledyu-kafka-clients-ca \
                   --from-file=ca.key=/tmp/clients-ca.key \
@@ -163,15 +191,21 @@ spec:
                   | kubectl label --local -f - strimzi.io/kind=Kafka strimzi.io/cluster=cledyu-kafka --dry-run=client -o yaml \
                   | kubectl apply -f -
 
+                # cert 3개로 분리 저장 — Strimzi가 각각 import해 truststore에 3개 CA 모두 포함
                 kubectl create secret generic cledyu-kafka-clients-ca-cert \
-                  --from-file=ca.crt=/tmp/clients-ca.crt \
+                  --from-file=ca.crt=/tmp/clients-split-1.crt \
+                  --from-file=ca-internal.crt=/tmp/clients-split-2.crt \
+                  --from-file=ca-root.crt=/tmp/clients-split-3.crt \
                   --namespace kafka --dry-run=client -o yaml \
                   | kubectl label --local -f - strimzi.io/kind=Kafka strimzi.io/cluster=cledyu-kafka --dry-run=client -o yaml \
                   | kubectl apply -f -
 
                 echo "[ca-sync-watcher] CA Secret 동기화 완료"
                 # 민감한 키 파일은 즉시 삭제 (tmpfs라 재시작 시 자동 소멸되지만 명시적으로 정리)
-                rm -f /tmp/cluster-ca.key /tmp/cluster-ca.crt /tmp/clients-ca.key /tmp/clients-ca.crt /tmp/root-ca.crt
+                rm -f /tmp/cluster-ca.key /tmp/cluster-ca.crt \
+                      /tmp/clients-ca.key /tmp/clients-ca.crt \
+                      /tmp/root-ca.crt /tmp/clients-split-1.crt \
+                      /tmp/clients-split-2.crt /tmp/clients-split-3.crt
               }
 
               # 시작 시점의 ConfigMap 해시를 기준값으로 저장

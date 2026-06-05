@@ -1,0 +1,25 @@
+---
+# Kyverno background-controller 가 generate 정책으로 RoleBinding 을 만들고,
+# 그 RoleBinding 이 참조하는 validation-engine ClusterRole 에 bind 할 수 있도록 권한을 부여한다.
+# 기본 Kyverno 는 권한 상승(privilege escalation) 방지를 위해 RBAC 리소스 생성 권한이 없으므로,
+# aggregation 라벨로 background-controller ClusterRole 에 이 규칙을 합산(aggregate)한다.
+# (chart values 스키마에 의존하지 않는 버전 안정적인 확장 방식)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kyverno:generate-validation-engine-rolebinding
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  labels:
+    rbac.kyverno.io/aggregate-to-background-controller: "true"
+rules:
+  # 세션 네임스페이스에 RoleBinding 을 생성/동기화/삭제할 수 있어야 한다.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # 생성하는 RoleBinding 이 ClusterRole 을 참조하므로, 권한 상승 방지 규칙상 그 ClusterRole 에
+  # bind 권한이 필요하다. validation-engine ClusterRole 로만 한정해 최소권한을 유지한다.
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles"]
+    verbs: ["bind"]
+    resourceNames: ["validation-engine"]

@@ -3,6 +3,7 @@ package checker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -74,6 +75,9 @@ func runCommand(ctx context.Context, exe executor.VMExecutor, check model.Check)
 	// VM에서 명령어를 실행
 	output, err := exe.Exec(ctx, check.Command)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return requestError("VM 연결 timeout")
+		}
 		return fail(check.Type, fmt.Sprintf("명령어 실행 실패: %s", err))
 	}
 
@@ -99,6 +103,9 @@ func runFileExists(ctx context.Context, exe executor.VMExecutor, check model.Che
 	// 쉘의 'test -f' 명령어를 사용하여 파일이 존재하는지 확인
 	_, err := exe.Exec(ctx, "test -f "+check.Path)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return requestError("VM 연결 timeout")
+		}
 		return fail(check.Type, fmt.Sprintf("파일 없음: %s", check.Path))
 	}
 	return pass(check.Type)
@@ -117,6 +124,9 @@ func runFileContent(ctx context.Context, exe executor.VMExecutor, check model.Ch
 	// 'cat' 명령어로 파일 내용을 읽어온다
 	output, err := exe.Exec(ctx, "cat "+check.Path)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return requestError("VM 연결 timeout")
+		}
 		return fail(check.Type, fmt.Sprintf("파일 읽기 실패: %s", err))
 	}
 
@@ -137,6 +147,9 @@ func runProcessRunning(ctx context.Context, exe executor.VMExecutor, check model
 	// 'pgrep' 명령어로 해당 이름의 프로세스가 실행 중인지 확인
 	_, err := exe.Exec(ctx, "pgrep "+check.Name)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return requestError("VM 연결 timeout")
+		}
 		return fail(check.Type, fmt.Sprintf("프로세스 실행 중 아님: %s", check.Name))
 	}
 	return pass(check.Type)
@@ -155,6 +168,9 @@ func runHTTPResponse(ctx context.Context, exe executor.VMExecutor, check model.C
 	cmd := fmt.Sprintf("curl -s -o /dev/null -w %%{http_code} %s", check.URL)
 	output, err := exe.Exec(ctx, cmd)
 	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return requestError("VM 연결 timeout")
+		}
 		return fail(check.Type, fmt.Sprintf("HTTP 요청 실패: %s", err))
 	}
 
@@ -172,7 +188,12 @@ func pass(t model.CheckType) model.CheckResult {
 	return model.CheckResult{Type: t, Passed: true}
 }
 
-// 실패 결과 객체 생성
 func fail(t model.CheckType, detail string) model.CheckResult {
 	return model.CheckResult{Type: t, Passed: false, Detail: detail}
+}
+
+// requestError는 VM 연결 자체가 실패한 인프라 장애를 나타낸다.
+// 학습자 정답 여부와 무관한 시스템 오류로, Session API가 별도 처리해야 한다.
+func requestError(detail string) model.CheckResult {
+	return model.CheckResult{Type: model.CheckRequestError, Passed: false, Detail: detail}
 }

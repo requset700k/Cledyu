@@ -1,0 +1,20 @@
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: kafka
+  namespace: kafka
+  labels:
+    release: kps
+spec:
+  namespaceSelector:
+    matchNames:
+      - kafka
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kafka-metrics
+  endpoints:
+    - port: tcp-prometheus
+      scheme: http
+      interval: 30s
+      scrapeTimeout: 10s

@@ -1,8 +1,15 @@
 ---
-local_dns_unix_hosts_file: /etc/hosts
-local_dns_windows_hosts_file: C:\Windows\System32\drivers\etc\hosts
-local_dns_entries:
-  - ip: 10.10.0.101
-    hostname: keycloak.cledyu.local
-  - ip: 10.10.0.101
-    hostname: vault.cledyu.local
+# Cledyu 와일드카드 DNS forwarding 설정.
+# 호스트별 /etc/hosts entry 대신 cledyu.local 도메인 전체를 클러스터 CoreDNS 로
+# 위임. 신규 서비스 추가 시 본 role / 팀원 머신 재실행 불요.
+local_dns_resolver_ip: 10.10.0.102
+local_dns_search_domain: cledyu.local
+
+# 검증용 와일드카드 호스트 — 실제 ingress 가 없어도 template plugin 이 응답해야 함.
+local_dns_probe_host: "wildcard-probe.{{ local_dns_search_domain }}"
+local_dns_probe_expected_ip: 10.10.0.101
+
+# macOS resolver dir.
+local_dns_macos_resolver_dir: /etc/resolver
+# Linux systemd-resolved drop-in dir.
+local_dns_linux_resolved_dropin_dir: /etc/systemd/resolved.conf.d

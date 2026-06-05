@@ -1,0 +1,13 @@
+---
+# validation-engine 등 Kafka 클라이언트 mTLS 인증서 발급용 ClusterIssuer.
+# ca-certificates.yaml의 kafka-clients-ca Certificate가 cert-manager 네임스페이스에
+# kafka-clients-ca-cm Secret을 생성하면 이 ClusterIssuer가 참조한다.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: kafka-clients-ca
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  ca:
+    secretName: kafka-clients-ca-cm

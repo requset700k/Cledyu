@@ -32,6 +32,11 @@ spec:
     -Xmx: 2048m
   # kafka 네임스페이스 PSA restricted 적용을 위해 securityContext를 명시한다.
   template:
+    persistentVolumeClaim:
+      metadata:
+        annotations:
+          argocd.argoproj.io/sync-options: Prune=false
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
     pod:
       affinity:
         podAntiAffinity:

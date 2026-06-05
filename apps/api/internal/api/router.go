@@ -9,10 +9,11 @@ import (
 	"github.com/requset700k/cledyu/api/internal/config"
 	"github.com/requset700k/cledyu/api/internal/kubevirt"
 	"github.com/requset700k/cledyu/api/internal/middleware"
+	"github.com/requset700k/cledyu/api/internal/validation"
 	"go.uber.org/zap"
 )
 
-func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager) *gin.Engine {
+func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, validator validation.Publisher) *gin.Engine {
 	gin.SetMode(cfg.Server.Mode)
 
 	r := gin.New()
@@ -27,7 +28,7 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager) 
 		AllowCredentials: true,
 	}))
 
-	h := handlers.New(cfg, log, sessions)
+	h := handlers.New(cfg, log, sessions, validator)
 
 	r.GET("/health", h.Health)
 
@@ -51,7 +52,7 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager) 
 		v1.GET("/sessions/:id", h.GetSession)
 		v1.DELETE("/sessions/:id", h.DeleteSession)
 
-		// 스텝 진행/검증 — STUB(검증엔진 연동 전까지 in-memory mock).
+		// 스텝 진행/검증 — publisher 미연결 시 mock 동작, 연결 시 Kafka로 발행.
 		v1.GET("/sessions/:id/steps", h.GetSessionSteps)
 		v1.POST("/sessions/:id/validate", h.ValidateStep)
 
