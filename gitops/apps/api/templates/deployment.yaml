@@ -13,6 +13,7 @@ spec:
       labels:
         app: {{ .Release.Name }}
     spec:
+      serviceAccountName: {{ .Release.Name }} # 세션 프로비저닝 RBAC(rbac.yaml)이 붙은 전용 SA
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -27,6 +28,13 @@ spec:
               value: {{ .Values.env.CLEDYU_SERVER_MODE | quote }}
             - name: CLEDYU_REDIS_ADDR
               value: {{ .Values.env.CLEDYU_REDIS_ADDR | quote }}
+            # validation-requests Kafka 발행 — 인증서는 아래 kafka-certs 볼륨(기본 경로 /etc/kafka-certs).
+            - name: CLEDYU_KAFKA_BROKERS
+              value: {{ .Values.env.CLEDYU_KAFKA_BROKERS | quote }}
+          volumeMounts:
+            - name: kafka-certs
+              mountPath: /etc/kafka-certs
+              readOnly: true
           resources:
             requests:
               cpu: {{ .Values.resources.requests.cpu }}
@@ -42,3 +50,7 @@ spec:
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 10
+      volumes:
+        - name: kafka-certs
+          secret:
+            secretName: api-kafka-client-tls

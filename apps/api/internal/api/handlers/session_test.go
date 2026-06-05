@@ -18,7 +18,7 @@ import (
 func newSessionRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	h := handlers.New(newTestConfig(), zap.NewNop(), nil)
+	h := handlers.New(newTestConfig(), zap.NewNop(), nil, nil)
 	r.Use(func(c *gin.Context) {
 		c.Set("user_id", "test-user")
 		c.Next()
@@ -78,5 +78,19 @@ func TestCreateSession_NoKubeVirt(t *testing.T) {
 	}
 	if body["error"] == nil {
 		t.Error("expected error payload")
+	}
+}
+
+func TestValidateStep_RequiresStepID(t *testing.T) {
+	r := newSessionRouter()
+
+	for _, body := range []map[string]int{{}, {"step_id": 0}} {
+		w, res := doJSON(t, r, http.MethodPost, "/sessions/test-session/validate", body)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("expected 400 for %#v, got %d", body, w.Code)
+		}
+		if res["error"] == nil {
+			t.Fatal("expected error payload")
+		}
 	}
 }
