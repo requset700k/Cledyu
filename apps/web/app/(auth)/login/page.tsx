@@ -25,6 +25,7 @@ export default function LoginPage() {
 
           <p className="text-center text-slate-400 text-sm mt-4">
             처음이신가요?{' '}
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
             <a
               href="/api/v1/auth/login?screen=register"
               className="text-brand-400 hover:text-brand-300 font-medium"
