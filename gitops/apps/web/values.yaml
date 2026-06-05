@@ -15,8 +15,8 @@ ingress:
   tlsSecret: web-tls
 
 env:
-  # Keycloak 미연동 상태이므로 false. Keycloak 연동 PR에서 true로 전환.
-  AUTH_ENABLED: "false"
+  # 학습자 realm(cledyu-learn) OIDC 연동 완료 → 인증 게이트 활성화.
+  AUTH_ENABLED: "true"
   # In-cluster Session API endpoint — Next.js route handler가 런타임에 읽어 백엔드로 프록시.
   CLEDYU_BACKEND_URL: "http://api.api.svc.cluster.local"
 

@@ -17,6 +17,19 @@ env:
   CLEDYU_REDIS_ADDR: "redis-master.redis.svc.cluster.local:6379"
   CLEDYU_KAFKA_BROKERS: "cledyu-kafka-kafka-bootstrap.kafka.svc:9093"
 
+# Keycloak OIDC (학습자 realm). client_secret 은 Vault→ESO(cledyu-web-oidc-externalsecret.yaml)
+# 가 만든 Secret cledyu-api-oidc 에서 주입. 운영자 SSO realm(cledyu)과 분리됨.
+keycloak:
+  url: "https://keycloak.cledyu.local"
+  realm: "cledyu-learn"
+  clientId: "web"
+  redirectUri: "https://api.cledyu.local/api/v1/auth/callback"
+  cookieDomain: ".cledyu.local"
+  frontendUrl: "https://app.cledyu.local"
+  clientSecret:
+    secretName: "cledyu-api-oidc"
+    secretKey: "client_secret"
+
 resources:
   requests:
     cpu: 50m

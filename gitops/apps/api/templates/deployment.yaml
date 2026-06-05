@@ -31,6 +31,24 @@ spec:
             # validation-requests Kafka 발행 — 인증서는 아래 kafka-certs 볼륨(기본 경로 /etc/kafka-certs).
             - name: CLEDYU_KAFKA_BROKERS
               value: {{ .Values.env.CLEDYU_KAFKA_BROKERS | quote }}
+            # Keycloak OIDC (학습자 realm cledyu-learn). client_secret 은 Vault→ESO Secret 에서.
+            - name: CLEDYU_KEYCLOAK_URL
+              value: {{ .Values.keycloak.url | quote }}
+            - name: CLEDYU_KEYCLOAK_REALM
+              value: {{ .Values.keycloak.realm | quote }}
+            - name: CLEDYU_KEYCLOAK_CLIENT_ID
+              value: {{ .Values.keycloak.clientId | quote }}
+            - name: CLEDYU_KEYCLOAK_REDIRECT_URI
+              value: {{ .Values.keycloak.redirectUri | quote }}
+            - name: CLEDYU_KEYCLOAK_COOKIE_DOMAIN
+              value: {{ .Values.keycloak.cookieDomain | quote }}
+            - name: CLEDYU_FRONTEND_URL
+              value: {{ .Values.keycloak.frontendUrl | quote }}
+            - name: CLEDYU_KEYCLOAK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.keycloak.clientSecret.secretName | quote }}
+                  key: {{ .Values.keycloak.clientSecret.secretKey | quote }}
           volumeMounts:
             - name: kafka-certs
               mountPath: /etc/kafka-certs
