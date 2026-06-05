@@ -1,11 +1,7 @@
 locals {
+  # 운영자(내부) realm 역할만 둔다. student/instructor 학습자 역할은
+  # cledyu-learn realm(roles-learn.tf)으로 분리되었다 — 운영 권한과 학습자 격리.
   realm_roles = {
-    student = {
-      description = "Learner role for lab access and AI tutor usage."
-    }
-    instructor = {
-      description = "Instructor role for learner creation and instructor mode."
-    }
     admin = {
       description = "Operational administrator role."
     }
@@ -38,12 +34,6 @@ locals {
     }
     team-service = {
       realm_roles = ["admin", "observer", "kafka-viewer"]
-    }
-    students-cohort-0 = {
-      realm_roles = ["student"]
-    }
-    instructors = {
-      realm_roles = ["instructor"]
     }
   }
 

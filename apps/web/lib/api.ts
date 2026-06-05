@@ -93,6 +93,13 @@ export const api = {
 
   auth: {
     me: () => request<User>('/api/v1/me'),
-    logout: () => request<void>('/api/v1/auth/logout', { method: 'POST' }),
+    // 로그아웃은 전체 페이지 이동으로 처리한다 — 백엔드가 세션 쿠키를 지우고
+    // Keycloak end-session(SSO 로그아웃)을 거쳐 프론트로 되돌려보낸다. fetch로는
+    // 크로스 오리진 리다이렉트(Keycloak)를 의미있게 따라갈 수 없다.
+    logout: () => {
+      if (typeof window !== 'undefined') {
+        window.location.href = '/api/v1/auth/logout';
+      }
+    },
   },
 };

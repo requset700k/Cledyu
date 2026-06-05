@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -30,7 +29,8 @@ func newTestConfig() *config.Config {
 func newTestRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	h := handlers.New(newTestConfig(), zap.NewNop(), nil, nil)
+	// validator=nil(mock 검증), authProvider=nil(OIDC discovery 없이 핸들러 단위만 — 인증 흐름은 503).
+	h := handlers.New(newTestConfig(), zap.NewNop(), nil, nil, nil)
 
 	r.GET("/health", h.Health)
 	r.GET("/me", func(c *gin.Context) {
@@ -117,26 +117,14 @@ func TestGetMe(t *testing.T) {
 	}
 }
 
-func TestLogin_SetsMockCookieAndRedirects(t *testing.T) {
+// authProvider 미설정(Keycloak 미가용) 시 로그인은 503 으로 안전하게 막힌다.
+// 실 OIDC 리다이렉트 흐름은 Keycloak 가용 환경의 통합 테스트에서 검증한다.
+func TestLogin_Unavailable_WhenNoProvider(t *testing.T) {
 	r := newTestRouter()
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil))
 
-	if w.Code != http.StatusFound {
-		t.Fatalf("expected 302, got %d", w.Code)
-	}
-	loc := w.Header().Get("Location")
-	if !strings.HasSuffix(loc, "/callback") {
-		t.Errorf("expected redirect to /callback, got %s", loc)
-	}
-	cookies := w.Result().Cookies()
-	var found bool
-	for _, c := range cookies {
-		if c.Name == "access_token" && c.Value == "mock-token" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected access_token=mock-token cookie")
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 without auth provider, got %d", w.Code)
 	}
 }

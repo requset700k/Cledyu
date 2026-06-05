@@ -3,9 +3,13 @@
 package api
 
 import (
+	"context"
+	"time"
+
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/requset700k/cledyu/api/internal/api/handlers"
+	"github.com/requset700k/cledyu/api/internal/auth"
 	"github.com/requset700k/cledyu/api/internal/config"
 	"github.com/requset700k/cledyu/api/internal/kubevirt"
 	"github.com/requset700k/cledyu/api/internal/middleware"
@@ -15,6 +19,16 @@ import (
 
 func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, validator validation.Publisher) *gin.Engine {
 	gin.SetMode(cfg.Server.Mode)
+
+	// Keycloak OIDC provider — discovery(.well-known) 수행. Keycloak 미가용(CI/로컬)
+	// 환경에서는 nil 로 두고 graceful degradation 한다.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	authProvider, err := auth.NewProvider(ctx, cfg.Keycloak)
+	if err != nil {
+		log.Warn("oidc provider unavailable; auth flow disabled until Keycloak reachable", zap.Error(err))
+		authProvider = nil
+	}
 
 	r := gin.New()
 	r.Use(gin.Recovery())
@@ -28,20 +42,23 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, 
 		AllowCredentials: true,
 	}))
 
-	h := handlers.New(cfg, log, sessions, validator)
+	h := handlers.New(cfg, log, sessions, validator, authProvider)
 
 	r.GET("/health", h.Health)
 
-	// 인증 불필요 — 로그인 (mock: 쿠키 설정 후 /callback 리다이렉트)
+	// 인증 불필요 — OIDC authorization code(PKCE) 흐름.
 	r.GET("/api/v1/auth/login", h.Login)
+	r.GET("/api/v1/auth/callback", h.Callback)
+	r.GET("/api/v1/auth/logout", h.Logout)
 
-	if cfg.Server.Mode == "release" {
-		log.Warn("JWT verification is running in STUB mode — replace with JWKS before handling real users")
+	if cfg.Server.Mode == "release" && authProvider == nil {
+		log.Warn("running WITHOUT auth provider in release mode — protected routes will 503")
 	}
 
-	// TODO: Keycloak JWKS 검증으로 교체 (현재 stub).
+	// release 에서는 provider 필수, debug 에서만 mock 신원 폴백 허용.
+	devFallback := cfg.Server.Mode != "release"
 	v1 := r.Group("/api/v1")
-	v1.Use(middleware.JWT())
+	v1.Use(middleware.JWT(authProvider, log, devFallback))
 	{
 		v1.GET("/me", h.GetMe)
 		v1.GET("/labs", h.ListLabs)

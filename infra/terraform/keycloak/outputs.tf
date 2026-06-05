@@ -23,3 +23,18 @@ output "confidential_client_ids" {
   value       = local.confidential_client_ids
   sensitive   = true
 }
+
+output "learn_realm_id" {
+  description = "외부 학습자용 cledyu-learn realm ID."
+  value       = keycloak_realm.cledyu_learn.id
+}
+
+output "learn_oidc_client_ids" {
+  description = "cledyu-learn realm OIDC client ID 목록."
+  value       = keys(keycloak_openid_client.learn_clients)
+}
+
+output "social_idp_enabled" {
+  description = "소셜 IdP(구글/카카오/네이버) 생성 여부."
+  value       = var.enable_social_idp
+}
