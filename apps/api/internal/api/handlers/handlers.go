@@ -3,6 +3,7 @@ package handlers
 
 import (
 	"github.com/gin-gonic/gin"
+	"github.com/requset700k/cledyu/api/internal/auth"
 	"github.com/requset700k/cledyu/api/internal/config"
 	"github.com/requset700k/cledyu/api/internal/content"
 	"github.com/requset700k/cledyu/api/internal/kube"
@@ -16,6 +17,7 @@ import (
 type Handler struct {
 	cfg       *config.Config
 	log       *zap.Logger
+	auth      *auth.Provider                // Keycloak OIDC. nil 허용 — discovery 실패(CI/로컬) 시 인증 흐름 비활성.
 	labs      map[string]content.LabContent // lab id → DSL 콘텐츠(스텝). GetLab/세션에서 사용.
 	sessions  *kubevirt.Manager             // KubeVirt VM 수명주기. nil 허용 — 클러스터 미연결 시 세션 API 503.
 	steps     *stepStore                    // STUB(검증엔진 연동 전): 세션별 스텝 진행 상태 in-memory.
@@ -23,10 +25,10 @@ type Handler struct {
 	validator validation.Publisher          // validation-requests Kafka 발행기. nil이면 debug 모드에서 mock 검증.
 }
 
-// New는 설정/로거/세션 매니저를 받아 Handler를 생성한다. sessions는 nil 허용.
+// New는 설정/로거/세션 매니저/OIDC provider를 받아 Handler를 생성한다. sessions·authProvider는 nil 허용.
 // 시작 시 임베드된 Lab DSL 콘텐츠를 로드하고, serial console 용 KubeVirt 클라이언트를 초기화한다.
 // 클러스터 미연결(CI/로컬) 환경에서도 New가 성공하도록 둘 다 실패 시 nil/empty 폴백한다.
-func New(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, validator validation.Publisher) *Handler {
+func New(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, validator validation.Publisher, authProvider *auth.Provider) *Handler {
 	labs, err := content.Load()
 	if err != nil {
 		log.Error("lab content load failed; detail pages will lack steps", zap.Error(err))
@@ -42,6 +44,7 @@ func New(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, valida
 	return &Handler{
 		cfg:       cfg,
 		log:       log,
+		auth:      authProvider,
 		labs:      labs,
 		sessions:  sessions,
 		steps:     newStepStore(),

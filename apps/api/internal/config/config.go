@@ -69,8 +69,10 @@ func Load() (*Config, error) {
 	v.SetDefault("server.mode", "debug")
 	v.SetDefault("redis.addr", "localhost:6379")
 	v.SetDefault("keycloak.url", "https://keycloak.cledyu.local")
-	v.SetDefault("keycloak.realm", "cledyu")
-	v.SetDefault("keycloak.client_id", "cledyu-web")
+	// 학습자 realm(운영자 cledyu realm과 분리). client_secret은 환경변수
+	// CLEDYU_KEYCLOAK_CLIENT_SECRET 로 주입(web=confidential BFF client).
+	v.SetDefault("keycloak.realm", "cledyu-learn")
+	v.SetDefault("keycloak.client_id", "web")
 	v.SetDefault("keycloak.redirect_uri", "https://api.cledyu.local/api/v1/auth/callback")
 	v.SetDefault("frontend_url", "https://app.cledyu.local")
 	v.SetDefault("keycloak.cookie_domain", ".cledyu.local")

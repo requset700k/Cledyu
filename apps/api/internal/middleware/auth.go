@@ -5,11 +5,31 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/requset700k/cledyu/api/internal/auth"
+	"go.uber.org/zap"
 )
 
-// TODO: Keycloak 연동 완료 후 stub → 실 JWKS 검증으로 교체.
-func JWT() gin.HandlerFunc {
+// JWT는 access_token(쿠키/Bearer/쿼리)을 Keycloak JWKS로 검증하는 미들웨어다.
+//
+// provider 가 nil 이면(Keycloak discovery 실패 — CI/로컬) 인증을 강제할 수 없으므로
+// 모든 보호 요청을 503 으로 막는다. devFallback=true 인 경우에만(=debug 모드)
+// mock 신원을 주입해 로컬 개발을 허용한다 — 운영(release)에서는 절대 우회 없음.
+func JWT(provider *auth.Provider, log *zap.Logger, devFallback bool) gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if provider == nil {
+			if devFallback {
+				c.Set("user_id", "dev-user")
+				c.Set("user_email", "dev@cledyu.local")
+				c.Set("user_name", "Dev User")
+				c.Set("user_role", "admin")
+				c.Next()
+				return
+			}
+			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "auth provider unavailable"})
+			c.Abort()
+			return
+		}
+
 		token := extractToken(c)
 		if token == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "missing token"})
@@ -17,12 +37,20 @@ func JWT() gin.HandlerFunc {
 			return
 		}
 
-		// Stub: 비어있지 않은 토큰은 모두 허용, mock claims 주입.
-		// admin role → 전체 엔드포인트 접근 가능 (개발 전용).
-		c.Set("user_id", "mock-user-id")
-		c.Set("user_email", "admin@cledyu.local")
-		c.Set("user_name", "Dev Admin")
-		c.Set("user_role", "admin")
+		id, err := provider.VerifyAccessToken(c.Request.Context(), token)
+		if err != nil {
+			if log != nil {
+				log.Debug("access token verification failed", zap.Error(err))
+			}
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+			c.Abort()
+			return
+		}
+
+		c.Set("user_id", id.Subject)
+		c.Set("user_email", id.Email)
+		c.Set("user_name", id.Name)
+		c.Set("user_role", id.Role())
 		c.Next()
 	}
 }
