@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -9,7 +10,9 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/requset700k/cledyu/api/internal/content"
 	"github.com/requset700k/cledyu/api/internal/kubevirt"
+	"github.com/requset700k/cledyu/api/internal/validation"
 	"go.uber.org/zap"
 )
 
@@ -21,14 +24,16 @@ type stepState struct {
 }
 
 // sessionSteps는 한 세션의 스텝 진행 상태(전체 목록 + 현재 단계 id)를 묶어 보관한다.
+// LabID는 검증 요청 발행 시 해당 스텝의 checks를 lab 콘텐츠에서 찾기 위해 보관한다.
 type sessionSteps struct {
+	LabID       string
 	Steps       []stepState
 	CurrentStep int
 }
 
 // stepStore는 sessionID → 스텝 진행 상태 맵을 동시성 안전하게 관리한다.
-// STUB(검증엔진 미연동): 검증 결과는 항상 통과 처리. 실 검증엔진 연동 시 본 스토어를 제거하고
-// 검증 결과 토픽을 구독하도록 교체할 예정.
+// ValidateStep은 검증 요청을 Kafka로 발행하지만, 결과(validation-results) 소비는 후속 작업이라
+// 현재 상태 전이는 mock 통과로 유지된다. 결과 토픽 구독을 붙일 때 본 스토어를 결과 기반으로 교체한다.
 type stepStore struct {
 	mu sync.Mutex
 	m  map[string]*sessionSteps
@@ -102,7 +107,7 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	}
 
 	// 스텝 진행 상태 초기화 — 첫 스텝 active, 나머지 pending.
-	ss := &sessionSteps{}
+	ss := &sessionSteps{LabID: req.LabID}
 	for i, st := range lc.Steps {
 		status := "pending"
 		if i == 0 {
@@ -181,8 +186,12 @@ func (h *Handler) GetSessionSteps(c *gin.Context) {
 }
 
 // ValidateStep은 한 단계의 검증을 수행한다.
-// STUB — 검증엔진(Kafka) 미연동. 데모용으로 항상 통과 처리하고 다음 단계를 활성화한다.
 // POST /api/v1/sessions/:id/validate  body: { "step_id": 1 }
+//
+// 검증엔진 연동(dark launch): 해당 스텝의 checks로 검증 요청을 Kafka(validation-requests)에
+// 발행한다. 단, 검증 결과(validation-results) 소비는 후속 작업이라, 지금은 결과를 기다리지
+// 않고 종전과 같이 mock 통과로 상태를 전이한다. Kafka 미설정(h.dispatch == nil) 시 발행을
+// 생략하므로 동작에 영향이 없다.
 func (h *Handler) ValidateStep(c *gin.Context) {
 	var req struct {
 		StepID int `json:"step_id"`
@@ -191,10 +200,12 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 		h.err(c, http.StatusBadRequest, "step_id is required")
 		return
 	}
+	sessionID := c.Param("id")
+
 	h.steps.mu.Lock()
-	defer h.steps.mu.Unlock()
-	ss, ok := h.steps.m[c.Param("id")]
+	ss, ok := h.steps.m[sessionID]
 	if !ok {
+		h.steps.mu.Unlock()
 		h.err(c, http.StatusNotFound, "session not found")
 		return
 	}
@@ -206,6 +217,7 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 		}
 	}
 	if idx == -1 {
+		h.steps.mu.Unlock()
 		h.err(c, http.StatusNotFound, "step not found")
 		return
 	}
@@ -217,5 +229,53 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 		}
 		ss.CurrentStep = ss.Steps[idx+1].StepID
 	}
+	labID := ss.LabID
+	h.steps.mu.Unlock()
+
+	// 락 밖에서 발행(네트워크 I/O가 다른 스텝 연산을 막지 않도록).
+	h.dispatchValidation(c.Request.Context(), sessionID, labID, req.StepID)
+
 	c.JSON(http.StatusOK, gin.H{"status": "passed", "message": "검증을 통과했습니다 (mock)"})
+}
+
+// dispatchValidation은 lab 콘텐츠에서 해당 스텝의 checks를 찾아 검증 요청을 발행한다.
+// 발행 실패는 로깅만 하고 요청 처리에는 영향을 주지 않는다(best-effort).
+func (h *Handler) dispatchValidation(ctx context.Context, sessionID, labID string, stepID int) {
+	if h.dispatch == nil {
+		return
+	}
+	lc, ok := h.labs[labID]
+	if !ok {
+		return
+	}
+	var checks []content.Check
+	for _, st := range lc.Steps {
+		if st.ID == stepID {
+			checks = st.Checks
+			break
+		}
+	}
+	if len(checks) == 0 {
+		return // 검증엔진은 빈 checks를 요청 오류로 거절하므로 발행하지 않는다.
+	}
+
+	pubCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	err := h.dispatch.Publish(pubCtx, validation.Request{
+		SessionID: sessionID,
+		StepID:    stepID,
+		VM: validation.VMSpec{
+			Type:      validation.VMTypeKubeVirt,
+			Name:      "session-vm",       // kubevirt.Manager.Create가 고정 생성하는 VM 이름
+			Namespace: "lab-" + sessionID, // 세션 네임스페이스 규칙
+		},
+		Checks: checks,
+	})
+	if err != nil {
+		h.log.Error("검증 요청 발행 실패",
+			zap.String("session_id", sessionID),
+			zap.Int("step_id", stepID),
+			zap.Error(err),
+		)
+	}
 }

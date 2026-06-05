@@ -12,7 +12,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager) *gin.Engine {
+func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, dispatch handlers.Dispatcher) *gin.Engine {
 	gin.SetMode(cfg.Server.Mode)
 
 	r := gin.New()
@@ -27,7 +27,7 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager) 
 		AllowCredentials: true,
 	}))
 
-	h := handlers.New(cfg, log, sessions)
+	h := handlers.New(cfg, log, sessions, dispatch)
 
 	r.GET("/health", h.Health)
 

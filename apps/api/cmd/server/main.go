@@ -6,12 +6,15 @@ import (
 	"log"
 	"net/http"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	api "github.com/requset700k/cledyu/api/internal/api"
+	"github.com/requset700k/cledyu/api/internal/api/handlers"
 	"github.com/requset700k/cledyu/api/internal/config"
 	"github.com/requset700k/cledyu/api/internal/kubevirt"
+	"github.com/requset700k/cledyu/api/internal/validation"
 	"go.uber.org/zap"
 )
 
@@ -40,7 +43,22 @@ func main() {
 		sessions = nil
 	}
 
-	router := api.NewRouter(cfg, logger, sessions)
+	// 검증 요청 발행: kafka.enabled=true 이고 인증서 로드에 성공할 때만 활성화한다.
+	// 비활성(기본)이면 dispatch는 nil이라 ValidateStep이 발행을 생략한다.
+	var dispatch handlers.Dispatcher
+	if cfg.Kafka.Enabled {
+		tlsCfg, terr := validation.LoadTLS(cfg.Kafka.TLSCert, cfg.Kafka.TLSKey, cfg.Kafka.CACert)
+		if terr != nil {
+			logger.Warn("kafka tls load failed, validation dispatch disabled", zap.Error(terr))
+		} else {
+			prod := validation.New(strings.Split(cfg.Kafka.Brokers, ","), cfg.Kafka.Topic, tlsCfg, logger)
+			defer prod.Close() //nolint:errcheck
+			dispatch = prod
+			logger.Info("validation dispatch enabled", zap.String("topic", cfg.Kafka.Topic))
+		}
+	}
+
+	router := api.NewRouter(cfg, logger, sessions, dispatch)
 
 	// Read/WriteTimeout: 느린 클라이언트로 인한 goroutine 고갈 방지. IdleTimeout: keep-alive 연결 유지 상한.
 	srv := &http.Server{
