@@ -51,11 +51,20 @@ spec:
               value: /etc/kafka-certs/tls.key
             - name: KAFKA_CA_CERT
               value: /etc/kafka-certs/ca.crt
+            # 랩 VM SSH 접속(virtctl ssh) 사용자/개인키 — kubevirt.go executor가 읽는다.
+            - name: LAB_SSH_USER
+              value: lab
+            - name: LAB_SSH_KEY
+              value: /etc/lab-ssh/id_ed25519
 
           volumeMounts:
             # 아래 volumes에서 정의한 kafka-certs를 컨테이너 안 /etc/kafka-certs/에 마운트
             - name: kafka-certs
               mountPath: /etc/kafka-certs
+              readOnly: true
+            # 랩 VM 접속용 SSH private key (Secret lab-ssh-key). 세션 VM의 lab authorized_keys와 짝.
+            - name: lab-ssh
+              mountPath: /etc/lab-ssh
               readOnly: true
 
           livenessProbe:
@@ -87,3 +96,13 @@ spec:
         - name: kafka-certs
           secret:
             secretName: validation-engine-kafka-client-tls
+        # 랩 VM 접속용 SSH private key. optional=true 라 Secret 미생성 시에도 파드는 뜬다
+        # (그 경우 키 파일이 없어 해당 체크만 실패; cloud-init 키 주입 + Secret 생성 후 정상 동작).
+        - name: lab-ssh
+          secret:
+            secretName: lab-ssh-key
+            optional: true
+            defaultMode: 256 # 0o400 — 소유자 읽기 전용(ssh private key 권한)
+            items:
+              - key: id_ed25519
+                path: id_ed25519

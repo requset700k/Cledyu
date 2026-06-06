@@ -37,6 +37,9 @@ type KubeVirtConfig struct {
 	BaseImageNS     string `mapstructure:"base_image_ns"`
 	BaseImageName   string `mapstructure:"base_image_name"`
 	SessionTTLHours int    `mapstructure:"session_ttl_hours"`
+	// LabSSHPublicKey: 세션 VM cloud-init이 user "lab"의 authorized_keys로 넣는 공개키.
+	// 검증엔진이 이 키의 private 짝으로 virtctl ssh 접속한다. 비면 키를 넣지 않는다(비번/시리얼만).
+	LabSSHPublicKey string `mapstructure:"lab_ssh_public_key"`
 }
 
 type KeycloakConfig struct {
@@ -82,6 +85,7 @@ func Load() (*Config, error) {
 	v.SetDefault("keycloak.cookie_domain", ".cledyu.local")
 	v.SetDefault("kubevirt.base_image_ns", "kubevirt")
 	v.SetDefault("kubevirt.base_image_name", "ubuntu-2204-base")
+	v.SetDefault("kubevirt.lab_ssh_public_key", "") // 빈 기본값 — env CLEDYU_KUBEVIRT_LAB_SSH_PUBLIC_KEY로 주입
 	v.SetDefault("kubevirt.session_ttl_hours", 3)
 	v.SetDefault("kafka.brokers", "cledyu-kafka-kafka-bootstrap.kafka.svc:9093")
 	v.SetDefault("kafka.topic", "validation-requests")

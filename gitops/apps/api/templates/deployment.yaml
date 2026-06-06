@@ -31,6 +31,9 @@ spec:
             # validation-requests Kafka 발행 — 인증서는 아래 kafka-certs 볼륨(기본 경로 /etc/kafka-certs).
             - name: CLEDYU_KAFKA_BROKERS
               value: {{ .Values.env.CLEDYU_KAFKA_BROKERS | quote }}
+            # 세션 VM cloud-init이 lab authorized_keys로 넣는 검증엔진 공개키(공개값이라 평문 OK).
+            - name: CLEDYU_KUBEVIRT_LAB_SSH_PUBLIC_KEY
+              value: {{ .Values.kubevirt.labSshPublicKey | quote }}
             # Keycloak OIDC (학습자 realm cledyu-learn). client_secret 은 Vault→ESO Secret 에서.
             - name: CLEDYU_KEYCLOAK_URL
               value: {{ .Values.keycloak.url | quote }}
