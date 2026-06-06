@@ -42,7 +42,7 @@ openssl rand -hex 32   # 값 생성
 cd infra/terraform/keycloak && terraform apply
 
 # 3) 같은 값을 Vault 에 등록 (api Deployment 가 ESO 로 주입받음)
-vault kv put secret/oidc/cledyu-web client_secret=<위 값>
+vault kv put cledyu/oidc/cledyu-web client_secret=<위 값>   # KV mount=cledyu (ClusterSecretStore vault-backend)
 
 # 4) ESO 동기화 확인 (api 네임스페이스)
 kubectl -n api get externalsecret cledyu-web-oidc-client-secret
