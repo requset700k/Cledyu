@@ -14,8 +14,11 @@ export type SessionStatus = 'provisioning' | 'ready' | 'active' | 'completed' | 
 /** VM 프로바이더 — 온프렘 KubeVirt 또는 AWS EC2 오버플로우 */
 export type VMProvider = 'kubevirt' | 'ec2';
 
-/** 단계별 진행 상태 — StepList 컴포넌트의 아이콘/색상 결정에 사용 */
-export type StepStatus = 'pending' | 'active' | 'passed' | 'failed';
+/**
+ * 단계별 진행 상태 — StepList 컴포넌트의 아이콘/색상 결정에 사용.
+ * validating: 검증 요청을 보내고 검증엔진 결과를 기다리는 중(비동기).
+ */
+export type StepStatus = 'pending' | 'active' | 'validating' | 'passed' | 'failed';
 
 /** instructor 역할은 /instructor 대시보드 접근 + 강사 API 사용 가능 */
 export type UserRole = 'student' | 'instructor' | 'admin';
@@ -56,11 +59,19 @@ export interface Session {
   expires_at: string; // 세션 최대 유지 시간 3시간
 }
 
+/** 검증엔진이 돌려준 체크 항목 하나의 결과 (실패 사유 표시용) */
+export interface CheckResult {
+  type: string;
+  passed: boolean;
+  detail?: string;
+}
+
 /** 세션 내 개별 단계의 진행 상황 */
 export interface StepProgress {
   step_id: number;
   status: StepStatus;
   attempts: number; // 검증 시도 횟수
+  checks?: CheckResult[]; // 검증엔진 결과 수신 시 채워짐 (체크별 pass/detail)
 }
 
 export interface User {
