@@ -51,8 +51,12 @@ func TestValidateStep_PublishesRequest(t *testing.T) {
 
 	h.ValidateStep(c)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("기대 200, 실제 %d", w.Code)
+	// 검증엔진 연동 시 즉시 통과가 아니라 validating(202)으로 응답하고, 결과는 비동기로 확정된다.
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("기대 202, 실제 %d", w.Code)
+	}
+	if got := h.steps.m["sess-1"].Steps[2].Status; got != "validating" {
+		t.Errorf("step3 상태 = %q, 기대 validating", got)
 	}
 	if len(fd.got) != 1 {
 		t.Fatalf("검증 요청 1건 발행 기대, 실제 %d건", len(fd.got))

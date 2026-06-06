@@ -16,11 +16,19 @@ import (
 	"go.uber.org/zap"
 )
 
+// checkOutcome은 한 검증 항목의 결과다(검증엔진이 돌려준 체크별 pass/detail).
+type checkOutcome struct {
+	Type   string
+	Passed bool
+	Detail string
+}
+
 // stepState는 세션 내 한 단계의 진행 상태다(프론트 StepProgress와 대응).
 type stepState struct {
 	StepID   int
-	Status   string // pending | active | passed | failed
+	Status   string // pending | active | validating | passed | failed
 	Attempts int
+	Checks   []checkOutcome // 검증엔진 결과의 체크별 상세(실패 사유 표시용). 결과 수신 시 채워진다.
 }
 
 // sessionSteps는 한 세션의 스텝 진행 상태(전체 목록 + 현재 단계 id)를 묶어 보관한다.
@@ -32,8 +40,8 @@ type sessionSteps struct {
 }
 
 // stepStore는 sessionID → 스텝 진행 상태 맵을 동시성 안전하게 관리한다.
-// ValidateStep은 검증 요청을 Kafka로 발행하지만, 결과(validation-results) 소비는 후속 작업이라
-// 현재 상태 전이는 mock 통과로 유지된다. 결과 토픽 구독을 붙일 때 본 스토어를 결과 기반으로 교체한다.
+// ValidateStep이 검증 요청을 발행하면 스텝은 validating 상태가 되고, 검증엔진 결과를
+// 소비하는 ApplyValidationResult가 passed/failed로 확정한다(Kafka 미설정 시에는 mock 통과 폴백).
 type stepStore struct {
 	mu sync.Mutex
 	m  map[string]*sessionSteps
@@ -180,7 +188,16 @@ func (h *Handler) GetSessionSteps(c *gin.Context) {
 	}
 	items := make([]gin.H, 0, len(ss.Steps))
 	for _, st := range ss.Steps {
-		items = append(items, gin.H{"step_id": st.StepID, "status": st.Status, "attempts": st.Attempts})
+		item := gin.H{"step_id": st.StepID, "status": st.Status, "attempts": st.Attempts}
+		// 검증엔진 결과가 있으면 체크별 상세(실패 사유)를 함께 노출한다.
+		if len(st.Checks) > 0 {
+			checks := make([]gin.H, 0, len(st.Checks))
+			for _, ck := range st.Checks {
+				checks = append(checks, gin.H{"type": ck.Type, "passed": ck.Passed, "detail": ck.Detail})
+			}
+			item["checks"] = checks
+		}
+		items = append(items, item)
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items, "total": len(items)})
 }
@@ -188,10 +205,11 @@ func (h *Handler) GetSessionSteps(c *gin.Context) {
 // ValidateStep은 한 단계의 검증을 수행한다.
 // POST /api/v1/sessions/:id/validate  body: { "step_id": 1 }
 //
-// 검증엔진 연동(dark launch): 해당 스텝의 checks로 검증 요청을 Kafka(validation-requests)에
-// 발행한다. 단, 검증 결과(validation-results) 소비는 후속 작업이라, 지금은 결과를 기다리지
-// 않고 종전과 같이 mock 통과로 상태를 전이한다. Kafka 미설정(h.dispatch == nil) 시 발행을
-// 생략하므로 동작에 영향이 없다.
+// 검증엔진 연동 시(h.dispatch != nil 이고 스텝에 checks 존재): 해당 스텝을 validating으로 두고
+// 검증 요청을 Kafka(validation-requests)에 발행한 뒤 202(validating)로 즉시 응답한다. 실제
+// pass/fail은 검증엔진이 validation-results로 돌려준 결과를 ApplyValidationResult가 확정하며,
+// 프론트는 GET /steps 폴링으로 상태 변화를 관찰한다.
+// Kafka 미설정 또는 스텝에 checks가 없으면: 검증할 대상이 없으므로 종전대로 mock 통과한다.
 func (h *Handler) ValidateStep(c *gin.Context) {
 	var req struct {
 		StepID int `json:"step_id"`
@@ -221,44 +239,96 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 		h.err(c, http.StatusNotFound, "step not found")
 		return
 	}
+	labID := ss.LabID
+	checks := stepChecks(h.labs, labID, req.StepID)
+	real := h.dispatch != nil && len(checks) > 0
+
 	ss.Steps[idx].Attempts++
-	ss.Steps[idx].Status = "passed"
+	if real {
+		// 결과가 올 때까지 validating. 재시도 시 이전 체크 상세는 비운다.
+		ss.Steps[idx].Status = "validating"
+		ss.Steps[idx].Checks = nil
+	} else {
+		ss.Steps[idx].Status = "passed"
+		advanceStep(ss, idx)
+	}
+	h.steps.mu.Unlock()
+
+	if !real {
+		c.JSON(http.StatusOK, gin.H{"status": "passed", "message": "검증을 통과했습니다 (mock)"})
+		return
+	}
+
+	// 락 밖에서 발행(네트워크 I/O가 다른 스텝 연산을 막지 않도록).
+	h.publishValidation(c.Request.Context(), sessionID, req.StepID, checks)
+	c.JSON(http.StatusAccepted, gin.H{"status": "validating", "message": "검증 요청을 보냈습니다"})
+}
+
+// ApplyValidationResult는 검증엔진 결과(validation-results)를 stepStore에 반영한다.
+// consumer goroutine에서 호출되며, (session_id, step_id)로 해당 스텝을 찾아 체크 상세를 저장하고
+// 모두 통과면 passed로 확정 후 다음 스텝을 활성화한다. 실패면 failed로 두되 스텝을 진행시키지
+// 않아(current 유지) 사용자가 다시 시도할 수 있게 한다. 모르는 세션/스텝은 무시한다(지연 결과 등).
+func (h *Handler) ApplyValidationResult(r validation.Result) {
+	h.steps.mu.Lock()
+	defer h.steps.mu.Unlock()
+	ss, ok := h.steps.m[r.SessionID]
+	if !ok {
+		h.log.Warn("검증 결과의 세션을 찾을 수 없음", zap.String("session_id", r.SessionID), zap.Int("step_id", r.StepID))
+		return
+	}
+	idx := -1
+	for i := range ss.Steps {
+		if ss.Steps[i].StepID == r.StepID {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		h.log.Warn("검증 결과의 스텝을 찾을 수 없음", zap.String("session_id", r.SessionID), zap.Int("step_id", r.StepID))
+		return
+	}
+
+	outcomes := make([]checkOutcome, 0, len(r.Checks))
+	for _, c := range r.Checks {
+		outcomes = append(outcomes, checkOutcome{Type: c.Type, Passed: c.Passed, Detail: c.Detail})
+	}
+	ss.Steps[idx].Checks = outcomes
+	if r.Passed {
+		ss.Steps[idx].Status = "passed"
+		advanceStep(ss, idx)
+	} else {
+		ss.Steps[idx].Status = "failed"
+	}
+}
+
+// advanceStep은 idx 스텝 통과 후 다음 스텝을 active로 올리고 현재 스텝 포인터를 옮긴다.
+// 호출자는 stepStore 락을 보유해야 한다.
+func advanceStep(ss *sessionSteps, idx int) {
 	if idx+1 < len(ss.Steps) {
 		if ss.Steps[idx+1].Status == "pending" {
 			ss.Steps[idx+1].Status = "active"
 		}
 		ss.CurrentStep = ss.Steps[idx+1].StepID
 	}
-	labID := ss.LabID
-	h.steps.mu.Unlock()
-
-	// 락 밖에서 발행(네트워크 I/O가 다른 스텝 연산을 막지 않도록).
-	h.dispatchValidation(c.Request.Context(), sessionID, labID, req.StepID)
-
-	c.JSON(http.StatusOK, gin.H{"status": "passed", "message": "검증을 통과했습니다 (mock)"})
 }
 
-// dispatchValidation은 lab 콘텐츠에서 해당 스텝의 checks를 찾아 검증 요청을 발행한다.
-// 발행 실패는 로깅만 하고 요청 처리에는 영향을 주지 않는다(best-effort).
-func (h *Handler) dispatchValidation(ctx context.Context, sessionID, labID string, stepID int) {
-	if h.dispatch == nil {
-		return
-	}
-	lc, ok := h.labs[labID]
+// stepChecks는 lab 콘텐츠에서 해당 스텝의 검증 항목을 찾는다(없으면 nil).
+func stepChecks(labs map[string]content.LabContent, labID string, stepID int) []content.Check {
+	lc, ok := labs[labID]
 	if !ok {
-		return
+		return nil
 	}
-	var checks []content.Check
 	for _, st := range lc.Steps {
 		if st.ID == stepID {
-			checks = st.Checks
-			break
+			return st.Checks
 		}
 	}
-	if len(checks) == 0 {
-		return // 검증엔진은 빈 checks를 요청 오류로 거절하므로 발행하지 않는다.
-	}
+	return nil
+}
 
+// publishValidation은 검증 요청을 발행한다. 발행 실패는 로깅만 하고 요청 처리에는 영향을 주지 않는다.
+// 단 발행이 실패하면 결과가 영영 오지 않아 validating에 머무르므로, 스텝을 failed로 되돌려 재시도를 유도한다.
+func (h *Handler) publishValidation(ctx context.Context, sessionID string, stepID int, checks []content.Check) {
 	pubCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	err := h.dispatch.Publish(pubCtx, validation.Request{
@@ -277,5 +347,16 @@ func (h *Handler) dispatchValidation(ctx context.Context, sessionID, labID strin
 			zap.Int("step_id", stepID),
 			zap.Error(err),
 		)
+		// 발행 실패 → 결과 미수신 → validating 고착 방지: failed로 되돌린다.
+		h.steps.mu.Lock()
+		if ss, ok := h.steps.m[sessionID]; ok {
+			for i := range ss.Steps {
+				if ss.Steps[i].StepID == stepID && ss.Steps[i].Status == "validating" {
+					ss.Steps[i].Status = "failed"
+					break
+				}
+			}
+		}
+		h.steps.mu.Unlock()
 	}
 }

@@ -12,7 +12,9 @@ import (
 	"go.uber.org/zap"
 )
 
-func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, dispatch handlers.Dispatcher) *gin.Engine {
+// NewRouter는 Gin 엔진과 함께 *handlers.Handler를 반환한다.
+// 핸들러는 검증 결과 consumer가 stepStore를 갱신(ApplyValidationResult)하도록 main에서 참조한다.
+func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, dispatch handlers.Dispatcher) (*gin.Engine, *handlers.Handler) {
 	gin.SetMode(cfg.Server.Mode)
 
 	r := gin.New()
@@ -59,5 +61,5 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, 
 		v1.GET("/sessions/:id/ws", h.Console)
 	}
 
-	return r
+	return r, h
 }

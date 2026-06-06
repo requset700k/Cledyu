@@ -23,10 +23,14 @@ type Config struct {
 type KafkaConfig struct {
 	Enabled bool   `mapstructure:"enabled"`
 	Brokers string `mapstructure:"brokers"` // 콤마 구분 mTLS 리스너 주소(:9093)
-	Topic   string `mapstructure:"topic"`
+	Topic   string `mapstructure:"topic"`   // 검증 요청 발행 토픽(validation-requests)
 	TLSCert string `mapstructure:"tls_cert"`
 	TLSKey  string `mapstructure:"tls_key"`
 	CACert  string `mapstructure:"ca_cert"`
+
+	// 검증 결과 소비(consumer) 설정. ResultsTopic 을 구독해 stepStore 를 실제 결과로 갱신한다.
+	ResultsTopic  string `mapstructure:"results_topic"`
+	ConsumerGroup string `mapstructure:"consumer_group"`
 }
 
 type KubeVirtConfig struct {
@@ -84,6 +88,8 @@ func Load() (*Config, error) {
 	v.SetDefault("kafka.tls_cert", "/etc/kafka-certs/tls.crt")
 	v.SetDefault("kafka.tls_key", "/etc/kafka-certs/tls.key")
 	v.SetDefault("kafka.ca_cert", "/etc/kafka-certs/ca.crt")
+	v.SetDefault("kafka.results_topic", "validation-results")
+	v.SetDefault("kafka.consumer_group", "cledyu-api-validation-results")
 
 	if err := v.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError

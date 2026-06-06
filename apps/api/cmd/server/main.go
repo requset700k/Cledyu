@@ -43,22 +43,39 @@ func main() {
 		sessions = nil
 	}
 
-	// 검증 요청 발행: kafka.enabled=true 이고 인증서 로드에 성공할 때만 활성화한다.
-	// 비활성(기본)이면 dispatch는 nil이라 ValidateStep이 발행을 생략한다.
+	// 검증 연동: kafka.enabled=true 이고 인증서 로드에 성공할 때만 활성화한다.
+	// 비활성(기본)이면 dispatch=nil(발행 생략) + consumer=nil(결과 소비 없음)이라
+	// ValidateStep이 mock 통과로 동작해 클러스터 없이도 안전하다.
 	var dispatch handlers.Dispatcher
+	var consumer *validation.Consumer
 	if cfg.Kafka.Enabled {
 		tlsCfg, terr := validation.LoadTLS(cfg.Kafka.TLSCert, cfg.Kafka.TLSKey, cfg.Kafka.CACert)
 		if terr != nil {
-			logger.Warn("kafka tls load failed, validation dispatch disabled", zap.Error(terr))
+			logger.Warn("kafka tls load failed, validation disabled", zap.Error(terr))
 		} else {
-			prod := validation.New(strings.Split(cfg.Kafka.Brokers, ","), cfg.Kafka.Topic, tlsCfg, logger)
+			brokers := strings.Split(cfg.Kafka.Brokers, ",")
+			prod := validation.New(brokers, cfg.Kafka.Topic, tlsCfg, logger)
 			defer prod.Close() //nolint:errcheck
 			dispatch = prod
-			logger.Info("validation dispatch enabled", zap.String("topic", cfg.Kafka.Topic))
+			consumer = validation.NewConsumer(brokers, cfg.Kafka.ResultsTopic, cfg.Kafka.ConsumerGroup, tlsCfg, logger)
+			defer consumer.Close() //nolint:errcheck
+			logger.Info("validation enabled",
+				zap.String("requests_topic", cfg.Kafka.Topic),
+				zap.String("results_topic", cfg.Kafka.ResultsTopic),
+			)
 		}
 	}
 
-	router := api.NewRouter(cfg, logger, sessions, dispatch)
+	router, h := api.NewRouter(cfg, logger, sessions, dispatch)
+
+	// 검증 결과 소비 루프: 결과를 stepStore에 반영한다. ctx 취소(종료 신호) 시 graceful 종료.
+	if consumer != nil {
+		go func() {
+			if err := consumer.Run(ctx, h.ApplyValidationResult); err != nil {
+				logger.Error("validation consumer stopped", zap.Error(err))
+			}
+		}()
+	}
 
 	// Read/WriteTimeout: 느린 클라이언트로 인한 goroutine 고갈 방지. IdleTimeout: keep-alive 연결 유지 상한.
 	srv := &http.Server{
