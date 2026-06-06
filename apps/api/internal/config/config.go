@@ -22,10 +22,14 @@ type Config struct {
 // 인증서 경로의 파일이 없으면(로컬/CI) publisher가 비활성화되고 검증은 mock으로 동작한다.
 type KafkaConfig struct {
 	Brokers string `mapstructure:"brokers"` // 쉼표로 구분된 broker 주소 목록
-	Topic   string `mapstructure:"topic"`
+	Topic   string `mapstructure:"topic"`   // 검증 요청 발행 토픽(validation-requests)
 	TLSCert string `mapstructure:"tls_cert"`
 	TLSKey  string `mapstructure:"tls_key"`
 	TLSCA   string `mapstructure:"tls_ca"`
+
+	// 검증 결과 소비(consumer) 설정. ResultsTopic을 구독해 stepStore를 실제 결과로 갱신한다.
+	ResultsTopic  string `mapstructure:"results_topic"`
+	ConsumerGroup string `mapstructure:"consumer_group"`
 }
 
 type KubeVirtConfig struct {
@@ -84,6 +88,8 @@ func Load() (*Config, error) {
 	v.SetDefault("kafka.tls_cert", "/etc/kafka-certs/tls.crt")
 	v.SetDefault("kafka.tls_key", "/etc/kafka-certs/tls.key")
 	v.SetDefault("kafka.tls_ca", "/etc/kafka-certs/ca.crt")
+	v.SetDefault("kafka.results_topic", "validation-results")
+	v.SetDefault("kafka.consumer_group", "cledyu-api-validation-results")
 
 	if err := v.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError

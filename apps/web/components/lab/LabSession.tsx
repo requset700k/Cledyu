@@ -40,9 +40,12 @@ export function LabSession({ sessionId, lab }: { sessionId: string; lab: Lab }) 
   }, [session?.status]);
 
   // 스텝 진행 — boot 단계에선 실제로 사용하지 않지만 hook 순서 일관성을 위해 항상 호출.
+  // 검증 중(validating)인 단계가 있으면 검증엔진 결과가 올 때까지 2초 간격으로 폴링한다.
   const { data: progressData } = useQuery({
     queryKey: ['session', sessionId, 'steps'],
     queryFn: () => api.sessions.steps(sessionId),
+    refetchInterval: (q) =>
+      q.state.data?.items?.some((p) => p.status === 'validating') ? 2000 : false,
   });
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -72,7 +75,12 @@ export function LabSession({ sessionId, lab }: { sessionId: string; lab: Lab }) 
   const progress: StepProgress[] = progressData?.items ?? [];
   const statusOf = (id: number): StepStatus =>
     progress.find((p) => p.step_id === id)?.status ?? 'pending';
-  const activeStepId = progress.find((p) => p.status === 'active')?.step_id ?? steps[0]?.id;
+  // 진행 중인 단계에 초점: 검증 중 → 활성 → 실패(결과 확인용) → 첫 단계 순.
+  const activeStepId =
+    progress.find((p) => p.status === 'validating')?.step_id ??
+    progress.find((p) => p.status === 'active')?.step_id ??
+    progress.find((p) => p.status === 'failed')?.step_id ??
+    steps[0]?.id;
   const currentId = selectedId ?? activeStepId;
   const currentStep = steps.find((s) => s.id === currentId) ?? steps[0];
 
@@ -82,6 +90,12 @@ export function LabSession({ sessionId, lab }: { sessionId: string; lab: Lab }) 
 
   const allPassed = steps.length > 0 && steps.every((s) => statusOf(s.id) === 'passed');
   const currentStatus = statusOf(currentStep.id);
+  // 검증 진행 중: 요청이 날아가는 중이거나(isPending) 결과 대기 중(validating).
+  const validating = currentStatus === 'validating' || validate.isPending;
+  // 실패한 체크의 상세(사유)는 결과 수신 시 진행 상태에 함께 담겨 온다.
+  const failedChecks = (progress.find((p) => p.step_id === currentStep.id)?.checks ?? []).filter(
+    (ck) => !ck.passed,
+  );
   const terminalUrl = session?.terminal_url ?? null;
 
   return (
@@ -132,16 +146,36 @@ export function LabSession({ sessionId, lab }: { sessionId: string; lab: Lab }) 
             <button
               type="button"
               onClick={() => validate.mutate(currentStep.id)}
-              disabled={validate.isPending || currentStatus === 'passed'}
+              disabled={validating || currentStatus === 'passed'}
               className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 disabled:hover:bg-brand-500 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors"
             >
-              {currentStatus === 'passed' ? '완료됨' : validate.isPending ? '검증 중...' : '검증'}
+              {currentStatus === 'passed' ? '완료됨' : validating ? '검증 중...' : '검증'}
             </button>
             {currentStatus === 'passed' && <span className="text-emerald-400 text-xs">통과</span>}
+            {validating && <span className="text-amber-400 text-xs">검증엔진 결과 대기 중…</span>}
+            {currentStatus === 'failed' && failedChecks.length === 0 && (
+              <span className="text-red-400 text-xs">검증에 실패했습니다. 다시 시도하세요.</span>
+            )}
             {validate.isError && (
               <span className="text-red-400 text-xs">검증 요청에 실패했습니다.</span>
             )}
           </div>
+
+          {currentStatus === 'failed' && failedChecks.length > 0 && (
+            <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3">
+              <p className="text-red-300 text-xs font-medium mb-1.5">
+                검증 실패 — 아래 항목을 확인하세요
+              </p>
+              <ul className="space-y-1">
+                {failedChecks.map((ck, i) => (
+                  <li key={i} className="text-red-200/90 text-xs">
+                    <span className="font-mono text-red-300">{ck.type}</span>
+                    {ck.detail ? `: ${ck.detail}` : ''}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
 
         {terminalUrl ? (

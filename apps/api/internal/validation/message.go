@@ -55,3 +55,21 @@ type ValidationRequest struct {
 	VM        VMSpec  `json:"vm"`
 	Checks    []Check `json:"checks"`
 }
+
+// CheckResult is one check's outcome (aligned with validation-engine model.CheckResult).
+type CheckResult struct {
+	Type   CheckType `json:"type"`
+	Passed bool      `json:"passed"`
+	Detail string    `json:"detail,omitempty"` // 실패 이유 또는 실행 결과 요약
+}
+
+// ValidationResult is consumed from the validation-results Kafka topic
+// (aligned with validation-engine model.ValidationResult).
+type ValidationResult struct {
+	TraceID    string        `json:"trace_id,omitempty"`
+	SessionID  string        `json:"session_id"`
+	StepID     int           `json:"step_id"`
+	Passed     bool          `json:"passed"` // Checks 가 모두 통과하면 true
+	Checks     []CheckResult `json:"checks"`
+	DurationMS int64         `json:"duration_ms"`
+}

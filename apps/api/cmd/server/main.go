@@ -45,17 +45,33 @@ func main() {
 	// validation publisher: Kafka mTLS 인증서가 있으면 연결하고, 없으면(로컬/CI) nil로 두어
 	// ValidateStep 핸들러가 mock 검증으로 폴백한다.
 	var validator validation.Publisher
+	var consumer *validation.KafkaConsumer
 	if tlsCfg, tlsErr := validation.LoadTLS(cfg.Kafka.TLSCert, cfg.Kafka.TLSKey, cfg.Kafka.TLSCA); tlsErr != nil {
-		logger.Warn("kafka mTLS 인증서 없음 — validation publisher 비활성(mock 모드)", zap.Error(tlsErr))
+		logger.Warn("kafka mTLS 인증서 없음 — validation 비활성(mock 모드)", zap.Error(tlsErr))
 	} else {
 		brokers := strings.Split(cfg.Kafka.Brokers, ",")
 		pub := validation.NewKafkaPublisher(brokers, cfg.Kafka.Topic, tlsCfg, logger)
 		defer pub.Close() //nolint:errcheck
 		validator = pub
-		logger.Info("validation publisher 연결", zap.Strings("brokers", brokers), zap.String("topic", cfg.Kafka.Topic))
+		consumer = validation.NewKafkaConsumer(brokers, cfg.Kafka.ResultsTopic, cfg.Kafka.ConsumerGroup, tlsCfg, logger)
+		defer consumer.Close() //nolint:errcheck
+		logger.Info("validation 연결",
+			zap.Strings("brokers", brokers),
+			zap.String("requests_topic", cfg.Kafka.Topic),
+			zap.String("results_topic", cfg.Kafka.ResultsTopic),
+		)
 	}
 
-	router := api.NewRouter(cfg, logger, sessions, validator)
+	router, h := api.NewRouter(cfg, logger, sessions, validator)
+
+	// 검증 결과 소비 루프: 결과를 stepStore에 반영한다. ctx 취소(종료 신호) 시 graceful 종료.
+	if consumer != nil {
+		go func() {
+			if err := consumer.Run(ctx, h.ApplyValidationResult); err != nil {
+				logger.Error("validation consumer stopped", zap.Error(err))
+			}
+		}()
+	}
 
 	// Read/WriteTimeout: 느린 클라이언트로 인한 goroutine 고갈 방지. IdleTimeout: keep-alive 연결 유지 상한.
 	srv := &http.Server{
