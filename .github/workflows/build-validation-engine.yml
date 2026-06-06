@@ -17,37 +17,16 @@ on:
   workflow_dispatch: # GitHub UI에서 수동 실행
 
 permissions:
-  contents: read
-  packages: write # GHCR에 이미지 push하기 위한 권한
+  contents: write # GHCR push + main push 시 build-image.yml 의 bump 잡이 gitops values.yaml 에 push
+  packages: write
 
 jobs:
   image:
-    # 공통 빌드 워크플로우 재사용 — 빌드, GHCR push, Trivy 보안 스캔 포함
+    # 공통 빌드 워크플로우 재사용 — 빌드, GHCR push, Trivy 스캔, main push 시 gitops tag bump 포함
     uses: ./.github/workflows/build-image.yml
     with:
       context: apps/validation-engine       # Dockerfile이 있는 폴더
       image-name: validation-engine         # ghcr.io/requset700k/validation-engine
       trivyignores: ""
+      gitops-values-file: gitops/apps/validation-engine/values.yaml
     secrets: inherit
-
-  update-tag:
-    needs: image
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Update image tag in values.yaml
-        run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          sed -i "s/^  tag: .*/  tag: sha-${SHORT_SHA}/" gitops/apps/validation-engine/values.yaml
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add gitops/apps/validation-engine/values.yaml
-          git diff --cached --quiet && echo "tag unchanged, skip commit" && exit 0
-          git commit -m "chore(cd): validation-engine 이미지 태그 sha-${SHORT_SHA}로 업데이트"
-          git push

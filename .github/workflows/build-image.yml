@@ -59,6 +59,10 @@ on:
         description: "Path to .trivyignore file (optional)"
         type: string
         default: ""
+      gitops-values-file:
+        description: "main push 시 image.tag 를 sha-<short> 로 bump 할 gitops values.yaml 경로 (비우면 bump 안 함)"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -130,3 +134,43 @@ jobs:
         env:
           TRIVY_USERNAME: ${{ github.actor }}
           TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+
+  # main push(또는 수동 재발행) 후, 방금 push 한 sha-<short> 태그로 gitops values.yaml 을 bump 한다.
+  # ArgoCD 가 변경을 감지해 자동 sync. gitops-values-file 이 비어 있으면(예: dummy) skip.
+  bump:
+    name: bump ${{ inputs.image-name }} gitops tag
+    needs: build
+    if: github.event_name != 'pull_request' && inputs.gitops-values-file != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # 호출자(matrix)마다 별도 워크플로 런이라 워크플로 레벨 concurrency 로는 직렬화되지 않는다.
+    # 전역 잡 그룹으로 묶어 동시 push 경합을 막는다(취소 금지 — 모든 bump 를 순차 반영).
+    concurrency:
+      group: gitops-tag-bump
+      cancel-in-progress: false
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Bump image tag in gitops values
+        run: |
+          set -euo pipefail
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          TAG="sha-${SHORT_SHA}"
+          FILE="${{ inputs.gitops-values-file }}"
+          sed -i "s|^  tag:.*|  tag: ${TAG}|" "$FILE"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add "$FILE"
+          if git diff --cached --quiet; then
+            echo "tag unchanged, skip commit"
+            exit 0
+          fi
+          git commit -m "chore(gitops): bump ${{ inputs.image-name }} image tag to ${TAG}"
+          # 직렬 실행 사이 다른 bump 가 먼저 push 했을 수 있으므로 rebase 후 push.
+          git pull --rebase origin main
+          git push
