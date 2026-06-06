@@ -41,7 +41,7 @@ func (c *KafkaConsumer) Run(ctx context.Context, handle func(ValidationResult)) 
 		m, err := c.reader.ReadMessage(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
-				return nil // graceful shutdown
+				return nil //nolint:nilerr // ctx 취소는 에러가 아니라 정상 종료다
 			}
 			c.log.Error("validation result 읽기 실패", zap.Error(err))
 			continue
