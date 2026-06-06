@@ -24,6 +24,10 @@ spec:
           ports:
             - containerPort: 8080
           env:
+            # Keycloak(cledyu-ca 서명) OIDC discovery TLS 검증용 root CA.
+            # trust-manager가 분배한 ConfigMap을 마운트(ca-bundle)하고 Go http.Client가 이 파일을 신뢰하게 한다.
+            - name: SSL_CERT_FILE
+              value: /etc/cledyu-ca/ca.crt
             - name: CLEDYU_SERVER_MODE
               value: {{ .Values.env.CLEDYU_SERVER_MODE | quote }}
             - name: CLEDYU_REDIS_ADDR
@@ -53,6 +57,9 @@ spec:
             - name: kafka-certs
               mountPath: /etc/kafka-certs
               readOnly: true
+            - name: ca-bundle
+              mountPath: /etc/cledyu-ca
+              readOnly: true
           resources:
             requests:
               cpu: {{ .Values.resources.requests.cpu }}
@@ -72,3 +79,10 @@ spec:
         - name: kafka-certs
           secret:
             secretName: api-kafka-client-tls
+        # trust-manager가 분배한 root CA 번들(namespace 라벨 cledyu.io/trust-bundle=root-ca 필요).
+        - name: ca-bundle
+          configMap:
+            name: cledyu-root-ca-bundle
+            items:
+              - key: ca.crt
+                path: ca.crt

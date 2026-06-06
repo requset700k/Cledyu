@@ -2,3 +2,7 @@ apiVersion: v1
 kind: Namespace
 metadata:
   name: api
+  labels:
+    # trust-manager가 cledyu-root-ca-bundle ConfigMap을 이 namespace에 분배하도록 한다.
+    # api가 Keycloak(cledyu-ca 서명) OIDC discovery TLS를 검증하려면 root CA가 필요하다.
+    cledyu.io/trust-bundle: root-ca
