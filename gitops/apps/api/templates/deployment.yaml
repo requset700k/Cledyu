@@ -49,9 +49,17 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.keycloak.clientSecret.secretName | quote }}
                   key: {{ .Values.keycloak.clientSecret.secretKey | quote }}
+            # go-oidc 가 keycloak(cledyu 내부 CA) TLS 를 신뢰하도록 default cert pool 을
+            # 아래 마운트된 cledyu Root CA 로 지정. api 의 외부 TLS 대상은 keycloak 뿐이다
+            # (redis 평문, kafka mTLS 는 자체 인증서, kubevirt 는 kubeconfig CA).
+            - name: SSL_CERT_FILE
+              value: /etc/ssl/cledyu/ca.crt
           volumeMounts:
             - name: kafka-certs
               mountPath: /etc/kafka-certs
+              readOnly: true
+            - name: cledyu-ca
+              mountPath: /etc/ssl/cledyu
               readOnly: true
           resources:
             requests:
@@ -72,3 +80,6 @@ spec:
         - name: kafka-certs
           secret:
             secretName: api-kafka-client-tls
+        - name: cledyu-ca
+          configMap:
+            name: cledyu-root-ca-bundle  # trust-manager 가 ns 라벨 기준으로 배포(키: ca.crt)
