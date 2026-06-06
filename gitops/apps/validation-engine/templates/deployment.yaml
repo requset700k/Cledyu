@@ -102,7 +102,7 @@ spec:
           secret:
             secretName: lab-ssh-key
             optional: true
-            defaultMode: 0400
+            defaultMode: 256 # 0o400 — 소유자 읽기 전용(ssh private key 권한)
             items:
               - key: id_ed25519
                 path: id_ed25519

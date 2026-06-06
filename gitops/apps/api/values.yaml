@@ -37,3 +37,8 @@ resources:
   limits:
     cpu: 500m
     memory: 256Mi
+
+kubevirt:
+  # 세션 VM cloud-init이 lab 사용자 authorized_keys로 넣는 검증엔진 공개키(공개값).
+  # 대응 private key는 validation-engine Secret(lab-ssh-key)에 보관 — git에 넣지 않는다.
+  labSshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGIZUWVKVjoJzh6dirTVWAtLYewp+SXW54f3uiS8tCFj validation-engine@cledyu"
