@@ -24,7 +24,7 @@ spec:
           - resources:
               kinds:
                 - Pod
-      exclude:
+      exclude: &system_namespace_exclude
         any:
           - resources:
               namespaces:
@@ -70,21 +70,7 @@ spec:
           - resources:
               kinds:
                 - Pod
-      exclude:
-        any:
-          - resources:
-              namespaces:
-                - kube-system
-                - kube-public
-                - kube-node-lease
-                - kyverno
-                - kubevirt
-                - longhorn-system
-                - metallb-system
-                - monitoring
-                - loki
-                - cdi
-                - cert-manager
+      exclude: *system_namespace_exclude
       validate:
         message: "hostPath volumes are not allowed outside approved system namespaces."
         foreach:
@@ -102,21 +88,7 @@ spec:
           - resources:
               kinds:
                 - Pod
-      exclude:
-        any:
-          - resources:
-              namespaces:
-                - kube-system
-                - kube-public
-                - kube-node-lease
-                - kyverno
-                - kubevirt
-                - longhorn-system
-                - metallb-system
-                - monitoring
-                - loki
-                - cdi
-                - cert-manager
+      exclude: *system_namespace_exclude
       validate:
         message: "Explicit root pod security contexts are not allowed outside approved system namespaces."
         deny:
@@ -135,21 +107,7 @@ spec:
           - resources:
               kinds:
                 - Pod
-      exclude:
-        any:
-          - resources:
-              namespaces:
-                - kube-system
-                - kube-public
-                - kube-node-lease
-                - kyverno
-                - kubevirt
-                - longhorn-system
-                - metallb-system
-                - monitoring
-                - loki
-                - cdi
-                - cert-manager
+      exclude: *system_namespace_exclude
       validate:
         message: "Explicit root container users are not allowed outside approved system namespaces."
         foreach:
@@ -181,21 +139,7 @@ spec:
           - resources:
               kinds:
                 - Pod
-      exclude:
-        any:
-          - resources:
-              namespaces:
-                - kube-system
-                - kube-public
-                - kube-node-lease
-                - kyverno
-                - kubevirt
-                - longhorn-system
-                - metallb-system
-                - monitoring
-                - loki
-                - cdi
-                - cert-manager
+      exclude: *system_namespace_exclude
       validate:
         message: "Pods must declare runAsNonRoot=true at the pod or container level."
         foreach:
@@ -236,21 +180,7 @@ spec:
           - resources:
               kinds:
                 - Pod
-      exclude:
-        any:
-          - resources:
-              namespaces:
-                - kube-system
-                - kube-public
-                - kube-node-lease
-                - kyverno
-                - kubevirt
-                - longhorn-system
-                - metallb-system
-                - monitoring
-                - loki
-                - cdi
-                - cert-manager
+      exclude: *system_namespace_exclude
       validate:
         message: "hostNetwork, hostPID, and hostIPC are not allowed outside approved system namespaces."
         deny:
@@ -272,21 +202,7 @@ spec:
           - resources:
               kinds:
                 - Pod
-      exclude:
-        any:
-          - resources:
-              namespaces:
-                - kube-system
-                - kube-public
-                - kube-node-lease
-                - kyverno
-                - kubevirt
-                - longhorn-system
-                - metallb-system
-                - monitoring
-                - loki
-                - cdi
-                - cert-manager
+      exclude: *system_namespace_exclude
       validate:
         message: "Privilege escalation is not allowed outside approved system namespaces."
         foreach:
