@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/requset700k/cledyu/api/internal/content"
 )
 
 // mockLabs는 Lab DSL 명세 확정 전까지 사용하는 하드코딩 데이터.
@@ -71,6 +72,30 @@ var mockLabs = []gin.H{
 	},
 }
 
+// labStepResponse는 학습자 화면에 필요한 step 정보만 노출한다.
+// checks는 validation-engine 전용 정답 조건이므로 API 응답에서 제외한다.
+type labStepResponse struct {
+	ID          int      `json:"id"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Commands    []string `json:"commands,omitempty"`
+	Hint        string   `json:"hint,omitempty"`
+}
+
+func publicSteps(steps []content.Step) []labStepResponse {
+	out := make([]labStepResponse, 0, len(steps))
+	for _, step := range steps {
+		out = append(out, labStepResponse{
+			ID:          step.ID,
+			Title:       step.Title,
+			Description: step.Description,
+			Commands:    step.Commands,
+			Hint:        step.Hint,
+		})
+	}
+	return out
+}
+
 // ListLabs는 전체 lab 목록과 총 개수를 반환한다. 인증 필요.
 // GET /api/v1/labs
 func (h *Handler) ListLabs(c *gin.Context) {
@@ -95,7 +120,7 @@ func (h *Handler) GetLab(c *gin.Context) {
 			resp[k] = v
 		}
 		if lc, ok := h.labs[id]; ok {
-			resp["steps"] = lc.Steps
+			resp["steps"] = publicSteps(lc.Steps)
 			resp["environment"] = lc.Environment
 		}
 		c.JSON(http.StatusOK, resp)
