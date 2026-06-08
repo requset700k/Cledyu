@@ -43,12 +43,14 @@ spec:
     - name: requests-latency
       objective: 99.9
       description: "Traefik이 처리하는 전체 요청 중 99.9%는 1.2초 이내에 응답해야 한다."
+      # 주의: le="1.2" 버킷이 Traefik 히스토그램 설정에 존재해야 함
+      # 버킷 설정 변경 시 이 쿼리도 함께 수정 필요
       sli:
         events:
           errorQuery: |
-            (sum(rate(traefik_service_request_duration_seconds_count[{{.window}}])) or vector(0))
+            (sum(rate(traefik_service_request_duration_seconds_count[{{ .window }}])) or vector(0))
             -
-            (sum(rate(traefik_service_request_duration_seconds_bucket{le="1.2"}[{{.window}}])) or vector(0))
+            (sum(rate(traefik_service_request_duration_seconds_bucket{le="1.2"}[{{ .window }}])) or vector(0))
           totalQuery: |
             sum(rate(traefik_service_request_duration_seconds_count[{{.window}}]))
       alerting:
