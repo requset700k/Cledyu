@@ -39,7 +39,7 @@ spec:
       sli:
         raw:
           errorRatioQuery: |
-            avg(avg_over_time(kafka_network_requestmetrics_totaltimems_50thpercentile{request="Fetch"}[{{ .window }}]) > bool 1000)
+            avg(avg_over_time(kafka_network_requestmetrics_totaltimems_50thpercentile{request="Produce"}[{{ .window }}]) > bool 1000)
       alerting:
         name: KafkaLatencySLO
         pageAlert: { labels: { severity: critical } }
