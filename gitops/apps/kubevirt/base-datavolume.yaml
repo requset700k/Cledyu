@@ -8,6 +8,10 @@ metadata:
   namespace: kubevirt
   annotations:
     argocd.argoproj.io/sync-wave: "30"
+    # DataVolume spec(특히 storageClassName/source)은 immutable이라 ArgoCD가 apply로 변경 못 한다.
+    # Replace=true 로 두면 spec 변경 시 delete+recreate 해 ArgoCD sync가 immutable 필드 충돌로
+    # 영구 OutOfSync/health-wait에 빠지지 않는다(과거 11일간 sync hung 사고의 메커니즘).
+    argocd.argoproj.io/sync-options: Replace=true
 spec:
   source:
     http:
