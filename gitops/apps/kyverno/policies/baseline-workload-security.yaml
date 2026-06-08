@@ -1,0 +1,229 @@
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: baseline-workload-security
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    policies.kyverno.io/title: baseline workload security
+    policies.kyverno.io/category: Pod Security Baseline
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/subject: Pod
+    policies.kyverno.io/description: >-
+      Audits risky pod settings before enforcement. System namespaces are
+      excluded because Cilium, KubeVirt, Longhorn, MetalLB, and node exporters
+      currently require host-level privileges.
+spec:
+  validationFailureAction: Audit
+  emitWarning: true
+  background: true
+  rules:
+    - name: audit-privileged-containers
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude: &system_namespace_exclude
+        any:
+          - resources:
+              namespaces:
+                - kube-system
+                - kube-public
+                - kube-node-lease
+                - kyverno
+                - kubevirt
+                - longhorn-system
+                - metallb-system
+                - monitoring
+                - loki
+                - cdi
+                - cert-manager
+      validate:
+        message: "Privileged containers are not allowed outside approved system namespaces."
+        foreach:
+          - list: "request.object.spec.containers[]"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.securityContext.privileged || `false` }}"
+                    operator: Equals
+                    value: true
+          - list: "request.object.spec.initContainers || `[]`"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.securityContext.privileged || `false` }}"
+                    operator: Equals
+                    value: true
+          - list: "request.object.spec.ephemeralContainers || `[]`"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.securityContext.privileged || `false` }}"
+                    operator: Equals
+                    value: true
+
+    - name: audit-hostpath-volumes
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude: *system_namespace_exclude
+      validate:
+        message: "hostPath volumes are not allowed outside approved system namespaces."
+        foreach:
+          - list: "request.object.spec.volumes || `[]`"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.hostPath.path || '' }}"
+                    operator: NotEquals
+                    value: ""
+
+    - name: audit-pod-root-user
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude: *system_namespace_exclude
+      validate:
+        message: "Explicit root pod security contexts are not allowed outside approved system namespaces."
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.object.spec.securityContext.runAsUser || `-1` }}"
+                operator: Equals
+                value: 0
+              - key: "{{ request.object.spec.securityContext.runAsNonRoot || `true` }}"
+                operator: Equals
+                value: false
+
+    - name: audit-container-root-user
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude: *system_namespace_exclude
+      validate:
+        message: "Explicit root container users are not allowed outside approved system namespaces."
+        foreach:
+          - list: "request.object.spec.containers[]"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.securityContext.runAsUser || `-1` }}"
+                    operator: Equals
+                    value: 0
+          - list: "request.object.spec.initContainers || `[]`"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.securityContext.runAsUser || `-1` }}"
+                    operator: Equals
+                    value: 0
+          - list: "request.object.spec.ephemeralContainers || `[]`"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.securityContext.runAsUser || `-1` }}"
+                    operator: Equals
+                    value: 0
+
+    - name: audit-run-as-non-root-required
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude: *system_namespace_exclude
+      validate:
+        message: "Pods must declare runAsNonRoot=true at the pod or container level."
+        foreach:
+          - list: "request.object.spec.containers[]"
+            deny:
+              conditions:
+                all:
+                  - key: "{{ request.object.spec.securityContext.runAsNonRoot || `false` }}"
+                    operator: NotEquals
+                    value: true
+                  - key: "{{ element.securityContext.runAsNonRoot || `false` }}"
+                    operator: NotEquals
+                    value: true
+          - list: "request.object.spec.initContainers || `[]`"
+            deny:
+              conditions:
+                all:
+                  - key: "{{ request.object.spec.securityContext.runAsNonRoot || `false` }}"
+                    operator: NotEquals
+                    value: true
+                  - key: "{{ element.securityContext.runAsNonRoot || `false` }}"
+                    operator: NotEquals
+                    value: true
+          - list: "request.object.spec.ephemeralContainers || `[]`"
+            deny:
+              conditions:
+                all:
+                  - key: "{{ request.object.spec.securityContext.runAsNonRoot || `false` }}"
+                    operator: NotEquals
+                    value: true
+                  - key: "{{ element.securityContext.runAsNonRoot || `false` }}"
+                    operator: NotEquals
+                    value: true
+
+    - name: audit-host-namespaces
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude: *system_namespace_exclude
+      validate:
+        message: "hostNetwork, hostPID, and hostIPC are not allowed outside approved system namespaces."
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.object.spec.hostNetwork || `false` }}"
+                operator: Equals
+                value: true
+              - key: "{{ request.object.spec.hostPID || `false` }}"
+                operator: Equals
+                value: true
+              - key: "{{ request.object.spec.hostIPC || `false` }}"
+                operator: Equals
+                value: true
+
+    - name: audit-privilege-escalation
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude: *system_namespace_exclude
+      validate:
+        message: "Privilege escalation is not allowed outside approved system namespaces."
+        foreach:
+          - list: "request.object.spec.containers[]"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.securityContext.allowPrivilegeEscalation || `false` }}"
+                    operator: Equals
+                    value: true
+          - list: "request.object.spec.initContainers || `[]`"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.securityContext.allowPrivilegeEscalation || `false` }}"
+                    operator: Equals
+                    value: true
+          - list: "request.object.spec.ephemeralContainers || `[]`"
+            deny:
+              conditions:
+                any:
+                  - key: "{{ element.securityContext.allowPrivilegeEscalation || `false` }}"
+                    operator: Equals
+                    value: true
