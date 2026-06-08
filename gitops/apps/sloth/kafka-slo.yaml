@@ -1,0 +1,46 @@
+---
+apiVersion: sloth.slok.dev/v1
+kind: PrometheusServiceLevel
+metadata:
+  name: kafka-slo
+  namespace: monitoring
+  labels:
+    app: kafka
+    team: platform
+spec:
+  service: kafka
+  labels:
+    app: kafka
+    team: platform
+  slos:
+    # ───────────────────────────────────────────
+    # 1. 가용성 SLO: 99.99%
+    # ───────────────────────────────────────────
+    - name: kafka-availability
+      objective: 99.9
+      description: "Kafka 브로커 내 오프라인 파티션이 없어야 한다."
+      sli:
+        raw:
+          errorRatioQuery: |
+            max(avg_over_time(kafka_controller_offlinepartitionscount[{{ .window }}]))
+            /
+            max(avg_over_time(kafka_controller_globalpartitioncount[{{ .window }}]))
+      alerting:
+        name: KafkaAvailabilitySLO
+        pageAlert: { labels: { severity: critical } }
+        ticketAlert: { labels: { severity: warning } }
+
+    # ───────────────────────────────────────────
+    # 2. 성능 SLO: 99.5%
+    # ───────────────────────────────────────────
+    - name: kafka-latency
+      objective: 99.5
+      description: "Kafka 브로커의 Produce 요청 지연시간 50th 퍼센타일이 1000ms를 초과하는 비율"
+      sli:
+        raw:
+          errorRatioQuery: |
+            avg(avg_over_time(kafka_network_requestmetrics_totaltimems_50thpercentile{request="Produce"}[{{ .window }}]) > bool 1000)
+      alerting:
+        name: KafkaLatencySLO
+        pageAlert: { labels: { severity: critical } }
+        ticketAlert: { labels: { severity: warning } }

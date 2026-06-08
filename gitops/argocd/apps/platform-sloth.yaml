@@ -1,0 +1,42 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-sloth
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://slok.github.io/sloth
+      chart: sloth
+      targetRevision: 0.16.0
+      helm:
+        releaseName: sloth
+        valueFiles:
+          - $values/gitops/apps/sloth/values.yaml
+    - repoURL: https://github.com/requset700k/Cledyu.git
+      targetRevision: main
+      ref: values
+    - repoURL: https://github.com/requset700k/Cledyu.git
+      targetRevision: main
+      path: gitops/apps/sloth
+      directory:
+        include: namespace.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: sloth
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m

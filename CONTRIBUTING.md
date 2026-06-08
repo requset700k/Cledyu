@@ -26,9 +26,17 @@
 ```
 
 - `type`: `feat | fix | refactor | perf | docs | test | chore | ci | build | revert | security`
-- `scope`: `infra | k8s | terraform | ansible | gitops | kubevirt | ec2-orch | kafka | airflow | dbt | lab-dsl | validation | ai | rag | api | web | obs | sec | dr | data`
-- `subject`: 명령형, 50자 이내, 마침표 X
-- Breaking change는 본문에 `BREAKING CHANGE:` 블록 추가
+- `scope`: `infra | k8s | terraform | ansible | gitops | kafka | airflow | dbt | nlp | llm | ai | api | web | obs | sec | dr | data | deps`
+- `subject`: 명령형, 50자 권장(100자 한도), 소문자 시작, 마침표 X
+- 본문은 한 줄 120자 이내로 wrap, Breaking change는 본문에 `BREAKING CHANGE:` 블록 추가
+
+> scope/type 목록의 단일 기준은 [`.commitlintrc.json`](.commitlintrc.json)입니다. KubeVirt·EC2 Orchestrator·Validation Engine 같은 컴포넌트는 별도 scope가 아니라 `api`·`infra`·`data` 등 상위 scope로 묶습니다.
+
+커밋 메시지 틀은 [`.gitmessage`](.gitmessage) 템플릿으로 제공합니다. 레포 루트에서 한 번 활성화하세요:
+
+```bash
+git config commit.template .gitmessage
+```
 
 검증은 `pre-commit install --hook-type commit-msg` + CI `commitlint` 워크플로가 담당합니다.
 
@@ -39,9 +47,10 @@
 brew install pre-commit terraform tflint ansible ansible-lint shellcheck shfmt \
              yamllint gitleaks pnpm uv go
 
-# 훅 설치
+# 훅 설치 + 커밋 메시지 템플릿
 pre-commit install
 pre-commit install --hook-type commit-msg
+git config commit.template .gitmessage
 
 # Python 환경 (uv 권장)
 uv sync

@@ -4,6 +4,7 @@ import type { StepContent, StepStatus } from '@/lib/types';
 const STATUS_DOT: Record<StepStatus, string> = {
   pending: 'bg-slate-600',
   active: 'bg-brand-400',
+  validating: 'bg-amber-400 animate-pulse',
   passed: 'bg-emerald-400',
   failed: 'bg-red-400',
 };

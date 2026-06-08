@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -18,6 +19,16 @@ import (
 )
 
 var ErrNotFound = errors.New("session not found")
+
+const (
+	// annUserID는 세션 소유자(JWT sub)를 세션 namespace에 보관하는 annotation 키다.
+	annUserID = "cledyu.io/user-id"
+	// labelManagedBy/managedByValue는 세션 namespace 를 식별하는 라벨이다.
+	// annotation은 label selector로 조회할 수 없으므로, 활성 세션 조회 시 이 라벨로 후보를 한정한 뒤
+	// user-id annotation으로 매칭한다.
+	labelManagedBy = "cledyu.io/managed-by"
+	managedByValue = "cledyu-session"
+)
 
 var (
 	vmGVR  = schema.GroupVersionResource{Group: "kubevirt.io", Version: "v1", Resource: "virtualmachines"}
@@ -68,10 +79,11 @@ func (m *Manager) Create(ctx context.Context, sessionID, labID, userID string) (
 	// 1. Namespace — 세션 메타데이터는 annotation에 보관한다.
 	_, err := m.core.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: ns,
+			Name:   ns,
+			Labels: map[string]string{labelManagedBy: managedByValue},
 			Annotations: map[string]string{
 				"cledyu.io/lab-id":     labID,
-				"cledyu.io/user-id":    userID,
+				annUserID:              userID,
 				"cledyu.io/started-at": now.Format(time.RFC3339),
 				"cledyu.io/expires-at": expires.Format(time.RFC3339),
 			},
@@ -79,6 +91,13 @@ func (m *Manager) Create(ctx context.Context, sessionID, labID, userID string) (
 	}, metav1.CreateOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("create namespace: %w", err)
+	}
+
+	// 검증엔진(virtctl ssh)이 키로 접속할 수 있도록 lab 사용자에 엔진 공개키를 넣는다.
+	// 공개키 미설정 시 비번/시리얼 콘솔만 유지(키 블록 생략).
+	sshKeyBlock := ""
+	if m.cfg.LabSSHPublicKey != "" {
+		sshKeyBlock = "\n    ssh_authorized_keys:\n      - " + m.cfg.LabSSHPublicKey
 	}
 
 	// 2. cloud-init Secret
@@ -95,7 +114,7 @@ users:
   - name: lab
     lock_passwd: false
     shell: /bin/bash
-    sudo: ALL=(ALL) NOPASSWD:ALL
+    sudo: ALL=(ALL) NOPASSWD:ALL%s
 chpasswd:
   expire: false
   list: |
@@ -110,7 +129,7 @@ write_files:
 runcmd:
   - systemctl daemon-reload
   - systemctl restart serial-getty@ttyS0.service
-`, "session-"+sessionID),
+`, "session-"+sessionID, sshKeyBlock),
 		},
 	}, metav1.CreateOptions{})
 	if err != nil {
@@ -155,7 +174,7 @@ runcmd:
 										"storage": "10Gi",
 									},
 								},
-								"storageClassName": "longhorn",
+								"storageClassName": m.cfg.StorageClass,
 							},
 						},
 					},
@@ -222,6 +241,31 @@ runcmd:
 		StartedAt: now,
 		ExpiresAt: expires,
 	}, nil
+}
+
+// FindActiveByUser는 해당 user가 소유한 활성 세션의 sessionID를 반환한다.
+// 활성 세션이 없으면 빈 문자열을 반환한다(에러 아님). 세션 namespace는 managed-by 라벨로 한정해
+// 조회한 뒤 user-id annotation으로 매칭하며, 삭제 진행 중(Terminating) namespace는 곧 사라지므로 제외한다.
+func (m *Manager) FindActiveByUser(ctx context.Context, userID string) (string, error) {
+	if userID == "" {
+		return "", nil
+	}
+	list, err := m.core.CoreV1().Namespaces().List(ctx, metav1.ListOptions{
+		LabelSelector: labelManagedBy + "=" + managedByValue,
+	})
+	if err != nil {
+		return "", fmt.Errorf("list session namespaces: %w", err)
+	}
+	for _, ns := range list.Items {
+		if ns.Annotations[annUserID] != userID {
+			continue
+		}
+		if ns.Status.Phase == corev1.NamespaceTerminating {
+			continue
+		}
+		return strings.TrimPrefix(ns.Name, "lab-"), nil
+	}
+	return "", nil
 }
 
 func (m *Manager) Get(ctx context.Context, sessionID string) (*Session, error) {
