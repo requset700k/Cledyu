@@ -80,7 +80,10 @@ metrics:
     service:
       enabled: true
     serviceMonitor:
-      enabled: false
+      enabled: true
+      namespaceSelector:
+        matchNames:
+          - traefik
 
 resources:
   requests:

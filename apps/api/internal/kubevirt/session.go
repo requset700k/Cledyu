@@ -93,6 +93,13 @@ func (m *Manager) Create(ctx context.Context, sessionID, labID, userID string) (
 		return nil, fmt.Errorf("create namespace: %w", err)
 	}
 
+	// 검증엔진(virtctl ssh)이 키로 접속할 수 있도록 lab 사용자에 엔진 공개키를 넣는다.
+	// 공개키 미설정 시 비번/시리얼 콘솔만 유지(키 블록 생략).
+	sshKeyBlock := ""
+	if m.cfg.LabSSHPublicKey != "" {
+		sshKeyBlock = "\n    ssh_authorized_keys:\n      - " + m.cfg.LabSSHPublicKey
+	}
+
 	// 2. cloud-init Secret
 	_, err = m.core.CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -107,7 +114,7 @@ users:
   - name: lab
     lock_passwd: false
     shell: /bin/bash
-    sudo: ALL=(ALL) NOPASSWD:ALL
+    sudo: ALL=(ALL) NOPASSWD:ALL%s
 chpasswd:
   expire: false
   list: |
@@ -122,7 +129,7 @@ write_files:
 runcmd:
   - systemctl daemon-reload
   - systemctl restart serial-getty@ttyS0.service
-`, "session-"+sessionID),
+`, "session-"+sessionID, sshKeyBlock),
 		},
 	}, metav1.CreateOptions{})
 	if err != nil {
@@ -167,7 +174,7 @@ runcmd:
 										"storage": "10Gi",
 									},
 								},
-								"storageClassName": "longhorn",
+								"storageClassName": m.cfg.StorageClass,
 							},
 						},
 					},

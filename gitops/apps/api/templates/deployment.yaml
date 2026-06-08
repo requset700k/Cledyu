@@ -31,6 +31,9 @@ spec:
             # validation-requests Kafka 발행 — 인증서는 아래 kafka-certs 볼륨(기본 경로 /etc/kafka-certs).
             - name: CLEDYU_KAFKA_BROKERS
               value: {{ .Values.env.CLEDYU_KAFKA_BROKERS | quote }}
+            # 세션 VM cloud-init이 lab authorized_keys로 넣는 검증엔진 공개키(공개값이라 평문 OK).
+            - name: CLEDYU_KUBEVIRT_LAB_SSH_PUBLIC_KEY
+              value: {{ .Values.kubevirt.labSshPublicKey | quote }}
             # Keycloak OIDC (학습자 realm cledyu-learn). client_secret 은 Vault→ESO Secret 에서.
             - name: CLEDYU_KEYCLOAK_URL
               value: {{ .Values.keycloak.url | quote }}
@@ -49,9 +52,17 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.keycloak.clientSecret.secretName | quote }}
                   key: {{ .Values.keycloak.clientSecret.secretKey | quote }}
+            # go-oidc 가 keycloak(cledyu 내부 CA) TLS 를 신뢰하도록 default cert pool 을
+            # 아래 마운트된 cledyu Root CA 로 지정. api 의 외부 TLS 대상은 keycloak 뿐이다
+            # (redis 평문, kafka mTLS 는 자체 인증서, kubevirt 는 kubeconfig CA).
+            - name: SSL_CERT_FILE
+              value: /etc/ssl/cledyu/ca.crt
           volumeMounts:
             - name: kafka-certs
               mountPath: /etc/kafka-certs
+              readOnly: true
+            - name: cledyu-ca
+              mountPath: /etc/ssl/cledyu
               readOnly: true
           resources:
             requests:
@@ -72,3 +83,6 @@ spec:
         - name: kafka-certs
           secret:
             secretName: api-kafka-client-tls
+        - name: cledyu-ca
+          configMap:
+            name: cledyu-root-ca-bundle  # trust-manager 가 ns 라벨 기준으로 배포(키: ca.crt)

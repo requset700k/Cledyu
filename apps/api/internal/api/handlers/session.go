@@ -15,11 +15,19 @@ import (
 	"go.uber.org/zap"
 )
 
+// checkOutcome은 한 검증 항목의 결과다(검증엔진이 돌려준 체크별 pass/detail).
+type checkOutcome struct {
+	Type   string
+	Passed bool
+	Detail string
+}
+
 // stepState는 세션 내 한 단계의 진행 상태다(프론트 StepProgress와 대응).
 type stepState struct {
 	StepID   int
-	Status   string // pending | active | passed | failed
+	Status   string // pending | active | validating | passed | failed
 	Attempts int
+	Checks   []checkOutcome // 검증엔진 결과의 체크별 상세(실패 사유 표시용). 결과 수신 시 채워진다.
 }
 
 // sessionSteps는 한 세션의 스텝 진행 상태(전체 목록 + 현재 단계 id)를 묶어 보관한다.
@@ -229,13 +237,23 @@ func (h *Handler) GetSessionSteps(c *gin.Context) {
 	}
 	items := make([]gin.H, 0, len(ss.Steps))
 	for _, st := range ss.Steps {
-		items = append(items, gin.H{"step_id": st.StepID, "status": st.Status, "attempts": st.Attempts})
+		item := gin.H{"step_id": st.StepID, "status": st.Status, "attempts": st.Attempts}
+		// 검증엔진 결과가 있으면 체크별 상세(실패 사유)를 함께 노출한다.
+		if len(st.Checks) > 0 {
+			checks := make([]gin.H, 0, len(st.Checks))
+			for _, ck := range st.Checks {
+				checks = append(checks, gin.H{"type": ck.Type, "passed": ck.Passed, "detail": ck.Detail})
+			}
+			item["checks"] = checks
+		}
+		items = append(items, item)
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items, "total": len(items)})
 }
 
-// ValidateStep은 한 단계의 검증 요청을 validation-engine으로 발행한다.
-// Kafka publisher가 없으면 기존 mock 통과 동작을 유지한다(실제 publisher 연결은 후속 PR).
+// ValidateStep은 한 단계의 검증 요청을 validation-engine으로 발행하고 스텝을 validating으로 둔다.
+// 실제 pass/fail은 ApplyValidationResult가 validation-results 결과를 받아 확정한다(프론트는 폴링).
+// Kafka publisher가 없으면(로컬/CI) 종전대로 mock 통과한다.
 // POST /api/v1/sessions/:id/validate  body: { "step_id": 1 }
 func (h *Handler) ValidateStep(c *gin.Context) {
 	var req struct {
@@ -311,12 +329,69 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 		return
 	}
 
-	h.recordStepAttempt(sessionID, idx)
+	// 결과가 올 때까지 validating으로 둔다. 실제 pass/fail은 ApplyValidationResult가 확정한다.
+	h.markStepValidating(sessionID, idx)
 	c.JSON(http.StatusAccepted, gin.H{
-		"status":   "accepted",
+		"status":   "validating",
 		"message":  "검증 요청을 접수했습니다",
 		"trace_id": traceID,
 	})
+}
+
+// markStepValidating은 검증 요청 발행 후 스텝을 validating으로 두고 시도 횟수를 올린다.
+// 재시도 시 이전 체크 상세는 비운다.
+func (h *Handler) markStepValidating(sessionID string, idx int) {
+	h.steps.mu.Lock()
+	defer h.steps.mu.Unlock()
+	ss, ok := h.steps.m[sessionID]
+	if !ok || idx < 0 || idx >= len(ss.Steps) {
+		return
+	}
+	ss.Steps[idx].Attempts++
+	ss.Steps[idx].Status = "validating"
+	ss.Steps[idx].Checks = nil
+}
+
+// ApplyValidationResult는 검증엔진 결과(validation-results)를 stepStore에 반영한다.
+// consumer goroutine에서 호출되며, (session_id, step_id)로 스텝을 찾아 체크별 상세를 저장하고
+// 모두 통과면 passed로 확정 후 다음 스텝을 활성화한다. 실패면 failed로 두되 스텝을 진행시키지
+// 않아(current 유지) 사용자가 다시 시도할 수 있게 한다. 모르는 세션/스텝은 무시한다(지연 결과 등).
+func (h *Handler) ApplyValidationResult(r validation.ValidationResult) {
+	h.steps.mu.Lock()
+	defer h.steps.mu.Unlock()
+	ss, ok := h.steps.m[r.SessionID]
+	if !ok {
+		h.log.Warn("검증 결과의 세션을 찾을 수 없음", zap.String("session_id", r.SessionID), zap.Int("step_id", r.StepID))
+		return
+	}
+	idx := -1
+	for i := range ss.Steps {
+		if ss.Steps[i].StepID == r.StepID {
+			idx = i
+			break
+		}
+	}
+	if idx == -1 {
+		h.log.Warn("검증 결과의 스텝을 찾을 수 없음", zap.String("session_id", r.SessionID), zap.Int("step_id", r.StepID))
+		return
+	}
+
+	outcomes := make([]checkOutcome, 0, len(r.Checks))
+	for _, ck := range r.Checks {
+		outcomes = append(outcomes, checkOutcome{Type: string(ck.Type), Passed: ck.Passed, Detail: ck.Detail})
+	}
+	ss.Steps[idx].Checks = outcomes
+	if r.Passed {
+		ss.Steps[idx].Status = "passed"
+		if idx+1 < len(ss.Steps) {
+			if ss.Steps[idx+1].Status == "pending" {
+				ss.Steps[idx+1].Status = "active"
+			}
+			ss.CurrentStep = ss.Steps[idx+1].StepID
+		}
+	} else {
+		ss.Steps[idx].Status = "failed"
+	}
 }
 
 var errStepSessionNotFound = errors.New("session not found")
@@ -335,16 +410,6 @@ func (h *Handler) findStepIndex(sessionID string, stepID int) (int, error) {
 		}
 	}
 	return -1, errStepNotFound
-}
-
-func (h *Handler) recordStepAttempt(sessionID string, idx int) {
-	h.steps.mu.Lock()
-	defer h.steps.mu.Unlock()
-	ss, ok := h.steps.m[sessionID]
-	if !ok || idx < 0 || idx >= len(ss.Steps) {
-		return
-	}
-	ss.Steps[idx].Attempts++
 }
 
 func (h *Handler) markStepPassed(sessionID string, idx int) {

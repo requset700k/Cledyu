@@ -5,18 +5,20 @@ on:
     branches: [main]
     paths:
       - apps/**
+      - "!apps/validation-engine/**" # VE 는 build-validation-engine.yml 가 담당
       - .github/workflows/build-image.yml
       - .github/workflows/build-apps.yml
   push:
     branches: [main]
     paths:
       - apps/**
+      - "!apps/validation-engine/**"
       - .github/workflows/build-image.yml
       - .github/workflows/build-apps.yml
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write # main push 시 build-image.yml 의 bump 잡이 gitops values.yaml 에 push
   packages: write
 
 jobs:
@@ -28,15 +30,19 @@ jobs:
           - context: apps/api
             name: api
             trivyignores: apps/api/.trivyignore
+            values: gitops/apps/api/values.yaml
           - context: apps/web
             name: web
             trivyignores: apps/web/.trivyignore
+            values: gitops/apps/web/values.yaml
           - context: apps/dummy
             name: dummy
             trivyignores: ""
+            values: "" # gitops 배포 대상 아님 — tag bump skip
     uses: ./.github/workflows/build-image.yml
     with:
       context: ${{ matrix.context }}
       image-name: ${{ matrix.name }}
       trivyignores: ${{ matrix.trivyignores }}
+      gitops-values-file: ${{ matrix.values }}
     secrets: inherit
