@@ -68,9 +68,9 @@ spec:
       sli:
         events:
           errorQuery: |
-            (1 - avg_over_time(up{job="kubevirt-prometheus-metrics", container="virt-handler"}[{{ .window }}])) or vector(0)
+            (1 - avg(avg_over_time(up{job="kubevirt-prometheus-metrics", container="virt-handler"}[{{ .window }}]))) or vector(0)
           totalQuery: |
-            count_over_time(up{job="kubevirt-prometheus-metrics", container="virt-handler"}[{{ .window }}]) * 0 + 1
+            avg(count_over_time(up{job="kubevirt-prometheus-metrics", container="virt-handler"}[{{ .window }}])) * 0 + 1
       alerting:
         name: KubeVirtHandlerAvailabilitySLO
         labels:
