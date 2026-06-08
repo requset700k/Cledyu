@@ -35,7 +35,7 @@ spec:
     # ───────────────────────────────────────────
     - name: kafka-latency
       objective: 99.5
-      description: "Kafka 브로커의 Fetch 요청 지연시간 50th 퍼센타일이 1000ms를 초과하는 비율"
+      description: "Kafka 브로커의 Produce 요청 지연시간 50th 퍼센타일이 1000ms를 초과하는 비율"
       sli:
         raw:
           errorRatioQuery: |
