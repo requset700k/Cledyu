@@ -1,0 +1,84 @@
+---
+apiVersion: sloth.slok.dev/v1
+kind: PrometheusServiceLevel
+metadata:
+  name: kubevirt-slo
+  namespace: monitoring
+  labels:
+    app: kubevirt
+    team: platform
+spec:
+  service: kubevirt
+  labels:
+    app: kubevirt
+    team: platform
+  slos:
+    # ───────────────────────────────────────────
+    # 가용성 SLO: virt-api 99.9% (avg_over_time 기준)
+    # ───────────────────────────────────────────
+    - name: virt-api-availability
+      objective: 99.9
+      description: "virt-api 컴포넌트 가용성이 99.9% 이상이어야 한다."
+      sli:
+        events:
+          errorQuery: |
+            (1 - avg(avg_over_time(up{job="kubevirt-prometheus-metrics", container="virt-api"}[{{ .window }}]))) or vector(0)
+          totalQuery: |
+            avg(count_over_time(up{job="kubevirt-prometheus-metrics", container="virt-api"}[{{ .window }}])) * 0 + 1
+      alerting:
+        name: KubeVirtApiAvailabilitySLO
+        labels:
+          service: kubevirt
+          slo: availability
+        pageAlert:
+          labels:
+            severity: critical
+        ticketAlert:
+          labels:
+            severity: warning
+    # ───────────────────────────────────────────
+    # 가용성 SLO: virt-controller 99.9% (avg_over_time 기준)
+    # ───────────────────────────────────────────
+    - name: virt-controller-availability
+      objective: 99.9
+      description: "virt-controller 컴포넌트 가용성이 99.9% 이상이어야 한다."
+      sli:
+        events:
+          errorQuery: |
+            (1 - avg(avg_over_time(up{job="kubevirt-prometheus-metrics", container="virt-controller"}[{{ .window }}]))) or vector(0)
+          totalQuery: |
+            avg(count_over_time(up{job="kubevirt-prometheus-metrics", container="virt-controller"}[{{ .window }}])) * 0 + 1
+      alerting:
+        name: KubeVirtControllerAvailabilitySLO
+        labels:
+          service: kubevirt
+          slo: availability
+        pageAlert:
+          labels:
+            severity: critical
+        ticketAlert:
+          labels:
+            severity: warning
+    # ───────────────────────────────────────────
+    # 가용성 SLO: virt-handler 99.9% (avg_over_time 기준)
+    # ───────────────────────────────────────────
+    - name: virt-handler-availability
+      objective: 99.9
+      description: "virt-handler 컴포넌트 가용성이 99.9% 이상이어야 한다. (노드별 DaemonSet)"
+      sli:
+        events:
+          errorQuery: |
+            (1 - avg(avg_over_time(up{job="kubevirt-prometheus-metrics", container="virt-handler"}[{{ .window }}]))) or vector(0)
+          totalQuery: |
+            avg(count_over_time(up{job="kubevirt-prometheus-metrics", container="virt-handler"}[{{ .window }}])) * 0 + 1
+      alerting:
+        name: KubeVirtHandlerAvailabilitySLO
+        labels:
+          service: kubevirt
+          slo: availability
+        pageAlert:
+          labels:
+            severity: critical
+        ticketAlert:
+          labels:
+            severity: warning
