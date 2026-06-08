@@ -22,9 +22,9 @@ spec:
       sli:
         raw:
           errorRatioQuery: |
-            sum(avg_over_time(kafka_controller_offlinepartitionscount[{{.window}}]))
+            max(avg_over_time(kafka_controller_offlinepartitionscount[{{ .window }}]))
             /
-            sum(avg_over_time(kafka_controller_globalpartitioncount[{{.window}}]))
+            max(avg_over_time(kafka_controller_globalpartitioncount[{{ .window }}]))
       alerting:
         name: KafkaAvailabilitySLO
         pageAlert: { labels: { severity: critical } }
