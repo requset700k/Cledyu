@@ -162,7 +162,7 @@ runcmd:
 										"storage": "10Gi",
 									},
 								},
-								"storageClassName": "longhorn",
+								"storageClassName": m.cfg.StorageClass,
 							},
 						},
 					},
