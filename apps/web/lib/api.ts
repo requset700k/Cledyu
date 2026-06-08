@@ -9,6 +9,16 @@ interface Paginated<T> {
   total: number;
 }
 
+export class ApiRequestError extends Error {
+  constructor(
+    message: string,
+    readonly status?: number,
+  ) {
+    super(message);
+    this.name = 'ApiRequestError';
+  }
+}
+
 // 개발 모드에서는 Keycloak 대신 dev-token으로 백엔드 stub JWT 미들웨어를 통과
 const DEV_HEADERS: Record<string, string> =
   process.env.NODE_ENV === 'development' ? { Authorization: 'Bearer dev-token' } : {};
@@ -33,7 +43,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     });
   } catch {
     // 서버 다운 또는 네트워크 끊김
-    throw new Error('NETWORK_ERROR');
+    throw new ApiRequestError('NETWORK_ERROR');
   }
 
   // 만료된 토큰으로 API 호출 시 백엔드가 401 반환 → 로그인 페이지로 강제 이동
@@ -46,22 +56,22 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
   // 인증은 됐지만 역할 권한 없음 (student → instructor 엔드포인트 등)
   if (res.status === 403) {
-    throw new Error('FORBIDDEN');
+    throw new ApiRequestError('FORBIDDEN', res.status);
   }
 
   // 존재하지 않는 리소스 (Lab ID, Session ID 등)
   if (res.status === 404) {
-    throw new Error('NOT_FOUND');
+    throw new ApiRequestError('NOT_FOUND', res.status);
   }
 
   // 500/502/503/504: 서버 측 문제 — 클라이언트 에러(4xx)와 구분해서 UI 처리
   if (res.status >= 500) {
-    throw new Error('SERVER_ERROR');
+    throw new ApiRequestError('SERVER_ERROR', res.status);
   }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error ?? 'Request failed');
+    throw new ApiRequestError(body.error ?? 'Request failed', res.status);
   }
 
   // 204 No Content: DELETE 등 응답 바디 없는 경우. T=void 호출 전용.

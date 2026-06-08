@@ -4,7 +4,7 @@ import { Suspense, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { api } from '@/lib/api';
+import { ApiRequestError, api } from '@/lib/api';
 import { DIFFICULTY_CONFIG } from '@/components/lab/difficulty';
 import { LabSession } from '@/components/lab/LabSession';
 import type { Lab } from '@/lib/types';
@@ -77,7 +77,7 @@ function LabDetail() {
                 {start.isPending ? '세션 준비 중...' : '실습 시작'}
               </button>
               {start.isError && (
-                <span className="ml-3 text-red-400 text-xs">세션을 시작하지 못했습니다.</span>
+                <SessionStartErrorToast error={start.error} onClose={() => start.reset()} />
               )}
             </>
           ) : (
@@ -87,6 +87,61 @@ function LabDetail() {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+function getSessionStartErrorMessage(error: unknown) {
+  if (error instanceof ApiRequestError) {
+    if (error.message === 'NETWORK_ERROR') {
+      return 'API 서버에 연결할 수 없습니다. 서버 상태를 확인한 뒤 다시 시도해주세요.';
+    }
+
+    switch (error.status) {
+      case 403:
+        return '이 Lab을 시작할 권한이 없습니다.';
+      case 404:
+        return 'Lab 콘텐츠를 찾을 수 없습니다.';
+      case 502:
+        return '프론트엔드가 API 서버에 연결하지 못했습니다.';
+      case 503:
+        return '실습 환경을 준비할 수 없습니다. 잠시 후 다시 시도해주세요.';
+      default:
+        if (error.status && error.status >= 500) {
+          return '서버에서 실습 세션을 생성하지 못했습니다.';
+        }
+    }
+  }
+
+  return '세션을 시작하지 못했습니다.';
+}
+
+function SessionStartErrorToast({
+  error,
+  onClose,
+}: {
+  error: unknown;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      role="alert"
+      className="fixed bottom-6 right-6 z-50 w-[min(360px,calc(100vw-32px))] rounded-lg border border-red-400/30 bg-slate-950 px-4 py-3 shadow-2xl shadow-black/40"
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="text-sm font-semibold text-red-300">실습 시작 실패</p>
+          <p className="mt-1 text-xs leading-5 text-slate-300">{getSessionStartErrorMessage(error)}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded px-1 text-lg leading-none text-slate-500 hover:text-slate-200"
+          aria-label="닫기"
+        >
+          ×
+        </button>
+      </div>
     </div>
   );
 }
