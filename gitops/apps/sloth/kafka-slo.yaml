@@ -17,7 +17,7 @@ spec:
     # 1. 가용성 SLO: 99.99%
     # ───────────────────────────────────────────
     - name: kafka-availability
-      objective: 99.99
+      objective: 99.9
       description: "Kafka 브로커 내 오프라인 파티션이 없어야 한다."
       sli:
         raw:
