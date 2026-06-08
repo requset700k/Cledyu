@@ -43,7 +43,8 @@ jobs:
 
       - name: Install shfmt
         run: |
-          sudo curl -sSLo /usr/local/bin/shfmt \
+          sudo curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors \
+            -o /usr/local/bin/shfmt \
             https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_linux_amd64
           sudo chmod +x /usr/local/bin/shfmt
 
@@ -58,7 +59,8 @@ jobs:
         # 로컬 terraform-docs 버전과 반드시 일치시킬 것 (포맷 차이 방지).
         run: |
           VERSION=v0.22.0
-          sudo curl -sSLo /tmp/terraform-docs.tar.gz \
+          sudo curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors \
+            -o /tmp/terraform-docs.tar.gz \
             "https://terraform-docs.io/dl/${VERSION}/terraform-docs-${VERSION}-linux-amd64.tar.gz"
           sudo tar -xzf /tmp/terraform-docs.tar.gz -C /usr/local/bin terraform-docs
           sudo chmod +x /usr/local/bin/terraform-docs
@@ -67,7 +69,8 @@ jobs:
         # pre-commit 의 local hook (entry: kubeconform) 이 시스템 바이너리 사용.
         run: |
           VERSION=v0.6.7
-          curl -sSLo /tmp/kubeconform.tar.gz \
+          curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors \
+            -o /tmp/kubeconform.tar.gz \
             "https://github.com/yannh/kubeconform/releases/download/${VERSION}/kubeconform-linux-amd64.tar.gz"
           sudo tar -xzf /tmp/kubeconform.tar.gz -C /usr/local/bin kubeconform
           sudo chmod +x /usr/local/bin/kubeconform
