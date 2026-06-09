@@ -52,6 +52,7 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, 
 	h := handlers.New(cfg, log, sessions, validator, eventsPub, db, locks, authProvider)
 
 	r.GET("/health", h.Health)
+	r.GET("/ready", h.Ready)
 
 	// 인증 불필요 — OIDC authorization code(PKCE) 흐름.
 	r.GET("/api/v1/auth/login", h.Login)
