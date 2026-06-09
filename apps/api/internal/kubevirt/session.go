@@ -268,6 +268,23 @@ func (m *Manager) FindActiveByUser(ctx context.Context, userID string) (string, 
 	return "", nil
 }
 
+// CountActiveSessions는 현재 활성(삭제 중이 아닌) 세션 namespace 수를 반환한다(동시 세션 쿼터용).
+func (m *Manager) CountActiveSessions(ctx context.Context) (int, error) {
+	list, err := m.core.CoreV1().Namespaces().List(ctx, metav1.ListOptions{
+		LabelSelector: labelManagedBy + "=" + managedByValue,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("list session namespaces: %w", err)
+	}
+	n := 0
+	for i := range list.Items {
+		if list.Items[i].Status.Phase != corev1.NamespaceTerminating {
+			n++
+		}
+	}
+	return n, nil
+}
+
 // ReapStuckSessions는 생성 후 timeout 안에 VM이 ready(Running)가 되지 못한 세션 namespace를 삭제하고
 // 회수된 sessionID 목록을 반환한다. ready(Running) 세션은 회수하지 않는다(정상 세션 보호).
 // stuck provisioning이 CDI 클론 재시도 thrash로 번져 스토리지를 마르게 하는 것을 차단하기 위한 GC다.

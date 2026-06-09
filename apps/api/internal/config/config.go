@@ -46,6 +46,9 @@ type KubeVirtConfig struct {
 	// ProvisionTimeoutMinutes: 세션 VM이 이 시간 내 ready(Running)가 안 되면 reaper가 세션을 회수(삭제)한다.
 	// stuck provisioning이 CDI 클론 재시도 thrash로 번지는 것을 차단. 0이면 비활성.
 	ProvisionTimeoutMinutes int `mapstructure:"provision_timeout_minutes"`
+	// MaxActiveSessions: 클러스터 전체 동시 활성 세션 상한. 초과 시 세션 생성을 429로 거부한다.
+	// 스토리지/컴퓨트 용량을 넘어서는 무한정 세션 생성으로 Longhorn이 마르는 것을 방지. 0이면 무제한.
+	MaxActiveSessions int `mapstructure:"max_active_sessions"`
 }
 
 type KeycloakConfig struct {
@@ -95,6 +98,7 @@ func Load() (*Config, error) {
 	v.SetDefault("kubevirt.storage_class", "longhorn-r2")
 	v.SetDefault("kubevirt.session_ttl_hours", 3)
 	v.SetDefault("kubevirt.provision_timeout_minutes", 10)
+	v.SetDefault("kubevirt.max_active_sessions", 24)
 	v.SetDefault("kafka.brokers", "cledyu-kafka-kafka-bootstrap.kafka.svc:9093")
 	v.SetDefault("kafka.topic", "validation-requests")
 	v.SetDefault("kafka.tls_cert", "/etc/kafka-certs/tls.crt")
