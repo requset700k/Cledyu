@@ -1,0 +1,109 @@
+---
+# lab 프로비저닝 합성 카나리 — 세션 VM이 하는 것과 동일하게 base 이미지(ubuntu-2204-base)를
+# longhorn-r2로 클론해 Bound까지 확인하고 정리한다. 30분마다 실행.
+# 클론이 막히면(스토리지 데드락 등) Job이 activeDeadline 초과로 실패 → CronJob last_successful_time
+# 갱신 중단 → PrometheusRule(LabProvisionCanaryFailing) 알림. 이번 사고를 분 단위로 탐지하기 위한 장치.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: lab-provision-canary
+  namespace: kubevirt
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: lab-provision-canary
+  namespace: kubevirt
+rules:
+  - apiGroups: ["cdi.kubevirt.io"]
+    resources: ["datavolumes"]
+    verbs: ["create", "get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: lab-provision-canary
+  namespace: kubevirt
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: lab-provision-canary
+subjects:
+  - kind: ServiceAccount
+    name: lab-provision-canary
+    namespace: kubevirt
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: lab-provision-canary
+  namespace: kubevirt
+spec:
+  schedule: "*/30 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 420 # 7분 내 클론 Bound 못 하면 실패(=프로비저닝 깨짐 신호)
+      backoffLimit: 0
+      template:
+        spec:
+          serviceAccountName: lab-provision-canary
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: canary
+              image: bitnami/kubectl:1.31
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: HOME
+                  value: /tmp
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  DV=lab-provision-canary-clone
+                  cleanup() { kubectl delete dv "$DV" -n kubevirt --ignore-not-found --wait=false >/dev/null 2>&1 || true; }
+                  trap cleanup EXIT
+                  cleanup  # 이전 잔재 제거(멱등)
+                  cat <<EOF | kubectl apply -f -
+                  apiVersion: cdi.kubevirt.io/v1beta1
+                  kind: DataVolume
+                  metadata:
+                    name: $DV
+                    namespace: kubevirt
+                    labels: { app.kubernetes.io/managed-by: lab-provision-canary }
+                  spec:
+                    source:
+                      pvc: { namespace: kubevirt, name: ubuntu-2204-base }
+                    storage:
+                      accessModes: [ReadWriteOnce]
+                      resources: { requests: { storage: 10Gi } }
+                      storageClassName: longhorn-r2
+                  EOF
+                  echo "waiting for clone PVC Bound..."
+                  kubectl wait --for=jsonpath='{.status.phase}'=Bound "pvc/$DV" -n kubevirt --timeout=360s
+                  echo "canary OK: base 이미지 클론 프로비저닝 정상"
+              resources:
+                requests: { cpu: 20m, memory: 32Mi }
+                limits: { cpu: 100m, memory: 128Mi }
+          volumes:
+            - name: tmp
+              emptyDir: {}
