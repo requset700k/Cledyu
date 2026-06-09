@@ -39,6 +39,27 @@ alloy:
           url = "http://loki-gateway.loki.svc.cluster.local/loki/api/v1/push"
         }
       }
+      // OTel Trace 수집 → Tempo 전송
+      otelcol.receiver.otlp "default" {
+        grpc {
+          endpoint = "0.0.0.0:4317"
+        }
+        http {
+          endpoint = "0.0.0.0:4318"
+        }
+        output {
+          traces = [otelcol.exporter.otlp.tempo.input]
+        }
+      }
+
+      otelcol.exporter.otlp "tempo" {
+        client {
+          endpoint = "tempo.monitoring.svc.cluster.local:4317"
+          tls {
+            insecure = true
+          }
+        }
+      }
   securityContext:
     runAsNonRoot: true
     runAsUser: 10001
