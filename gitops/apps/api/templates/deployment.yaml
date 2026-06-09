@@ -93,6 +93,12 @@ spec:
               memory: {{ .Values.resources.limits.memory }}
           securityContext:
             allowPrivilegeEscalation: false
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 15
           readinessProbe:
             httpGet:
               path: /ready
