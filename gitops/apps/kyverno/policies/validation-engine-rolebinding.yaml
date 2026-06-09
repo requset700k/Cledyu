@@ -19,6 +19,10 @@ metadata:
       RoleBinding 을 자동 생성한다. 동적으로 만들어지는 세션 네임스페이스에 대해
       validation-engine 접근 권한을 per-session 으로 부여하기 위한 정책이다.
 spec:
+  admission: true
+  background: true
+  emitWarning: false
+  validationFailureAction: Audit
   # 정책 적용 시점에 이미 떠 있는 lab-* 네임스페이스에도 소급 생성한다(기존 세션 백필).
   generateExisting: true
   rules:
@@ -30,6 +34,7 @@ spec:
                 - Namespace
               names:
                 - "lab-*"
+      skipBackgroundRequests: true
       generate:
         apiVersion: rbac.authorization.k8s.io/v1
         kind: RoleBinding

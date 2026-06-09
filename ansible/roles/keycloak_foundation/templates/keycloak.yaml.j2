@@ -10,6 +10,10 @@ spec:
     podTemplate:
       spec:
         serviceAccountName: "{{ keycloak_foundation_service_account_name }}"
+        securityContext:
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
   db:
     vendor: postgres
     host: "{{ keycloak_foundation_db_service_name }}"
