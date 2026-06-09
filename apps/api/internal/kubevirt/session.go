@@ -268,6 +268,51 @@ func (m *Manager) FindActiveByUser(ctx context.Context, userID string) (string, 
 	return "", nil
 }
 
+// ReapStuckSessions는 생성 후 timeout 안에 VM이 ready(Running)가 되지 못한 세션 namespace를 삭제하고
+// 회수된 sessionID 목록을 반환한다. ready(Running) 세션은 회수하지 않는다(정상 세션 보호).
+// stuck provisioning이 CDI 클론 재시도 thrash로 번져 스토리지를 마르게 하는 것을 차단하기 위한 GC다.
+func (m *Manager) ReapStuckSessions(ctx context.Context, timeout time.Duration) ([]string, error) {
+	list, err := m.core.CoreV1().Namespaces().List(ctx, metav1.ListOptions{
+		LabelSelector: labelManagedBy + "=" + managedByValue,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list session namespaces: %w", err)
+	}
+	now := time.Now()
+	var reaped []string
+	for i := range list.Items {
+		ns := &list.Items[i]
+		if ns.Status.Phase == corev1.NamespaceTerminating {
+			continue // 이미 삭제 중
+		}
+		started, _ := time.Parse(time.RFC3339, ns.Annotations["cledyu.io/started-at"])
+		if started.IsZero() {
+			started = ns.CreationTimestamp.Time
+		}
+		if now.Sub(started) < timeout {
+			continue // 아직 프로비저닝 유예 시간 내
+		}
+		if m.vmiPhase(ctx, ns.Name) == "Running" {
+			continue // ready 상태면 정상 세션 — 회수 금지
+		}
+		if err := m.core.CoreV1().Namespaces().Delete(ctx, ns.Name, metav1.DeleteOptions{}); err != nil && !k8serr.IsNotFound(err) {
+			continue // best-effort — 다음 주기에 재시도
+		}
+		reaped = append(reaped, strings.TrimPrefix(ns.Name, "lab-"))
+	}
+	return reaped, nil
+}
+
+// vmiPhase는 세션 VM(session-vm)의 VMI phase를 반환한다(없거나 오류면 빈 문자열).
+func (m *Manager) vmiPhase(ctx context.Context, ns string) string {
+	vmi, err := m.dyn.Resource(vmiGVR).Namespace(ns).Get(ctx, "session-vm", metav1.GetOptions{})
+	if err != nil {
+		return ""
+	}
+	phase, _, _ := unstructured.NestedString(vmi.Object, "status", "phase")
+	return phase
+}
+
 func (m *Manager) Get(ctx context.Context, sessionID string) (*Session, error) {
 	ns := "lab-" + sessionID
 	nsObj, err := m.core.CoreV1().Namespaces().Get(ctx, ns, metav1.GetOptions{})
