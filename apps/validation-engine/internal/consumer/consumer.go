@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -34,7 +35,7 @@ type Consumer struct {
 }
 
 // New는 Consumer를 만든다
-// brokers: Kafka 주소 목록 (예: ["cledyu-kafka-bootstrap.kafka.svc:9093"])
+// brokers: Kafka 주소 목록 (예: ["cledyu-kafka-kafka-bootstrap.kafka.svc:9093"])
 func New(brokers []string, tlsCfg *tls.Config, log *zap.Logger) *Consumer {
 	reader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers: brokers,
@@ -105,6 +106,11 @@ func (c *Consumer) Run(ctx context.Context, handler HandleFunc) error {
 		cancel()
 
 		if err != nil {
+			// FatalError는 일시적 인프라 오류 — DLQ 대신 consumer를 종료해 파드 재시작 후 재시도
+			var fatal *FatalError
+			if errors.As(err, &fatal) {
+				return fmt.Errorf("인프라 오류 — 파드 재시작 후 재시도: %w", fatal.Err)
+			}
 			c.log.Error("handler 실패 — DLQ 발행",
 				zap.Error(err),
 				zap.String("session_id", req.SessionID),
@@ -117,7 +123,7 @@ func (c *Consumer) Run(ctx context.Context, handler HandleFunc) error {
 			continue
 		}
 
-		// 성공 시에만 커밋 — Kafka에 "처리 완료" 기록
+		// handler 성공 시 커밋 — DLQ 경로는 위에서 각자 커밋한다
 		if err := c.reader.CommitMessages(context.Background(), msg); err != nil {
 			c.log.Error("커밋 실패", zap.Error(err))
 		}
