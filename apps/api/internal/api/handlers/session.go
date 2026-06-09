@@ -157,6 +157,23 @@ func (h *Handler) CreateSession(c *gin.Context) {
 		}
 	}
 
+	// 동시 활성 세션 쿼터 — 용량 초과 무한 생성으로 스토리지가 마르는 것을 막는다(0이면 무제한).
+	if max := h.cfg.KubeVirt.MaxActiveSessions; max > 0 {
+		active, err := h.sessions.CountActiveSessions(c.Request.Context())
+		if err != nil {
+			h.log.Error("count active sessions", zap.Error(err))
+			h.err(c, http.StatusInternalServerError, "check session capacity failed")
+			return
+		}
+		if active >= max {
+			c.JSON(http.StatusTooManyRequests, gin.H{
+				"error": "session capacity reached, try again later",
+				"code":  "capacity_reached",
+			})
+			return
+		}
+	}
+
 	sess, err := h.sessions.Create(c.Request.Context(), newSessionID(), req.LabID, uid)
 	if err != nil {
 		h.log.Error("create session", zap.Error(err))

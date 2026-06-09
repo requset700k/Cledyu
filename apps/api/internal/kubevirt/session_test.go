@@ -86,6 +86,21 @@ func TestFindActiveByUser(t *testing.T) {
 	}
 }
 
+func TestCountActiveSessions(t *testing.T) {
+	m := newTestManager(
+		sessionNS("a", "u1", corev1.NamespaceActive),
+		sessionNS("b", "u2", corev1.NamespaceActive),
+		sessionNS("c", "u3", corev1.NamespaceTerminating), // 삭제 중 → 제외
+	)
+	n, err := m.CountActiveSessions(context.Background())
+	if err != nil {
+		t.Fatalf("CountActiveSessions: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("count = %d, want 2", n)
+	}
+}
+
 // reapNS는 started-at이 ago 전인 세션 namespace를 만든다.
 func reapNS(id string, ago time.Duration) *corev1.Namespace {
 	return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
