@@ -1,0 +1,107 @@
+---
+# 고아 Longhorn 볼륨 청소 — 삭제된 lab 세션이 남긴 Released 볼륨을 주기적으로 정리한다.
+# longhorn-r2(reclaimPolicy Delete)로 만든 세션은 namespace 삭제 시 자동 정리되지만, 전환 이전
+# longhorn(Retain) SC로 만든 세션은 종료 시 Released 볼륨이 남아 예약을 점유한다(과거 사고 누적 원인).
+# 안전장치: pvStatus=Released + namespace가 lab-* + 그 namespace가 실재하지 않음 만 삭제, 1회 최대 20개.
+# vault/monitoring 등 다른 네임스페이스/Bound/활성 볼륨은 절대 건드리지 않는다.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: orphan-volume-cleanup
+  namespace: kubevirt
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: orphan-volume-cleanup
+rules:
+  - apiGroups: ["longhorn.io"]
+    resources: ["volumes"]
+    verbs: ["get", "list", "delete"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "list", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: orphan-volume-cleanup
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: orphan-volume-cleanup
+subjects:
+  - kind: ServiceAccount
+    name: orphan-volume-cleanup
+    namespace: kubevirt
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: orphan-volume-cleanup
+  namespace: kubevirt
+spec:
+  schedule: "17 * * * *" # 매시 17분
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 300
+      backoffLimit: 0
+      template:
+        spec:
+          serviceAccountName: orphan-volume-cleanup
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: cleanup
+              image: alpine/k8s:1.31.1
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                - name: HOME
+                  value: /tmp
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -eu
+                  MAX=20
+                  deleted=0
+                  # Released + lab-* 세션 소속 볼륨만 후보. (namespace null/타 ns/Bound는 제외)
+                  kubectl get volumes.longhorn.io -n longhorn-system -o json \
+                    | jq -r '.items[]
+                        | select(.status.kubernetesStatus.pvStatus=="Released")
+                        | select((.status.kubernetesStatus.namespace // "") | test("^lab-"))
+                        | "\(.metadata.name) \(.status.kubernetesStatus.namespace)"' \
+                    | while read -r vol ns; do
+                        # 해당 lab 세션 namespace가 아직 살아 있으면 활성일 수 있으므로 건너뛴다.
+                        if kubectl get ns "$ns" >/dev/null 2>&1; then continue; fi
+                        if [ "$deleted" -ge "$MAX" ]; then echo "cap $MAX reached, stop"; break; fi
+                        echo "deleting orphaned volume $vol (session ns $ns gone)"
+                        kubectl delete volumes.longhorn.io "$vol" -n longhorn-system --ignore-not-found
+                        kubectl delete pv "$vol" --ignore-not-found >/dev/null 2>&1 || true
+                        deleted=$((deleted + 1))
+                      done
+                  echo "orphan volume cleanup done"
+              resources:
+                requests: { cpu: 20m, memory: 32Mi }
+                limits: { cpu: 100m, memory: 128Mi }
+          volumes:
+            - name: tmp
+              emptyDir: {}

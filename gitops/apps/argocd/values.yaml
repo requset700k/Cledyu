@@ -22,6 +22,12 @@ controller:
   resources:
     limits: {cpu: 2000m, memory: 2Gi}
     requests: {cpu: 100m, memory: 256Mi}
+  # application-controller가 argocd_app_info(sync/health) 메트릭을 노출 → Prometheus 수집.
+  # 알림(ArgoCDAppOutOfSync/Unhealthy)이 실제로 동작하려면 필수(과거 11일 sync hung 사고 탐지).
+  metrics:
+    enabled: true
+    serviceMonitor:
+      enabled: true
 
 dex:
   enabled: false
