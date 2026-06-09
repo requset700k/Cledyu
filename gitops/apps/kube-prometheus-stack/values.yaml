@@ -314,3 +314,75 @@ prometheusOperator:
     limits:
       cpu: 500m
       memory: 256Mi
+
+# lab 프로비저닝/스토리지/ArgoCD 재발 방지 알림.
+# 핵심(lab-provisioning)은 kube-state-metrics(항상 수집)만 쓰므로 즉시 동작 — 이번 사고를 분 단위로 탐지.
+# longhorn/argocd 그룹은 해당 메트릭 스크랩이 필요하며, 스크랩 누락 시 *MetricsAbsent 알림이 떠
+# "모니터링 사각지대"가 조용히 생기지 않도록 한다.
+additionalPrometheusRulesMap:
+  lab-platform-health:
+    groups:
+      - name: lab-provisioning
+        rules:
+          - alert: LabBaseImageMissing
+            expr: absent(kube_persistentvolumeclaim_status_phase{namespace="kubevirt", persistentvolumeclaim="ubuntu-2204-base", phase="Bound"} == 1)
+            for: 5m
+            labels: { severity: critical }
+            annotations:
+              summary: "lab base 이미지 PVC(ubuntu-2204-base)가 Bound 아님/부재"
+              description: "세션 VM은 이 PVC를 클론한다. 부재 시 모든 세션 생성이 실패한다(과거 사고의 직접 원인)."
+          - alert: LabProvisionCanaryFailing
+            expr: |
+              (time() - max(kube_cronjob_status_last_successful_time{namespace="kubevirt", cronjob="lab-provision-canary"})) > 2700
+              or absent(kube_cronjob_status_last_successful_time{namespace="kubevirt", cronjob="lab-provision-canary"})
+            for: 10m
+            labels: { severity: critical }
+            annotations:
+              summary: "lab 프로비저닝 카나리가 최근 성공하지 못함"
+              description: "base 이미지 클론(=세션 디스크 프로비저닝) 카나리가 45분 내 성공 기록이 없다. 프로비저닝 경로 장애 가능성."
+      - name: longhorn-health
+        rules:
+          - alert: LonghornNodeUnschedulable
+            expr: longhorn_node_status{condition="schedulable"} == 0
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "Longhorn 노드 {{ $labels.node }} 스케줄 불가"
+              description: "용량/예약 한도 초과 등으로 신규 볼륨 replica를 못 받는다. 누적 시 프로비저닝 전면 중단(과거 사고 유형)."
+          - alert: LonghornVolumeFaulted
+            expr: longhorn_volume_robustness == 3
+            for: 10m
+            labels: { severity: critical }
+            annotations:
+              summary: "Longhorn 볼륨 {{ $labels.volume }} faulted"
+              description: "replica가 전부 비정상 — 데이터/프로비저닝 영향."
+          - alert: LonghornMetricsAbsent
+            expr: absent(longhorn_node_status)
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "Longhorn 메트릭 미수집(스크랩 누락 → Longhorn 알림 무력화)"
+              description: "longhorn_node_status 시계열이 없다. longhorn-manager(9500/metrics) ServiceMonitor 또는 scrape 설정 필요."
+      - name: argocd-health
+        rules:
+          - alert: ArgoCDAppOutOfSync
+            expr: argocd_app_info{sync_status="OutOfSync"} == 1
+            for: 30m
+            labels: { severity: warning }
+            annotations:
+              summary: "ArgoCD 앱 {{ $labels.name }} OutOfSync 30분+ 지속"
+              description: "drift 또는 sync 실패(과거 11일 sync hung 사고 유형). 확인 필요."
+          - alert: ArgoCDAppUnhealthy
+            expr: argocd_app_info{health_status=~"Degraded|Missing|Unknown"} == 1
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "ArgoCD 앱 {{ $labels.name }} health={{ $labels.health_status }}"
+              description: "앱이 비정상 health로 지속."
+          - alert: ArgoCDMetricsAbsent
+            expr: absent(argocd_app_info)
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "ArgoCD 메트릭 미수집(스크랩 누락 → ArgoCD 알림 무력화)"
+              description: "argocd_app_info 시계열이 없다. argocd-application-controller metrics ServiceMonitor/scrape 설정 필요."
