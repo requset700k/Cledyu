@@ -17,10 +17,10 @@ metadata:
 rules:
   - apiGroups: ["cdi.kubevirt.io"]
     resources: ["datavolumes"]
-    verbs: ["create", "get", "list", "delete"]
+    verbs: ["create", "get", "list", "delete", "patch", "update"] # apply 시 patch/update 필요
   - apiGroups: [""]
     resources: ["persistentvolumeclaims"]
-    verbs: ["get", "list"]
+    verbs: ["get", "list", "watch"] # kubectl wait 가 watch 사용
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -62,7 +62,10 @@ spec:
               type: RuntimeDefault
           containers:
             - name: canary
-              image: bitnami/kubectl:1.31
+              # bitnami/kubectl 레거시 태그는 Docker Hub에서 제거됨(ImagePullBackOff) → alpine/k8s 사용
+              # (kubectl + /bin/sh 포함; 공식 registry.k8s.io/kubectl 은 distroless라 shell 없음).
+              image: alpine/k8s:1.31.1
+              imagePullPolicy: IfNotPresent
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
