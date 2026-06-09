@@ -237,6 +237,30 @@ func TestDLQ_RetrySucceedsOnThirdAttempt(t *testing.T) {
 	}
 }
 
+// Test: FatalError 반환 시 DLQ 없이 consumer가 종료되어야 한다.
+func TestFatalError_TerminatesConsumer(t *testing.T) {
+	dlq := &mockDLQ{}
+	reader := &mockReader{msgs: []kafka.Message{validMsg(t, "sess-1", 1)}}
+	log := zaptest.NewLogger(t)
+
+	c := newTestConsumer(reader, dlq, log)
+	handler := func(_ context.Context, _ model.ValidationRequest) error {
+		return &FatalError{Err: errors.New("Kafka 브로커 장애")}
+	}
+
+	err := c.Run(context.Background(), handler)
+
+	if err == nil {
+		t.Fatal("FatalError 시 Run()이 에러를 반환해야 한다")
+	}
+	if dlq.calls.Load() != 0 {
+		t.Fatalf("FatalError 시 DLQ가 호출되면 안 되지만 %d번 호출됐다", dlq.calls.Load())
+	}
+	if len(reader.commits) != 0 {
+		t.Fatalf("FatalError 시 커밋이 없어야 하지만 %d회였다", len(reader.commits))
+	}
+}
+
 // Test: handler 성공 시 DLQ에 메시지가 가지 않아야 한다.
 func TestDLQ_HandlerSuccess_NoDLQ(t *testing.T) {
 	dlq := &mockDLQ{}
