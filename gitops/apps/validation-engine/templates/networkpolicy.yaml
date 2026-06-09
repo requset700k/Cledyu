@@ -29,7 +29,7 @@ spec:
           protocol: UDP
         - port: 53
           protocol: TCP
-    # Kafka TLS — validation-requests 수신, validation-results 발행
+    # Kafka TLS — validation-requests 수신, validation-results·validation-requests-dlq 발행
     - to:
         - namespaceSelector:
             matchLabels:
