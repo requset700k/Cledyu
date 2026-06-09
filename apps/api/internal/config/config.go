@@ -43,6 +43,9 @@ type KubeVirtConfig struct {
 	// LabSSHPublicKey: 세션 VM cloud-init이 user "lab"의 authorized_keys로 넣는 공개키.
 	// 검증엔진이 이 키의 private 짝으로 virtctl ssh 접속한다. 비면 키를 넣지 않는다(비번/시리얼만).
 	LabSSHPublicKey string `mapstructure:"lab_ssh_public_key"`
+	// ProvisionTimeoutMinutes: 세션 VM이 이 시간 내 ready(Running)가 안 되면 reaper가 세션을 회수(삭제)한다.
+	// stuck provisioning이 CDI 클론 재시도 thrash로 번지는 것을 차단. 0이면 비활성.
+	ProvisionTimeoutMinutes int `mapstructure:"provision_timeout_minutes"`
 }
 
 type KeycloakConfig struct {
@@ -91,6 +94,7 @@ func Load() (*Config, error) {
 	v.SetDefault("kubevirt.lab_ssh_public_key", "") // 빈 기본값 — env CLEDYU_KUBEVIRT_LAB_SSH_PUBLIC_KEY로 주입
 	v.SetDefault("kubevirt.storage_class", "longhorn-r2")
 	v.SetDefault("kubevirt.session_ttl_hours", 3)
+	v.SetDefault("kubevirt.provision_timeout_minutes", 10)
 	v.SetDefault("kafka.brokers", "cledyu-kafka-kafka-bootstrap.kafka.svc:9093")
 	v.SetDefault("kafka.topic", "validation-requests")
 	v.SetDefault("kafka.tls_cert", "/etc/kafka-certs/tls.crt")

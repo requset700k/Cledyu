@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -223,6 +224,35 @@ func (h *Handler) DeleteSession(c *gin.Context) {
 	delete(h.steps.m, id)
 	h.steps.mu.Unlock()
 	c.Status(http.StatusNoContent)
+}
+
+// ReapStuckSessions는 프로비저닝 타임아웃을 넘겨 ready가 되지 못한 세션을 회수하고 stepStore도 정리한다.
+// main의 백그라운드 루프가 주기적으로 호출한다. sessions 미설정 또는 timeout<=0 이면 no-op.
+func (h *Handler) ReapStuckSessions(ctx context.Context) {
+	if h.sessions == nil {
+		return
+	}
+	timeout := time.Duration(h.cfg.KubeVirt.ProvisionTimeoutMinutes) * time.Minute
+	if timeout <= 0 {
+		return
+	}
+	reaped, err := h.sessions.ReapStuckSessions(ctx, timeout)
+	if err != nil {
+		h.log.Error("reap stuck sessions", zap.Error(err))
+		return
+	}
+	if len(reaped) == 0 {
+		return
+	}
+	h.steps.mu.Lock()
+	for _, id := range reaped {
+		delete(h.steps.m, id)
+	}
+	h.steps.mu.Unlock()
+	h.log.Warn("프로비저닝 타임아웃 세션 회수",
+		zap.Strings("session_ids", reaped),
+		zap.Duration("timeout", timeout),
+	)
 }
 
 // GetSessionSteps는 세션의 단계별 진행 상태 목록을 반환한다(프론트 StepProgress[]).
