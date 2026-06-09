@@ -12,3 +12,12 @@ configMapGenerator:
         grafana_dashboard: "1"
       annotations:
         argocd.argoproj.io/sync-wave: "5"
+  - name: cilium-agent-metrics-dashboard
+    files:
+      - cilium-agent-metrics-dashboard.json=dashboards/cilium-agent-metrics.json
+    options:
+      labels:
+        app: kube-prometheus-stack-grafana
+        grafana_dashboard: "1"
+      annotations:
+        argocd.argoproj.io/sync-wave: "5"
