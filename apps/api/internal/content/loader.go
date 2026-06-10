@@ -88,9 +88,9 @@ type LabContent struct {
 	Environment string `yaml:"environment,omitempty" json:"environment,omitempty"`
 	// IDE: true 면 세션 VM 에 code-server(브라우저 VS Code)를 띄우고 IDE 탭을 제공한다.
 	// init 에서 code-server 설치/기동을 함께 선언해야 한다(예: lab-terraform-basics).
-	IDE  bool     `yaml:"ide,omitempty" json:"ide,omitempty"`
-	Init InitSpec `yaml:"init,omitempty" json:"-"` // 프론트에 노출할 필요 없는 서버 전용 필드
-	Steps []Step `yaml:"steps" json:"steps"`
+	IDE   bool     `yaml:"ide,omitempty" json:"ide,omitempty"`
+	Init  InitSpec `yaml:"init,omitempty" json:"-"` // 프론트에 노출할 필요 없는 서버 전용 필드
+	Steps []Step   `yaml:"steps" json:"steps"`
 }
 
 // HasLiveTerminal은 이 랩이 실시간 KubeVirt 터미널을 제공하는지 반환한다.
