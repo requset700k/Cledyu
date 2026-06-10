@@ -1,0 +1,6 @@
+# 테스트/로컬 개발 의존성. google-genai/chromadb 는 lazy import 라 테스트에 불필요.
+fastapi==0.115.12
+pydantic-settings==2.9.1
+prometheus-client==0.21.1
+httpx==0.28.1
+pytest==8.3.5

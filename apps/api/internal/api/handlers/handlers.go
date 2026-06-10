@@ -2,7 +2,10 @@
 package handlers
 
 import (
+	"time"
+
 	"github.com/gin-gonic/gin"
+	"github.com/requset700k/cledyu/api/internal/ai"
 	"github.com/requset700k/cledyu/api/internal/auth"
 	"github.com/requset700k/cledyu/api/internal/config"
 	"github.com/requset700k/cledyu/api/internal/content"
@@ -23,6 +26,7 @@ type Handler struct {
 	steps     *stepStore                    // STUB(검증엔진 연동 전): 세션별 스텝 진행 상태 in-memory.
 	virt      kubecli.KubevirtClient        // VM serial console 접속용 KubeVirt 클라이언트. nil이면 콘솔 비활성.
 	validator validation.Publisher          // validation-requests Kafka 발행기. nil이면 debug 모드에서 mock 검증.
+	ai        *ai.Client                    // AI 학습 도우미 BFF. nil 허용 — 미설정 시 정적 hint_levels 폴백.
 	userLocks *userLocks                    // 유저별 세션 생성 직렬화 — 단일 세션 제약의 동시요청 경합 완화.
 }
 
@@ -42,6 +46,11 @@ func New(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, valida
 		virt = nil
 	}
 
+	aiClient := ai.New(cfg.AI.BaseURL, time.Duration(cfg.AI.TimeoutSeconds)*time.Second)
+	if aiClient == nil {
+		log.Warn("ai tutor not configured; hints fall back to static hint_levels")
+	}
+
 	return &Handler{
 		cfg:       cfg,
 		log:       log,
@@ -51,6 +60,7 @@ func New(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, valida
 		steps:     newStepStore(),
 		virt:      virt,
 		validator: validator,
+		ai:        aiClient,
 		userLocks: newUserLocks(),
 	}
 }

@@ -1,0 +1,8 @@
+# 런타임 의존성 — Dockerfile 에서 설치. 테스트 전용 의존은 requirements-dev.txt.
+fastapi==0.115.12
+uvicorn[standard]==0.34.2
+pydantic-settings==2.9.1
+google-genai==1.16.1
+prometheus-client==0.21.1
+# RAG(선택) — HttpClient + 기본 ONNX 임베딩(all-MiniLM-L6-v2, 기획서의 임베딩 모델과 동일).
+chromadb==1.0.8

@@ -31,6 +31,9 @@ spec:
             # validation-requests Kafka 발행 — 인증서는 아래 kafka-certs 볼륨(기본 경로 /etc/kafka-certs).
             - name: CLEDYU_KAFKA_BROKERS
               value: {{ .Values.env.CLEDYU_KAFKA_BROKERS | quote }}
+            # AI 학습 도우미 BFF — 미가용/빈 값이면 핸들러가 정적 hint_levels 로 폴백.
+            - name: CLEDYU_AI_BASE_URL
+              value: {{ .Values.env.CLEDYU_AI_BASE_URL | quote }}
             # 세션 VM cloud-init이 lab authorized_keys로 넣는 검증엔진 공개키(공개값이라 평문 OK).
             - name: CLEDYU_KUBEVIRT_LAB_SSH_PUBLIC_KEY
               value: {{ .Values.kubevirt.labSshPublicKey | quote }}

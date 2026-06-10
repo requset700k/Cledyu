@@ -30,6 +30,25 @@ export interface StepContent {
   description: string;
   commands?: string[];
   hint?: string;
+  hint_levels?: string[]; // 레벨 1(개념)→2(방향)→3(구체) 정적 힌트 — AI 미가용 시 폴백
+}
+
+/** AI 힌트와 함께 표시하는 관련 문서 링크(RAG 출처) */
+export interface HintSource {
+  title: string;
+  url?: string;
+}
+
+/**
+ * AI 학습 도우미 힌트 — POST /api/v1/sessions/:id/hint 응답.
+ * source=ai 면 Gemini 생성(model 포함), source=static 이면 Lab DSL hint_levels 폴백.
+ */
+export interface HintResponse {
+  hint: string;
+  hint_level: number;
+  source: 'ai' | 'static';
+  model?: string;
+  sources?: HintSource[];
 }
 
 /** Lab 카탈로그에 표시되는 실습 항목 */

@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  namespace: {{ .Release.Namespace }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532 # api/validation-engine 과 동일 uid 정책
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ai-tutor
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8080
+          env:
+            - name: AI_TUTOR_GEMINI_MODELS
+              value: {{ .Values.env.AI_TUTOR_GEMINI_MODELS | quote }}
+            - name: AI_TUTOR_CHROMA_HOST
+              value: {{ .Values.env.AI_TUTOR_CHROMA_HOST | quote }}
+            - name: AI_TUTOR_CHROMA_PORT
+              value: {{ .Values.env.AI_TUTOR_CHROMA_PORT | quote }}
+            - name: AI_TUTOR_RATE_LIMIT_PER_MINUTE
+              value: {{ .Values.env.AI_TUTOR_RATE_LIMIT_PER_MINUTE | quote }}
+            - name: AI_TUTOR_RATE_LIMIT_PER_SESSION
+              value: {{ .Values.env.AI_TUTOR_RATE_LIMIT_PER_SESSION | quote }}
+            # Vault(kv: ai/gemini) → ESO Secret. optional — 미생성 시에도 파드는 뜨고
+            # /v1/hints 가 503(ai_unavailable)을 반환해 Session API 가 정적 힌트로 폴백한다.
+            - name: GEMINI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.gemini.secretName | quote }}
+                  key: {{ .Values.gemini.secretKey | quote }}
+                  optional: true
+          volumeMounts:
+            # readOnlyRootFilesystem 대응 — chromadb ONNX 임베딩 캐시(XDG_CACHE_HOME=/tmp/cache).
+            - name: tmp
+              mountPath: /tmp
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: {{ .Values.resources.requests.cpu }}
+              memory: {{ .Values.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.resources.limits.cpu }}
+              memory: {{ .Values.resources.limits.memory }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+      volumes:
+        - name: tmp
+          emptyDir: {}
