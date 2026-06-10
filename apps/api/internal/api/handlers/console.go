@@ -34,6 +34,22 @@ func (h *Handler) Console(c *gin.Context) {
 	sessionID := c.Param("id")
 	ns, vm := "lab-"+sessionID, "session-vm"
 
+	// 소유자 검증(WS 업그레이드 전) — 세션 ID 추측만으로 타인의 터미널에 붙을 수 없게 한다.
+	// 소유자 정보는 namespace annotation(영속)에서 읽는다. sessions 매니저가 없으면(h.virt 만
+	// 있는 비정상 조합) 검사가 불가능하므로 fail-closed 로 차단한다.
+	if h.sessions == nil {
+		h.err(c, http.StatusServiceUnavailable, "session manager not configured")
+		return
+	}
+	sess, err := h.sessions.Get(c.Request.Context(), sessionID)
+	if err != nil {
+		h.err(c, http.StatusNotFound, "session not found")
+		return
+	}
+	if h.denyIfNotSessionOwner(c, sess) {
+		return
+	}
+
 	ws, err := wsUpgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		h.log.Warn("ws upgrade failed", zap.Error(err))

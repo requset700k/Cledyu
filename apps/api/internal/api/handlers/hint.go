@@ -35,6 +35,9 @@ func (h *Handler) RequestHint(c *gin.Context) {
 	}
 
 	sessionID := c.Param("id")
+	if h.denyIfNotStoreOwner(c, sessionID) {
+		return
+	}
 	labID, level, ok := h.steps.nextHint(sessionID, req.StepID, req.Level)
 	if !ok {
 		h.err(c, http.StatusNotFound, "session not found")
