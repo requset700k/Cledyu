@@ -32,7 +32,13 @@ type Handler struct {
 	ai        *ai.Client                    // AI 학습 도우미 BFF. nil 허용 — 미설정 시 정적 hint_levels 폴백.
 	events    events.Publisher              // lab-events 학습 이벤트 발행기. nil 허용 — 발행 생략(로컬/CI).
 	db        persistence                   // PostgreSQL 영속 계층. nil 허용 — in-memory 전용(로컬/CI).
+	kcAdmin   roleAssigner                  // Keycloak Admin(역할 승격). nil 허용 — 미설정 시 역할 승격 API 501.
 	userLocks *userLocks                    // 유저별 세션 생성 직렬화 — 단일 세션 제약의 동시요청 경합 완화.
+}
+
+// roleAssigner는 Keycloak 역할 승격 의존성이다(*auth.AdminClient 가 구현).
+type roleAssigner interface {
+	AssignRealmRole(ctx context.Context, userID, role string) error
 }
 
 // New는 설정/로거/세션 매니저/OIDC provider를 받아 Handler를 생성한다.
@@ -64,6 +70,14 @@ func New(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, valida
 		p = db
 	}
 
+	// 역할 승격 service-account — 미설정 시 nil(역할 승격 API 만 비활성).
+	var kc roleAssigner
+	if ac := auth.NewAdminClient(cfg.Keycloak); ac != nil {
+		kc = ac
+	} else {
+		log.Warn("keycloak admin client not configured; role promotion API disabled")
+	}
+
 	return &Handler{
 		cfg:       cfg,
 		log:       log,
@@ -76,6 +90,7 @@ func New(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, valida
 		ai:        aiClient,
 		events:    eventsPub,
 		db:        p,
+		kcAdmin:   kc,
 		userLocks: newUserLocks(),
 	}
 }

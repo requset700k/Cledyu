@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 
@@ -70,6 +71,27 @@ func (f *fakePersistence) ListUsers(_ context.Context, limit int) ([]store.User,
 		}
 	}
 	return out, nil
+}
+
+func (f *fakePersistence) ListCompletionsByUser(_ context.Context, userID string) ([]store.Completion, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]store.Completion, 0)
+	for key, sess := range f.completions {
+		if strings.HasPrefix(key, userID+"|") {
+			out = append(out, store.Completion{LabID: strings.TrimPrefix(key, userID+"|"), SessionID: sess})
+		}
+	}
+	return out, nil
+}
+
+func (f *fakePersistence) SetUserRole(_ context.Context, userID, role string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if _, ok := f.users[userID]; ok {
+		f.users[userID] = role
+	}
+	return nil
 }
 
 func (f *fakePersistence) RecordCompletion(_ context.Context, userID, labID, sessionID string) error {

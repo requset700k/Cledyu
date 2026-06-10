@@ -63,6 +63,15 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.keycloak.clientSecret.secretName | quote }}
                   key: {{ .Values.keycloak.clientSecret.secretKey | quote }}
+            # 역할 승격 service-account(realm-management). Secret 미생성 시(optional) 역할 승격 API 만 비활성.
+            - name: CLEDYU_KEYCLOAK_ADMIN_CLIENT_ID
+              value: {{ .Values.keycloak.adminClient.clientId | quote }}
+            - name: CLEDYU_KEYCLOAK_ADMIN_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.keycloak.adminClient.secretName | quote }}
+                  key: {{ .Values.keycloak.adminClient.secretKey | quote }}
+                  optional: true
             # go-oidc 가 keycloak(cledyu 내부 CA) TLS 를 신뢰하도록 default cert pool 을
             # 아래 마운트된 cledyu Root CA 로 지정. api 의 외부 TLS 대상은 keycloak 뿐이다
             # (redis 평문, kafka mTLS 는 자체 인증서, kubevirt 는 kubeconfig CA).

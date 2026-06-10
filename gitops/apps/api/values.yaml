@@ -37,6 +37,12 @@ keycloak:
   clientSecret:
     secretName: "cledyu-api-oidc"
     secretKey: "client_secret"
+  # 역할 승격 service-account(realm-management: manage-users, view-realm).
+  # Secret 은 Vault(cledyu/oidc/cledyu-admin: client_secret)→ESO. 미생성 시 역할 승격 API 만 비활성.
+  adminClient:
+    clientId: "cledyu-admin"
+    secretName: "cledyu-api-admin-oidc"
+    secretKey: "client_secret"
 
 resources:
   requests:

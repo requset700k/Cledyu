@@ -124,6 +124,40 @@ instructor > student)로 정규화해 컨텍스트에 주입하고, `RequireMinR
 - 권한 부족 응답은 `403 {code: forbidden}` — 프론트(`lib/api.ts`)는 이를 `FORBIDDEN` 으로 처리한다.
 - 강사(instructor) 전용 그룹은 강사 모드 도입 시 `RequireMinRole("instructor")` 로 같은 패턴 추가.
 
+## 6.2 관리자 유저 관리 API + 역할 승격 service-account
+
+admin(최소 역할) 전용 엔드포인트:
+
+| 메서드 · 경로 | 동작 |
+|---|---|
+| `GET /api/v1/admin/users?limit=50` | 유저 목록(최근 로그인 순) |
+| `GET /api/v1/admin/users/:uid/activity` | 유저의 랩 완료 이력 |
+| `POST /api/v1/admin/users/:uid/role` `{role}` | instructor/admin 승격(Keycloak realm 역할 추가 + DB 미러 갱신) |
+| `DELETE /api/v1/admin/users/:uid/session` | 활성 세션 강제 종료 |
+
+역할 승격은 Keycloak Admin REST API 를 호출하므로 **service-account 클라이언트**가 필요하다.
+미설정 시 승격 API 만 `501` 로 비활성되고 나머지는 동작한다.
+
+### service-account 설정 (cledyu-admin)
+
+```bash
+# 1) cledyu-learn realm 에 confidential client 생성 (service account 활성)
+#    + realm-management 의 manage-users, view-realm 역할 부여
+#    (Terraform: client cledyu-admin + service_account 역할 매핑 권장)
+
+# 2) client secret 을 Vault 에 등록
+vault kv put cledyu/oidc/cledyu-admin client_secret=<cledyu-admin client secret>
+
+# 3) ESO 매니페스트 적용 + 동기화 확인
+kubectl apply -f infra/kubernetes/external-secrets/cledyu-admin-oidc-externalsecret.yaml
+kubectl -n api get externalsecret cledyu-admin-oidc-client-secret
+```
+
+- 승격은 realm 역할 `instructor`/`admin` 을 **추가**한다(데모트는 Keycloak 콘솔에서). 해당 realm
+  역할이 없으면 `500 realm role not provisioned` — Terraform 으로 realm 역할을 먼저 생성한다.
+- 승격 직후 DB 미러(`users.role`)는 즉시 갱신되지만, **세션 토큰**은 다음 로그인/`/auth/refresh`
+  까지 이전 역할을 유지한다(§6.1). 즉시 강사 권한이 필요하면 재로그인을 안내한다.
+
 ## 7. 트러블슈팅
 
 | 증상 | 원인 / 조치 |

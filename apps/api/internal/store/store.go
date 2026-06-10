@@ -233,3 +233,41 @@ func (s *Store) RecordCompletion(ctx context.Context, userID, labID, sessionID s
 	}
 	return nil
 }
+
+// Completion은 lab_completions 한 행이다(유저 활동 조회용).
+type Completion struct {
+	LabID       string    `json:"lab_id"`
+	SessionID   string    `json:"session_id"`
+	CompletedAt time.Time `json:"completed_at"`
+}
+
+// ListCompletionsByUser는 유저의 랩 완료 이력을 최신 순으로 반환한다(관리자 활동 조회).
+func (s *Store) ListCompletionsByUser(ctx context.Context, userID string) ([]Completion, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT lab_id, session_id, completed_at
+		FROM lab_completions WHERE user_id = $1 ORDER BY completed_at DESC`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list completions: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]Completion, 0)
+	for rows.Next() {
+		var c Completion
+		if err := rows.Scan(&c.LabID, &c.SessionID, &c.CompletedAt); err != nil {
+			return nil, fmt.Errorf("scan completion: %w", err)
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// SetUserRole은 users 미러의 역할 스냅샷을 갱신한다(Keycloak 역할 변경 직후 즉시 반영용).
+// 해당 유저가 아직 미러에 없으면(로그인 전) 영향 없음 — 다음 로그인 시 upsert 된다.
+func (s *Store) SetUserRole(ctx context.Context, userID, role string) error {
+	if _, err := s.pool.Exec(ctx,
+		`UPDATE users SET role = $2 WHERE id = $1`, userID, role); err != nil {
+		return fmt.Errorf("set user role: %w", err)
+	}
+	return nil
+}

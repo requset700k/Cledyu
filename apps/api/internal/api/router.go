@@ -96,6 +96,9 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, 
 	admin.Use(middleware.RequireMinRole("admin"))
 	{
 		admin.GET("/users", h.ListUsers)
+		admin.GET("/users/:uid/activity", h.GetUserActivity)        // 랩 완료 이력
+		admin.POST("/users/:uid/role", h.SetUserRole)               // 역할 승격(Keycloak)
+		admin.DELETE("/users/:uid/session", h.TerminateUserSession) // 활성 세션 강제 종료
 	}
 
 	return r, h
