@@ -24,7 +24,7 @@ type mockDLQ struct {
 
 func (m *mockDLQ) WriteMessages(_ context.Context, msgs ...kafka.Message) error {
 	n := m.calls.Add(1)
-	if int32(n) <= m.failUntil {
+	if n <= m.failUntil {
 		return errors.New("DLQ 브로커 오류")
 	}
 	m.received = append(m.received, msgs...)
@@ -65,7 +65,6 @@ func newTestConsumer(reader *mockReader, dlq dlqPublisher, log *zap.Logger) *Con
 		log:       log,
 	}
 }
-
 
 func validMsg(t *testing.T, sessionID string, stepID int) kafka.Message {
 	t.Helper()
