@@ -78,6 +78,11 @@ type KeycloakConfig struct {
 	ClientSecret string `mapstructure:"client_secret"`
 	RedirectURI  string `mapstructure:"redirect_uri"`
 	CookieDomain string `mapstructure:"cookie_domain"`
+	// AdminClientID/Secret: 관리자 유저 관리(역할 승격)용 service-account 클라이언트.
+	// realm-management 의 manage-users·view-realm 역할이 부여된 confidential client 여야 한다
+	// (런북 learner-auth.md §6.2). 비면 역할 승격 API 가 비활성(501)된다.
+	AdminClientID     string `mapstructure:"admin_client_id"`
+	AdminClientSecret string `mapstructure:"admin_client_secret"`
 }
 
 type ServerConfig struct {
@@ -112,6 +117,9 @@ func Load() (*Config, error) {
 	v.SetDefault("keycloak.redirect_uri", "https://api.cledyu.local/api/v1/auth/callback")
 	v.SetDefault("frontend_url", "https://app.cledyu.local")
 	v.SetDefault("keycloak.cookie_domain", ".cledyu.local")
+	// 역할 승격 service-account — 빈 기본값. env CLEDYU_KEYCLOAK_ADMIN_CLIENT_ID/SECRET 로 주입.
+	v.SetDefault("keycloak.admin_client_id", "")
+	v.SetDefault("keycloak.admin_client_secret", "")
 	v.SetDefault("kubevirt.base_image_ns", "kubevirt")
 	v.SetDefault("kubevirt.base_image_name", "ubuntu-2204-base")
 	v.SetDefault("kubevirt.lab_ssh_public_key", "") // 빈 기본값 — env CLEDYU_KUBEVIRT_LAB_SSH_PUBLIC_KEY로 주입
