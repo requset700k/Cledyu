@@ -14,7 +14,7 @@ ingress:
 
 env:
   CLEDYU_SERVER_MODE: "release"
-  CLEDYU_REDIS_ADDR: "redis-master.redis.svc.cluster.local:6379"
+  CLEDYU_REDIS_ADDR: "redis.redis.svc:6379"
   CLEDYU_KAFKA_BROKERS: "cledyu-kafka-kafka-bootstrap.kafka.svc:9093"
   # AI 학습 도우미 BFF(service-ai-tutor). 빈 값이면 Lab DSL 정적 hint_levels 폴백.
   CLEDYU_AI_BASE_URL: "http://ai-tutor.ai-tutor.svc:8080"

@@ -19,7 +19,7 @@ import (
 func newSessionRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	h := handlers.New(newTestConfig(), zap.NewNop(), nil, nil, nil, nil, nil)
+	h := handlers.New(newTestConfig(), zap.NewNop(), nil, nil, nil, nil, nil, nil)
 	r.Use(func(c *gin.Context) {
 		c.Set("user_id", "test-user")
 		c.Next()

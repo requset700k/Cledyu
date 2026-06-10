@@ -13,6 +13,7 @@ import (
 	"github.com/requset700k/cledyu/api/internal/events"
 	"github.com/requset700k/cledyu/api/internal/kube"
 	"github.com/requset700k/cledyu/api/internal/kubevirt"
+	"github.com/requset700k/cledyu/api/internal/lock"
 	"github.com/requset700k/cledyu/api/internal/store"
 	"github.com/requset700k/cledyu/api/internal/validation"
 	"go.uber.org/zap"
@@ -33,7 +34,7 @@ type Handler struct {
 	events    events.Publisher              // lab-events 학습 이벤트 발행기. nil 허용 — 발행 생략(로컬/CI).
 	db        persistence                   // PostgreSQL 영속 계층. nil 허용 — in-memory 전용(로컬/CI).
 	kcAdmin   roleAssigner                  // Keycloak Admin(역할 승격). nil 허용 — 미설정 시 역할 승격 API 501.
-	userLocks *userLocks                    // 유저별 세션 생성 직렬화 — 단일 세션 제약의 동시요청 경합 완화.
+	locks     lock.Locker                   // 유저별 세션 생성 직렬화 — Redis 분산 락 또는 in-memory(MemLocker).
 }
 
 // roleAssigner는 Keycloak 역할 승격 의존성이다(*auth.AdminClient 가 구현).
@@ -45,7 +46,7 @@ type roleAssigner interface {
 // sessions·authProvider·eventsPub·db 는 nil 허용. 시작 시 임베드된 Lab DSL 콘텐츠를
 // 로드하고, serial console 용 KubeVirt 클라이언트를 초기화한다.
 // 클러스터 미연결(CI/로컬) 환경에서도 New가 성공하도록 둘 다 실패 시 nil/empty 폴백한다.
-func New(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, validator validation.Publisher, eventsPub events.Publisher, db *store.Store, authProvider *auth.Provider) *Handler {
+func New(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, validator validation.Publisher, eventsPub events.Publisher, db *store.Store, locks lock.Locker, authProvider *auth.Provider) *Handler {
 	labs, err := content.Load()
 	if err != nil {
 		log.Error("lab content load failed; detail pages will lack steps", zap.Error(err))
@@ -78,6 +79,11 @@ func New(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, valida
 		log.Warn("keycloak admin client not configured; role promotion API disabled")
 	}
 
+	// 락 미주입(로컬/CI 등 main 외 경로)이면 in-memory 폴백으로 안전하게 동작한다.
+	if locks == nil {
+		locks = lock.NewMemLocker()
+	}
+
 	return &Handler{
 		cfg:       cfg,
 		log:       log,
@@ -91,7 +97,7 @@ func New(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, valida
 		events:    eventsPub,
 		db:        p,
 		kcAdmin:   kc,
-		userLocks: newUserLocks(),
+		locks:     locks,
 	}
 }
 

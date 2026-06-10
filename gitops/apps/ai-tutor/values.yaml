@@ -17,6 +17,8 @@ env:
   AI_TUTOR_CHROMA_PORT: "8000"
   AI_TUTOR_RATE_LIMIT_PER_MINUTE: "6"
   AI_TUTOR_RATE_LIMIT_PER_SESSION: "15"
+  # Rate limit 공유 카운터(다중 레플리카 안전). 빈 값이면 in-memory. DB 1번(api 락은 DB 0).
+  AI_TUTOR_REDIS_URL: "redis://redis.redis.svc:6379/1"
 
 # GEMINI_API_KEY 는 Vault(kv: ai/gemini, property: api_key) → ESO 가 만든 Secret 에서 주입.
 gemini:
