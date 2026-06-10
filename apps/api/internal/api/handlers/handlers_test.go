@@ -90,6 +90,43 @@ func TestGetLab_Found(t *testing.T) {
 	}
 }
 
+func TestGetLab_HidesValidationChecks(t *testing.T) {
+	r := newTestRouter()
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/labs/lab-linux-basics", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	var body struct {
+		Environment string `json:"environment"`
+		Steps       []struct {
+			ID          int      `json:"id"`
+			Title       string   `json:"title"`
+			Description string   `json:"description"`
+			Commands    []string `json:"commands"`
+			Hint        string   `json:"hint"`
+			Checks      any      `json:"checks"`
+		} `json:"steps"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Environment != "ubuntu" {
+		t.Fatalf("expected environment=ubuntu, got %q", body.Environment)
+	}
+	if len(body.Steps) == 0 {
+		t.Fatal("expected steps in lab detail response")
+	}
+	if body.Steps[0].Title == "" || len(body.Steps[0].Commands) == 0 || body.Steps[0].Hint == "" {
+		t.Fatalf("expected public step fields to remain, got %+v", body.Steps[0])
+	}
+	if body.Steps[0].Checks != nil {
+		t.Fatalf("validation checks must not be exposed, got %+v", body.Steps[0].Checks)
+	}
+}
+
 func TestGetLab_NotFound(t *testing.T) {
 	r := newTestRouter()
 	w := httptest.NewRecorder()
