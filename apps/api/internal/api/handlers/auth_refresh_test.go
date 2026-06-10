@@ -27,19 +27,19 @@ import (
 // discovery + JWKS + token 엔드포인트만 흉내 낸다. refresh grant 의 응답(성공/실패)을
 // 테스트가 제어할 수 있도록 refreshStatus 로 스위칭한다.
 
-type fakeIdP struct {
+type fakeIDP struct {
 	server        *httptest.Server
 	key           *rsa.PrivateKey
 	refreshStatus int // 200 이면 새 토큰 발급, 그 외엔 해당 상태코드로 실패
 }
 
-func newFakeIdP(t *testing.T) *fakeIdP {
+func newFakeIDP(t *testing.T) *fakeIDP {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fakeIdP{key: key, refreshStatus: http.StatusOK}
+	f := &fakeIDP{key: key, refreshStatus: http.StatusOK}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/realms/test/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
@@ -89,7 +89,7 @@ func newFakeIdP(t *testing.T) *fakeIdP {
 }
 
 // signJWT는 가짜 IdP 의 RSA 키로 RS256 access_token JWT 를 서명한다.
-func (f *fakeIdP) signJWT() string {
+func (f *fakeIDP) signJWT() string {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"RS256","kid":"test-key","typ":"JWT"}`))
 	payload := base64.RawURLEncoding.EncodeToString(fmt.Appendf(nil,
 		`{"iss":%q,"sub":"user-1","aud":"account","exp":%d,"iat":%d,"preferred_username":"tester"}`,
@@ -101,7 +101,7 @@ func (f *fakeIdP) signJWT() string {
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig)
 }
 
-func newRefreshRouter(t *testing.T, idp *fakeIdP) *gin.Engine {
+func newRefreshRouter(t *testing.T, idp *fakeIDP) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 
@@ -147,7 +147,7 @@ func TestRefresh_Unavailable_WhenNoProvider(t *testing.T) {
 
 // refresh_token 쿠키가 없으면 401 + 세션 쿠키 정리.
 func TestRefresh_MissingCookie(t *testing.T) {
-	idp := newFakeIdP(t)
+	idp := newFakeIDP(t)
 	defer idp.server.Close()
 	r := newRefreshRouter(t, idp)
 
@@ -162,7 +162,7 @@ func TestRefresh_MissingCookie(t *testing.T) {
 
 // 정상 refresh: 204 + access/refresh 쿠키 재발급(회전된 refresh_token 반영).
 func TestRefresh_Success_RotatesCookies(t *testing.T) {
-	idp := newFakeIdP(t)
+	idp := newFakeIDP(t)
 	defer idp.server.Close()
 	r := newRefreshRouter(t, idp)
 
@@ -193,7 +193,7 @@ func TestRefresh_Success_RotatesCookies(t *testing.T) {
 
 // IdP 가 invalid_grant 를 돌려주면(만료/폐기/SSO 종료) 401 + 세션 쿠키 만료 처리.
 func TestRefresh_Failure_ClearsCookies(t *testing.T) {
-	idp := newFakeIdP(t)
+	idp := newFakeIDP(t)
 	defer idp.server.Close()
 	idp.refreshStatus = http.StatusBadRequest
 	r := newRefreshRouter(t, idp)
