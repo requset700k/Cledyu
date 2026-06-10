@@ -158,6 +158,31 @@ kubectl -n api get externalsecret cledyu-admin-oidc-client-secret
 - 승격 직후 DB 미러(`users.role`)는 즉시 갱신되지만, **세션 토큰**은 다음 로그인/`/auth/refresh`
   까지 이전 역할을 유지한다(§6.1). 즉시 강사 권한이 필요하면 재로그인을 안내한다.
 
+## 6.3 조직 멀티테넌트 (RAG 조직 중립성)
+
+기획서 1.1/3.5 의 '조직 중립성' — 학습자 소속 조직별로 AI 튜터 RAG collection 을 분리한다.
+같은 플랫폼을 코드 변경 없이 다른 기업·교육과정에 배포할 수 있게 한다.
+
+흐름:
+
+```
+Keycloak 그룹 "/org-<이름>"  ──(groups 클레임)──►  api JWT 미들웨어 Identity.Org()
+                                                        │  user_org = "org-<이름>"(없으면 public)
+                                                        ▼
+                        POST /sessions/:id/hint ──► ai-tutor org_id
+                                                        ▼
+                        RAG 검색 = [org-<이름> collection, public collection]
+```
+
+- **조직 배정:** Keycloak 에서 사용자를 `/org-<이름>` 그룹에 추가한다(예: `/org-kt-cloud`).
+  그룹명 규약 `org-` 접두사가 곧 ChromaDB collection 이름이다. 그룹이 없으면 `public` 만 검색.
+- **문서 주입:** 해당 조직 문서를 같은 이름 collection 으로 인덱싱한다 —
+  `python apps/ai-tutor/scripts/index_docs.py --collection org-kt-cloud --source ...`
+  (인덱싱 가이드는 `docs/architecture/ai-tutor.md`).
+- `groups` 클레임이 토큰에 포함되려면 Keycloak client scope 에 group membership mapper 가
+  있어야 한다(full group path on). 현재 토큰에 그룹이 없으면 전원 `public` 으로 동작(안전한 기본값).
+- `GET /api/v1/me` 응답의 `org` 필드로 현재 소속 조직을 확인할 수 있다.
+
 ## 7. 트러블슈팅
 
 | 증상 | 원인 / 조치 |
