@@ -1,6 +1,6 @@
 image:
   repository: ghcr.io/requset700k/ai-tutor
-  tag: latest # CI가 main push 시 sha-<short>로 자동 업데이트(GITOPS_PAT 설정 시)
+  tag: sha-36972d7
   # api/validation-engine 과 동일 정책 — tag 고정 전까지 항상 새 :latest pull.
   pullPolicy: Always
 
