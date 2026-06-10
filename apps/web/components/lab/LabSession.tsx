@@ -7,6 +7,7 @@ import type { Lab, Session, StepProgress, StepStatus } from '@/lib/types';
 import { StepList } from './StepList';
 import { TerminalPlaceholder } from './TerminalPlaceholder';
 import { LabTerminal } from './LabTerminal';
+import { LabWorkspace } from './LabWorkspace';
 import { AiTutorPanel } from './AiTutorPanel';
 
 // VM이 Running으로 보고된 이후에도 cloud-init final stage(getty 재시작 + autologin 활성)
@@ -181,7 +182,15 @@ export function LabSession({ sessionId, lab }: { sessionId: string; lab: Lab }) 
         <AiTutorPanel key={currentStep.id} sessionId={sessionId} stepId={currentStep.id} />
 
         {terminalUrl ? (
-          <LabTerminal terminalPath={terminalUrl} />
+          session?.ide_url ? (
+            <LabWorkspace
+              sessionId={sessionId}
+              terminalPath={terminalUrl}
+              idePath={session.ide_url}
+            />
+          ) : (
+            <LabTerminal terminalPath={terminalUrl} />
+          )
         ) : (
           <div>
             <TerminalPlaceholder commands={currentStep.commands ?? []} />
