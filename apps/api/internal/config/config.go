@@ -39,6 +39,9 @@ type KafkaConfig struct {
 	// 검증 결과 소비(consumer) 설정. ResultsTopic을 구독해 stepStore를 실제 결과로 갱신한다.
 	ResultsTopic  string `mapstructure:"results_topic"`
 	ConsumerGroup string `mapstructure:"consumer_group"`
+
+	// EventsTopic: 학습 이벤트(lab_started 등) 발행 토픽. 학습 분석 파이프라인의 입력이다.
+	EventsTopic string `mapstructure:"events_topic"`
 }
 
 type KubeVirtConfig struct {
@@ -115,6 +118,7 @@ func Load() (*Config, error) {
 	v.SetDefault("kafka.tls_ca", "/etc/kafka-certs/ca.crt")
 	v.SetDefault("kafka.results_topic", "validation-results")
 	v.SetDefault("kafka.consumer_group", "cledyu-api-validation-results")
+	v.SetDefault("kafka.events_topic", "lab-events")
 	v.SetDefault("ai.base_url", "") // 빈 기본값 — env CLEDYU_AI_BASE_URL 로 주입(미설정 시 정적 힌트 폴백)
 	v.SetDefault("ai.timeout_seconds", 15)
 

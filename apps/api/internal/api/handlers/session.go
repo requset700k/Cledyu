@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/requset700k/cledyu/api/internal/content"
+	"github.com/requset700k/cledyu/api/internal/events"
 	"github.com/requset700k/cledyu/api/internal/kubevirt"
 	"github.com/requset700k/cledyu/api/internal/validation"
 	"go.uber.org/zap"
@@ -37,8 +38,22 @@ type stepState struct {
 // sessionSteps는 한 세션의 스텝 진행 상태(전체 목록 + 현재 단계 id)를 묶어 보관한다.
 type sessionSteps struct {
 	LabID       string // 힌트/콘텐츠 조회용 — KubeVirt 조회 없이 lab DSL 에 접근하게 한다.
+	UserID      string // 학습 이벤트(lab-events) 발행용 — 파티션 키.
 	Steps       []stepState
 	CurrentStep int
+}
+
+// allPassed는 모든 스텝이 passed 인지 반환한다(lab_completed 판정용).
+func (ss *sessionSteps) allPassed() bool {
+	if len(ss.Steps) == 0 {
+		return false
+	}
+	for i := range ss.Steps {
+		if ss.Steps[i].Status != "passed" {
+			return false
+		}
+	}
+	return true
 }
 
 // stepStore는 sessionID → 스텝 진행 상태 맵을 동시성 안전하게 관리한다.
@@ -186,7 +201,7 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	}
 
 	// 스텝 진행 상태 초기화 — 첫 스텝 active, 나머지 pending.
-	ss := &sessionSteps{LabID: req.LabID}
+	ss := &sessionSteps{LabID: req.LabID, UserID: uid}
 	for i, st := range lc.Steps {
 		status := "pending"
 		if i == 0 {
@@ -200,6 +215,12 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	h.steps.mu.Lock()
 	h.steps.m[sess.ID] = ss
 	h.steps.mu.Unlock()
+
+	// 학습 분석: vm_provisioned_source 로 온프렘/EC2 분포를 집계한다(Phase-1: kubevirt 고정).
+	h.emitEvent(events.Event{
+		Type: events.LabStarted, UserID: uid, SessionID: sess.ID, LabID: req.LabID,
+		VMProvider: "kubevirt",
+	})
 
 	c.JSON(http.StatusCreated, h.sessionResponse(sess))
 }
@@ -242,8 +263,17 @@ func (h *Handler) DeleteSession(c *gin.Context) {
 		return
 	}
 	h.steps.mu.Lock()
+	ss, tracked := h.steps.m[id]
 	delete(h.steps.m, id)
 	h.steps.mu.Unlock()
+
+	// 전 스텝 통과 전 종료는 이탈(lab_abandoned)로 기록한다 — 막힘 분포 분석의 입력.
+	// lab_completed 는 마지막 스텝 통과 시점(ApplyValidationResult)에 이미 발행됐다.
+	if tracked && !ss.allPassed() {
+		h.emitEvent(events.Event{
+			Type: events.LabAbandoned, UserID: ss.UserID, SessionID: id, LabID: ss.LabID,
+		})
+	}
 	c.Status(http.StatusNoContent)
 }
 
@@ -440,8 +470,22 @@ func (h *Handler) ApplyValidationResult(r validation.ValidationResult) {
 			}
 			ss.CurrentStep = ss.Steps[idx+1].StepID
 		}
+		h.emitEvent(events.Event{
+			Type: events.StepCompleted, UserID: ss.UserID, SessionID: r.SessionID,
+			LabID: ss.LabID, StepID: r.StepID,
+		})
+		// 마지막 스텝까지 모두 통과한 시점이 랩 완료다(세션 삭제와 무관하게 1회 발행).
+		if ss.allPassed() {
+			h.emitEvent(events.Event{
+				Type: events.LabCompleted, UserID: ss.UserID, SessionID: r.SessionID, LabID: ss.LabID,
+			})
+		}
 	} else {
 		ss.Steps[idx].Status = "failed"
+		h.emitEvent(events.Event{
+			Type: events.ValidationFailed, UserID: ss.UserID, SessionID: r.SessionID,
+			LabID: ss.LabID, StepID: r.StepID,
+		})
 	}
 }
 

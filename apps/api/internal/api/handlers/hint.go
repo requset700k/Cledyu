@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/requset700k/cledyu/api/internal/ai"
+	"github.com/requset700k/cledyu/api/internal/events"
 	"go.uber.org/zap"
 )
 
@@ -71,6 +72,10 @@ func (h *Handler) RequestHint(c *gin.Context) {
 		})
 		switch {
 		case err == nil:
+			h.emitEvent(events.Event{
+				Type: events.HintRequested, UserID: uid, SessionID: sessionID, LabID: labID,
+				StepID: req.StepID, HintLevel: level, HintSource: "ai",
+			})
 			c.JSON(http.StatusOK, gin.H{
 				"hint":       resp.Hint,
 				"hint_level": resp.HintLevel,
@@ -97,6 +102,10 @@ func (h *Handler) RequestHint(c *gin.Context) {
 		h.err(c, http.StatusNotFound, "no hint available for this step")
 		return
 	}
+	h.emitEvent(events.Event{
+		Type: events.HintRequested, UserID: uid, SessionID: sessionID, LabID: labID,
+		StepID: req.StepID, HintLevel: level, HintSource: "static",
+	})
 	c.JSON(http.StatusOK, gin.H{
 		"hint":       hint,
 		"hint_level": level,

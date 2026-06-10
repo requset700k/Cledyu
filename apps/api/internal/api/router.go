@@ -11,6 +11,7 @@ import (
 	"github.com/requset700k/cledyu/api/internal/api/handlers"
 	"github.com/requset700k/cledyu/api/internal/auth"
 	"github.com/requset700k/cledyu/api/internal/config"
+	"github.com/requset700k/cledyu/api/internal/events"
 	"github.com/requset700k/cledyu/api/internal/kubevirt"
 	"github.com/requset700k/cledyu/api/internal/middleware"
 	"github.com/requset700k/cledyu/api/internal/validation"
@@ -19,7 +20,8 @@ import (
 
 // NewRouter는 Gin 엔진과 함께 *handlers.Handler를 반환한다.
 // 핸들러는 검증 결과 consumer가 stepStore를 갱신(ApplyValidationResult)하도록 main에서 참조한다.
-func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, validator validation.Publisher) (*gin.Engine, *handlers.Handler) {
+// eventsPub은 학습 이벤트(lab-events) 발행기 — nil 이면 발행을 생략한다(로컬/CI).
+func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, validator validation.Publisher, eventsPub events.Publisher) (*gin.Engine, *handlers.Handler) {
 	gin.SetMode(cfg.Server.Mode)
 
 	// Keycloak OIDC provider — discovery(.well-known) 수행. Keycloak 미가용(CI/로컬)
@@ -44,7 +46,7 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, 
 		AllowCredentials: true,
 	}))
 
-	h := handlers.New(cfg, log, sessions, validator, authProvider)
+	h := handlers.New(cfg, log, sessions, validator, eventsPub, authProvider)
 
 	r.GET("/health", h.Health)
 

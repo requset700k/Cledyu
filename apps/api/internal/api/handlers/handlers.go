@@ -2,6 +2,7 @@
 package handlers
 
 import (
+	"context"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -9,6 +10,7 @@ import (
 	"github.com/requset700k/cledyu/api/internal/auth"
 	"github.com/requset700k/cledyu/api/internal/config"
 	"github.com/requset700k/cledyu/api/internal/content"
+	"github.com/requset700k/cledyu/api/internal/events"
 	"github.com/requset700k/cledyu/api/internal/kube"
 	"github.com/requset700k/cledyu/api/internal/kubevirt"
 	"github.com/requset700k/cledyu/api/internal/validation"
@@ -27,13 +29,14 @@ type Handler struct {
 	virt      kubecli.KubevirtClient        // VM serial console 접속용 KubeVirt 클라이언트. nil이면 콘솔 비활성.
 	validator validation.Publisher          // validation-requests Kafka 발행기. nil이면 debug 모드에서 mock 검증.
 	ai        *ai.Client                    // AI 학습 도우미 BFF. nil 허용 — 미설정 시 정적 hint_levels 폴백.
+	events    events.Publisher              // lab-events 학습 이벤트 발행기. nil 허용 — 발행 생략(로컬/CI).
 	userLocks *userLocks                    // 유저별 세션 생성 직렬화 — 단일 세션 제약의 동시요청 경합 완화.
 }
 
-// New는 설정/로거/세션 매니저/OIDC provider를 받아 Handler를 생성한다. sessions·authProvider는 nil 허용.
+// New는 설정/로거/세션 매니저/OIDC provider를 받아 Handler를 생성한다. sessions·authProvider·eventsPub는 nil 허용.
 // 시작 시 임베드된 Lab DSL 콘텐츠를 로드하고, serial console 용 KubeVirt 클라이언트를 초기화한다.
 // 클러스터 미연결(CI/로컬) 환경에서도 New가 성공하도록 둘 다 실패 시 nil/empty 폴백한다.
-func New(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, validator validation.Publisher, authProvider *auth.Provider) *Handler {
+func New(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, validator validation.Publisher, eventsPub events.Publisher, authProvider *auth.Provider) *Handler {
 	labs, err := content.Load()
 	if err != nil {
 		log.Error("lab content load failed; detail pages will lack steps", zap.Error(err))
@@ -61,8 +64,30 @@ func New(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, valida
 		virt:      virt,
 		validator: validator,
 		ai:        aiClient,
+		events:    eventsPub,
 		userLocks: newUserLocks(),
 	}
+}
+
+// emitEvent는 학습 이벤트를 비동기로 발행한다(요청 경로를 막지 않음).
+// publisher 미설정(nil)이면 no-op. 발행 실패는 경고 로그만 남긴다 — 분석용
+// 데이터라 유실을 허용하고(at-most-once) 사용자 흐름에는 영향을 주지 않는다.
+func (h *Handler) emitEvent(e events.Event) {
+	if h.events == nil {
+		return
+	}
+	e.Timestamp = time.Now().UTC()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := h.events.Publish(ctx, e); err != nil {
+			h.log.Warn("학습 이벤트 발행 실패",
+				zap.String("event_type", string(e.Type)),
+				zap.String("session_id", e.SessionID),
+				zap.Error(err),
+			)
+		}
+	}()
 }
 
 // 프론트엔드 lib/api.ts의 ApiError 타입과 대응.
