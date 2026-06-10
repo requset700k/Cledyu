@@ -85,7 +85,7 @@ func TestReady_ReleaseReportsMissingExternalDependencies(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := newTestConfig()
 	cfg.Server.Mode = "release"
-	h := handlers.New(cfg, zap.NewNop(), nil, nil, nil)
+	h := handlers.New(cfg, zap.NewNop(), nil, nil, nil, nil, nil, nil)
 	r := gin.New()
 	r.GET("/ready", h.Ready)
 
