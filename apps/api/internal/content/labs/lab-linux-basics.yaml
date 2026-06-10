@@ -1,5 +1,6 @@
 # Linux 기초 — 순수 Ubuntu 셸 환경(실시간 KubeVirt 터미널 제공).
 # autologin 사용자는 `lab`(홈: /home/lab). checks[]는 검증엔진 Check 스키마/화이트리스트와 정렬.
+# hint_levels: 레벨 1(개념) → 2(방향) → 3(구체). AI 도우미 미가용 시의 정적 폴백.
 id: lab-linux-basics
 title: Linux 기초
 description: 파일·디렉터리, 권한, 프로세스 등 리눅스 셸 기본기 실습
@@ -21,6 +22,10 @@ steps:
       - mkdir -p ~/work
       - touch ~/work/notes.txt
     hint: "mkdir -p <경로> 로 폴더를, touch <파일> 로 빈 파일을 만듭니다."
+    hint_levels:
+      - "디렉터리를 만드는 명령과 빈 파일을 만드는 명령, 두 가지가 필요합니다. 홈 디렉터리(~) 아래에 만들어야 한다는 점을 기억하세요."
+      - "디렉터리는 mkdir, 빈 파일은 touch 명령으로 만듭니다. mkdir 에는 중간 경로까지 한 번에 만들어 주는 옵션(-p)이 있습니다."
+      - "mkdir -p <경로> 로 폴더를 만들고, touch <폴더>/notes.txt 로 빈 파일을 만듭니다. 경로는 홈(~) 아래 work 입니다."
     checks:
       - type: file_exists
         path: /home/lab/work/notes.txt
@@ -32,6 +37,10 @@ steps:
     commands:
       - echo "hello cledyu" > ~/work/notes.txt
     hint: 'echo "내용" > <파일> 형태로 파일에 텍스트를 씁니다.'
+    hint_levels:
+      - "셸에서 명령의 출력을 화면 대신 파일로 보내는 기능(리다이렉션)을 떠올려 보세요."
+      - "echo 명령으로 텍스트를 출력하고, > 기호로 그 출력을 파일에 저장할 수 있습니다."
+      - 'echo "<내용>" > <파일 경로> 형태입니다. 검증은 내용에 cledyu 가 포함됐는지 확인합니다.'
     checks:
       - type: file_content
         path: /home/lab/work/notes.txt
@@ -44,6 +53,10 @@ steps:
       - chmod 600 ~/work/notes.txt
       - stat -c %a ~/work/notes.txt
     hint: "chmod 600 <파일> 후 stat -c %a <파일> 로 권한 숫자를 확인합니다."
+    hint_levels:
+      - "리눅스 파일 권한은 소유자/그룹/기타 사용자에 대한 읽기·쓰기·실행을 숫자 세 자리로 표현합니다. '소유자만 읽고 쓰기'는 어떤 숫자일까요?"
+      - "권한 변경은 chmod 명령입니다. 소유자 읽기(4)+쓰기(2)=6, 그룹/기타는 0 입니다. 확인은 stat 명령의 %a 포맷을 사용합니다."
+      - "chmod 600 <파일> 로 권한을 바꾸고 stat -c %a <파일> 로 600 이 출력되는지 확인하세요."
     checks:
       - type: command
         command: stat -c %a /home/lab/work/notes.txt

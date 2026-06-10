@@ -29,10 +29,14 @@ type stepState struct {
 	Status   string // pending | active | validating | passed | failed
 	Attempts int
 	Checks   []checkOutcome // 검증엔진 결과의 체크별 상세(실패 사유 표시용). 결과 수신 시 채워진다.
+	// HintLevel: 이 스텝에서 지금까지 사용한 최고 힌트 레벨(0=미사용).
+	// RequestHint 가 레벨 미지정 요청을 1→2→3 으로 자동 상승시키는 데 쓴다.
+	HintLevel int
 }
 
 // sessionSteps는 한 세션의 스텝 진행 상태(전체 목록 + 현재 단계 id)를 묶어 보관한다.
 type sessionSteps struct {
+	LabID       string // 힌트/콘텐츠 조회용 — KubeVirt 조회 없이 lab DSL 에 접근하게 한다.
 	Steps       []stepState
 	CurrentStep int
 }
@@ -182,7 +186,7 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	}
 
 	// 스텝 진행 상태 초기화 — 첫 스텝 active, 나머지 pending.
-	ss := &sessionSteps{}
+	ss := &sessionSteps{LabID: req.LabID}
 	for i, st := range lc.Steps {
 		status := "pending"
 		if i == 0 {

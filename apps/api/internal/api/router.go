@@ -75,6 +75,9 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, 
 		v1.GET("/sessions/:id/steps", h.GetSessionSteps)
 		v1.POST("/sessions/:id/validate", h.ValidateStep)
 
+		// AI 학습 도우미 — ai-tutor BFF 프록시(미가용 시 Lab DSL 정적 hint_levels 폴백).
+		v1.POST("/sessions/:id/hint", h.RequestHint)
+
 		// 실시간 터미널 — VM serial console을 WebSocket으로 프록시(JWT가 ?token= 처리).
 		v1.GET("/sessions/:id/ws", h.Console)
 	}

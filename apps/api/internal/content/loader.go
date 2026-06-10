@@ -39,7 +39,27 @@ type Step struct {
 	Description string   `yaml:"description" json:"description"`
 	Commands    []string `yaml:"commands,omitempty" json:"commands,omitempty"`
 	Hint        string   `yaml:"hint,omitempty" json:"hint,omitempty"`
-	Checks      []Check  `yaml:"checks,omitempty" json:"checks,omitempty"`
+	// HintLevels는 단계별 구체성의 정적 힌트 3개(레벨 1 개념 → 2 방향 → 3 구체)다.
+	// AI 도우미(ai-tutor) 미가용 시의 최종 폴백이자(기획서 3.5 다층 fallback),
+	// 레거시 단일 hint 의 후속이다. 비어 있으면 Hint 가 전 레벨 공용으로 쓰인다.
+	HintLevels []string `yaml:"hint_levels,omitempty" json:"hint_levels,omitempty"`
+	Checks     []Check  `yaml:"checks,omitempty" json:"checks,omitempty"`
+}
+
+// StaticHint는 요청 레벨(1~3)에 해당하는 정적 힌트를 반환한다.
+// 해당 레벨이 없으면 마지막 hint_levels 항목 → 레거시 hint 순으로 폴백한다.
+func (s Step) StaticHint(level int) string {
+	if len(s.HintLevels) > 0 {
+		idx := level - 1
+		if idx < 0 {
+			idx = 0
+		}
+		if idx >= len(s.HintLevels) {
+			idx = len(s.HintLevels) - 1
+		}
+		return s.HintLevels[idx]
+	}
+	return s.Hint
 }
 
 // LabContent는 한 랩의 DSL 콘텐츠(메타데이터 + 스텝)다.

@@ -35,6 +35,10 @@ jobs:
             name: web
             trivyignores: apps/web/.trivyignore
             values: gitops/apps/web/values.yaml
+          - context: apps/ai-tutor
+            name: ai-tutor
+            trivyignores: ""
+            values: gitops/apps/ai-tutor/values.yaml
           - context: apps/dummy
             name: dummy
             trivyignores: ""

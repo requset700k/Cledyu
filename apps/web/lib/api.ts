@@ -2,7 +2,7 @@
 // 모든 HTTP 요청은 Next.js route handler를 통해 /api/* → BACKEND_URL/api/*로 프록시됨.
 // WebSocket은 rewrite 대상이 아니므로 Terminal 컴포넌트에서 NEXT_PUBLIC_WS_URL로 직접 연결.
 
-import type { Lab, Session, StepProgress, User } from './types';
+import type { HintResponse, Lab, Session, StepProgress, User } from './types';
 
 interface Paginated<T> {
   items: T[];
@@ -88,6 +88,12 @@ export const api = {
       request<{ status: string; message: string }>(`/api/v1/sessions/${id}/validate`, {
         method: 'POST',
         body: JSON.stringify({ step_id: stepId }),
+      }),
+    // AI 학습 도우미 힌트. level 미지정 시 백엔드가 1→2→3 으로 자동 상승시킨다.
+    hint: (id: string, stepId: number, level?: number) =>
+      request<HintResponse>(`/api/v1/sessions/${id}/hint`, {
+        method: 'POST',
+        body: JSON.stringify({ step_id: stepId, ...(level ? { level } : {}) }),
       }),
   },
 
