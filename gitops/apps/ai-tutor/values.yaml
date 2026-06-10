@@ -1,0 +1,32 @@
+image:
+  repository: ghcr.io/requset700k/ai-tutor
+  tag: sha-babfd0c
+  # api/validation-engine 과 동일 정책 — tag 고정 전까지 항상 새 :latest pull.
+  pullPolicy: Always
+
+replicaCount: 1 # rate limit 카운터가 in-memory 라 1 고정. 확장 시 Redis 이관 필요(README 참고).
+
+service:
+  port: 8080
+
+env:
+  # Gemini 모델 티어링(기획서 3.5): pro → flash → 2.5-flash. 운영 중 env 로 교체 가능.
+  AI_TUTOR_GEMINI_MODELS: "gemini-3-pro,gemini-3-flash,gemini-2.5-flash"
+  # ChromaDB 미배포 동안 빈 값 — RAG 생략하고 힌트는 컨텍스트만으로 생성.
+  AI_TUTOR_CHROMA_HOST: ""
+  AI_TUTOR_CHROMA_PORT: "8000"
+  AI_TUTOR_RATE_LIMIT_PER_MINUTE: "6"
+  AI_TUTOR_RATE_LIMIT_PER_SESSION: "15"
+
+# GEMINI_API_KEY 는 Vault(kv: ai/gemini, property: api_key) → ESO 가 만든 Secret 에서 주입.
+gemini:
+  secretName: ai-tutor-gemini
+  secretKey: api_key
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi # chromadb/onnx 임베딩 로드 여유분 포함
+  limits:
+    cpu: "1"
+    memory: 1Gi

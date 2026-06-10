@@ -1,0 +1,21 @@
+---
+# Longhorn manager 메트릭 수집 ServiceMonitor.
+# Longhorn은 gitops 앱이 아니라(helm 직접 설치) 별도 ServiceMonitor가 없어 longhorn_* 메트릭이
+# 수집되지 않았다(LonghornMetricsAbsent 발화). longhorn-backend(app=longhorn-manager, port manager/9500)
+# 를 스크랩해 longhorn_node_status / longhorn_volume_robustness 알림이 동작하게 한다.
+# 이 CR은 kubevirt 앱이 배포하지만 namespaceSelector로 longhorn-system의 서비스를 선택한다.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: longhorn-manager
+  namespace: kubevirt
+spec:
+  namespaceSelector:
+    matchNames: [longhorn-system]
+  selector:
+    matchLabels:
+      app: longhorn-manager
+  endpoints:
+    - port: manager
+      path: /metrics
+      interval: 30s

@@ -5,6 +5,7 @@ metadata:
   name: baseline-workload-security
   annotations:
     argocd.argoproj.io/sync-wave: "1"
+    pod-policies.kyverno.io/autogen-controllers: Deployment,StatefulSet,DaemonSet,Job,CronJob
     policies.kyverno.io/title: baseline workload security
     policies.kyverno.io/category: Pod Security Baseline
     policies.kyverno.io/severity: medium
@@ -14,6 +15,7 @@ metadata:
       excluded because Cilium, KubeVirt, Longhorn, MetalLB, and node exporters
       currently require host-level privileges.
 spec:
+  admission: true
   validationFailureAction: Audit
   emitWarning: true
   background: true
@@ -39,7 +41,9 @@ spec:
                 - loki
                 - cdi
                 - cert-manager
+      skipBackgroundRequests: true
       validate:
+        allowExistingViolations: true
         message: "Privileged containers are not allowed outside approved system namespaces."
         foreach:
           - list: "request.object.spec.containers[]"
@@ -71,7 +75,9 @@ spec:
               kinds:
                 - Pod
       exclude: *system_namespace_exclude
+      skipBackgroundRequests: true
       validate:
+        allowExistingViolations: true
         message: "hostPath volumes are not allowed outside approved system namespaces."
         foreach:
           - list: "request.object.spec.volumes || `[]`"
@@ -89,7 +95,9 @@ spec:
               kinds:
                 - Pod
       exclude: *system_namespace_exclude
+      skipBackgroundRequests: true
       validate:
+        allowExistingViolations: true
         message: "Explicit root pod security contexts are not allowed outside approved system namespaces."
         deny:
           conditions:
@@ -108,7 +116,9 @@ spec:
               kinds:
                 - Pod
       exclude: *system_namespace_exclude
+      skipBackgroundRequests: true
       validate:
+        allowExistingViolations: true
         message: "Explicit root container users are not allowed outside approved system namespaces."
         foreach:
           - list: "request.object.spec.containers[]"
@@ -140,7 +150,9 @@ spec:
               kinds:
                 - Pod
       exclude: *system_namespace_exclude
+      skipBackgroundRequests: true
       validate:
+        allowExistingViolations: true
         message: "Pods must declare runAsNonRoot=true at the pod or container level."
         foreach:
           - list: "request.object.spec.containers[]"
@@ -181,7 +193,9 @@ spec:
               kinds:
                 - Pod
       exclude: *system_namespace_exclude
+      skipBackgroundRequests: true
       validate:
+        allowExistingViolations: true
         message: "hostNetwork, hostPID, and hostIPC are not allowed outside approved system namespaces."
         deny:
           conditions:
@@ -203,7 +217,9 @@ spec:
               kinds:
                 - Pod
       exclude: *system_namespace_exclude
+      skipBackgroundRequests: true
       validate:
+        allowExistingViolations: true
         message: "Privilege escalation is not allowed outside approved system namespaces."
         foreach:
           - list: "request.object.spec.containers[]"

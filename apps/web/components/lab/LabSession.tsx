@@ -7,6 +7,7 @@ import type { Lab, Session, StepProgress, StepStatus } from '@/lib/types';
 import { StepList } from './StepList';
 import { TerminalPlaceholder } from './TerminalPlaceholder';
 import { LabTerminal } from './LabTerminal';
+import { AiTutorPanel } from './AiTutorPanel';
 
 // VM이 Running으로 보고된 이후에도 cloud-init final stage(getty 재시작 + autologin 활성)
 // 까지 약 30–60초가 더 필요하다. 그 사이 학생에게 login 프롬프트가 보이지 않도록
@@ -140,8 +141,6 @@ export function LabSession({ sessionId, lab }: { sessionId: string; lab: Lab }) 
             </div>
           )}
 
-          {currentStep.hint && <p className="text-xs text-slate-500 mb-4">💡 {currentStep.hint}</p>}
-
           <div className="flex items-center gap-3">
             <button
               type="button"
@@ -177,6 +176,9 @@ export function LabSession({ sessionId, lab }: { sessionId: string; lab: Lab }) 
             </div>
           )}
         </div>
+
+        {/* AI 학습 도우미 — 정적 hint 표시를 대체. key=stepId 로 스텝 전환 시 힌트 초기화. */}
+        <AiTutorPanel key={currentStep.id} sessionId={sessionId} stepId={currentStep.id} />
 
         {terminalUrl ? (
           <LabTerminal terminalPath={terminalUrl} />

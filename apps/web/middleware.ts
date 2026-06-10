@@ -21,8 +21,10 @@ export function middleware(request: NextRequest) {
 
   if (!authEnabled) return NextResponse.next();
 
-  // Keycloak 로그인 후 백엔드가 설정하는 HTTP-only 쿠키로 인증 확인
-  const token = request.cookies.get('access_token');
+  // Keycloak 로그인 후 백엔드가 설정하는 HTTP-only 쿠키로 인증 확인.
+  // access_token 이 만료로 사라져도 refresh_token 이 있으면 통과시킨다 —
+  // 첫 API 호출의 401 을 lib/api.ts 의 silent refresh 가 처리한다.
+  const token = request.cookies.get('access_token') ?? request.cookies.get('refresh_token');
   if (!token) {
     const loginUrl = new URL('/login', request.url);
     loginUrl.searchParams.set('from', pathname); // 로그인 후 원래 경로로 복귀

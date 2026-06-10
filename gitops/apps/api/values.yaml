@@ -1,6 +1,6 @@
 image:
   repository: ghcr.io/requset700k/api
-  tag: latest
+  tag: sha-6df00b7
   pullPolicy: Always
 
 replicaCount: 1
@@ -16,6 +16,8 @@ env:
   CLEDYU_SERVER_MODE: "release"
   CLEDYU_REDIS_ADDR: "redis-master.redis.svc.cluster.local:6379"
   CLEDYU_KAFKA_BROKERS: "cledyu-kafka-kafka-bootstrap.kafka.svc:9093"
+  # AI 학습 도우미 BFF(service-ai-tutor). 빈 값이면 Lab DSL 정적 hint_levels 폴백.
+  CLEDYU_AI_BASE_URL: "http://ai-tutor.ai-tutor.svc:8080"
 
 # Keycloak OIDC (학습자 realm). client_secret 은 Vault→ESO(cledyu-web-oidc-externalsecret.yaml)
 # 가 만든 Secret cledyu-api-oidc 에서 주입. 운영자 SSO realm(cledyu)과 분리됨.

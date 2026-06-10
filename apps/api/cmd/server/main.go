@@ -12,6 +12,7 @@ import (
 
 	api "github.com/requset700k/cledyu/api/internal/api"
 	"github.com/requset700k/cledyu/api/internal/config"
+	"github.com/requset700k/cledyu/api/internal/events"
 	"github.com/requset700k/cledyu/api/internal/kubevirt"
 	"github.com/requset700k/cledyu/api/internal/validation"
 	"go.uber.org/zap"
@@ -43,11 +44,13 @@ func main() {
 	}
 
 	// validation publisher: Kafka mTLS 인증서가 있으면 연결하고, 없으면(로컬/CI) nil로 두어
-	// ValidateStep 핸들러가 mock 검증으로 폴백한다.
+	// ValidateStep 핸들러가 mock 검증으로 폴백한다. 학습 이벤트(lab-events) 발행기도
+	// 같은 mTLS 자격으로 함께 구성한다 — 미가용 시 nil(발행 생략).
 	var validator validation.Publisher
 	var consumer *validation.KafkaConsumer
+	var eventsPub events.Publisher
 	if tlsCfg, tlsErr := validation.LoadTLS(cfg.Kafka.TLSCert, cfg.Kafka.TLSKey, cfg.Kafka.TLSCA); tlsErr != nil {
-		logger.Warn("kafka mTLS 인증서 없음 — validation 비활성(mock 모드)", zap.Error(tlsErr))
+		logger.Warn("kafka mTLS 인증서 없음 — validation/학습 이벤트 비활성(mock 모드)", zap.Error(tlsErr))
 	} else {
 		brokers := strings.Split(cfg.Kafka.Brokers, ",")
 		pub := validation.NewKafkaPublisher(brokers, cfg.Kafka.Topic, tlsCfg, logger)
@@ -55,14 +58,18 @@ func main() {
 		validator = pub
 		consumer = validation.NewKafkaConsumer(brokers, cfg.Kafka.ResultsTopic, cfg.Kafka.ConsumerGroup, tlsCfg, logger)
 		defer consumer.Close() //nolint:errcheck
+		evPub := events.NewKafkaPublisher(brokers, cfg.Kafka.EventsTopic, tlsCfg, logger)
+		defer evPub.Close() //nolint:errcheck
+		eventsPub = evPub
 		logger.Info("validation 연결",
 			zap.Strings("brokers", brokers),
 			zap.String("requests_topic", cfg.Kafka.Topic),
 			zap.String("results_topic", cfg.Kafka.ResultsTopic),
+			zap.String("events_topic", cfg.Kafka.EventsTopic),
 		)
 	}
 
-	router, h := api.NewRouter(cfg, logger, sessions, validator)
+	router, h := api.NewRouter(cfg, logger, sessions, validator, eventsPub)
 
 	// 검증 결과 소비 루프: 결과를 stepStore에 반영한다. ctx 취소(종료 신호) 시 graceful 종료.
 	if consumer != nil {
