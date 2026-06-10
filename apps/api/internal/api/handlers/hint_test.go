@@ -35,10 +35,18 @@ func hintTestHandler(t *testing.T, aiURL string) *Handler {
 }
 
 func hintRouter(h *Handler) *gin.Engine {
+	return hintRouterOrg(h, "")
+}
+
+// hintRouterOrg는 선택적으로 user_org 를 주입한다(조직 멀티테넌트 검증용).
+func hintRouterOrg(h *Handler, org string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.POST("/sessions/:id/hint", func(c *gin.Context) {
 		c.Set("user_id", "test-user")
+		if org != "" {
+			c.Set("user_org", org)
+		}
 		h.RequestHint(c)
 	})
 	return r
@@ -123,6 +131,35 @@ func TestRequestHint_AIOK(t *testing.T) {
 	body := decode(t, postHint(r, "s1", map[string]any{"step_id": 1}))
 	if body["source"] != "ai" || body["model"] != "gemini-3-pro" {
 		t.Fatalf("expected ai hint, got %v", body)
+	}
+}
+
+// 조직 멀티테넌트: user_org 가 BFF 요청의 org_id 로 전달된다(기본은 public).
+func TestRequestHint_PassesOrg(t *testing.T) {
+	var gotOrg string
+	bff := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		var hr ai.HintRequest
+		_ = json.NewDecoder(req.Body).Decode(&hr)
+		gotOrg = hr.OrgID
+		_ = json.NewEncoder(w).Encode(ai.HintResponse{Hint: "h", HintLevel: hr.HintLevel, Model: "m"})
+	}))
+	defer bff.Close()
+	h := hintTestHandler(t, bff.URL)
+
+	// org 그룹 보유 유저 → org collection 전달.
+	if w := postHint(hintRouterOrg(h, "org-kt-cloud"), "s1", map[string]any{"step_id": 1}); w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if gotOrg != "org-kt-cloud" {
+		t.Errorf("expected org-kt-cloud forwarded, got %q", gotOrg)
+	}
+
+	// org 미설정 → public 기본값.
+	if w := postHint(hintRouter(h), "s1", map[string]any{"step_id": 1}); w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if gotOrg != "public" {
+		t.Errorf("expected public default, got %q", gotOrg)
 	}
 }
 

@@ -57,13 +57,19 @@ func (h *Handler) RequestHint(c *gin.Context) {
 
 	userID, _ := c.Get("user_id")
 	uid, _ := userID.(string)
+	// 소속 조직 collection — JWT 미들웨어가 Keycloak 그룹에서 도출(없으면 public).
+	// ai-tutor 가 [org, public] 을 함께 검색한다(기획서 3.5 RAG 멀티테넌트).
+	org := c.GetString("user_org")
+	if org == "" {
+		org = "public"
+	}
 
 	if h.ai != nil {
 		resp, err := h.ai.RequestHint(c.Request.Context(), ai.HintRequest{
 			UserID:    uid,
 			SessionID: sessionID,
 			LabID:     labID,
-			OrgID:     "public", // 조직 멀티테넌시 도입 전까지 public 고정(기획서 3.5)
+			OrgID:     org,
 			Step: ai.StepInfo{
 				ID:          step.ID,
 				Title:       step.Title,
