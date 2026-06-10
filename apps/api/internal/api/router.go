@@ -54,6 +54,8 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, 
 	r.GET("/api/v1/auth/login", h.Login)
 	r.GET("/api/v1/auth/callback", h.Callback)
 	r.GET("/api/v1/auth/logout", h.Logout)
+	// silent refresh — access_token 만료 시 프론트가 호출(쿠키의 refresh_token grant).
+	r.POST("/api/v1/auth/refresh", h.Refresh)
 
 	if cfg.Server.Mode == "release" && authProvider == nil {
 		log.Warn("running WITHOUT auth provider in release mode — protected routes will 503")

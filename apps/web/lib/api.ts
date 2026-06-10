@@ -13,8 +13,22 @@ interface Paginated<T> {
 const DEV_HEADERS: Record<string, string> =
   process.env.NODE_ENV === 'development' ? { Authorization: 'Bearer dev-token' } : {};
 
+// silent refresh — 401 을 받으면 refresh_token 쿠키로 access_token 을 갱신한 뒤 1회 재시도.
+// 동시 다발 401(폴링 + 사용자 액션)은 같은 refresh 호출을 공유한다(single-flight).
+let refreshInFlight: Promise<boolean> | null = null;
+
+function refreshSession(): Promise<boolean> {
+  refreshInFlight ??= fetch('/api/v1/auth/refresh', { method: 'POST', credentials: 'include' })
+    .then((r) => r.ok)
+    .catch(() => false)
+    .finally(() => {
+      refreshInFlight = null;
+    });
+  return refreshInFlight;
+}
+
 /** 모든 API 요청의 공통 래퍼. 에러 응답은 백엔드의 { error: string } 포맷으로 throw. */
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+async function request<T>(path: string, options?: RequestInit, retried = false): Promise<T> {
   const headers: Record<string, string> = {
     ...DEV_HEADERS,
     ...(options?.headers as Record<string, string>),
@@ -36,8 +50,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     throw new Error('NETWORK_ERROR');
   }
 
-  // 만료된 토큰으로 API 호출 시 백엔드가 401 반환 → 로그인 페이지로 강제 이동
+  // access_token 만료 → silent refresh 후 원 요청 1회 재시도.
+  // refresh 실패(SSO 세션 종료/refresh_token 만료)면 로그인 페이지로 강제 이동.
   if (res.status === 401) {
+    if (!retried && (await refreshSession())) {
+      return request<T>(path, options, true);
+    }
     if (typeof window !== 'undefined') {
       window.location.href = `/login?from=${encodeURIComponent(window.location.pathname)}`;
     }
