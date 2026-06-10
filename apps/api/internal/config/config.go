@@ -15,7 +15,16 @@ type Config struct {
 	Keycloak    KeycloakConfig `mapstructure:"keycloak"`
 	KubeVirt    KubeVirtConfig `mapstructure:"kubevirt"`
 	Kafka       KafkaConfig    `mapstructure:"kafka"`
+	AI          AIConfig       `mapstructure:"ai"`
 	FrontendURL string         `mapstructure:"frontend_url"`
+}
+
+// AIConfig는 AI 학습 도우미 BFF(apps/ai-tutor) 연동 설정이다.
+// BaseURL이 비면 AI 힌트는 비활성 — 핸들러가 Lab DSL의 정적 hint_levels로 폴백한다.
+type AIConfig struct {
+	BaseURL string `mapstructure:"base_url"` // 예: http://ai-tutor.ai-tutor.svc:8080
+	// TimeoutSeconds: BFF 호출 타임아웃. BFF 내부의 Gemini 티어링(최대 3개 모델 순차 시도)을 감안해 둔다.
+	TimeoutSeconds int `mapstructure:"timeout_seconds"`
 }
 
 // KafkaConfig는 validation-requests 토픽 발행용 Kafka 연결 설정이다.
@@ -30,6 +39,9 @@ type KafkaConfig struct {
 	// 검증 결과 소비(consumer) 설정. ResultsTopic을 구독해 stepStore를 실제 결과로 갱신한다.
 	ResultsTopic  string `mapstructure:"results_topic"`
 	ConsumerGroup string `mapstructure:"consumer_group"`
+
+	// EventsTopic: 학습 이벤트(lab_started 등) 발행 토픽. 학습 분석 파이프라인의 입력이다.
+	EventsTopic string `mapstructure:"events_topic"`
 }
 
 type KubeVirtConfig struct {
@@ -106,6 +118,9 @@ func Load() (*Config, error) {
 	v.SetDefault("kafka.tls_ca", "/etc/kafka-certs/ca.crt")
 	v.SetDefault("kafka.results_topic", "validation-results")
 	v.SetDefault("kafka.consumer_group", "cledyu-api-validation-results")
+	v.SetDefault("kafka.events_topic", "lab-events")
+	v.SetDefault("ai.base_url", "") // 빈 기본값 — env CLEDYU_AI_BASE_URL 로 주입(미설정 시 정적 힌트 폴백)
+	v.SetDefault("ai.timeout_seconds", 15)
 
 	if err := v.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError

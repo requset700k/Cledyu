@@ -128,6 +128,17 @@ func (p *Provider) Exchange(ctx context.Context, code, pkceVerifier string) (*oa
 	return p.oauth2.Exchange(ctx, code, oauth2.VerifierOption(pkceVerifier))
 }
 
+// Refresh는 refresh_token 으로 새 토큰 세트를 발급받는다(refresh_token grant).
+// Keycloak 은 기본 설정에서 회전된 refresh_token 을 함께 돌려주므로, 호출부는 응답의
+// RefreshToken 으로 쿠키를 갱신해야 한다. 만료/폐기된 refresh_token 은 에러를 반환한다.
+func (p *Provider) Refresh(ctx context.Context, refreshToken string) (*oauth2.Token, error) {
+	tok, err := p.oauth2.TokenSource(ctx, &oauth2.Token{RefreshToken: refreshToken}).Token()
+	if err != nil {
+		return nil, fmt.Errorf("refresh token grant: %w", err)
+	}
+	return tok, nil
+}
+
 // VerifyIDToken은 토큰 응답의 id_token을 검증하고 nonce 일치를 확인한다.
 func (p *Provider) VerifyIDToken(ctx context.Context, token *oauth2.Token, wantNonce string) (*Identity, error) {
 	raw, ok := token.Extra("id_token").(string)

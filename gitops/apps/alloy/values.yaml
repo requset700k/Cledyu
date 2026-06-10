@@ -46,7 +46,7 @@ alloy:
     seccompProfile:
       type: RuntimeDefault
   mounts:
-    varlog: true
+    varlog: false
 controller:
   type: daemonset
   securityContext:

@@ -11,6 +11,7 @@ import (
 	"github.com/requset700k/cledyu/api/internal/api/handlers"
 	"github.com/requset700k/cledyu/api/internal/auth"
 	"github.com/requset700k/cledyu/api/internal/config"
+	"github.com/requset700k/cledyu/api/internal/events"
 	"github.com/requset700k/cledyu/api/internal/kubevirt"
 	"github.com/requset700k/cledyu/api/internal/middleware"
 	"github.com/requset700k/cledyu/api/internal/validation"
@@ -19,7 +20,8 @@ import (
 
 // NewRouter는 Gin 엔진과 함께 *handlers.Handler를 반환한다.
 // 핸들러는 검증 결과 consumer가 stepStore를 갱신(ApplyValidationResult)하도록 main에서 참조한다.
-func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, validator validation.Publisher) (*gin.Engine, *handlers.Handler) {
+// eventsPub은 학습 이벤트(lab-events) 발행기 — nil 이면 발행을 생략한다(로컬/CI).
+func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, validator validation.Publisher, eventsPub events.Publisher) (*gin.Engine, *handlers.Handler) {
 	gin.SetMode(cfg.Server.Mode)
 
 	// Keycloak OIDC provider — discovery(.well-known) 수행. Keycloak 미가용(CI/로컬)
@@ -44,7 +46,7 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, 
 		AllowCredentials: true,
 	}))
 
-	h := handlers.New(cfg, log, sessions, validator, authProvider)
+	h := handlers.New(cfg, log, sessions, validator, eventsPub, authProvider)
 
 	r.GET("/health", h.Health)
 
@@ -52,6 +54,8 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, 
 	r.GET("/api/v1/auth/login", h.Login)
 	r.GET("/api/v1/auth/callback", h.Callback)
 	r.GET("/api/v1/auth/logout", h.Logout)
+	// silent refresh — access_token 만료 시 프론트가 호출(쿠키의 refresh_token grant).
+	r.POST("/api/v1/auth/refresh", h.Refresh)
 
 	if cfg.Server.Mode == "release" && authProvider == nil {
 		log.Warn("running WITHOUT auth provider in release mode — protected routes will 503")
@@ -74,6 +78,9 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, 
 		// 스텝 진행/검증 — publisher 미연결 시 mock 동작, 연결 시 Kafka로 발행.
 		v1.GET("/sessions/:id/steps", h.GetSessionSteps)
 		v1.POST("/sessions/:id/validate", h.ValidateStep)
+
+		// AI 학습 도우미 — ai-tutor BFF 프록시(미가용 시 Lab DSL 정적 hint_levels 폴백).
+		v1.POST("/sessions/:id/hint", h.RequestHint)
 
 		// 실시간 터미널 — VM serial console을 WebSocket으로 프록시(JWT가 ?token= 처리).
 		v1.GET("/sessions/:id/ws", h.Console)
