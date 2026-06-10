@@ -121,7 +121,7 @@ func newRefreshRouter(t *testing.T, idp *fakeIDP) *gin.Engine {
 		provider = p
 	}
 
-	h := handlers.New(cfg, zap.NewNop(), nil, nil, provider)
+	h := handlers.New(cfg, zap.NewNop(), nil, nil, nil, provider)
 	r := gin.New()
 	r.POST("/api/v1/auth/refresh", h.Refresh)
 	return r
