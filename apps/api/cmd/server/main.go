@@ -14,6 +14,7 @@ import (
 	"github.com/requset700k/cledyu/api/internal/config"
 	"github.com/requset700k/cledyu/api/internal/events"
 	"github.com/requset700k/cledyu/api/internal/kubevirt"
+	"github.com/requset700k/cledyu/api/internal/store"
 	"github.com/requset700k/cledyu/api/internal/validation"
 	"go.uber.org/zap"
 )
@@ -69,7 +70,22 @@ func main() {
 		)
 	}
 
-	router, h := api.NewRouter(cfg, logger, sessions, validator, eventsPub)
+	// PostgreSQL 영속 계층 — DSN 미설정(로컬/CI) 또는 연결 실패 시 nil 로 두고
+	// in-memory 전용으로 동작한다(시작은 막지 않되 진행 상태가 재시작에 휘발됨을 경고).
+	var db *store.Store
+	if cfg.DB.DSN != "" {
+		if s, dbErr := store.Open(ctx, cfg.DB.DSN, logger); dbErr != nil {
+			logger.Error("db 연결 실패 — 진행 상태 영속화 비활성(in-memory 전용)", zap.Error(dbErr))
+		} else {
+			db = s
+			defer db.Close()
+			logger.Info("db 연결 — 유저/진행 상태 영속화 활성")
+		}
+	} else {
+		logger.Warn("db 미설정(CLEDYU_DB_DSN) — 진행 상태가 API 재시작 시 휘발됨")
+	}
+
+	router, h := api.NewRouter(cfg, logger, sessions, validator, eventsPub, db)
 
 	// 검증 결과 소비 루프: 결과를 stepStore에 반영한다. ctx 취소(종료 신호) 시 graceful 종료.
 	if consumer != nil {

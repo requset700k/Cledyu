@@ -22,7 +22,7 @@ func hintTestHandler(t *testing.T, aiURL string) *Handler {
 	if err != nil {
 		t.Fatalf("load lab content: %v", err)
 	}
-	h := &Handler{log: zap.NewNop(), labs: labs, steps: newStepStore()}
+	h := &Handler{log: zap.NewNop(), labs: labs, steps: newStepStore(nil, nil)}
 	if aiURL != "" {
 		h.ai = ai.New(aiURL, 2*time.Second)
 	}

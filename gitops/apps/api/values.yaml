@@ -19,6 +19,12 @@ env:
   # AI 학습 도우미 BFF(service-ai-tutor). 빈 값이면 Lab DSL 정적 hint_levels 폴백.
   CLEDYU_AI_BASE_URL: "http://ai-tutor.ai-tutor.svc:8080"
 
+# PostgreSQL DSN — Vault(cledyu/db/api: dsn)→ESO(cledyu-api-db-externalsecret.yaml)가 만든
+# Secret 에서 주입. Secret 미생성 시(optional) in-memory 전용으로 동작한다.
+db:
+  secretName: "cledyu-api-db"
+  secretKey: "dsn"
+
 # Keycloak OIDC (학습자 realm). client_secret 은 Vault→ESO(cledyu-web-oidc-externalsecret.yaml)
 # 가 만든 Secret cledyu-api-oidc 에서 주입. 운영자 SSO realm(cledyu)과 분리됨.
 keycloak:

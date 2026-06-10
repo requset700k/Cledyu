@@ -103,11 +103,14 @@ func (h *Handler) Callback(c *gin.Context) {
 		return
 	}
 
-	if _, err := h.auth.VerifyIDToken(c.Request.Context(), token, nonce); err != nil {
+	identity, err := h.auth.VerifyIDToken(c.Request.Context(), token, nonce)
+	if err != nil {
 		h.log.Warn("oidc id_token verification failed", zap.Error(err))
 		h.err(c, http.StatusUnauthorized, "token verification failed")
 		return
 	}
+	// 로그인 성공 — Keycloak 신원을 앱 DB users 로 미러링(프로필·역할·last_login_at 갱신).
+	h.upsertUser(identity)
 
 	// 임시 쿠키 정리.
 	dom := h.cfg.Keycloak.CookieDomain
@@ -188,12 +191,15 @@ func (h *Handler) Refresh(c *gin.Context) {
 	}
 
 	// 방어적 검증: Keycloak 이 돌려준 새 access_token 이 실제로 유효한지 확인한다.
-	if _, err := h.auth.VerifyAccessToken(c.Request.Context(), token.AccessToken); err != nil {
+	identity, err := h.auth.VerifyAccessToken(c.Request.Context(), token.AccessToken)
+	if err != nil {
 		h.log.Warn("refreshed access token verification failed", zap.Error(err))
 		h.clearSessionCookies(c)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "session expired", "code": "refresh_failed"})
 		return
 	}
+	// 세션 연장도 활동이다 — last_login_at 을 갱신한다.
+	h.upsertUser(identity)
 
 	h.setSessionCookies(c, token)
 	c.Status(http.StatusNoContent)
