@@ -19,7 +19,7 @@ func ownershipHandler(t *testing.T) *Handler {
 	if err != nil {
 		t.Fatalf("load lab content: %v", err)
 	}
-	h := &Handler{log: zap.NewNop(), labs: labs, steps: newStepStore()}
+	h := &Handler{log: zap.NewNop(), labs: labs, steps: newStepStore(nil, nil)}
 	h.steps.m["s1"] = &sessionSteps{
 		LabID:  "lab-linux-basics",
 		UserID: "alice",

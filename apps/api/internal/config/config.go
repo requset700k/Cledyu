@@ -16,7 +16,15 @@ type Config struct {
 	KubeVirt    KubeVirtConfig `mapstructure:"kubevirt"`
 	Kafka       KafkaConfig    `mapstructure:"kafka"`
 	AI          AIConfig       `mapstructure:"ai"`
+	DB          DBConfig       `mapstructure:"db"`
 	FrontendURL string         `mapstructure:"frontend_url"`
+}
+
+// DBConfig는 PostgreSQL 영속 계층 설정이다.
+// DSN 이 비면 영속화 비활성 — 진행 상태는 in-memory 전용으로 동작한다(로컬/CI).
+// DSN 에 비밀번호가 포함되므로 값 전체를 Secret(ESO: cledyu-api-db)으로 주입한다.
+type DBConfig struct {
+	DSN string `mapstructure:"dsn"` // 예: postgres://cledyu:***@postgres.postgres.svc:5432/cledyu
 }
 
 // AIConfig는 AI 학습 도우미 BFF(apps/ai-tutor) 연동 설정이다.
@@ -121,6 +129,7 @@ func Load() (*Config, error) {
 	v.SetDefault("kafka.events_topic", "lab-events")
 	v.SetDefault("ai.base_url", "") // 빈 기본값 — env CLEDYU_AI_BASE_URL 로 주입(미설정 시 정적 힌트 폴백)
 	v.SetDefault("ai.timeout_seconds", 15)
+	v.SetDefault("db.dsn", "") // 빈 기본값 — env CLEDYU_DB_DSN(Secret)으로 주입. 미설정 시 in-memory 전용
 
 	if err := v.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError

@@ -30,7 +30,7 @@ func newTestRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	// validator=nil(mock 검증), authProvider=nil(OIDC discovery 없이 핸들러 단위만 — 인증 흐름은 503).
-	h := handlers.New(newTestConfig(), zap.NewNop(), nil, nil, nil, nil)
+	h := handlers.New(newTestConfig(), zap.NewNop(), nil, nil, nil, nil, nil)
 
 	r.GET("/health", h.Health)
 	r.GET("/me", func(c *gin.Context) {
