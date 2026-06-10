@@ -1,0 +1,109 @@
+# Terraform 기초 — IDE(브라우저 VS Code) 제공 랩.
+# init 이 부팅 시 terraform 바이너리와 code-server 를 설치한다(인터넷 egress 필요).
+# code-server 는 13337 에 auth none 으로 떠 있고, 접근은 Session API 의 인증 프록시
+# (/api/v1/sessions/:id/ide/)로만 가능하다. 검증 command 는 엔진 화이트리스트
+# (영숫자/공백/ /._-=:@%"') 안에서만 작성한다.
+id: lab-terraform-basics
+title: Terraform 기초
+description: 브라우저 VS Code에서 HCL을 작성하고 init·plan·apply로 IaC 워크플로를 실습합니다
+difficulty: beginner
+duration_min: 60
+vm_type: lab-small
+environment: ubuntu
+ide: true
+tags:
+  - terraform
+  - iac
+  - ide
+init:
+  packages:
+    - unzip
+    - curl
+  runcmd:
+    # terraform 설치 (releases.hashicorp.com zip → /usr/local/bin)
+    - curl -fsSL -o /tmp/terraform.zip https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip
+    - unzip -o /tmp/terraform.zip -d /usr/local/bin
+    - rm -f /tmp/terraform.zip
+    # code-server 설치 + lab 사용자 서비스 기동 (워크스페이스 /home/lab/workspace)
+    - curl -fsSL https://code-server.dev/install.sh -o /tmp/code-server-install.sh
+    - sh /tmp/code-server-install.sh
+    - mkdir -p /home/lab/workspace /home/lab/.config/code-server
+    - "printf 'bind-addr: 0.0.0.0:13337\\nauth: none\\ncert: false\\n' > /home/lab/.config/code-server/config.yaml"
+    - chown -R lab:lab /home/lab/workspace /home/lab/.config
+    - systemctl enable --now code-server@lab
+steps:
+  - id: 1
+    title: IDE에서 main.tf 작성
+    description: |
+      상단의 IDE 탭(브라우저 VS Code)을 열고 /home/lab/workspace 폴더에 main.tf 파일을
+      만들어 아래 리소스를 선언합니다. local_file 은 로컬 파일을 코드로 관리하는
+      가장 작은 Terraform 예제입니다.
+
+      resource "local_file" "hello" {
+        content  = "managed by terraform"
+        filename = "/home/lab/workspace/hello.txt"
+      }
+
+      환경 준비(terraform·VS Code 설치)에 1~2분이 걸릴 수 있습니다. IDE 탭이 열리지
+      않으면 잠시 후 다시 시도하세요.
+    commands:
+      - "IDE 탭에서 /home/lab/workspace/main.tf 생성 (터미널이라면: nano ~/workspace/main.tf)"
+    hint_levels:
+      - "Terraform 은 .tf 파일의 resource 블록으로 원하는 상태를 선언합니다. 어떤 리소스 타입이 '로컬 파일'을 관리할까요?"
+      - "resource \"local_file\" \"<이름>\" { ... } 블록을 main.tf 에 작성합니다. 파일 내용(content)과 경로(filename) 두 인자가 필요합니다."
+      - "resource \"local_file\" \"hello\" 블록에 content = \"managed by terraform\", filename = \"/home/lab/workspace/hello.txt\" 를 넣고 저장하세요."
+    checks:
+      - type: file_exists
+        path: /home/lab/workspace/main.tf
+      - type: file_content
+        path: /home/lab/workspace/main.tf
+        expect: local_file
+  - id: 2
+    title: terraform init
+    description: >
+      워크스페이스에서 terraform init 을 실행합니다. init 은 코드에 선언된 provider
+      (여기서는 hashicorp/local)를 내려받고 .terraform.lock.hcl 로 버전을 고정합니다.
+    commands:
+      - cd ~/workspace
+      - terraform init
+    hint_levels:
+      - "Terraform 프로젝트는 작업을 시작하기 전에 provider 플러그인을 내려받는 초기화 단계가 필요합니다."
+      - "main.tf 가 있는 디렉터리로 이동한 뒤 terraform 의 초기화 하위 명령을 실행하세요."
+      - "cd ~/workspace 후 terraform init 을 실행하면 .terraform.lock.hcl 이 생깁니다."
+    checks:
+      - type: file_exists
+        path: /home/lab/workspace/.terraform.lock.hcl
+  - id: 3
+    title: plan과 apply
+    description: >
+      terraform plan 으로 변경 예정 사항(1 to add)을 확인하고, terraform apply 로
+      실제 리소스를 생성합니다. apply 의 확인 프롬프트에는 yes 를 입력합니다.
+    commands:
+      - cd ~/workspace
+      - terraform plan
+      - terraform apply
+    hint_levels:
+      - "Terraform 워크플로는 '미리보기'와 '적용' 두 단계로 나뉩니다. 각각 어떤 명령일까요?"
+      - "terraform plan 으로 변경분을 확인하고 terraform apply 로 적용합니다. apply 는 확인 입력을 요구합니다."
+      - "cd ~/workspace 후 terraform apply 를 실행하고 프롬프트에 yes 를 입력하면 hello.txt 가 생성됩니다."
+    checks:
+      - type: file_exists
+        path: /home/lab/workspace/hello.txt
+      - type: file_content
+        path: /home/lab/workspace/hello.txt
+        expect: managed by terraform
+  - id: 4
+    title: 상태(state) 확인
+    description: >
+      Terraform 은 적용된 리소스를 상태 파일(terraform.tfstate)로 추적합니다.
+      terraform state list 로 방금 만든 리소스가 상태에 기록됐는지 확인하세요.
+    commands:
+      - terraform -chdir=/home/lab/workspace state list
+    hint_levels:
+      - "Terraform 이 '지금까지 만든 것'을 기억하는 곳이 상태(state)입니다. 상태를 조회하는 하위 명령이 있습니다."
+      - "terraform state 하위 명령 중 리소스 목록을 보여주는 것을 사용하세요. 다른 디렉터리에서는 -chdir 옵션이 필요합니다."
+      - "terraform -chdir=/home/lab/workspace state list 를 실행하면 local_file.hello 가 출력됩니다."
+    checks:
+      - type: command
+        command: terraform -chdir=/home/lab/workspace state list
+        expect: local_file.hello

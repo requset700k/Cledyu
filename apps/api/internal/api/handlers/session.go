@@ -126,6 +126,10 @@ func (h *Handler) sessionResponse(s *kubevirt.Session) gin.H {
 	// 라이브 터미널 랩만 WS 경로 제공.
 	if lc, ok := h.labs[s.LabID]; ok && lc.HasLiveTerminal() {
 		out["terminal_url"] = "/api/v1/sessions/" + s.ID + "/ws"
+		// IDE 랩(code-server)은 브라우저 VS Code 프록시 경로도 함께 제공.
+		if lc.IDE {
+			out["ide_url"] = "/api/v1/sessions/" + s.ID + "/ide/"
+		}
 	}
 	return out
 }
@@ -193,7 +197,11 @@ func (h *Handler) CreateSession(c *gin.Context) {
 		}
 	}
 
-	sess, err := h.sessions.Create(c.Request.Context(), newSessionID(), req.LabID, uid)
+	// 랩별 초기화(init)는 cloud-init 으로 VM 부팅 시 실행된다(도구 설치 등).
+	sess, err := h.sessions.Create(c.Request.Context(), newSessionID(), req.LabID, uid, kubevirt.BootInit{
+		Packages: lc.Init.Packages,
+		Runcmd:   lc.Init.Runcmd,
+	})
 	if err != nil {
 		h.log.Error("create session", zap.Error(err))
 		h.err(c, http.StatusInternalServerError, "create session failed")
@@ -242,6 +250,9 @@ func (h *Handler) GetSession(c *gin.Context) {
 		h.err(c, http.StatusInternalServerError, "get session failed")
 		return
 	}
+	if h.denyIfNotSessionOwner(c, sess) {
+		return
+	}
 	c.JSON(http.StatusOK, h.sessionResponse(sess))
 }
 
@@ -253,6 +264,22 @@ func (h *Handler) DeleteSession(c *gin.Context) {
 		return
 	}
 	id := c.Param("id")
+
+	// 삭제 전 소유자 확인 — 세션 ID 추측만으로 타인의 실습을 종료시킬 수 없게 한다.
+	sess, err := h.sessions.Get(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, kubevirt.ErrNotFound) {
+			h.err(c, http.StatusNotFound, "session not found")
+			return
+		}
+		h.log.Error("get session for delete", zap.Error(err))
+		h.err(c, http.StatusInternalServerError, "delete session failed")
+		return
+	}
+	if h.denyIfNotSessionOwner(c, sess) {
+		return
+	}
+
 	if err := h.sessions.Delete(c.Request.Context(), id); err != nil {
 		if errors.Is(err, kubevirt.ErrNotFound) {
 			h.err(c, http.StatusNotFound, "session not found")
@@ -309,6 +336,9 @@ func (h *Handler) ReapStuckSessions(ctx context.Context) {
 // GetSessionSteps는 세션의 단계별 진행 상태 목록을 반환한다(프론트 StepProgress[]).
 // GET /api/v1/sessions/:id/steps
 func (h *Handler) GetSessionSteps(c *gin.Context) {
+	if h.denyIfNotStoreOwner(c, c.Param("id")) {
+		return
+	}
 	h.steps.mu.Lock()
 	defer h.steps.mu.Unlock()
 	ss, ok := h.steps.m[c.Param("id")]
@@ -346,6 +376,9 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 	}
 
 	sessionID := c.Param("id")
+	if h.denyIfNotStoreOwner(c, sessionID) {
+		return
+	}
 	idx, err := h.findStepIndex(sessionID, req.StepID)
 	if err != nil {
 		if errors.Is(err, errStepSessionNotFound) {

@@ -7,6 +7,7 @@ import type { Lab, Session, StepProgress, StepStatus } from '@/lib/types';
 import { StepList } from './StepList';
 import { TerminalPlaceholder } from './TerminalPlaceholder';
 import { LabTerminal } from './LabTerminal';
+import { LabWorkspace } from './LabWorkspace';
 import { AiTutorPanel } from './AiTutorPanel';
 
 // VM이 Running으로 보고된 이후에도 cloud-init final stage(getty 재시작 + autologin 활성)
@@ -99,24 +100,26 @@ export function LabSession({ sessionId, lab }: { sessionId: string; lab: Lab }) 
   );
   const terminalUrl = session?.terminal_url ?? null;
 
+  // KodeKloud 스타일 2분할 — 좌측: 문제(스텝 목록·지시문·검증·AI 도우미), 우측: 터미널/IDE.
+  // 우측은 sticky 로 고정해 긴 지시문을 스크롤해도 터미널이 화면에 남는다.
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-6 mt-6">
-      <div>
-        <h2 className="text-slate-400 text-xs font-medium mb-2 px-3">진행 단계</h2>
-        <StepList
-          steps={steps}
-          statusOf={statusOf}
-          currentId={currentStep.id}
-          onSelect={setSelectedId}
-        />
-      </div>
-
-      <div className="space-y-4">
+    <div className="grid grid-cols-1 xl:grid-cols-[minmax(360px,420px)_1fr] gap-6 mt-6 items-start">
+      <div className="space-y-4 xl:max-h-[calc(100vh-9rem)] xl:overflow-y-auto xl:pr-1">
         {allPassed && (
           <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-emerald-300 text-sm">
             🎉 모든 단계를 완료했습니다. 수고하셨습니다!
           </div>
         )}
+
+        <div>
+          <h2 className="text-slate-400 text-xs font-medium mb-2 px-3">진행 단계</h2>
+          <StepList
+            steps={steps}
+            statusOf={statusOf}
+            currentId={currentStep.id}
+            onSelect={setSelectedId}
+          />
+        </div>
 
         <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6">
           <div className="flex items-center gap-2 mb-2">
@@ -179,18 +182,26 @@ export function LabSession({ sessionId, lab }: { sessionId: string; lab: Lab }) 
 
         {/* AI 학습 도우미 — 정적 hint 표시를 대체. key=stepId 로 스텝 전환 시 힌트 초기화. */}
         <AiTutorPanel key={currentStep.id} sessionId={sessionId} stepId={currentStep.id} />
+      </div>
 
+      {/* 우측 — 작업 영역(터미널/IDE). xl 미만에서는 문제 아래로 쌓인다. */}
+      <div className="xl:sticky xl:top-6">
         {terminalUrl ? (
-          <LabTerminal terminalPath={terminalUrl} />
+          session?.ide_url ? (
+            <LabWorkspace
+              sessionId={sessionId}
+              terminalPath={terminalUrl}
+              idePath={session.ide_url}
+              heightClass="h-[60vh] xl:h-[calc(100vh-15rem)]"
+            />
+          ) : (
+            <LabTerminal
+              terminalPath={terminalUrl}
+              heightClass="h-[60vh] xl:h-[calc(100vh-13rem)]"
+            />
+          )
         ) : (
-          <div>
-            <TerminalPlaceholder commands={currentStep.commands ?? []} />
-            {lab.environment === 'k3s' && (
-              <p className="mt-2 text-xs text-amber-400/80">
-                ⚠ k3s 실습 환경은 준비 중입니다 — 현재는 콘텐츠 미리보기만 제공합니다.
-              </p>
-            )}
-          </div>
+          <TerminalPlaceholder commands={currentStep.commands ?? []} />
         )}
       </div>
     </div>

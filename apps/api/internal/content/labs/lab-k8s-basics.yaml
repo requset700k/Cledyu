@@ -1,66 +1,126 @@
-# Kubernetes 기초 — 임시 Lab DSL (정식 스키마 확정 전까지 사용).
-# checks[] 필드는 검증엔진(apps/validation-engine)의 Check 스키마와 정렬되어 있어
-# 실제 검증엔진 연동 시 그대로 publish 가능하다.
-# checks[].command 는 검증엔진의 command 화이트리스트(영숫자/공백/ /._-=:@%"')만 사용한다.
-# hint_levels: 레벨 1(개념) → 2(방향) → 3(구체). AI 도우미 미가용 시의 정적 폴백.
+# Kubernetes 기초 — k3s-in-VM 인터랙티브 랩(실시간 터미널).
+# init 이 부팅 시 k3s(단일 노드)를 설치한다. kubeconfig 는 lab 사용자가 읽을 수 있게
+# mode 644 + KUBECONFIG 환경변수(/etc/environment: ssh·검증엔진용, profile.d: 로그인 셸용).
+# 검증 command 는 엔진 화이트리스트(영숫자/공백/ /._-=:@%"') 안에서만 작성 — 파이프/글롭 금지.
 id: lab-k8s-basics
 title: Kubernetes 기초
-description: Pod, Deployment, Service 기본 개념 실습
+description: 단일 노드 k3s 클러스터에서 Pod·Deployment·Service·롤링 업데이트를 직접 실습합니다
 difficulty: beginner
-duration_min: 60
+duration_min: 75
 vm_type: lab-small
-# k3s-in-VM 환경 — 아직 미구현이라 실시간 터미널 비활성(콘텐츠 전용).
-environment: k3s
+environment: ubuntu
 tags:
   - kubernetes
-  - pod
+  - k3s
   - deployment
+  - service
+init:
+  packages:
+    - curl
+  runcmd:
+    - curl -sfL https://get.k3s.io -o /tmp/k3s-install.sh
+    - INSTALL_K3S_EXEC="--write-kubeconfig-mode 644" sh /tmp/k3s-install.sh
+    - echo KUBECONFIG=/etc/rancher/k3s/k3s.yaml >> /etc/environment
+    - "printf 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml\\n' > /etc/profile.d/k3s-kubeconfig.sh"
 steps:
   - id: 1
-    title: Pod 생성
-    description: >
-      nginx 이미지로 단일 Pod를 생성합니다. Pod는 쿠버네티스에서 배포 가능한
-      가장 작은 단위로, 하나 이상의 컨테이너를 감쌉니다.
+    title: 클러스터 상태 확인
+    description: |
+      이 VM 에는 경량 Kubernetes 배포판인 k3s 가 단일 노드로 설치되어 있습니다.
+      kubectl 로 노드와 시스템 Pod 를 살펴보고, 노드가 Ready 가 될 때까지 기다리세요.
+      (부팅 직후라면 준비에 1~2분 걸릴 수 있습니다)
     commands:
-      - kubectl run nginx --image=nginx --restart=Never
-    hint: "kubectl run <이름> --image=<이미지> 형태입니다. --restart=Never 로 단일 Pod가 생성됩니다."
+      - kubectl get nodes
+      - kubectl get pods -A
+      - kubectl wait --for=condition=Ready node --all --timeout=120s
     hint_levels:
-      - "Deployment 없이 Pod 하나만 바로 만드는 kubectl 명령이 있습니다. 어떤 동사를 쓸까요?"
-      - "kubectl run 명령으로 Pod를 만들 수 있습니다. 이미지 지정 옵션과, ReplicaSet 없이 단일 Pod로 만들기 위한 restart 정책 옵션이 필요합니다."
-      - "kubectl run <이름> --image=<이미지> --restart=Never 형태입니다. 이름은 nginx, 이미지도 nginx 입니다."
+      - "클러스터의 구성 요소(노드, Pod)를 조회하는 kubectl 의 기본 동사를 떠올려 보세요. 특정 상태가 될 때까지 기다리는 하위 명령도 있습니다."
+      - "kubectl get nodes 로 상태를 보고, kubectl wait 에 --for=condition=Ready 를 주면 준비될 때까지 블로킹합니다."
+      - "kubectl wait --for=condition=Ready node --all --timeout=120s 가 'condition met' 을 출력하면 준비 완료입니다."
     checks:
       - type: command
-        command: kubectl get pods
-        expect: nginx
+        command: kubectl wait --for=condition=Ready node --all --timeout=10s
+        expect: condition met
   - id: 2
-    title: Deployment 생성
+    title: Pod 실행
     description: >
-      replica 3개를 유지하는 Deployment를 생성합니다. Deployment는 ReplicaSet을
-      통해 원하는 수의 Pod를 선언적으로 관리하며, 장애 시 자동으로 복구합니다.
+      nginx 이미지로 단일 Pod 를 실행합니다. Pod 는 배포 가능한 가장 작은 단위로,
+      하나 이상의 컨테이너를 감쌉니다. STATUS 가 Running 이 될 때까지 확인하세요.
     commands:
-      - kubectl create deployment web --image=nginx --replicas=3
-    hint: "kubectl create deployment <이름> --image=<이미지> --replicas=3"
+      - kubectl run nginx --image=nginx --restart=Never
+      - kubectl get pod nginx -w
     hint_levels:
-      - "여러 개의 Pod 복제본을 선언적으로 유지하려면 Pod가 아니라 어떤 리소스를 만들어야 할까요?"
-      - "kubectl create deployment 명령을 사용합니다. 이미지와 복제본 수를 지정하는 옵션이 각각 있습니다."
-      - "kubectl create deployment <이름> --image=<이미지> --replicas=<수> 형태입니다. 이름은 web, 복제본은 3개입니다."
+      - "Deployment 없이 Pod 하나만 바로 만드는 kubectl 명령이 있습니다. 단일 Pod 가 되려면 재시작 정책을 어떻게 줘야 할까요?"
+      - "kubectl run <이름> 에 --image 와 --restart=Never 를 함께 지정합니다. -w 옵션으로 상태 변화를 지켜볼 수 있습니다."
+      - "kubectl run nginx --image=nginx --restart=Never 실행 후 kubectl get pod nginx 가 Running 을 보일 때까지 기다리세요."
+    checks:
+      - type: command
+        command: kubectl get pod nginx
+        expect: Running
+  - id: 3
+    title: Pod 관찰과 라벨
+    description: >
+      kubectl describe 로 Pod 의 이벤트·IP 를 살펴보고, kubectl logs 로 nginx 로그를
+      확인하세요. 그리고 이 Pod 에 tier=web 라벨을 붙입니다 — 라벨은 Service 셀렉터와
+      쿼리의 기본 단위입니다.
+    commands:
+      - kubectl describe pod nginx
+      - kubectl logs nginx
+      - kubectl label pod nginx tier=web
+    hint_levels:
+      - "Pod 의 상세 정보와 로그를 보는 명령, 그리고 리소스에 key=value 메타데이터를 붙이는 명령을 각각 떠올려 보세요."
+      - "kubectl describe pod / kubectl logs 로 관찰하고, kubectl label pod <이름> key=value 로 라벨을 답니다."
+      - "kubectl label pod nginx tier=web 실행 후 kubectl get pod nginx --show-labels 로 tier=web 이 보이면 됩니다."
+    checks:
+      - type: command
+        command: kubectl get pod nginx --show-labels
+        expect: tier=web
+  - id: 4
+    title: Deployment와 스케일링
+    description: >
+      replica 2개의 Deployment 를 만들고 4개로 스케일합니다. Deployment 는 ReplicaSet 을
+      통해 원하는 수의 Pod 를 선언적으로 유지하며, 장애 시 자동 복구합니다.
+    commands:
+      - kubectl create deployment web --image=nginx --replicas=2
+      - kubectl scale deployment web --replicas=4
+      - kubectl get deployment web
+    hint_levels:
+      - "여러 복제본을 선언적으로 유지하는 리소스를 만들고, 만든 뒤 복제본 수를 바꾸는 명령 두 가지가 필요합니다."
+      - "kubectl create deployment 로 만들고 kubectl scale deployment <이름> --replicas=<수> 로 조절합니다."
+      - "kubectl create deployment web --image=nginx --replicas=2 후 kubectl scale deployment web --replicas=4 — READY 4/4 가 목표입니다."
     checks:
       - type: command
         command: kubectl get deployment web
-        expect: web
-  - id: 3
-    title: Service 노출
+        expect: 4/4
+  - id: 5
+    title: Service로 노출
     description: >
-      Deployment를 ClusterIP Service로 노출해 클러스터 내부에서 안정적인
-      엔드포인트(서비스명:포트)로 Pod 집합에 접근할 수 있게 합니다.
+      NodePort Service 로 web Deployment 를 노드 포트 30080 에 노출합니다.
+      curl http://localhost:30080 으로 nginx 응답을 확인하세요.
     commands:
-      - kubectl expose deployment web --port=80 --target-port=80
-    hint: "kubectl expose deployment <이름> --port=<포트> 로 Service를 만듭니다."
+      - kubectl create service nodeport web --tcp=80:80 --node-port=30080
+      - curl http://localhost:30080
     hint_levels:
-      - "Pod IP는 재생성될 때마다 바뀝니다. Pod 집합 앞에 고정된 접근 지점을 만들어 주는 쿠버네티스 리소스는 무엇일까요?"
-      - "kubectl expose 명령으로 기존 Deployment 를 Service 로 노출할 수 있습니다. 포트 지정 옵션이 필요합니다."
-      - "kubectl expose deployment <이름> --port=<포트> --target-port=<포트> 형태입니다. 대상은 web, 포트는 80 입니다."
+      - "Pod IP 는 재생성 시 바뀝니다. 고정 진입점을 만드는 리소스가 무엇이고, 노드의 포트로 노출하는 타입은 무엇일까요?"
+      - "kubectl create service nodeport 를 사용합니다. --tcp=<port>:<targetPort> 와 --node-port 옵션이 필요하며, Service 이름이 Deployment 라벨(app=web)과 같아야 셀렉터가 맞습니다."
+      - "kubectl create service nodeport web --tcp=80:80 --node-port=30080 실행 후 curl http://localhost:30080 에서 nginx 환영 페이지가 나오면 성공입니다."
+    checks:
+      - type: http_response
+        url: http://localhost:30080
+        expect_code: 200
+  - id: 6
+    title: 롤링 업데이트
+    description: >
+      web Deployment 의 이미지를 nginx:1.27-alpine 으로 교체하고 롤아웃이 끝날 때까지
+      지켜보세요. Kubernetes 는 새 ReplicaSet 을 점진적으로 늘리며 무중단 배포합니다.
+    commands:
+      - kubectl set image deployment/web nginx=nginx:1.27-alpine
+      - kubectl rollout status deployment web
+    hint_levels:
+      - "Deployment 의 컨테이너 이미지를 바꾸면 자동으로 점진 배포가 시작됩니다. 이미지를 바꾸는 명령과 진행 상황을 지켜보는 명령은 무엇일까요?"
+      - "kubectl set image deployment/<이름> <컨테이너>=<이미지> 로 교체하고 kubectl rollout status 로 완료를 확인합니다. 컨테이너 이름은 kubectl describe 로 찾을 수 있습니다(여기서는 nginx)."
+      - "kubectl set image deployment/web nginx=nginx:1.27-alpine 후 kubectl rollout status deployment web 이 successfully rolled out 을 출력하면 완료입니다."
     checks:
       - type: command
-        command: kubectl get service web
-        expect: web
+        command: kubectl rollout status deployment web --timeout=60s
+        expect: successfully rolled out
