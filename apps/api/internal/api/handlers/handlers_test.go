@@ -106,7 +106,7 @@ func TestGetLab_HidesValidationChecks(t *testing.T) {
 			Title       string   `json:"title"`
 			Description string   `json:"description"`
 			Commands    []string `json:"commands"`
-			Hint        string   `json:"hint"`
+			HintLevels  []string `json:"hint_levels"`
 			Checks      any      `json:"checks"`
 		} `json:"steps"`
 	}
@@ -119,11 +119,17 @@ func TestGetLab_HidesValidationChecks(t *testing.T) {
 	if len(body.Steps) == 0 {
 		t.Fatal("expected steps in lab detail response")
 	}
-	if body.Steps[0].Title == "" || len(body.Steps[0].Commands) == 0 || body.Steps[0].Hint == "" {
+	// 공개 필드(제목/명령)는 유지되어야 한다. 힌트는 /hint 엔드포인트가 레벨 1→2→3 으로
+	// 단계 제공하므로 랩 상세에는 노출하지 않는다(legacy hint 도 콘텐츠에서 제거됨).
+	if body.Steps[0].Title == "" || len(body.Steps[0].Commands) == 0 {
 		t.Fatalf("expected public step fields to remain, got %+v", body.Steps[0])
 	}
 	if body.Steps[0].Checks != nil {
 		t.Fatalf("validation checks must not be exposed, got %+v", body.Steps[0].Checks)
+	}
+	// 정적 힌트 3종 전체가 상세 응답으로 새면 단계적 힌트 설계가 무력화된다.
+	if len(body.Steps[0].HintLevels) != 0 {
+		t.Fatalf("hint_levels must not be exposed in lab detail, got %+v", body.Steps[0].HintLevels)
 	}
 }
 
