@@ -72,11 +72,30 @@ ESO 매니페스트와 같은 방식으로 적용한다(kubectl apply).
 | 재시작 후 진행 상태 소실 | 영속화 비활성 상태였는지 위 두 항목 확인. DB 활성 상태였다면 `session_progress` 에 행이 있는지 조회 |
 | `진행 상태 DB 저장 실패` 경고 반복 | DB 다운/디스크 풀. 캐시로 동작은 계속되지만 재시작 시 유실 — postgres 우선 복구 |
 
+## 5.1 Redis 공유 카운터 (세션 락 + AI rate limit)
+
+Redis(ns: `redis`, data-redis 앱)는 두 가지 공유 카운터를 제공해 다중 레플리카에서도
+정확히 동작하게 한다. **카운터/락 전용**이라 영속 디스크가 없고(유실 허용, TTL 자가정리),
+재시작 시 락은 TTL 만료로 풀리고 rate limit 카운터는 리셋된다.
+
+| 용도 | 사용처 | env | DB |
+|---|---|---|---|
+| 세션 생성 분산 락(유저당 1세션) | api | `CLEDYU_REDIS_ADDR=redis.redis.svc:6379` | 0 |
+| AI 힌트 rate limit(분당 6/세션 15) | ai-tutor | `AI_TUTOR_REDIS_URL=redis://redis.redis.svc:6379/1` | 1 |
+
+- 두 서비스 모두 **Redis 미연결 시 in-memory 폴백**한다(api 시작 로그 `redis 미연결`,
+  ai-tutor `rate_limiter backend`). 단일 레플리카면 기능은 동일하다.
+- api 락 경합/Redis 오류는 `409 {code: session_locked}` — 프론트는 잠시 후 재시도(fail-closed,
+  단일 세션 불변식 보호). ai-tutor 는 Redis 장애 시 rate limit 을 **fail-open**(허용) — 가용성
+  우선(가격 보호는 일시 약화).
+- 비밀번호는 두지 않았다(클러스터 내부 전용). redis 접근 제한 NetworkPolicy 는 후속.
+
 ## 6. 제약 / 후속
 
 - 단일 인스턴스(HA 없음) — 내구성은 Longhorn replica + Velero 에 의존. 규모 확장 시
   CloudNativePG 오퍼레이터 이관 검토
-- api 다중 레플리카는 아직 미지원 — stepStore 캐시가 인스턴스 로컬이라 결과 반영이
-  갈릴 수 있다(validation consumer 가 한 인스턴스에만 있음). 레플리카 확장 전에
-  캐시 무효화 or DB-직결 읽기로 전환 필요
+- api 다중 레플리카: 세션 생성 락은 Redis 로 해결됐으나 **stepStore 캐시가 인스턴스
+  로컬**이고 validation consumer 가 한 인스턴스에만 있어 여전히 미지원. 레플리카 확장 전에
+  캐시 무효화(pub/sub) 또는 DB-직결 읽기로 전환 필요
+- redis 접근 제한 NetworkPolicy(api·ai-tutor ns 만 허용) 후속
 - Gamification(포인트/배지)·수료증은 lab_completions 를 원천으로 후속 구현

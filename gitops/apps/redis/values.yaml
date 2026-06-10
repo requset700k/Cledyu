@@ -1,0 +1,17 @@
+image:
+  repository: redis
+  tag: "7-alpine"
+  pullPolicy: IfNotPresent
+
+# 카운터/락 전용 — 데이터는 TTL 로 만료되고 유실이 허용되므로 영속 디스크를 두지 않는다
+# (재시작 시 락은 TTL 만료로 자연 해제, rate limit 카운터는 리셋). maxmemory 정책으로
+# 메모리 상한을 강제한다.
+maxmemory: 128mb
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 192Mi # maxmemory 128m + 오버헤드 여유

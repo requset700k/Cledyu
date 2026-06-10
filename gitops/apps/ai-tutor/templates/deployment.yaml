@@ -35,6 +35,9 @@ spec:
               value: {{ .Values.env.AI_TUTOR_RATE_LIMIT_PER_MINUTE | quote }}
             - name: AI_TUTOR_RATE_LIMIT_PER_SESSION
               value: {{ .Values.env.AI_TUTOR_RATE_LIMIT_PER_SESSION | quote }}
+            # Rate limit 공유 카운터(Redis). 빈 값이면 in-memory 폴백.
+            - name: AI_TUTOR_REDIS_URL
+              value: {{ .Values.env.AI_TUTOR_REDIS_URL | quote }}
             # Vault(kv: ai/gemini) → ESO Secret. optional — 미생성 시에도 파드는 뜨고
             # /v1/hints 가 503(ai_unavailable)을 반환해 Session API 가 정적 힌트로 폴백한다.
             - name: GEMINI_API_KEY

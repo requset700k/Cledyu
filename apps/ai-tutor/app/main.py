@@ -36,7 +36,27 @@ HINT_LATENCY = Histogram(
 app = FastAPI(title="cledyu-ai-tutor", docs_url=None, redoc_url=None)
 
 settings = get_settings()
-limiter = RateLimiter(settings.rate_limit_per_minute, settings.rate_limit_per_session)
+
+
+def _build_limiter():
+    """REDIS_URL 설정 시 공유 카운터(다중 레플리카 안전), 아니면 in-memory."""
+    if settings.redis_url:
+        try:
+            from .ratelimit_redis import RedisRateLimiter
+
+            rl = RedisRateLimiter(
+                settings.redis_url,
+                settings.rate_limit_per_minute,
+                settings.rate_limit_per_session,
+            )
+            logger.info(json.dumps({"event": "rate_limiter", "backend": "redis"}))
+            return rl
+        except Exception:
+            logger.warning("redis rate limiter 초기화 실패 — in-memory 폴백", exc_info=True)
+    return RateLimiter(settings.rate_limit_per_minute, settings.rate_limit_per_session)
+
+
+limiter = _build_limiter()
 retriever = Retriever(settings)
 gemini = GeminiClient(settings)
 
