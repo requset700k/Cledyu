@@ -108,6 +108,22 @@ terraform apply
 - **가입 이벤트 확인:** `kcadm.sh get events -r cledyu-learn` → `REGISTER`/`IDENTITY_PROVIDER_FIRST_LOGIN`.
 - **client secret 회전:** §3.1 의 1~3 반복 후 `kubectl -n api annotate externalsecret cledyu-web-oidc-client-secret force-sync=$(date +%s) --overwrite`.
 
+## 6.1 역할 기반 인가 (RBAC)
+
+`realm_access.roles` 의 역할은 api 미들웨어 `JWT` 가 단일 역할(우선순위 admin >
+instructor > student)로 정규화해 컨텍스트에 주입하고, `RequireMinRole` 이 라우트 그룹에서
+최소 역할 이상인지 검사한다(상위 역할은 하위 라우트도 통과).
+
+| 라우트 그룹 | 최소 역할 | 비고 |
+|---|---|---|
+| `/api/v1/*` (세션·랩) | student | JWT 검증만, 역할 무관 |
+| `/api/v1/admin/*` | admin | 예: `GET /admin/users` (유저 목록) |
+
+- 역할 변경(강사 승격)은 Keycloak 에서 하고, 다음 로그인/`/auth/refresh` 시 새 토큰에
+  반영된다. 즉시 적용이 필요하면 해당 사용자에게 재로그인을 요청한다(토큰 수명 ~15m 내 자동 반영).
+- 권한 부족 응답은 `403 {code: forbidden}` — 프론트(`lib/api.ts`)는 이를 `FORBIDDEN` 으로 처리한다.
+- 강사(instructor) 전용 그룹은 강사 모드 도입 시 `RequireMinRole("instructor")` 로 같은 패턴 추가.
+
 ## 7. 트러블슈팅
 
 | 증상 | 원인 / 조치 |

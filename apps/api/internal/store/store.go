@@ -53,6 +53,40 @@ func (s *Store) Close() { s.pool.Close() }
 
 // ── users ───────────────────────────────────────────────────────────────────
 
+// User는 users 테이블 한 행이다(관리자 콘솔 조회용).
+type User struct {
+	ID          string    `json:"id"`
+	Email       string    `json:"email"`
+	Name        string    `json:"name"`
+	Role        string    `json:"role"`
+	CreatedAt   time.Time `json:"created_at"`
+	LastLoginAt time.Time `json:"last_login_at"`
+}
+
+// ListUsers는 최근 로그인 순으로 유저 목록을 반환한다(관리자 콘솔). limit<=0 이면 50.
+func (s *Store) ListUsers(ctx context.Context, limit int) ([]User, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, email, name, role, created_at, last_login_at
+		FROM users ORDER BY last_login_at DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list users: %w", err)
+	}
+	defer rows.Close()
+
+	users := make([]User, 0, limit)
+	for rows.Next() {
+		var u User
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.CreatedAt, &u.LastLoginAt); err != nil {
+			return nil, fmt.Errorf("scan user: %w", err)
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
 // UpsertUser는 로그인(콜백/리프레시) 시점에 Keycloak 신원을 앱 DB로 미러링한다.
 // 재로그인 시 프로필·역할 스냅샷과 last_login_at 을 갱신한다.
 func (s *Store) UpsertUser(ctx context.Context, id, email, name, role string) error {

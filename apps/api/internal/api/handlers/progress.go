@@ -15,6 +15,7 @@ type persistence interface {
 	LoadProgress(ctx context.Context, sessionID string) (*store.SessionProgress, error)
 	DeleteProgress(ctx context.Context, sessionID string) error
 	UpsertUser(ctx context.Context, id, email, name, role string) error
+	ListUsers(ctx context.Context, limit int) ([]store.User, error)
 	RecordCompletion(ctx context.Context, userID, labID, sessionID string) error
 }
 

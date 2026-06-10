@@ -90,5 +90,13 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, 
 		v1.Any("/sessions/:id/ide/*idepath", h.IDE)
 	}
 
+	// 관리자 전용 — JWT(v1) 이후 RequireMinRole 로 역할을 한 번 더 검사한다.
+	// admin 콘솔의 백엔드. 강사(instructor) 전용 그룹은 강사 모드 도입 시 같은 패턴으로 추가.
+	admin := v1.Group("/admin")
+	admin.Use(middleware.RequireMinRole("admin"))
+	{
+		admin.GET("/users", h.ListUsers)
+	}
+
 	return r, h
 }
