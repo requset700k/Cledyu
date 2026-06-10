@@ -59,6 +59,19 @@ func (f *fakePersistence) UpsertUser(_ context.Context, id, _, _, role string) e
 	return nil
 }
 
+func (f *fakePersistence) ListUsers(_ context.Context, limit int) ([]store.User, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]store.User, 0, len(f.users))
+	for id, role := range f.users {
+		out = append(out, store.User{ID: id, Role: role})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
 func (f *fakePersistence) RecordCompletion(_ context.Context, userID, labID, sessionID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
