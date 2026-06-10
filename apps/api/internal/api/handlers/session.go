@@ -126,6 +126,10 @@ func (h *Handler) sessionResponse(s *kubevirt.Session) gin.H {
 	// 라이브 터미널 랩만 WS 경로 제공.
 	if lc, ok := h.labs[s.LabID]; ok && lc.HasLiveTerminal() {
 		out["terminal_url"] = "/api/v1/sessions/" + s.ID + "/ws"
+		// IDE 랩(code-server)은 브라우저 VS Code 프록시 경로도 함께 제공.
+		if lc.IDE {
+			out["ide_url"] = "/api/v1/sessions/" + s.ID + "/ide/"
+		}
 	}
 	return out
 }
@@ -193,7 +197,11 @@ func (h *Handler) CreateSession(c *gin.Context) {
 		}
 	}
 
-	sess, err := h.sessions.Create(c.Request.Context(), newSessionID(), req.LabID, uid)
+	// 랩별 초기화(init)는 cloud-init 으로 VM 부팅 시 실행된다(도구 설치 등).
+	sess, err := h.sessions.Create(c.Request.Context(), newSessionID(), req.LabID, uid, kubevirt.BootInit{
+		Packages: lc.Init.Packages,
+		Runcmd:   lc.Init.Runcmd,
+	})
 	if err != nil {
 		h.log.Error("create session", zap.Error(err))
 		h.err(c, http.StatusInternalServerError, "create session failed")

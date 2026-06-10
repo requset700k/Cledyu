@@ -1,0 +1,99 @@
+# Ansible 기초 — 단일 VM 경량 구성.
+# 별도 관리 대상 노드 없이 localhost(ansible_connection=local)를 제어해
+# 인벤토리·플레이북·멱등성 개념을 그대로 학습한다. init 은 apt 의 ansible-core
+# 하나만 설치한다(추가 VM/컨테이너 없음 — 부팅 영향 최소화).
+id: lab-ansible-basics
+title: Ansible 기초
+description: 인벤토리와 플레이북을 작성하고 멱등성(idempotency)까지 확인하는 구성관리 입문 실습
+difficulty: beginner
+duration_min: 45
+vm_type: lab-small
+environment: ubuntu
+tags:
+  - ansible
+  - automation
+  - configuration-management
+init:
+  packages:
+    - ansible-core
+steps:
+  - id: 1
+    title: 인벤토리 작성
+    description: |
+      Ansible 은 인벤토리에 적힌 호스트들을 제어합니다. 이 실습에서는 별도 서버 없이
+      지금 접속한 VM 자신(localhost)을 관리 대상으로 등록합니다.
+      ~/ansible/inventory.ini 를 아래 내용으로 만드세요.
+
+      [local]
+      localhost ansible_connection=local
+    commands:
+      - mkdir -p ~/ansible
+      - echo "[local]" > ~/ansible/inventory.ini
+      - echo "localhost ansible_connection=local" >> ~/ansible/inventory.ini
+    hint_levels:
+      - "Ansible 이 '어떤 서버를 관리할지' 적어두는 파일이 인벤토리입니다. SSH 없이 자기 자신을 제어하려면 어떤 connection 타입을 쓸까요?"
+      - "inventory.ini 에 그룹([local])과 호스트(localhost)를 적고, ansible_connection 변수를 local 로 지정합니다."
+      - "echo 리다이렉션 두 줄로 ~/ansible/inventory.ini 에 [local] 그룹과 localhost ansible_connection=local 행을 만드세요."
+    checks:
+      - type: file_content
+        path: /home/lab/ansible/inventory.ini
+        expect: ansible_connection=local
+  - id: 2
+    title: 플레이북 작성
+    description: |
+      ~/ansible/site.yml 플레이북을 작성합니다. file 모듈로 디렉터리를 만들고
+      copy 모듈로 파일을 배포하는 태스크 2개를 선언하세요. (nano 또는 vi 사용)
+
+      - name: configure local host
+        hosts: local
+        tasks:
+          - name: create managed directory
+            ansible.builtin.file:
+              path: /home/lab/ansible/managed
+              state: directory
+          - name: deploy motd file
+            ansible.builtin.copy:
+              content: "configured by ansible\n"
+              dest: /home/lab/ansible/managed/motd.txt
+    commands:
+      - nano ~/ansible/site.yml
+    hint_levels:
+      - "플레이북은 '어느 호스트에(hosts)' '무엇을 할지(tasks)' 선언하는 YAML 입니다. 디렉터리와 파일을 만드는 기본 모듈 두 가지를 떠올려 보세요."
+      - "hosts: local 인 플레이 하나에 ansible.builtin.file(state: directory) 태스크와 ansible.builtin.copy(content/dest) 태스크를 넣습니다."
+      - "위 설명의 YAML 을 그대로 ~/ansible/site.yml 에 저장하세요. 들여쓰기(스페이스 2칸)가 맞는지 확인하세요."
+    checks:
+      - type: file_exists
+        path: /home/lab/ansible/site.yml
+      - type: file_content
+        path: /home/lab/ansible/site.yml
+        expect: "hosts: local"
+  - id: 3
+    title: 플레이북 실행
+    description: >
+      ansible-playbook 으로 플레이북을 실행합니다. -i 옵션으로 1단계의 인벤토리를
+      지정하세요. PLAY RECAP 에서 ok/changed 숫자를 확인합니다.
+    commands:
+      - ansible-playbook -i ~/ansible/inventory.ini ~/ansible/site.yml
+    hint_levels:
+      - "플레이북을 실행하는 전용 CLI 가 있습니다. 인벤토리를 함께 알려줘야 합니다."
+      - "ansible-playbook 명령에 -i <인벤토리 경로> 와 플레이북 경로를 차례로 넘기세요."
+      - "ansible-playbook -i ~/ansible/inventory.ini ~/ansible/site.yml 을 실행하면 managed/motd.txt 가 생성됩니다."
+    checks:
+      - type: file_content
+        path: /home/lab/ansible/managed/motd.txt
+        expect: configured by ansible
+  - id: 4
+    title: 멱등성 확인
+    description: >
+      같은 플레이북을 한 번 더 실행해 보세요. Ansible 은 이미 원하는 상태면 변경하지
+      않습니다 — PLAY RECAP 의 changed=0 이 멱등성(idempotency)의 증거입니다.
+    commands:
+      - ansible-playbook -i ~/ansible/inventory.ini ~/ansible/site.yml
+    hint_levels:
+      - "구성관리 도구의 핵심 성질은 '여러 번 실행해도 결과가 같다'는 것입니다. 재실행 출력에서 무엇을 보면 알 수 있을까요?"
+      - "플레이북을 그대로 다시 실행하고 PLAY RECAP 줄의 changed 값을 확인하세요."
+      - "재실행 시 changed=0 이어야 합니다. 값이 0이 아니라면 태스크가 매번 상태를 바꾸고 있다는 뜻입니다(content 끝 개행 등 확인)."
+    checks:
+      - type: command
+        command: ansible-playbook -i /home/lab/ansible/inventory.ini /home/lab/ansible/site.yml
+        expect: changed=0

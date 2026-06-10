@@ -62,6 +62,18 @@ func (s Step) StaticHint(level int) string {
 	return s.Hint
 }
 
+// InitSpec은 세션 VM 부팅 시 cloud-init 으로 실행되는 랩별 초기화다(기획서 Lab DSL 의 initial_state).
+// packages 는 cloud-init `packages:` 로(apt), runcmd 는 `runcmd:` 끝에 그대로 추가된다.
+// 랩 저자(Git PR)만 작성할 수 있는 신뢰 입력이며 root 로 실행된다 — 학생 VM 은 어차피
+// 학생이 root 인 격리 VM 이라 권한 상승 표면이 아니다.
+type InitSpec struct {
+	Packages []string `yaml:"packages,omitempty" json:"-"`
+	Runcmd   []string `yaml:"runcmd,omitempty" json:"-"`
+}
+
+// IsZero는 초기화 작업이 없는지 반환한다.
+func (i InitSpec) IsZero() bool { return len(i.Packages) == 0 && len(i.Runcmd) == 0 }
+
 // LabContent는 한 랩의 DSL 콘텐츠(메타데이터 + 스텝)다.
 type LabContent struct {
 	ID          string   `yaml:"id" json:"id"`
@@ -74,7 +86,11 @@ type LabContent struct {
 	// Environment는 세션 VM 실행 환경(예: "ubuntu", "k3s").
 	// Phase-1에서는 "ubuntu" 랩만 실시간 터미널을 제공한다(k3s는 미구현).
 	Environment string `yaml:"environment,omitempty" json:"environment,omitempty"`
-	Steps       []Step `yaml:"steps" json:"steps"`
+	// IDE: true 면 세션 VM 에 code-server(브라우저 VS Code)를 띄우고 IDE 탭을 제공한다.
+	// init 에서 code-server 설치/기동을 함께 선언해야 한다(예: lab-terraform-basics).
+	IDE   bool     `yaml:"ide,omitempty" json:"ide,omitempty"`
+	Init  InitSpec `yaml:"init,omitempty" json:"-"` // 프론트에 노출할 필요 없는 서버 전용 필드
+	Steps []Step   `yaml:"steps" json:"steps"`
 }
 
 // HasLiveTerminal은 이 랩이 실시간 KubeVirt 터미널을 제공하는지 반환한다.

@@ -21,6 +21,44 @@ func TestLoad_HintLevels(t *testing.T) {
 	}
 }
 
+// Lab DSL 의 init(cloud-init)·ide 필드가 파싱되는지 실제 임베드 콘텐츠로 검증한다.
+func TestLoad_InitAndIDE(t *testing.T) {
+	labs, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+
+	tf, ok := labs["lab-terraform-basics"]
+	if !ok {
+		t.Fatal("lab-terraform-basics not loaded")
+	}
+	if !tf.IDE {
+		t.Error("terraform lab must declare ide: true")
+	}
+	if tf.Init.IsZero() || len(tf.Init.Runcmd) == 0 {
+		t.Errorf("terraform lab must have init runcmd, got %+v", tf.Init)
+	}
+	if !tf.HasLiveTerminal() {
+		t.Error("terraform lab must keep the live terminal (environment: ubuntu)")
+	}
+
+	an, ok := labs["lab-ansible-basics"]
+	if !ok {
+		t.Fatal("lab-ansible-basics not loaded")
+	}
+	if an.IDE {
+		t.Error("ansible lab must not declare ide (경량 구성)")
+	}
+	if len(an.Init.Packages) == 0 {
+		t.Errorf("ansible lab must install ansible-core via init packages, got %+v", an.Init)
+	}
+
+	// IDE 없는 기존 랩은 init 도 ide 도 없어야 한다(zero value 회귀 확인).
+	if linux := labs["lab-linux-basics"]; linux.IDE || !linux.Init.IsZero() {
+		t.Errorf("linux lab must have no ide/init, got ide=%v init=%+v", linux.IDE, linux.Init)
+	}
+}
+
 func TestStaticHint(t *testing.T) {
 	s := Step{Hint: "legacy", HintLevels: []string{"l1", "l2", "l3"}}
 	cases := []struct {

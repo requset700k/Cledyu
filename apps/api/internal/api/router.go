@@ -84,6 +84,9 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, 
 
 		// 실시간 터미널 — VM serial console을 WebSocket으로 프록시(JWT가 ?token= 처리).
 		v1.GET("/sessions/:id/ws", h.Console)
+
+		// 브라우저 IDE(code-server) — IDE 랩(lab DSL ide: true)만. 세션 소유자 전용 프록시.
+		v1.Any("/sessions/:id/ide/*idepath", h.IDE)
 	}
 
 	return r, h
