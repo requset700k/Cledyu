@@ -50,10 +50,7 @@ export function AiTutorPanel({ sessionId, stepId }: { sessionId: string; stepId:
       {hints.length > 0 && (
         <ul className="space-y-2 mb-3">
           {hints.map((h, i) => (
-            <li
-              key={i}
-              className="rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2"
-            >
+            <li key={i} className="rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2">
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-indigo-300 text-[11px] font-semibold">
                   레벨 {h.hint_level}

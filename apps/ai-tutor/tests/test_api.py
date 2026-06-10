@@ -38,7 +38,9 @@ def test_healthz(client):
 
 def test_hint_ok(client, monkeypatch):
     monkeypatch.setattr(
-        main_mod.gemini, "generate_hint", lambda sys, usr: ("폴더를 만드는 명령을 떠올려 보세요.", "gemini-3-pro")
+        main_mod.gemini,
+        "generate_hint",
+        lambda sys, usr: ("폴더를 만드는 명령을 떠올려 보세요.", "gemini-3-pro"),
     )
     monkeypatch.setattr(main_mod.retriever, "search", lambda org, q: [])
     res = client.post("/v1/hints", json=hint_payload())

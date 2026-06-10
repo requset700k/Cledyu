@@ -35,9 +35,7 @@ def build_user_prompt(req: HintRequest, rag_chunks: list[dict]) -> str:
     if req.step.commands:
         # 채점 기준(정답)은 모델에게는 알려주되, 출력 금지를 재강조한다.
         joined = "\n".join(f"- {c}" for c in req.step.commands)
-        parts.append(
-            "## 이 스텝의 모범 답안 명령 (절대 그대로 출력 금지 — 유도용 참고)\n" + joined
-        )
+        parts.append("## 이 스텝의 모범 답안 명령 (절대 그대로 출력 금지 — 유도용 참고)\n" + joined)
     if req.terminal_tail.strip():
         parts.append("## 학생의 최근 터미널 출력\n```\n" + req.terminal_tail.strip() + "\n```")
     if rag_chunks:

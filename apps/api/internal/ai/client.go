@@ -88,18 +88,18 @@ func (c *Client) RequestHint(ctx context.Context, req HintRequest) (*HintRespons
 	resp, err := c.http.Do(httpReq)
 	if err != nil {
 		// 네트워크 단절/타임아웃도 미가용으로 본다 — 학생 UX 는 정적 힌트로 이어진다.
-		return nil, fmt.Errorf("%w: %s", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	defer resp.Body.Close()
 
-	switch {
-	case resp.StatusCode == http.StatusOK:
+	switch resp.StatusCode {
+	case http.StatusOK:
 		var out HintResponse
 		if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
-			return nil, fmt.Errorf("%w: decode response: %s", ErrUnavailable, err)
+			return nil, fmt.Errorf("%w: decode response: %w", ErrUnavailable, err)
 		}
 		return &out, nil
-	case resp.StatusCode == http.StatusTooManyRequests:
+	case http.StatusTooManyRequests:
 		return nil, ErrRateLimited
 	default:
 		return nil, fmt.Errorf("%w: status %d", ErrUnavailable, resp.StatusCode)

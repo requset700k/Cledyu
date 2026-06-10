@@ -26,9 +26,7 @@ from .rag import Retriever
 logger = logging.getLogger("ai_tutor")
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-HINT_REQUESTS = Counter(
-    "ai_hint_requests_total", "AI 힌트 요청 수", ["outcome", "model"]
-)
+HINT_REQUESTS = Counter("ai_hint_requests_total", "AI 힌트 요청 수", ["outcome", "model"])
 HINT_LATENCY = Histogram(
     "ai_hint_latency_seconds",
     "AI 힌트 생성 지연(SLO: p95 < 5s)",
