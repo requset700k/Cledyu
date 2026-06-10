@@ -16,10 +16,12 @@ export function LabWorkspace({
   sessionId,
   terminalPath,
   idePath,
+  heightClass = 'h-[560px]',
 }: {
   sessionId: string;
   terminalPath: string;
   idePath: string;
+  heightClass?: string;
 }) {
   const [tab, setTab] = useState<'terminal' | 'ide'>('terminal');
 
@@ -34,10 +36,10 @@ export function LabWorkspace({
         </TabButton>
       </div>
       <div className={tab === 'terminal' ? '' : 'hidden'}>
-        <LabTerminal terminalPath={terminalPath} />
+        <LabTerminal terminalPath={terminalPath} heightClass={heightClass} />
       </div>
       <div className={tab === 'ide' ? '' : 'hidden'}>
-        <IdePane sessionId={sessionId} idePath={idePath} />
+        <IdePane sessionId={sessionId} idePath={idePath} heightClass={heightClass} />
       </div>
     </div>
   );
@@ -67,7 +69,15 @@ function TabButton({
 
 // IdePane은 세션 VM 의 code-server 가 살아날 때까지 healthz 를 폴링한 뒤 iframe 을 띄운다.
 // code-server 설치는 cloud-init 으로 부팅 후 1~2분 걸릴 수 있다(Lab DSL init).
-function IdePane({ sessionId, idePath }: { sessionId: string; idePath: string }) {
+function IdePane({
+  sessionId,
+  idePath,
+  heightClass = 'h-[560px]',
+}: {
+  sessionId: string;
+  idePath: string;
+  heightClass?: string;
+}) {
   const [ready, setReady] = useState(false);
   const [waitedLong, setWaitedLong] = useState(false);
   const origin = apiHttpOrigin();
@@ -100,7 +110,9 @@ function IdePane({ sessionId, idePath }: { sessionId: string; idePath: string })
 
   if (!ready) {
     return (
-      <div className="h-[420px] rounded-xl border border-slate-700 bg-slate-900/60 flex flex-col items-center justify-center gap-3">
+      <div
+        className={`${heightClass} rounded-xl border border-slate-700 bg-slate-900/60 flex flex-col items-center justify-center gap-3`}
+      >
         <div className="w-8 h-8 rounded-full border-2 border-slate-700 border-t-brand-400 animate-spin" />
         <p className="text-slate-400 text-sm">IDE(VS Code)를 준비하고 있습니다…</p>
         <p className="text-slate-500 text-xs">
@@ -116,7 +128,7 @@ function IdePane({ sessionId, idePath }: { sessionId: string; idePath: string })
     <iframe
       src={`${origin}${idePath}?folder=/home/lab/workspace`}
       title="Lab IDE (VS Code)"
-      className="w-full h-[560px] rounded-xl border border-slate-700 bg-slate-950"
+      className={`w-full ${heightClass} rounded-xl border border-slate-700 bg-slate-950`}
     />
   );
 }
