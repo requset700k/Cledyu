@@ -25,9 +25,17 @@ app.cledyu.local (web)  ──►  api.cledyu.local (BFF)
 1. `GET /api/v1/auth/login` → state/nonce/PKCE 생성(임시 쿠키) → Keycloak 인가 URL 리다이렉트.
    - `?screen=register` 면 Keycloak **회원가입 폼**(`/registrations`)으로 딥링크.
 2. Keycloak → `GET /api/v1/auth/callback?code=…&state=…`
-   - state 쿠키 일치 검증 → code+PKCE 교환 → id_token nonce 검증 → `access_token`/`id_token` HttpOnly 쿠키 설정 → `app.cledyu.local/callback` 리다이렉트.
+   - state 쿠키 일치 검증 → code+PKCE 교환 → id_token nonce 검증 → `access_token`/`id_token`/`refresh_token` HttpOnly 쿠키 설정 → `app.cledyu.local/callback` 리다이렉트.
 3. 보호 API: `middleware.JWT` 가 access_token 을 JWKS 로 검증, claims(`sub`/`email`/`name`/`realm_access.roles`)를 컨텍스트에 주입.
-4. `GET /api/v1/auth/logout` → 쿠키 삭제 + Keycloak end-session(SSO 로그아웃) → 프론트로 복귀.
+4. **silent refresh:** access_token(기본 15m) 만료로 보호 API 가 401 을 돌려주면
+   프론트(`lib/api.ts`)가 `POST /api/v1/auth/refresh` 를 1회 호출(동시 401 은 single-flight 공유)
+   → 백엔드가 refresh_token grant 로 토큰 재발급 + 쿠키 갱신(회전된 refresh_token 반영)
+   → 원 요청 재시도. refresh 실패(SSO 세션 종료/refresh_token 만료) 시에만 로그인 페이지로 이동.
+   덕분에 실습(최대 3h) 중 Keycloak SSO 세션이 유지되는 한 재로그인이 발생하지 않는다.
+5. `GET /api/v1/auth/logout` → 쿠키 3종 삭제 + Keycloak end-session(SSO 로그아웃) → 프론트로 복귀.
+
+> 세션 수명 튜닝: 실습 중 끊김 없는 갱신을 보장하려면 Keycloak `cledyu-learn` realm 의
+> SSO Session Idle 을 Lab 세션 TTL(3h) 이상으로 설정한다(refresh 가 일어날 때마다 idle 은 연장됨).
 
 ## 3. 최초 활성화 절차
 
@@ -106,6 +114,7 @@ terraform apply
 |---|---|
 | 로그인 시 api 503 `auth provider not configured` | Keycloak 미가용으로 OIDC discovery 실패. `cledyu-learn` realm 존재·네트워크 확인. |
 | callback `invalid oauth state` | state 쿠키 유실(SameSite/도메인). `CLEDYU_KEYCLOAK_COOKIE_DOMAIN`(`.cledyu.local`) 확인. |
-| 보호 API 401 `invalid token` | access_token 만료/realm 불일치. api 의 `CLEDYU_KEYCLOAK_REALM=cledyu-learn` 확인. |
+| 보호 API 401 `invalid token` | access_token 만료/realm 불일치. api 의 `CLEDYU_KEYCLOAK_REALM=cledyu-learn` 확인. 만료라면 프론트가 자동으로 refresh 후 재시도하므로 사용자 영향 없음. |
+| 실습 중 주기적으로 로그인 페이지로 튕김 | refresh 실패 — Keycloak SSO Session Idle 이 너무 짧거나(§2 참고) refresh_token 이 폐기됨. `POST /api/v1/auth/refresh` 응답 코드(`refresh_failed`)와 Keycloak 세션 설정 확인. |
 | 소셜 버튼 안 보임 | `enable_social_idp=false` 또는 IdP redirect URI 미등록. |
 | 학습자가 ArgoCD 접근됨 | **격리 실패** — 학습자가 `cledyu`(운영) realm 에 생성되었는지 확인. learn realm 이어야 함. |
