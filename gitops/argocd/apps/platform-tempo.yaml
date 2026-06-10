@@ -7,6 +7,13 @@ metadata:
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
+  ignoreDifferences:
+    - group: apps
+      kind: StatefulSet
+      name: tempo
+      jsonPointers:
+        - /spec/volumeClaimTemplates/0/apiVersion
+        - /spec/volumeClaimTemplates/0/kind
   project: default
   sources:
     - repoURL: https://grafana.github.io/helm-charts
