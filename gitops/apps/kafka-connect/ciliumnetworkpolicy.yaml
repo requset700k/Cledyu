@@ -1,0 +1,19 @@
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: kafka-connect-external
+  namespace: kafka
+spec:
+  endpointSelector:
+    matchLabels:
+      strimzi.io/cluster: kafka-connect
+  egress:
+    # BigQuery API, GCS API — 배치 적재
+    # Maven Central, ghcr.io — Strimzi 빌드 시 플러그인 다운로드 및 이미지 push
+    - toEntities:
+        - world
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP

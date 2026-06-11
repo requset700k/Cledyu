@@ -1,0 +1,25 @@
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: kafka-connect-kafka-client
+  namespace: kafka
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  secretName: kafka-connect-kafka-client-tls
+  duration: "2160h"
+  renewBefore: "720h"
+  commonName: kafka-connect
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always
+  usages:
+    - client auth
+    - digital signature
+    - key encipherment
+  issuerRef:
+    name: kafka-clients-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

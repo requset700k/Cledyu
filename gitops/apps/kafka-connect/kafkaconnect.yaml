@@ -1,0 +1,94 @@
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnect
+metadata:
+  name: kafka-connect
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: cledyu-kafka
+  annotations:
+    # KafkaConnector CR로 커넥터를 관리하기 위해 필요
+    strimzi.io/use-connector-resources: "true" # KafkaConnector CR로 커넥터를 관리하겠다는 선언, 없으면 Strimzi가 무시
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  version: 3.8.0 # Kafka 브로커 버전과 통일
+  replicas: 1 # Connect Pod 1개
+  bootstrapServers: cledyu-kafka-kafka-bootstrap.kafka.svc:9093
+
+  tls:
+    trustedCertificates:
+      - secretName: cledyu-kafka-cluster-ca-cert
+        certificate: ca.crt
+
+  authentication:
+    type: tls
+    certificateAndKey:
+      secretName: kafka-connect-kafka-client-tls
+      certificate: tls.crt
+      key: tls.key
+
+  # Strimzi가 BigQuery Sink 플러그인(.jar)을 포함한 이미지를 빌드해서 ghcr.io에 push한다.
+  # 이후 KafkaConnect Pod는 이 이미지로 실행된다.
+  build:
+    output:
+      type: docker
+      image: ghcr.io/requset700k/kafka-connect-bigquery:latest # Strimzi가 빌드한 이미지를 ghcr.io/requset700k/kafka-connect-bigquery:latest로 push
+      pushSecret: kafka-connect-registry-credentials # externalsecrets.yaml이 만든 ghcr.io 인증 Secret
+    plugins:
+      - name: kafka-connect-bigquery
+        artifacts:
+          - type: maven # Maven Central에서 BigQuery Sink 플러그인 jar를 다운받아서 이미지에 포함, 없으면 Connect가 BigQuery로 데이터를 보낼 방법을 모른다.
+            repository: https://repo1.maven.org/maven2
+            group: com.wepay.kafka.connect
+            artifact: kafka-connect-bigquery
+            version: 2.5.0
+
+  # externalsecrets.yml에서 만든 GCP SA 키(kafka-connect-gcp-sa Secret)를 Connect Pod에 마운트(/opt/kafka/external-configuration/gcp-sa/)
+  # kafkaconnector.yaml의 keyfile이 이 경로를 참조해서 BigQuery 인증에 사용
+  externalConfiguration:
+    volumes:
+      - name: gcp-sa
+        secret:
+          secretName: kafka-connect-gcp-sa
+
+  # Kafka Connect가 내부적으로 쓰는 세 토픽 (Kafka Connect가 처음 뜰 때 알아서 생성, kafkauser.yaml에 ACL로 정의)
+  config:
+    group.id: kafka-connect
+    offset.storage.topic: kafka-connect-offsets
+    config.storage.topic: kafka-connect-configs
+    status.storage.topic: kafka-connect-status
+    config.storage.replication.factor: -1
+    offset.storage.replication.factor: -1
+    status.storage.replication.factor: -1
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+  template:
+    pod:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+    connectContainer:
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+    buildPod:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+    buildContainer:
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL

@@ -50,9 +50,9 @@ resource "google_bigquery_table" "lab_events" {
 
 # GCS 스테이징 버킷 (Kafka Connect가 BigQuery에 데이터 넣는 방식은 두 가지)
 # 스트리밍 Insert -> Kafka에서 오자마자 바로 BigQuery에 꽂아 빠르지만 비싸다.
-# 배치 Load Jop -> GCS에 모아뒀다가 한 번에 BigQuery에 적재, 약간 느리지만 빠름
+# 배치 Load Job -> GCS에 모아뒀다가 한 번에 BigQuery에 적재, 약간 느리지만 BigQuery 적재 비용 $0 (GCS 저장 비용만 미미하게 발생)
 
-# GCS를 중간 경유지로 써서 비용을 $0으로 만들기 위한 버킷
+# GCS를 중간 경유지로 써서 BigQuery 적재 비용을 $0으로 만들기 위한 버킷
 
 # Kafka Connect BigQuery Sink 배치 모드 전용
 resource "google_storage_bucket" "staging" {

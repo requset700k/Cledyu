@@ -120,6 +120,11 @@ env:
     value: cledyu-kafka
   - name: KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS
     value: cledyu-kafka-kafka-bootstrap.kafka.svc:9093
+  # Strimzi가 KafkaConnect CR 이름으로 <name>-connect-api Service를 자동 생성한다.
+  - name: KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME
+    value: kafka-connect
+  - name: KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS
+    value: http://kafka-connect-connect-api.kafka.svc:8083
 
   # Kafka 브로커와의 통신을 SSL(mTLS)로 한다는 선언.
   # PLAINTEXT(암호화 없음) / SSL(TLS) / SASL_PLAINTEXT / SASL_SSL 중 선택.

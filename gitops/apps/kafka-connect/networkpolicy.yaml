@@ -1,0 +1,44 @@
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kafka-connect
+  namespace: kafka
+spec:
+  podSelector:
+    matchLabels:
+      strimzi.io/cluster: kafka-connect
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Connect REST API — kafka-ui가 커넥터 상태 조회 시 사용
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: kafka-ui
+      ports:
+        - port: 8083
+          protocol: TCP
+  egress:
+    # DNS 조회
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Kafka 브로커 TLS — lab-events 소비 + 내부 토픽(offsets, configs, status) 관리
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kafka
+          podSelector:
+            matchLabels:
+              strimzi.io/kind: Kafka
+      ports:
+        - port: 9093
+          protocol: TCP

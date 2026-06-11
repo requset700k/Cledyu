@@ -1,0 +1,34 @@
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  name: kafka-connect
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: cledyu-kafka
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  authentication:
+    type: tls  # CN=kafka-connect 인증서로 인증
+  authorization:
+    type: simple
+    acls:
+      # lab-events 토픽 읽기
+      - resource:
+          type: topic
+          name: lab-events
+          patternType: literal
+        operations: [Read, Describe]
+      # Connect 내부 토픽 (offsets, configs, status) 관리
+      - resource:
+          type: topic
+          name: kafka-connect-
+          patternType: prefix
+        operations: [Read, Write, Describe, Create, Delete, Alter]
+      # 컨슈머 그룹
+      - resource:
+          type: group
+          name: kafka-connect
+          patternType: literal
+        operations: [Read]

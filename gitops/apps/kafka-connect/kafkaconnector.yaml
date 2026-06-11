@@ -1,0 +1,36 @@
+# Strimzi KafkaConnector CR, 실제로 lab-events 토픽 데이터를 BigQuery로 흘리는 커넥터 설정 파일
+
+---
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaConnector
+metadata:
+  name: lab-events-bigquery-sink
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-connect
+  annotations:
+    argocd.argoproj.io/sync-wave: "4"
+spec:
+  class: com.wepay.kafka.connect.bigquery.BigQuerySinkConnector
+  tasksMax: 3  # lab-events 파티션 12개 중 3개 태스크로 시작, 필요 시 증가
+  config:
+    topics: lab-events
+    # TODO: terraform var.project_id 값으로 교체
+    project: "<GCP_PROJECT_ID>"
+    defaultDataset: cledyu_raw
+    # externalConfiguration volumes의 gcp-sa Secret이 이 경로에 마운트됨
+    keyfile: /opt/kafka/external-configuration/gcp-sa/key.json
+    sanitizeTopics: "true"
+    # Terraform으로 스키마·파티션·클러스터 설정을 명시했으므로 자동 생성 비활성화
+    autoCreateTables: "false"
+    # GCS 배치 모드 — BigQuery Load Job으로 적재(스트리밍 Insert 없음 → BigQuery 적재 비용 $0)
+    enableBatchLoad: "true"
+    # TODO: terraform output staging_bucket 값으로 교체 (cledyu-bq-staging-<project_id>)
+    gcsBucketName: "<STAGING_BUCKET>"
+    gcsFolderName: lab-events
+    batchLoadIntervalSec: "300"  # 5분마다 Load Job 실행
+    # 재처리 정책 (결정: Kafka Connect 재시도만, Airflow 감지 없음)
+    maxRetryAttempts: "10"
+    retryWaitMs: "3000"
+    bigQueryRetry: "3"
+    bigQueryRetryWait: "2000"
