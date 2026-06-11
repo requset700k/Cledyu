@@ -33,6 +33,7 @@ func newTestRouter() *gin.Engine {
 	h := handlers.New(newTestConfig(), zap.NewNop(), nil, nil, nil, nil, nil, nil)
 
 	r.GET("/health", h.Health)
+	r.GET("/ready", h.Ready)
 	r.GET("/me", func(c *gin.Context) {
 		c.Set("user_id", "test-user")
 		c.Set("user_email", "test@cledyu.local")
@@ -60,6 +61,57 @@ func TestHealth(t *testing.T) {
 	}
 	if body["status"] != "ok" {
 		t.Errorf("expected status=ok, got %q", body["status"])
+	}
+}
+
+func TestReady_DebugAllowsMissingExternalDependencies(t *testing.T) {
+	r := newTestRouter()
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/ready", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 in debug mode, got %d", w.Code)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["status"] != "ok" {
+		t.Errorf("expected status=ok, got %q", body["status"])
+	}
+}
+
+func TestReady_ReleaseReportsMissingExternalDependencies(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := newTestConfig()
+	cfg.Server.Mode = "release"
+	h := handlers.New(cfg, zap.NewNop(), nil, nil, nil, nil, nil, nil)
+	r := gin.New()
+	r.GET("/ready", h.Ready)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/ready", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 in release mode with lab content loaded, got %d", w.Code)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["status"] != "ok" {
+		t.Errorf("expected status=ok, got %q", body["status"])
+	}
+	checks, ok := body["checks"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected checks object, got %T", body["checks"])
+	}
+	keycloak, ok := checks["keycloak"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected keycloak check, got %T", checks["keycloak"])
+	}
+	if keycloak["status"] != "degraded" {
+		t.Errorf("expected keycloak degraded detail in release mode, got %v", keycloak)
 	}
 }
 
