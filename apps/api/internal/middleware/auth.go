@@ -22,6 +22,7 @@ func JWT(provider *auth.Provider, log *zap.Logger, devFallback bool) gin.Handler
 				c.Set("user_email", "dev@cledyu.local")
 				c.Set("user_name", "Dev User")
 				c.Set("user_role", "admin")
+				c.Set("user_org", "public")
 				c.Next()
 				return
 			}
@@ -51,6 +52,7 @@ func JWT(provider *auth.Provider, log *zap.Logger, devFallback bool) gin.Handler
 		c.Set("user_email", id.Email)
 		c.Set("user_name", id.Name)
 		c.Set("user_role", id.Role())
+		c.Set("user_org", id.Org()) // RAG 멀티테넌트 — 소속 조직 collection(없으면 public)
 		c.Next()
 	}
 }

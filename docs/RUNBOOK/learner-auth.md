@@ -108,6 +108,81 @@ terraform apply
 - **가입 이벤트 확인:** `kcadm.sh get events -r cledyu-learn` → `REGISTER`/`IDENTITY_PROVIDER_FIRST_LOGIN`.
 - **client secret 회전:** §3.1 의 1~3 반복 후 `kubectl -n api annotate externalsecret cledyu-web-oidc-client-secret force-sync=$(date +%s) --overwrite`.
 
+## 6.1 역할 기반 인가 (RBAC)
+
+`realm_access.roles` 의 역할은 api 미들웨어 `JWT` 가 단일 역할(우선순위 admin >
+instructor > student)로 정규화해 컨텍스트에 주입하고, `RequireMinRole` 이 라우트 그룹에서
+최소 역할 이상인지 검사한다(상위 역할은 하위 라우트도 통과).
+
+| 라우트 그룹 | 최소 역할 | 비고 |
+|---|---|---|
+| `/api/v1/*` (세션·랩) | student | JWT 검증만, 역할 무관 |
+| `/api/v1/admin/*` | admin | 예: `GET /admin/users` (유저 목록) |
+
+- 역할 변경(강사 승격)은 Keycloak 에서 하고, 다음 로그인/`/auth/refresh` 시 새 토큰에
+  반영된다. 즉시 적용이 필요하면 해당 사용자에게 재로그인을 요청한다(토큰 수명 ~15m 내 자동 반영).
+- 권한 부족 응답은 `403 {code: forbidden}` — 프론트(`lib/api.ts`)는 이를 `FORBIDDEN` 으로 처리한다.
+- 강사(instructor) 전용 그룹은 강사 모드 도입 시 `RequireMinRole("instructor")` 로 같은 패턴 추가.
+
+## 6.2 관리자 유저 관리 API + 역할 승격 service-account
+
+admin(최소 역할) 전용 엔드포인트:
+
+| 메서드 · 경로 | 동작 |
+|---|---|
+| `GET /api/v1/admin/users?limit=50` | 유저 목록(최근 로그인 순) |
+| `GET /api/v1/admin/users/:uid/activity` | 유저의 랩 완료 이력 |
+| `POST /api/v1/admin/users/:uid/role` `{role}` | instructor/admin 승격(Keycloak realm 역할 추가 + DB 미러 갱신) |
+| `DELETE /api/v1/admin/users/:uid/session` | 활성 세션 강제 종료 |
+
+역할 승격은 Keycloak Admin REST API 를 호출하므로 **service-account 클라이언트**가 필요하다.
+미설정 시 승격 API 만 `501` 로 비활성되고 나머지는 동작한다.
+
+### service-account 설정 (cledyu-admin)
+
+```bash
+# 1) cledyu-learn realm 에 confidential client 생성 (service account 활성)
+#    + realm-management 의 manage-users, view-realm 역할 부여
+#    (Terraform: client cledyu-admin + service_account 역할 매핑 권장)
+
+# 2) client secret 을 Vault 에 등록
+vault kv put cledyu/oidc/cledyu-admin client_secret=<cledyu-admin client secret>
+
+# 3) ESO 매니페스트 적용 + 동기화 확인
+kubectl apply -f infra/kubernetes/external-secrets/cledyu-admin-oidc-externalsecret.yaml
+kubectl -n api get externalsecret cledyu-admin-oidc-client-secret
+```
+
+- 승격은 realm 역할 `instructor`/`admin` 을 **추가**한다(데모트는 Keycloak 콘솔에서). 해당 realm
+  역할이 없으면 `500 realm role not provisioned` — Terraform 으로 realm 역할을 먼저 생성한다.
+- 승격 직후 DB 미러(`users.role`)는 즉시 갱신되지만, **세션 토큰**은 다음 로그인/`/auth/refresh`
+  까지 이전 역할을 유지한다(§6.1). 즉시 강사 권한이 필요하면 재로그인을 안내한다.
+
+## 6.3 조직 멀티테넌트 (RAG 조직 중립성)
+
+기획서 1.1/3.5 의 '조직 중립성' — 학습자 소속 조직별로 AI 튜터 RAG collection 을 분리한다.
+같은 플랫폼을 코드 변경 없이 다른 기업·교육과정에 배포할 수 있게 한다.
+
+흐름:
+
+```
+Keycloak 그룹 "/org-<이름>"  ──(groups 클레임)──►  api JWT 미들웨어 Identity.Org()
+                                                        │  user_org = "org-<이름>"(없으면 public)
+                                                        ▼
+                        POST /sessions/:id/hint ──► ai-tutor org_id
+                                                        ▼
+                        RAG 검색 = [org-<이름> collection, public collection]
+```
+
+- **조직 배정:** Keycloak 에서 사용자를 `/org-<이름>` 그룹에 추가한다(예: `/org-kt-cloud`).
+  그룹명 규약 `org-` 접두사가 곧 ChromaDB collection 이름이다. 그룹이 없으면 `public` 만 검색.
+- **문서 주입:** 해당 조직 문서를 같은 이름 collection 으로 인덱싱한다 —
+  `python apps/ai-tutor/scripts/index_docs.py --collection org-kt-cloud --source ...`
+  (인덱싱 가이드는 `docs/architecture/ai-tutor.md`).
+- `groups` 클레임이 토큰에 포함되려면 Keycloak client scope 에 group membership mapper 가
+  있어야 한다(full group path on). 현재 토큰에 그룹이 없으면 전원 `public` 으로 동작(안전한 기본값).
+- `GET /api/v1/me` 응답의 `org` 필드로 현재 소속 조직을 확인할 수 있다.
+
 ## 7. 트러블슈팅
 
 | 증상 | 원인 / 조치 |

@@ -8,7 +8,7 @@ import (
 )
 
 func resultTestHandler() *Handler {
-	return &Handler{log: zap.NewNop(), steps: newStepStore()}
+	return &Handler{log: zap.NewNop(), steps: newStepStore(nil, nil)}
 }
 
 func twoStepSession(status1 string) *sessionSteps {

@@ -13,15 +13,18 @@ import (
 	"github.com/requset700k/cledyu/api/internal/config"
 	"github.com/requset700k/cledyu/api/internal/events"
 	"github.com/requset700k/cledyu/api/internal/kubevirt"
+	"github.com/requset700k/cledyu/api/internal/lock"
 	"github.com/requset700k/cledyu/api/internal/middleware"
+	"github.com/requset700k/cledyu/api/internal/store"
 	"github.com/requset700k/cledyu/api/internal/validation"
 	"go.uber.org/zap"
 )
 
 // NewRouter는 Gin 엔진과 함께 *handlers.Handler를 반환한다.
 // 핸들러는 검증 결과 consumer가 stepStore를 갱신(ApplyValidationResult)하도록 main에서 참조한다.
-// eventsPub은 학습 이벤트(lab-events) 발행기 — nil 이면 발행을 생략한다(로컬/CI).
-func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, validator validation.Publisher, eventsPub events.Publisher) (*gin.Engine, *handlers.Handler) {
+// eventsPub은 학습 이벤트(lab-events) 발행기, db 는 PostgreSQL 영속 계층 — 둘 다 nil 허용(로컬/CI).
+// locks 는 세션 생성 직렬화 락 — nil 이면 handlers.New 가 in-memory 폴백한다.
+func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, validator validation.Publisher, eventsPub events.Publisher, db *store.Store, locks lock.Locker) (*gin.Engine, *handlers.Handler) {
 	gin.SetMode(cfg.Server.Mode)
 
 	// Keycloak OIDC provider — discovery(.well-known) 수행. Keycloak 미가용(CI/로컬)
@@ -46,7 +49,7 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, 
 		AllowCredentials: true,
 	}))
 
-	h := handlers.New(cfg, log, sessions, validator, eventsPub, authProvider)
+	h := handlers.New(cfg, log, sessions, validator, eventsPub, db, locks, authProvider)
 
 	r.GET("/health", h.Health)
 	r.GET("/ready", h.Ready)
@@ -88,6 +91,17 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, 
 
 		// 브라우저 IDE(code-server) — IDE 랩(lab DSL ide: true)만. 세션 소유자 전용 프록시.
 		v1.Any("/sessions/:id/ide/*idepath", h.IDE)
+	}
+
+	// 관리자 전용 — JWT(v1) 이후 RequireMinRole 로 역할을 한 번 더 검사한다.
+	// admin 콘솔의 백엔드. 강사(instructor) 전용 그룹은 강사 모드 도입 시 같은 패턴으로 추가.
+	admin := v1.Group("/admin")
+	admin.Use(middleware.RequireMinRole("admin"))
+	{
+		admin.GET("/users", h.ListUsers)
+		admin.GET("/users/:uid/activity", h.GetUserActivity)        // 랩 완료 이력
+		admin.POST("/users/:uid/role", h.SetUserRole)               // 역할 승격(Keycloak)
+		admin.DELETE("/users/:uid/session", h.TerminateUserSession) // 활성 세션 강제 종료
 	}
 
 	return r, h

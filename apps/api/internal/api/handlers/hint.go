@@ -57,13 +57,19 @@ func (h *Handler) RequestHint(c *gin.Context) {
 
 	userID, _ := c.Get("user_id")
 	uid, _ := userID.(string)
+	// 소속 조직 collection — JWT 미들웨어가 Keycloak 그룹에서 도출(없으면 public).
+	// ai-tutor 가 [org, public] 을 함께 검색한다(기획서 3.5 RAG 멀티테넌트).
+	org := c.GetString("user_org")
+	if org == "" {
+		org = "public"
+	}
 
 	if h.ai != nil {
 		resp, err := h.ai.RequestHint(c.Request.Context(), ai.HintRequest{
 			UserID:    uid,
 			SessionID: sessionID,
 			LabID:     labID,
-			OrgID:     "public", // 조직 멀티테넌시 도입 전까지 public 고정(기획서 3.5)
+			OrgID:     org,
 			Step: ai.StepInfo{
 				ID:          step.ID,
 				Title:       step.Title,
@@ -120,30 +126,29 @@ func (h *Handler) RequestHint(c *gin.Context) {
 // explicit(1~3)이 지정되면 그대로 쓰고, 0이면 직전 사용 레벨+1(최대 3)로 자동 상승한다.
 // 세션이 없으면 ok=false. 스텝 진행 엔트리가 없어도 세션만 있으면 동작한다(이력만 못 쌓음).
 func (st *stepStore) nextHint(sessionID string, stepID, explicit int) (labID string, level int, ok bool) {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	ss, found := st.m[sessionID]
-	if !found {
-		return "", 0, false
-	}
-	level = explicit
-	for i := range ss.Steps {
-		if ss.Steps[i].StepID != stepID {
-			continue
+	ok = st.withSession(sessionID, func(ss *sessionSteps) bool {
+		labID = ss.LabID
+		level = explicit
+		for i := range ss.Steps {
+			if ss.Steps[i].StepID != stepID {
+				continue
+			}
+			if level == 0 {
+				level = ss.Steps[i].HintLevel + 1
+				if level > maxHintLevel {
+					level = maxHintLevel
+				}
+			}
+			if level > ss.Steps[i].HintLevel {
+				ss.Steps[i].HintLevel = level
+				return true // 힌트 사용 이력 변경 — write-through
+			}
+			return false
 		}
 		if level == 0 {
-			level = ss.Steps[i].HintLevel + 1
-			if level > maxHintLevel {
-				level = maxHintLevel
-			}
+			level = 1
 		}
-		if level > ss.Steps[i].HintLevel {
-			ss.Steps[i].HintLevel = level
-		}
-		return ss.LabID, level, true
-	}
-	if level == 0 {
-		level = 1
-	}
-	return ss.LabID, level, true
+		return false
+	})
+	return labID, level, ok
 }

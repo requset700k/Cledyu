@@ -57,6 +57,24 @@ func (c claims) identity() *Identity {
 	}
 }
 
+// orgGroupPrefix는 조직 소속을 나타내는 Keycloak 그룹 이름 규약이다.
+// 예: 그룹 "/org-kt-cloud" → 조직 "org-kt-cloud". RAG 멀티테넌트(기획서 3.5)의
+// 조직별 ChromaDB collection 이름과 1:1 대응한다.
+const orgGroupPrefix = "org-"
+
+// Org는 사용자가 속한 조직 collection 이름을 돌려준다(없으면 "public").
+// Keycloak groups 클레임에서 "org-" 로 시작하는 첫 그룹을 채택한다. 그룹 경로의
+// 앞쪽 "/"(예: "/org-kt-cloud")는 무시한다. 다중 org 그룹은 정렬상 첫 항목을 쓴다.
+func (id Identity) Org() string {
+	for _, g := range id.Groups {
+		name := strings.TrimPrefix(g, "/")
+		if strings.HasPrefix(name, orgGroupPrefix) {
+			return name
+		}
+	}
+	return "public"
+}
+
 // Role은 역할 우선순위(admin > instructor > student)에 따라 단일 역할을 돌려준다.
 // 학습자 realm 신규 가입자는 student 만 가지므로 기본값은 student.
 func (id Identity) Role() string {

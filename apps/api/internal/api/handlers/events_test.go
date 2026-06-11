@@ -49,7 +49,7 @@ func (p *capturePublisher) waitFor(t *testing.T, want int) []events.Event {
 }
 
 func eventsTestHandler(pub events.Publisher) *Handler {
-	return &Handler{log: zap.NewNop(), steps: newStepStore(), events: pub}
+	return &Handler{log: zap.NewNop(), steps: newStepStore(nil, nil), events: pub}
 }
 
 func seededSession(h *Handler, status1 string) {

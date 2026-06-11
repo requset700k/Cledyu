@@ -56,38 +56,25 @@ func (ss *sessionSteps) allPassed() bool {
 	return true
 }
 
-// stepStore는 sessionID → 스텝 진행 상태 맵을 동시성 안전하게 관리한다.
-// publisher 미연결 시 mock 통과로 동작. 실 검증엔진 연동 시 본 스토어를 제거하고
-// 검증 결과 토픽을 구독하도록 교체할 예정.
+// stepStore는 sessionID → 스텝 진행 상태를 관리한다.
+// in-memory 맵이 캐시이고, db(persistence)가 설정되면 변경을 write-through 하고
+// 캐시 미스를 DB에서 적재한다(progress.go) — API 재시작에도 진행 상태가 보존된다.
+// db 가 nil 이면(로컬/CI) 종전과 동일한 in-memory 전용으로 동작한다.
 type stepStore struct {
-	mu sync.Mutex
-	m  map[string]*sessionSteps
+	mu  sync.Mutex
+	m   map[string]*sessionSteps
+	db  persistence
+	log *zap.Logger
 }
 
-func newStepStore() *stepStore { return &stepStore{m: make(map[string]*sessionSteps)} }
-
-// userLocks는 유저별 mutex를 보관해 같은 유저의 동시 세션 생성을 직렬화한다.
-// 단일 세션 제약은 "활성 세션 조회 → 없으면 생성" 두 단계라, 더블클릭 등 동시 요청이
-// 둘 다 조회를 통과하는 TOCTOU 경합이 가능하다. 유저별 락으로 단일 API 인스턴스 내에서는 이를 막는다
-// (다중 레플리카에서는 best-effort — 완전 차단엔 별도 분산 락이 필요).
-type userLocks struct {
-	mu sync.Mutex
-	m  map[string]*sync.Mutex
+func newStepStore(db persistence, log *zap.Logger) *stepStore {
+	return &stepStore{m: make(map[string]*sessionSteps), db: db, log: log}
 }
 
-func newUserLocks() *userLocks { return &userLocks{m: make(map[string]*sync.Mutex)} }
-
-// get은 userID 전용 mutex를 반환한다(없으면 생성).
-func (u *userLocks) get(userID string) *sync.Mutex {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	lk, ok := u.m[userID]
-	if !ok {
-		lk = &sync.Mutex{}
-		u.m[userID] = lk
-	}
-	return lk
-}
+// 유저별 세션 생성 직렬화는 handler.locks(lock.Locker)가 담당한다.
+// 단일 세션 제약은 "활성 세션 조회 → 없으면 생성" 두 단계라 더블클릭 등 동시 요청이
+// 둘 다 조회를 통과하는 TOCTOU 경합이 가능하다. Redis 락이면 다중 레플리카에서도
+// 직렬화되고, 미설정 시 MemLocker 가 단일 인스턴스 내 직렬화를 제공한다.
 
 // newSessionID는 짧은 hex 세션 id를 생성한다.
 func newSessionID() string {
@@ -116,13 +103,11 @@ func (h *Handler) sessionResponse(s *kubevirt.Session) gin.H {
 		"expires_at":  s.ExpiresAt.UTC().Format(time.RFC3339),
 		"vm_provider": "kubevirt",
 	}
-	h.steps.mu.Lock()
-	if ss, ok := h.steps.m[s.ID]; ok {
+	out["current_step"] = 0
+	h.steps.withSession(s.ID, func(ss *sessionSteps) bool {
 		out["current_step"] = ss.CurrentStep
-	} else {
-		out["current_step"] = 0
-	}
-	h.steps.mu.Unlock()
+		return false
+	})
 	// 라이브 터미널 랩만 WS 경로 제공.
 	if lc, ok := h.labs[s.LabID]; ok && lc.HasLiveTerminal() {
 		out["terminal_url"] = "/api/v1/sessions/" + s.ID + "/ws"
@@ -160,9 +145,16 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	// 한 유저당 활성 세션 1개로 제한한다. uid가 있으면 유저별 락으로 동시요청을 직렬화하고
 	// (락은 생성 완료까지 유지), 이미 활성 세션이 있으면 409로 거부한다.
 	if uid != "" {
-		lk := h.userLocks.get(uid)
-		lk.Lock()
-		defer lk.Unlock()
+		release, ok := h.locks.Acquire(c.Request.Context(), "session-create:"+uid)
+		if !ok {
+			// 분산 락 경합(다른 생성 요청 진행 중) 또는 Redis 오류 — 잠시 후 재시도 유도.
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "session operation in progress, try again",
+				"code":  "session_locked",
+			})
+			return
+		}
+		defer release()
 
 		existing, err := h.sessions.FindActiveByUser(c.Request.Context(), uid)
 		if err != nil {
@@ -220,9 +212,7 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	if len(ss.Steps) > 0 {
 		ss.CurrentStep = ss.Steps[0].StepID
 	}
-	h.steps.mu.Lock()
-	h.steps.m[sess.ID] = ss
-	h.steps.mu.Unlock()
+	h.steps.put(sess.ID, ss)
 
 	// 학습 분석: vm_provisioned_source 로 온프렘/EC2 분포를 집계한다(Phase-1: kubevirt 고정).
 	h.emitEvent(events.Event{
@@ -289,10 +279,7 @@ func (h *Handler) DeleteSession(c *gin.Context) {
 		h.err(c, http.StatusInternalServerError, "delete session failed")
 		return
 	}
-	h.steps.mu.Lock()
-	ss, tracked := h.steps.m[id]
-	delete(h.steps.m, id)
-	h.steps.mu.Unlock()
+	ss, tracked := h.steps.take(id)
 
 	// 전 스텝 통과 전 종료는 이탈(lab_abandoned)로 기록한다 — 막힘 분포 분석의 입력.
 	// lab_completed 는 마지막 스텝 통과 시점(ApplyValidationResult)에 이미 발행됐다.
@@ -322,11 +309,9 @@ func (h *Handler) ReapStuckSessions(ctx context.Context) {
 	if len(reaped) == 0 {
 		return
 	}
-	h.steps.mu.Lock()
 	for _, id := range reaped {
-		delete(h.steps.m, id)
+		h.steps.remove(id)
 	}
-	h.steps.mu.Unlock()
 	h.log.Warn("프로비저닝 타임아웃 세션 회수",
 		zap.Strings("session_ids", reaped),
 		zap.Duration("timeout", timeout),
@@ -339,25 +324,26 @@ func (h *Handler) GetSessionSteps(c *gin.Context) {
 	if h.denyIfNotStoreOwner(c, c.Param("id")) {
 		return
 	}
-	h.steps.mu.Lock()
-	defer h.steps.mu.Unlock()
-	ss, ok := h.steps.m[c.Param("id")]
-	if !ok {
+	var items []gin.H
+	found := h.steps.withSession(c.Param("id"), func(ss *sessionSteps) bool {
+		items = make([]gin.H, 0, len(ss.Steps))
+		for _, st := range ss.Steps {
+			item := gin.H{"step_id": st.StepID, "status": st.Status, "attempts": st.Attempts}
+			// 검증엔진 결과가 있으면 체크별 상세(실패 사유)를 함께 노출한다.
+			if len(st.Checks) > 0 {
+				checks := make([]gin.H, 0, len(st.Checks))
+				for _, ck := range st.Checks {
+					checks = append(checks, gin.H{"type": ck.Type, "passed": ck.Passed, "detail": ck.Detail})
+				}
+				item["checks"] = checks
+			}
+			items = append(items, item)
+		}
+		return false
+	})
+	if !found {
 		h.err(c, http.StatusNotFound, "session not found")
 		return
-	}
-	items := make([]gin.H, 0, len(ss.Steps))
-	for _, st := range ss.Steps {
-		item := gin.H{"step_id": st.StepID, "status": st.Status, "attempts": st.Attempts}
-		// 검증엔진 결과가 있으면 체크별 상세(실패 사유)를 함께 노출한다.
-		if len(st.Checks) > 0 {
-			checks := make([]gin.H, 0, len(st.Checks))
-			for _, ck := range st.Checks {
-				checks = append(checks, gin.H{"type": ck.Type, "passed": ck.Passed, "detail": ck.Detail})
-			}
-			item["checks"] = checks
-		}
-		items = append(items, item)
 	}
 	c.JSON(http.StatusOK, gin.H{"items": items, "total": len(items)})
 }
@@ -455,15 +441,15 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 // markStepValidating은 검증 요청 발행 후 스텝을 validating으로 두고 시도 횟수를 올린다.
 // 재시도 시 이전 체크 상세는 비운다.
 func (h *Handler) markStepValidating(sessionID string, idx int) {
-	h.steps.mu.Lock()
-	defer h.steps.mu.Unlock()
-	ss, ok := h.steps.m[sessionID]
-	if !ok || idx < 0 || idx >= len(ss.Steps) {
-		return
-	}
-	ss.Steps[idx].Attempts++
-	ss.Steps[idx].Status = "validating"
-	ss.Steps[idx].Checks = nil
+	h.steps.withSession(sessionID, func(ss *sessionSteps) bool {
+		if idx < 0 || idx >= len(ss.Steps) {
+			return false
+		}
+		ss.Steps[idx].Attempts++
+		ss.Steps[idx].Status = "validating"
+		ss.Steps[idx].Checks = nil
+		return true
+	})
 }
 
 // ApplyValidationResult는 검증엔진 결과(validation-results)를 stepStore에 반영한다.
@@ -471,54 +457,65 @@ func (h *Handler) markStepValidating(sessionID string, idx int) {
 // 모두 통과면 passed로 확정 후 다음 스텝을 활성화한다. 실패면 failed로 두되 스텝을 진행시키지
 // 않아(current 유지) 사용자가 다시 시도할 수 있게 한다. 모르는 세션/스텝은 무시한다(지연 결과 등).
 func (h *Handler) ApplyValidationResult(r validation.ValidationResult) {
-	h.steps.mu.Lock()
-	defer h.steps.mu.Unlock()
-	ss, ok := h.steps.m[r.SessionID]
-	if !ok {
+	var completedUser, completedLab string
+	found := h.steps.withSession(r.SessionID, func(ss *sessionSteps) bool {
+		idx := -1
+		for i := range ss.Steps {
+			if ss.Steps[i].StepID == r.StepID {
+				idx = i
+				break
+			}
+		}
+		if idx == -1 {
+			h.log.Warn("검증 결과의 스텝을 찾을 수 없음", zap.String("session_id", r.SessionID), zap.Int("step_id", r.StepID))
+			return false
+		}
+
+		outcomes := make([]checkOutcome, 0, len(r.Checks))
+		for _, ck := range r.Checks {
+			outcomes = append(outcomes, checkOutcome{Type: string(ck.Type), Passed: ck.Passed, Detail: ck.Detail})
+		}
+		ss.Steps[idx].Checks = outcomes
+		if r.Passed {
+			ss.Steps[idx].Status = "passed"
+			if idx+1 < len(ss.Steps) {
+				if ss.Steps[idx+1].Status == "pending" {
+					ss.Steps[idx+1].Status = "active"
+				}
+				ss.CurrentStep = ss.Steps[idx+1].StepID
+			}
+			h.emitEvent(events.Event{
+				Type: events.StepCompleted, UserID: ss.UserID, SessionID: r.SessionID,
+				LabID: ss.LabID, StepID: r.StepID,
+			})
+			// 마지막 스텝까지 모두 통과한 시점이 랩 완료다(세션 삭제와 무관하게 1회 발행).
+			if ss.allPassed() {
+				h.emitEvent(events.Event{
+					Type: events.LabCompleted, UserID: ss.UserID, SessionID: r.SessionID, LabID: ss.LabID,
+				})
+				completedUser, completedLab = ss.UserID, ss.LabID
+			}
+		} else {
+			ss.Steps[idx].Status = "failed"
+			h.emitEvent(events.Event{
+				Type: events.ValidationFailed, UserID: ss.UserID, SessionID: r.SessionID,
+				LabID: ss.LabID, StepID: r.StepID,
+			})
+		}
+		return true
+	})
+	if !found {
 		h.log.Warn("검증 결과의 세션을 찾을 수 없음", zap.String("session_id", r.SessionID), zap.Int("step_id", r.StepID))
 		return
 	}
-	idx := -1
-	for i := range ss.Steps {
-		if ss.Steps[i].StepID == r.StepID {
-			idx = i
-			break
-		}
-	}
-	if idx == -1 {
-		h.log.Warn("검증 결과의 스텝을 찾을 수 없음", zap.String("session_id", r.SessionID), zap.Int("step_id", r.StepID))
-		return
-	}
 
-	outcomes := make([]checkOutcome, 0, len(r.Checks))
-	for _, ck := range r.Checks {
-		outcomes = append(outcomes, checkOutcome{Type: string(ck.Type), Passed: ck.Passed, Detail: ck.Detail})
-	}
-	ss.Steps[idx].Checks = outcomes
-	if r.Passed {
-		ss.Steps[idx].Status = "passed"
-		if idx+1 < len(ss.Steps) {
-			if ss.Steps[idx+1].Status == "pending" {
-				ss.Steps[idx+1].Status = "active"
-			}
-			ss.CurrentStep = ss.Steps[idx+1].StepID
+	// 랩 완료 이력(수료증·배지·리더보드의 원천). (user, lab) 최초 1회만 기록된다.
+	if completedLab != "" && completedUser != "" && h.db != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
+		defer cancel()
+		if err := h.db.RecordCompletion(ctx, completedUser, completedLab, r.SessionID); err != nil {
+			h.log.Warn("랩 완료 이력 기록 실패", zap.String("session_id", r.SessionID), zap.Error(err))
 		}
-		h.emitEvent(events.Event{
-			Type: events.StepCompleted, UserID: ss.UserID, SessionID: r.SessionID,
-			LabID: ss.LabID, StepID: r.StepID,
-		})
-		// 마지막 스텝까지 모두 통과한 시점이 랩 완료다(세션 삭제와 무관하게 1회 발행).
-		if ss.allPassed() {
-			h.emitEvent(events.Event{
-				Type: events.LabCompleted, UserID: ss.UserID, SessionID: r.SessionID, LabID: ss.LabID,
-			})
-		}
-	} else {
-		ss.Steps[idx].Status = "failed"
-		h.emitEvent(events.Event{
-			Type: events.ValidationFailed, UserID: ss.UserID, SessionID: r.SessionID,
-			LabID: ss.LabID, StepID: r.StepID,
-		})
 	}
 }
 
@@ -526,35 +523,40 @@ var errStepSessionNotFound = errors.New("session not found")
 var errStepNotFound = errors.New("step not found")
 
 func (h *Handler) findStepIndex(sessionID string, stepID int) (int, error) {
-	h.steps.mu.Lock()
-	defer h.steps.mu.Unlock()
-	ss, ok := h.steps.m[sessionID]
-	if !ok {
+	idx := -1
+	found := h.steps.withSession(sessionID, func(ss *sessionSteps) bool {
+		for i := range ss.Steps {
+			if ss.Steps[i].StepID == stepID {
+				idx = i
+				break
+			}
+		}
+		return false
+	})
+	if !found {
 		return -1, errStepSessionNotFound
 	}
-	for i := range ss.Steps {
-		if ss.Steps[i].StepID == stepID {
-			return i, nil
-		}
+	if idx == -1 {
+		return -1, errStepNotFound
 	}
-	return -1, errStepNotFound
+	return idx, nil
 }
 
 func (h *Handler) markStepPassed(sessionID string, idx int) {
-	h.steps.mu.Lock()
-	defer h.steps.mu.Unlock()
-	ss, ok := h.steps.m[sessionID]
-	if !ok || idx < 0 || idx >= len(ss.Steps) {
-		return
-	}
-	ss.Steps[idx].Attempts++
-	ss.Steps[idx].Status = "passed"
-	if idx+1 < len(ss.Steps) {
-		if ss.Steps[idx+1].Status == "pending" {
-			ss.Steps[idx+1].Status = "active"
+	h.steps.withSession(sessionID, func(ss *sessionSteps) bool {
+		if idx < 0 || idx >= len(ss.Steps) {
+			return false
 		}
-		ss.CurrentStep = ss.Steps[idx+1].StepID
-	}
+		ss.Steps[idx].Attempts++
+		ss.Steps[idx].Status = "passed"
+		if idx+1 < len(ss.Steps) {
+			if ss.Steps[idx+1].Status == "pending" {
+				ss.Steps[idx+1].Status = "active"
+			}
+			ss.CurrentStep = ss.Steps[idx+1].StepID
+		}
+		return true
+	})
 }
 
 func findContentStep(lc content.LabContent, stepID int) (content.Step, bool) {

@@ -100,6 +100,7 @@ export interface User {
   email: string;
   name: string;
   role: UserRole;
+  org?: string; // 소속 조직(RAG 멀티테넌트). 없으면 빈 문자열/public.
   points: number;
 }
 

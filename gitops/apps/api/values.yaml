@@ -1,6 +1,6 @@
 image:
   repository: ghcr.io/requset700k/api
-  tag: sha-7bdf0bf
+  tag: sha-d1d360e
   pullPolicy: Always
 
 replicaCount: 1
@@ -14,10 +14,16 @@ ingress:
 
 env:
   CLEDYU_SERVER_MODE: "release"
-  CLEDYU_REDIS_ADDR: "redis-master.redis.svc.cluster.local:6379"
+  CLEDYU_REDIS_ADDR: "redis.redis.svc:6379"
   CLEDYU_KAFKA_BROKERS: "cledyu-kafka-kafka-bootstrap.kafka.svc:9093"
   # AI 학습 도우미 BFF(service-ai-tutor). 빈 값이면 Lab DSL 정적 hint_levels 폴백.
   CLEDYU_AI_BASE_URL: "http://ai-tutor.ai-tutor.svc:8080"
+
+# PostgreSQL DSN — Vault(cledyu/db/api: dsn)→ESO(cledyu-api-db-externalsecret.yaml)가 만든
+# Secret 에서 주입. Secret 미생성 시(optional) in-memory 전용으로 동작한다.
+db:
+  secretName: "cledyu-api-db"
+  secretKey: "dsn"
 
 # Keycloak OIDC (학습자 realm). client_secret 은 Vault→ESO(cledyu-web-oidc-externalsecret.yaml)
 # 가 만든 Secret cledyu-api-oidc 에서 주입. 운영자 SSO realm(cledyu)과 분리됨.
@@ -30,6 +36,12 @@ keycloak:
   frontendUrl: "https://app.cledyu.local"
   clientSecret:
     secretName: "cledyu-api-oidc"
+    secretKey: "client_secret"
+  # 역할 승격 service-account(realm-management: manage-users, view-realm).
+  # Secret 은 Vault(cledyu/oidc/cledyu-admin: client_secret)→ESO. 미생성 시 역할 승격 API 만 비활성.
+  adminClient:
+    clientId: "cledyu-admin"
+    secretName: "cledyu-api-admin-oidc"
     secretKey: "client_secret"
 
 resources:

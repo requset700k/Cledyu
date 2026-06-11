@@ -43,6 +43,10 @@ class Settings(BaseSettings):
         default=10.0, validation_alias=AliasChoices("AI_TUTOR_REQUEST_TIMEOUT_SECONDS")
     )
 
+    # Rate limit 카운터 백엔드. 비면 in-memory(단일 레플리카 전제), 설정 시 Redis 공유 카운터
+    # (다중 레플리카 안전). 예: redis://redis.redis.svc:6379/1
+    redis_url: str = Field(default="", validation_alias=AliasChoices("AI_TUTOR_REDIS_URL"))
+
     @property
     def model_tiers(self) -> list[str]:
         return [m.strip() for m in self.gemini_models.split(",") if m.strip()]
