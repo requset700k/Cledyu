@@ -318,6 +318,33 @@ func (h *Handler) ReapStuckSessions(ctx context.Context) {
 	)
 }
 
+// ReapExpiredSessions는 TTL(expires_at)이 지난 세션을 회수하고 stepStore도 정리한다.
+// 미완료 세션 만료는 lab_abandoned 로 기록한다(타임아웃 분포 분석의 입력 — 막혀서 시간을
+// 다 쓴 케이스). main의 백그라운드 루프가 주기적으로 호출한다. sessions 미설정 시 no-op.
+func (h *Handler) ReapExpiredSessions(ctx context.Context) {
+	if h.sessions == nil {
+		return
+	}
+	reaped, err := h.sessions.ReapExpiredSessions(ctx)
+	if err != nil {
+		h.log.Error("reap expired sessions", zap.Error(err))
+		return
+	}
+	if len(reaped) == 0 {
+		return
+	}
+	for _, id := range reaped {
+		// take 로 마지막 상태를 받아 미완료면 이탈 이벤트를 남긴다(DeleteSession 과 동일 의미).
+		ss, tracked := h.steps.take(id)
+		if tracked && !ss.allPassed() {
+			h.emitEvent(events.Event{
+				Type: events.LabAbandoned, UserID: ss.UserID, SessionID: id, LabID: ss.LabID,
+			})
+		}
+	}
+	h.log.Warn("TTL 만료 세션 회수", zap.Strings("session_ids", reaped))
+}
+
 // GetSessionSteps는 세션의 단계별 진행 상태 목록을 반환한다(프론트 StepProgress[]).
 // GET /api/v1/sessions/:id/steps
 func (h *Handler) GetSessionSteps(c *gin.Context) {
