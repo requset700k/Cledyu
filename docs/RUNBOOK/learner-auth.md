@@ -84,23 +84,53 @@ terraform apply
 - Naver 는 OIDC 가 아닌 OAuth2 라서 서명검증을 끄고(`validate_signature=false`) userinfo 의 중첩 `response.{id,email,name}` 를 attribute mapper 로 평탄화한다(`idp-learn.tf`).
 - Kakao 는 OIDC 지원 → 표준 discovery 사용.
 
-## 5. 이메일 인증 활성화
+## 5. 이메일 인증 활성화 (Brevo SMTP)
 
-`learn_verify_email=true` 는 SMTP 가 있어야 가입 메일이 나간다.
+`learn_verify_email=true` 는 SMTP 가 있어야 가입 메일(이메일 인증·비번 재설정)이 나간다.
+메일 발송은 **Brevo SMTP 릴레이**(`smtp-relay.brevo.com`)를 쓴다.
+
+### 5.1 Brevo 준비 (콘솔, 1회)
+
+1. https://app.brevo.com 가입/로그인.
+2. **발신 주소 인증:** Senders, Domains & Dedicated IPs → Senders → `no-reply@cledyu.io`
+   (또는 보유 도메인 주소) 추가 후 인증 메일로 verify. **인증된 주소만 from 으로 쓸 수 있다.**
+   - 도메인 전체 인증(SPF/DKIM)을 하면 도메인 하위 임의 주소 발송 가능(권장, 스팸 점수↓).
+3. **SMTP key 발급:** Settings(우상단) → **SMTP & API → SMTP** 탭 → 'Generate a new SMTP key'.
+   여기 표시되는 **로그인 이메일**(auth_username)과 **SMTP key**(비밀번호)를 받아둔다.
+
+### 5.2 Terraform 적용
+
+`learn_smtp_password` 는 git 에 두지 않는다 — 환경변수로 주입한다(tfvars 의 host/from 등
+비밀 아닌 값만 보안 tfvars 에 둬도 되지만, 키는 env 권장).
 
 ```bash
-# tfvars
-learn_smtp = {
-  host          = "smtp.example.com"
-  port          = "587"
-  from          = "no-reply@cledyu.io"
-  auth_username = "no-reply@cledyu.io"
-}
-learn_smtp_password = "<smtp 비번>"
-learn_verify_email  = true
+cd infra/terraform/keycloak
 
-terraform apply
+# terraform.tfvars (gitignored) 에 — 키 제외 값:
+#   learn_verify_email = true
+#   learn_smtp = {
+#     host = "smtp-relay.brevo.com", port = "587",
+#     from = "no-reply@cledyu.io",            # ← Brevo 에서 verify 한 주소
+#     auth_username = "<Brevo 로그인 이메일>",  # SMTP 탭에 표시된 로그인
+#     starttls = true, ssl = false,
+#   }
+
+# SMTP key 는 환경변수로(state 외부, 셸 히스토리 주의):
+export TF_VAR_learn_smtp_password='<Brevo SMTP key>'
+
+terraform apply   # cledyu-learn realm SMTP 설정 + verify_email 반영
 ```
+
+### 5.3 검증
+
+```bash
+# 새 계정으로 회원가입(localhost redirect 로) → 인증 메일 수신 확인.
+# Keycloak admin console → cledyu-learn → Realm settings → Email → 'Test connection' 으로도 점검.
+```
+
+- 인증 메일이 안 오면: ① from 주소가 Brevo 에서 verify 됐는지 ② SMTP key 오타 ③ Brevo
+  일일 발송 한도(무료 300/day) ④ Keycloak → cluster egress 가 587 포트로 나가는지 확인.
+- Brevo 무료 플랜은 발신 푸터에 Brevo 배지가 붙는다(유료 전환 시 제거).
 
 ## 6. 운영 작업
 
