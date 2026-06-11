@@ -124,6 +124,31 @@ instructor > student)로 정규화해 컨텍스트에 주입하고, `RequireMinR
 - 권한 부족 응답은 `403 {code: forbidden}` — 프론트(`lib/api.ts`)는 이를 `FORBIDDEN` 으로 처리한다.
 - 강사(instructor) 전용 그룹은 강사 모드 도입 시 `RequireMinRole("instructor")` 로 같은 패턴 추가.
 
+> **realm 분리 주의:** 여기 `admin`/`instructor`/`student` 는 **학습 앱(cledyu-learn realm)
+> 내부 역할**이다. 팀 내부 개발자가 쓰는 운영 realm(`cledyu`)의 `admin`(ArgoCD·Kafka-UI 등
+> 인프라 관리)과는 **완전히 별개**다 — issuer 가 달라 토큰이 상호 통하지 않는다. 학습
+> 플랫폼 관리자가 되려면 `cledyu-learn` realm 에 계정을 두고 아래 부트스트랩으로 `admins`
+> 그룹에 편입해야 한다(운영 cledyu 계정으로는 학습 앱 admin 이 될 수 없다).
+
+### 6.1.1 최초 관리자(admin) 부트스트랩
+
+Terraform(`roles-learn.tf`)이 `admin` 역할 + `admins` 그룹을 만들지만, **그룹 멤버는
+자동 편입되지 않는다**(self-registration 은 student 만). 운영자가 학습 플랫폼 관리자가
+되려면 한 번만:
+
+```bash
+# 1) cledyu-learn realm 에 운영자용 학습 계정 생성(이미 있으면 생략 — 소셜/이메일 가입 모두 가능)
+#    예: admin@cledyu.io 로 회원가입 후 로그인 1회
+
+# 2) 그 계정을 admins 그룹에 편입 (Keycloak admin console 또는 kcadm)
+kcadm.sh add-user-groups -r cledyu-learn --uusername admin@cledyu.io --gname admins
+
+# 3) 재로그인하면 새 토큰에 admin 역할 반영 → /api/v1/admin/* 접근 가능
+```
+
+이후 추가 관리자/강사는 이 admin 계정으로 관리자 콘솔(`POST /admin/users/:uid/role`)에서
+승격하거나, 같은 방식으로 그룹에 직접 추가한다.
+
 ## 6.2 관리자 유저 관리 API + 역할 승격 service-account
 
 admin(최소 역할) 전용 엔드포인트:
