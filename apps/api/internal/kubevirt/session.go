@@ -298,6 +298,39 @@ func (m *Manager) ReapStuckSessions(ctx context.Context, timeout time.Duration) 
 	return reaped, nil
 }
 
+// ReapExpiredSessions는 expires_at(세션 TTL)이 지난 세션 namespace를 삭제하고 회수된
+// sessionID 목록을 반환한다. ReapStuckSessions 와 달리 Running 세션도 회수 대상이다 —
+// 광고한 세션 최대 수명(SessionTTLHours)을 지나면 정상 동작 중이어도 종료한다.
+// 만료 enforcement 부재로 세션이 영원히 살아 온프렘 VM 풀·스토리지를 잠그는 것을 막는다.
+func (m *Manager) ReapExpiredSessions(ctx context.Context) ([]string, error) {
+	list, err := m.core.CoreV1().Namespaces().List(ctx, metav1.ListOptions{
+		LabelSelector: labelManagedBy + "=" + managedByValue,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list session namespaces: %w", err)
+	}
+	now := time.Now()
+	var reaped []string
+	for i := range list.Items {
+		ns := &list.Items[i]
+		if ns.Status.Phase == corev1.NamespaceTerminating {
+			continue // 이미 삭제 중
+		}
+		expires, err := time.Parse(time.RFC3339, ns.Annotations["cledyu.io/expires-at"])
+		if err != nil || expires.IsZero() {
+			continue // 만료 시각을 못 읽으면 보수적으로 건너뛴다(레거시/손상 세션은 stuck reaper가 처리)
+		}
+		if now.Before(expires) {
+			continue // 아직 만료 전
+		}
+		if err := m.core.CoreV1().Namespaces().Delete(ctx, ns.Name, metav1.DeleteOptions{}); err != nil && !k8serr.IsNotFound(err) {
+			continue // best-effort — 다음 주기에 재시도
+		}
+		reaped = append(reaped, strings.TrimPrefix(ns.Name, "lab-"))
+	}
+	return reaped, nil
+}
+
 // vmiPhase는 세션 VM(session-vm)의 VMI phase를 반환한다(없거나 오류면 빈 문자열).
 func (m *Manager) vmiPhase(ctx context.Context, ns string) string {
 	vmi, err := m.dyn.Resource(vmiGVR).Namespace(ns).Get(ctx, "session-vm", metav1.GetOptions{})

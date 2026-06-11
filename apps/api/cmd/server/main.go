@@ -119,17 +119,22 @@ func main() {
 		}()
 	}
 
-	// 프로비저닝 타임아웃 reaper: ready 못 된 stuck 세션을 주기적으로 회수해 CDI 클론 thrash를 차단한다.
+	// 세션 reaper 루프(2분): ① stuck(프로비저닝 실패) 회수로 CDI 클론 thrash 차단,
+	// ② TTL(expires_at) 만료 세션 회수로 광고한 세션 수명 강제 + VM 풀 누수 방지.
 	go func() {
 		ticker := time.NewTicker(2 * time.Minute)
 		defer ticker.Stop()
-		h.ReapStuckSessions(ctx) // 시작 직후 1회
+		reap := func() {
+			h.ReapStuckSessions(ctx)
+			h.ReapExpiredSessions(ctx)
+		}
+		reap() // 시작 직후 1회
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				h.ReapStuckSessions(ctx)
+				reap()
 			}
 		}
 	}()

@@ -9,6 +9,7 @@ import { TerminalPlaceholder } from './TerminalPlaceholder';
 import { LabTerminal } from './LabTerminal';
 import { LabWorkspace } from './LabWorkspace';
 import { AiTutorPanel } from './AiTutorPanel';
+import { SessionTimer } from './SessionTimer';
 
 // VM이 Running으로 보고된 이후에도 cloud-init final stage(getty 재시작 + autologin 활성)
 // 까지 약 30–60초가 더 필요하다. 그 사이 학생에게 login 프롬프트가 보이지 않도록
@@ -51,6 +52,8 @@ export function LabSession({ sessionId, lab }: { sessionId: string; lab: Lab }) 
   });
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  // 클라이언트 카운트다운이 0에 도달하면 true — 서버 reaper 가 VM 을 회수하므로 만료 UI 로 전환.
+  const [expired, setExpired] = useState(false);
 
   const validate = useMutation({
     mutationFn: (stepId: number) => api.sessions.validate(sessionId, stepId),
@@ -71,6 +74,11 @@ export function LabSession({ sessionId, lab }: { sessionId: string; lab: Lab }) 
     return (
       <SessionBoot status={status} graceStartedAt={readyAtRef.current} graceMs={BOOT_GRACE_MS} />
     );
+  }
+
+  // 세션 TTL 만료 — 서버가 VM 을 회수하므로 터미널을 가리고 재시작을 안내한다.
+  if (expired) {
+    return <SessionExpired labId={lab.id} />;
   }
 
   // ── 메인 UI ────────────────────────────────────────────────────────────
@@ -103,107 +111,145 @@ export function LabSession({ sessionId, lab }: { sessionId: string; lab: Lab }) 
   // KodeKloud 스타일 2분할 — 좌측: 문제(스텝 목록·지시문·검증·AI 도우미), 우측: 터미널/IDE.
   // 우측은 sticky 로 고정해 긴 지시문을 스크롤해도 터미널이 화면에 남는다.
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-[minmax(360px,420px)_1fr] gap-6 mt-6 items-start">
-      <div className="space-y-4 xl:max-h-[calc(100vh-9rem)] xl:overflow-y-auto xl:pr-1">
-        {allPassed && (
-          <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-emerald-300 text-sm">
-            🎉 모든 단계를 완료했습니다. 수고하셨습니다!
-          </div>
-        )}
-
-        <div>
-          <h2 className="text-slate-400 text-xs font-medium mb-2 px-3">진행 단계</h2>
-          <StepList
-            steps={steps}
-            statusOf={statusOf}
-            currentId={currentStep.id}
-            onSelect={setSelectedId}
-          />
+    <>
+      {/* 세션 만료 카운트다운 — 우측 정렬 헤더 바. */}
+      {session?.expires_at && (
+        <div className="flex justify-end mt-4">
+          <SessionTimer expiresAt={session.expires_at} onExpire={() => setExpired(true)} />
         </div>
+      )}
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(360px,420px)_1fr] gap-6 mt-4 items-start">
+        <div className="space-y-4 xl:max-h-[calc(100vh-9rem)] xl:overflow-y-auto xl:pr-1">
+          {allPassed && (
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-emerald-300 text-sm">
+              🎉 모든 단계를 완료했습니다. 수고하셨습니다!
+            </div>
+          )}
 
-        <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-brand-400 text-xs font-semibold">STEP {currentStep.id}</span>
-            <h3 className="text-white font-semibold">{currentStep.title}</h3>
+          <div>
+            <h2 className="text-slate-400 text-xs font-medium mb-2 px-3">진행 단계</h2>
+            <StepList
+              steps={steps}
+              statusOf={statusOf}
+              currentId={currentStep.id}
+              onSelect={setSelectedId}
+            />
           </div>
-          <p className="text-slate-300 text-sm whitespace-pre-line mb-4">
-            {currentStep.description}
-          </p>
 
-          {currentStep.commands && currentStep.commands.length > 0 && (
-            <div className="mb-4">
-              <p className="text-slate-400 text-xs mb-1">이 단계에서 실행할 명령</p>
-              <div className="font-mono text-sm text-slate-300 bg-slate-950 border border-slate-700 rounded-md px-3 py-2 space-y-0.5">
-                {currentStep.commands.map((cmd, i) => (
-                  <div key={i}>
-                    <span className="text-emerald-400 select-none">$ </span>
-                    {cmd}
-                  </div>
-                ))}
+          <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-brand-400 text-xs font-semibold">STEP {currentStep.id}</span>
+              <h3 className="text-white font-semibold">{currentStep.title}</h3>
+            </div>
+            <p className="text-slate-300 text-sm whitespace-pre-line mb-4">
+              {currentStep.description}
+            </p>
+
+            {currentStep.commands && currentStep.commands.length > 0 && (
+              <div className="mb-4">
+                <p className="text-slate-400 text-xs mb-1">이 단계에서 실행할 명령</p>
+                <div className="font-mono text-sm text-slate-300 bg-slate-950 border border-slate-700 rounded-md px-3 py-2 space-y-0.5">
+                  {currentStep.commands.map((cmd, i) => (
+                    <div key={i}>
+                      <span className="text-emerald-400 select-none">$ </span>
+                      {cmd}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
-
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => validate.mutate(currentStep.id)}
-              disabled={validating || currentStatus === 'passed'}
-              className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 disabled:hover:bg-brand-500 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors"
-            >
-              {currentStatus === 'passed' ? '완료됨' : validating ? '검증 중...' : '검증'}
-            </button>
-            {currentStatus === 'passed' && <span className="text-emerald-400 text-xs">통과</span>}
-            {validating && <span className="text-amber-400 text-xs">검증엔진 결과 대기 중…</span>}
-            {currentStatus === 'failed' && failedChecks.length === 0 && (
-              <span className="text-red-400 text-xs">검증에 실패했습니다. 다시 시도하세요.</span>
             )}
-            {validate.isError && (
-              <span className="text-red-400 text-xs">검증 요청에 실패했습니다.</span>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => validate.mutate(currentStep.id)}
+                disabled={validating || currentStatus === 'passed'}
+                className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 disabled:hover:bg-brand-500 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors"
+              >
+                {currentStatus === 'passed' ? '완료됨' : validating ? '검증 중...' : '검증'}
+              </button>
+              {currentStatus === 'passed' && <span className="text-emerald-400 text-xs">통과</span>}
+              {validating && <span className="text-amber-400 text-xs">검증엔진 결과 대기 중…</span>}
+              {currentStatus === 'failed' && failedChecks.length === 0 && (
+                <span className="text-red-400 text-xs">검증에 실패했습니다. 다시 시도하세요.</span>
+              )}
+              {validate.isError && (
+                <span className="text-red-400 text-xs">검증 요청에 실패했습니다.</span>
+              )}
+            </div>
+
+            {currentStatus === 'failed' && failedChecks.length > 0 && (
+              <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3">
+                <p className="text-red-300 text-xs font-medium mb-1.5">
+                  검증 실패 — 아래 항목을 확인하세요
+                </p>
+                <ul className="space-y-1">
+                  {failedChecks.map((ck, i) => (
+                    <li key={i} className="text-red-200/90 text-xs">
+                      <span className="font-mono text-red-300">{ck.type}</span>
+                      {ck.detail ? `: ${ck.detail}` : ''}
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
           </div>
 
-          {currentStatus === 'failed' && failedChecks.length > 0 && (
-            <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3">
-              <p className="text-red-300 text-xs font-medium mb-1.5">
-                검증 실패 — 아래 항목을 확인하세요
-              </p>
-              <ul className="space-y-1">
-                {failedChecks.map((ck, i) => (
-                  <li key={i} className="text-red-200/90 text-xs">
-                    <span className="font-mono text-red-300">{ck.type}</span>
-                    {ck.detail ? `: ${ck.detail}` : ''}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+          {/* AI 학습 도우미 — 정적 hint 표시를 대체. key=stepId 로 스텝 전환 시 힌트 초기화. */}
+          <AiTutorPanel key={currentStep.id} sessionId={sessionId} stepId={currentStep.id} />
         </div>
 
-        {/* AI 학습 도우미 — 정적 hint 표시를 대체. key=stepId 로 스텝 전환 시 힌트 초기화. */}
-        <AiTutorPanel key={currentStep.id} sessionId={sessionId} stepId={currentStep.id} />
-      </div>
-
-      {/* 우측 — 작업 영역(터미널/IDE). xl 미만에서는 문제 아래로 쌓인다. */}
-      <div className="xl:sticky xl:top-6">
-        {terminalUrl ? (
-          session?.ide_url ? (
-            <LabWorkspace
-              sessionId={sessionId}
-              terminalPath={terminalUrl}
-              idePath={session.ide_url}
-              heightClass="h-[60vh] xl:h-[calc(100vh-15rem)]"
-            />
+        {/* 우측 — 작업 영역(터미널/IDE). xl 미만에서는 문제 아래로 쌓인다. */}
+        <div className="xl:sticky xl:top-6">
+          {terminalUrl ? (
+            session?.ide_url ? (
+              <LabWorkspace
+                sessionId={sessionId}
+                terminalPath={terminalUrl}
+                idePath={session.ide_url}
+                heightClass="h-[60vh] xl:h-[calc(100vh-15rem)]"
+              />
+            ) : (
+              <LabTerminal
+                terminalPath={terminalUrl}
+                heightClass="h-[60vh] xl:h-[calc(100vh-13rem)]"
+              />
+            )
           ) : (
-            <LabTerminal
-              terminalPath={terminalUrl}
-              heightClass="h-[60vh] xl:h-[calc(100vh-13rem)]"
-            />
-          )
-        ) : (
-          <TerminalPlaceholder commands={currentStep.commands ?? []} />
-        )}
+            <TerminalPlaceholder commands={currentStep.commands ?? []} />
+          )}
+        </div>
       </div>
+    </>
+  );
+}
+
+// SessionExpired는 TTL 만료(서버가 VM 회수) 시 터미널 대신 노출되는 안내 카드다.
+function SessionExpired({ labId }: { labId: string }) {
+  return (
+    <div className="mt-6 bg-slate-800/50 border border-slate-700 rounded-xl p-8 text-center">
+      <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 mb-4">
+        <svg
+          className="w-7 h-7 text-amber-400"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <circle cx="12" cy="12" r="9" strokeWidth={1.6} />
+          <path strokeLinecap="round" strokeWidth={1.6} d="M12 7v5l3 2" />
+        </svg>
+      </div>
+      <h3 className="text-white font-semibold">세션이 만료되었습니다</h3>
+      <p className="text-slate-400 text-sm mt-2">
+        실습 세션의 최대 사용 시간이 지나 환경이 종료되었습니다. 새 세션을 시작하면 처음부터 다시
+        실습할 수 있습니다.
+      </p>
+      <a
+        href={`/labs/${labId}`}
+        className="inline-block mt-5 bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors"
+      >
+        실습 다시 시작하기
+      </a>
     </div>
   );
 }
