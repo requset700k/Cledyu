@@ -1,0 +1,53 @@
+# marts 폴더의 세 테이블(lab_completion, lab_dropout, hint_patterns)에 대한 dbt 테스트를 정의하는 파일
+# 각 모델마다 핵심 컬럼에 not_null 테스트 진행
+
+version: 2
+
+models:
+  - name: lab_completion
+    description: "랩별 일별 완료율 / 이탈률 mart — Grafana 완료율 대시보드 소스"
+    columns:
+      - name: lab_id
+        tests:
+          - not_null
+      - name: event_date
+        tests:
+          - not_null
+      - name: total_sessions
+        tests:
+          - not_null
+      - name: completion_rate
+        tests:
+          - not_null
+
+  - name: lab_dropout
+    description: "랩별 스텝별 일별 드롭아웃 분석 mart — 어느 스텝에서 막히는지 파악"
+    columns:
+      - name: lab_id
+        tests:
+          - not_null
+      - name: step_id
+        tests:
+          - not_null
+      - name: event_date
+        tests:
+          - not_null
+      - name: sessions_reached
+        tests:
+          - not_null
+
+  - name: hint_patterns
+    description: "랩별 스텝별 힌트 사용 패턴 mart — AI 힌트 vs 정적 힌트 비율 분석"
+    columns:
+      - name: lab_id
+        tests:
+          - not_null
+      - name: step_id
+        tests:
+          - not_null
+      - name: event_date
+        tests:
+          - not_null
+      - name: hint_count
+        tests:
+          - not_null
