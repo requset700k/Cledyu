@@ -1,5 +1,5 @@
 -- cledyu_raw.lab_events raw 데이터를 읽어서 NULL을 필터링하고 event_date 컬럼을 추가하는 정제 View
---  mart 세 개가 전부 이 모델을 {{ ref('stg_lab_events') }}로 참조
+-- mart 세 개가 전부 이 모델을 ref('stg_lab_events')로 참조
 
 SELECT
     event_type,

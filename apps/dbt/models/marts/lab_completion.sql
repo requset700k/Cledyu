@@ -5,9 +5,9 @@
         partition_by={
             "field": "event_date",
             "data_type": "date",
-            "granularity": "day" -- 하루 단위로 파티션
+            "granularity": "day"
         },
-        cluster_by=["lab_id"] -- lab_id 순으로 정렬 저장
+        cluster_by=["lab_id"]
     )
 }}
 

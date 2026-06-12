@@ -16,13 +16,14 @@ sources:
             tests:
               - not_null
               - accepted_values:
-                  values:
-                    - lab_started
-                    - step_completed
-                    - validation_failed
-                    - hint_requested
-                    - lab_completed
-                    - lab_abandoned
+                  arguments:
+                    values:
+                      - lab_started
+                      - step_completed
+                      - validation_failed
+                      - hint_requested
+                      - lab_completed
+                      - lab_abandoned
           - name: user_id
             description: "학습자 ID"
             tests:
