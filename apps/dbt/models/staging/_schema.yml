@@ -1,0 +1,27 @@
+# stg_lab_events에 대한 dbt 테스트를 정의하는 파일
+# dbt test 실행 시 여기 정의된 테스트를 BigQuery에 검증 쿼리로 날린다.
+
+version: 2
+
+models:
+  - name: stg_lab_events
+    description: "cledyu_raw.lab_events 정제 뷰 — NULL 필터링 및 event_date 파생 컬럼 추가"
+    columns: # stg_lab_events.sql에서 WHERE 절로 이미 NULL을 걸러냈기 때문에 이 테스트들은 항상 통과해야 한다.
+      - name: event_type
+        tests:
+          - not_null
+      - name: user_id
+        tests:
+          - not_null
+      - name: session_id
+        tests:
+          - not_null
+      - name: lab_id
+        tests:
+          - not_null
+      - name: ts
+        tests:
+          - not_null
+      - name: event_date
+        tests:
+          - not_null

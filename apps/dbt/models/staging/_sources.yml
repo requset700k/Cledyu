@@ -1,0 +1,49 @@
+# dbt에게 이 테이블은 외부에서 오는 데이터라고 선언하는 파일
+# Kafka Connect가 BigQuery에 적재한 lab_events를 dbt 소스로 등록해서 모델 SQL에서 참조할 수 있게 해준다.
+
+version: 2
+
+sources:
+  - name: raw # 소스 그룹 이름
+    database: "{{ env_var('GCP_PROJECT_ID') }}"
+    schema: cledyu_raw
+    tables:
+      - name: lab_events
+        description: "Kafka Connect BigQuery Sink이 적재한 원시 학습 이벤트"
+        columns:
+          - name: event_type
+            description: "이벤트 종류 (lab_started / step_completed / validation_failed / hint_requested / lab_completed / lab_abandoned)"
+            tests:
+              - not_null
+              - accepted_values:
+                  values:
+                    - lab_started
+                    - step_completed
+                    - validation_failed
+                    - hint_requested
+                    - lab_completed
+                    - lab_abandoned
+          - name: user_id
+            description: "학습자 ID"
+            tests:
+              - not_null
+          - name: session_id
+            description: "학습 세션 ID"
+            tests:
+              - not_null
+          - name: lab_id
+            description: "랩 ID"
+            tests:
+              - not_null
+          - name: step_id
+            description: "스텝 번호 (step_completed / validation_failed / hint_requested 에서만 채워짐)"
+          - name: hint_level
+            description: "힌트 레벨 (hint_requested 전용)"
+          - name: hint_source
+            description: "힌트 출처 — ai | static (hint_requested 전용)"
+          - name: vm_provisioned_source
+            description: "VM 프로바이더 (lab_started 전용)"
+          - name: ts
+            description: "이벤트 발생 시각 (UTC)"
+            tests:
+              - not_null
