@@ -1,0 +1,6 @@
+lab_id,lab_title
+lab-linux-basics,Linux 기초
+lab-docker-basics,Docker 기초
+lab-k8s-basics,Kubernetes 기초
+lab-ansible-basics,Ansible 기초
+lab-terraform-basics,Terraform 기초
