@@ -1,0 +1,16 @@
+# dbt가 BigQuery에 연결할 때 필요한 인증 정보와 연결 설정을 담은 파일
+# dbt run 실행시 이 파일을 읽고 어느 GCP 프로젝트 어느 BigQuery 데이터셋에 모델을 만들지 결정
+
+cledyu:
+  target: prod
+  outputs:
+    prod:
+      type: bigquery # 어떤 DB에 연결할건지
+      method: service-account # GCP 인증 방식(SA 키 파일로 인증)
+      project: "{{ env_var('GCP_PROJECT_ID') }}" # BigQuery가 속한 GCP 프로젝트 ID (Airflow K8s Pod 실행 시 이 값을 주입)
+      dataset: cledyu_analytics # dbt 모델이 생성될 BigQuery 데이터셋 (terraform에서 만듦)
+      keyfile: "{{ env_var('GOOGLE_APPLICATION_CREDENTIALS', '/var/secrets/gcp-sa/key.json') }}" # GCP SA 키 파일 경로
+      location: asia-northeast3
+      threads: 4
+      timeout_seconds: 300
+      job_retry_deadline_seconds: 300
