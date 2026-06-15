@@ -1,0 +1,175 @@
+---
+# LocalExecutor — 스케줄러 프로세스에서 직접 태스크 실행. 별도 워커 Pod 없음.
+executor: LocalExecutor
+
+images:
+  airflow:
+    repository: apache/airflow
+    tag: 2.10.2
+    pullPolicy: IfNotPresent
+
+# ── DAG 로딩 ────────────────────────────────────────────────────────────────
+# git-sync 사이드카가 60초마다 main 브랜치를 pull해 apps/airflow/dags/ 를 동기화한다.
+# DAG 파일을 main에 merge하면 최대 60초 내 Airflow가 자동 인식한다.
+dags:
+  gitSync:
+    enabled: true
+    repo: https://github.com/requset700k/Cledyu.git
+    branch: main
+    rev: HEAD
+    depth: 1
+    subPath: apps/airflow/dags
+    wait: 60
+    securityContexts:
+      container:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
+        seccompProfile:
+          type: RuntimeDefault
+
+# ── 암호화 키 ────────────────────────────────────────────────────────────────
+# Vault → ExternalSecret → K8s Secret 으로 주입 (externalsecrets.yaml 참조)
+fernetKeySecretName: airflow-fernet-key           # 메타데이터 DB 저장 비밀번호 암호화
+webserverSecretKeySecretName: airflow-webserver-secret-key  # Flask 세션 서명
+
+# ── 내장 PostgreSQL ──────────────────────────────────────────────────────────
+postgresql:
+  enabled: true
+  auth:
+    username: airflow
+    database: airflow
+
+# ── Webserver ────────────────────────────────────────────────────────────────
+webserver:
+  defaultUser:
+    enabled: false  # OIDC 로그인만 사용. 기본 admin 계정 비활성화.
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 500m
+      memory: 768Mi
+  extraVolumeMounts:
+    - name: cledyu-ca
+      mountPath: /etc/ssl/certs-cledyu
+      readOnly: true
+  env:
+    # Keycloak OIDC discovery(HTTPS)에 내부 CA 신뢰. trust-manager가 배포한 CA 번들 사용.
+    - name: REQUESTS_CA_BUNDLE
+      value: /etc/ssl/certs-cledyu/ca.crt
+    # OIDC client secret — Vault → ExternalSecret → airflow-oidc Secret에서 주입
+    - name: AIRFLOW_KEYCLOAK_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: airflow-oidc
+          key: client-secret
+  # Flask-AppBuilder OAuth 설정 — Keycloak cledyu realm 으로 팀원 로그인
+  # FAB 4.x Keycloak provider는 userinfo의 groups 클레임을 role_keys로 읽음.
+  # AUTH_ROLES_MAPPING 키는 Keycloak 역할명이 아닌 그룹명이어야 한다.
+  webserverConfig: |
+    import os
+    from flask_appbuilder.security.manager import AUTH_OAUTH
+
+    AUTH_TYPE = AUTH_OAUTH
+    AUTH_ROLES_SYNC_AT_LOGIN = True
+    AUTH_USER_REGISTRATION = True
+    AUTH_USER_REGISTRATION_ROLE = "Viewer"
+    AUTH_ROLES_MAPPING = {
+        "team-platform": ["Admin"],
+        "team-lab-data": ["Admin"],
+        "team-ai":           ["Op"],
+        "team-service":      ["Op"],
+        "team-observability":["Op"],
+        "team-security":     ["Op"],
+    }
+
+    OAUTH_PROVIDERS = [
+        {
+            "name": "keycloak",
+            "icon": "fa-key",
+            "token_key": "access_token",
+            "remote_app": {
+                "client_id": "airflow",
+                "client_secret": os.environ.get("AIRFLOW_KEYCLOAK_CLIENT_SECRET"),
+                "server_metadata_url": "https://keycloak.cledyu.local/realms/cledyu/.well-known/openid-configuration",
+                "api_base_url": "https://keycloak.cledyu.local/realms/cledyu/protocol/",
+                "client_kwargs": {"scope": "openid email profile"},
+                "request_token_url": None,
+            },
+        }
+    ]
+
+# ── Scheduler ────────────────────────────────────────────────────────────────
+scheduler:
+  resources:
+    requests:
+      cpu: 300m
+      memory: 768Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+# ── Ingress ──────────────────────────────────────────────────────────────────
+# kafka-ui와 동일하게 Helm 내장 Ingress + Traefik ingressClassName 사용
+ingress:
+  web:
+    enabled: true
+    ingressClassName: traefik
+    hosts:
+      - name: airflow.cledyu.local
+        tls:
+          secretName: airflow-tls
+          enabled: true
+    path: /
+    pathType: Prefix
+
+# ── 로그 ────────────────────────────────────────────────────────────────────
+logs:
+  persistence:
+    enabled: true
+    size: 5Gi
+
+# ── CA 번들 볼륨 ─────────────────────────────────────────────────────────────
+# trust-manager가 클러스터 전체에 배포한 cledyu 루트 CA 번들.
+# webserver가 Keycloak HTTPS에 접근할 때 인증서 검증에 사용한다.
+extraVolumes:
+  - name: cledyu-ca
+    configMap:
+      name: cledyu-root-ca-bundle
+
+# ── PSA restricted 보안 컨텍스트 ─────────────────────────────────────────────
+securityContexts:
+  pod:
+    runAsUser: 50000
+    runAsNonRoot: true
+    fsGroup: 0
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
+# ── StatsD ────────────────────────────────────────────────────────────────────
+# PSA restricted: 전역 securityContexts가 statsd에 적용되지 않으므로 별도 지정.
+statsd:
+  securityContexts:
+    pod:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    container:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+
+# ── RBAC ─────────────────────────────────────────────────────────────────────
+# KubernetesPodOperator가 dbt Pod를 생성·삭제하려면 ServiceAccount에 권한 필요.
+# Helm이 기본 RBAC을 생성하며, 4번(Airflow DAG) 작업 시 권한 범위를 검토할 것.
+rbac:
+  create: true
