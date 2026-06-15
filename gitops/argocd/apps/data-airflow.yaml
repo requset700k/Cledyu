@@ -26,6 +26,7 @@ spec:
       path: gitops/apps/airflow
       directory:
         include: "*.yaml"
+        exclude: "values.yaml"
   destination:
     server: https://kubernetes.default.svc
     namespace: airflow
