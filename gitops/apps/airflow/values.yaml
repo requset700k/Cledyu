@@ -40,6 +40,9 @@ postgresql:
   auth:
     username: airflow
     database: airflow
+  image:
+    registry: registry-1.docker.io
+    tag: "latest"
 
 # ── Webserver ────────────────────────────────────────────────────────────────
 webserver:
