@@ -26,9 +26,15 @@ spec:
           name: kafka-connect-
           patternType: prefix
         operations: [Read, Write, Describe, Create, Delete, Alter]
-      # 컨슈머 그룹
+      # Connect worker 그룹
       - resource:
           type: group
           name: kafka-connect
           patternType: literal
+        operations: [Read]
+      # 커넥터 태스크 그룹 (connect-<connector-name> 패턴)
+      - resource:
+          type: group
+          name: connect-
+          patternType: prefix
         operations: [Read]
