@@ -15,20 +15,27 @@ spec:
   tasksMax: 3  # lab-events 파티션 12개 중 3개 태스크로 시작, 필요 시 증가
   config:
     topics: lab-events
-    # TODO: terraform var.project_id 값으로 교체
+    # terraform/gcp을 apply한 GCP 프로젝트 ID — 불일치 시 BigQuery 테이블 없음(404) 또는 권한 오류로 커넥터 실패
+    # TODO: terraform/gcp/terraform.tfvars의 project_id 값으로 교체
     project: "<GCP_PROJECT_ID>"
     defaultDataset: cledyu_raw
-    # externalConfiguration volumes의 gcp-sa Secret이 이 경로에 마운트됨
-    keyfile: /opt/kafka/external-configuration/gcp-sa/key.json
+    # keyfile 미지정 → GOOGLE_APPLICATION_CREDENTIALS 환경변수(kafkaconnect.yaml)로 ADC 인증
+    # plain JSON 사용 (schema+payload 래퍼 없음)
+    value.converter: org.apache.kafka.connect.json.JsonConverter
+    value.converter.schemas.enable: "false"
     sanitizeTopics: "true"
     # Terraform으로 스키마·파티션·클러스터 설정을 명시했으므로 자동 생성 비활성화
     autoCreateTables: "false"
     # GCS 배치 모드 — BigQuery Load Job으로 적재(스트리밍 Insert 없음 → BigQuery 적재 비용 $0)
     enableBatchLoad: "true"
-    # TODO: terraform output staging_bucket 값으로 교체 (cledyu-bq-staging-<project_id>)
+    # "cledyu-bq-staging-<project_id>" 형식 — terraform/gcp/main.tf locals.staging_bucket 참고
+    # TODO: terraform apply 후 출력되는 staging_bucket 값으로 교체
     gcsBucketName: "<STAGING_BUCKET>"
     gcsFolderName: lab-events
     batchLoadIntervalSec: "300"  # 5분마다 Load Job 실행
+    # ts 컬럼 기반 파티셔닝 테이블에 파티션 데코레이터($YYYYMMDD)를 붙이면 BigQuery가 400 에러 반환
+    # → false로 설정해서 데코레이터 없이 insert, BigQuery가 ts 값 기준으로 자동 파티셔닝
+    bigQueryPartitionDecorator: "false"
     # 재처리 정책 (결정: Kafka Connect 재시도만, Airflow 감지 없음)
     maxRetryAttempts: "10"
     retryWaitMs: "3000"
