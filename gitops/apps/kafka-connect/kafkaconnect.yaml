@@ -18,7 +18,7 @@ spec:
   #   1. kafka 네임스페이스 PSA restricted 정책이 Kaniko(build Pod)를 차단
   #   2. 지정했던 Maven 아티팩트(com.wepay.kafka.connect:kafka-connect-bigquery:2.5.0)가 Maven Central에 없음
   # 이미지는 로컬에서 빌드 후 push 필요:
-  #   docker build -t ghcr.io/requset700k/kafka-connect-bigquery:latest <Dockerfile 경로>
+  #   docker build -t ghcr.io/requset700k/kafka-connect-bigquery:latest apps/kafka-connect/
   #   docker push ghcr.io/requset700k/kafka-connect-bigquery:latest
   # TODO: 이미지 빌드 후 ghcr.io/requset700k/kafka-connect-bigquery:latest 로 push 필요
   image: ghcr.io/requset700k/kafka-connect-bigquery:latest
