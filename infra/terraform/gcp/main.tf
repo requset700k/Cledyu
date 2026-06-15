@@ -56,9 +56,10 @@ resource "google_bigquery_table" "lab_events" {
 
 # Kafka Connect BigQuery Sink 배치 모드 전용
 resource "google_storage_bucket" "staging" {
-  name          = local.staging_bucket
-  location      = var.region
-  force_destroy = true # GCS에 있는 파일은 BigQuery에 들어가고 나면 더 이상 필요 없는 임시 파일만 들어있으므로 삭제 허용
+  name                        = local.staging_bucket
+  location                    = var.region
+  force_destroy               = true # GCS에 있는 파일은 BigQuery에 들어가고 나면 더 이상 필요 없는 임시 파일만 들어있으므로 삭제 허용
+  uniform_bucket_level_access = true # 프로젝트 정책(storage.uniformBucketLevelAccess) 필수
 
   lifecycle_rule {
     action { type = "Delete" }
