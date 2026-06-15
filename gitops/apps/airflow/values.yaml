@@ -56,6 +56,12 @@ webserver:
     - name: cledyu-ca
       mountPath: /etc/ssl/certs-cledyu
       readOnly: true
+  # CA 번들 볼륨 정의 — trust-manager가 배포한 cledyu 루트 CA.
+  # top-level extraVolumes는 webserver pod에 적용 안 되므로 webserver 하위에 명시.
+  extraVolumes:
+    - name: cledyu-ca
+      configMap:
+        name: cledyu-root-ca-bundle
   env:
     # Keycloak OIDC discovery(HTTPS)에 내부 CA 신뢰. trust-manager가 배포한 CA 번들 사용.
     - name: REQUESTS_CA_BUNDLE
@@ -132,13 +138,14 @@ logs:
     enabled: true
     size: 5Gi
 
-# ── CA 번들 볼륨 ─────────────────────────────────────────────────────────────
-# trust-manager가 클러스터 전체에 배포한 cledyu 루트 CA 번들.
-# webserver가 Keycloak HTTPS에 접근할 때 인증서 검증에 사용한다.
-extraVolumes:
-  - name: cledyu-ca
-    configMap:
-      name: cledyu-root-ca-bundle
+# ── ArgoCD 호환 ───────────────────────────────────────────────────────────────
+# ArgoCD는 Helm hook(post-install/post-upgrade)을 실행하지 않으므로
+# migrate-database-job / create-user-job 을 일반 K8s Job으로 배포해야 한다.
+migrateDatabaseJob:
+  useHelmHooks: false
+
+createUserJob:
+  useHelmHooks: false
 
 # ── PSA restricted 보안 컨텍스트 ─────────────────────────────────────────────
 securityContexts:
