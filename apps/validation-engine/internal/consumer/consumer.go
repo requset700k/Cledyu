@@ -45,9 +45,10 @@ func New(brokers []string, tlsCfg *tls.Config, log *zap.Logger) *Consumer {
 	})
 
 	dlqWriter := &kafka.Writer{
-		Addr:      kafka.TCP(brokers...),
-		Topic:     "validation-requests-dlq",
-		Transport: &kafka.Transport{TLS: tlsCfg},
+		Addr:          kafka.TCP(brokers...),
+		Topic:         "validation-requests-dlq",
+		Transport:     &kafka.Transport{TLS: tlsCfg},
+		RequiredAcks:  kafka.RequireAll,
 	}
 
 	return &Consumer{
