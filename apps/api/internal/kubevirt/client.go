@@ -1,6 +1,8 @@
 package kubevirt
 
 import (
+	"path/filepath"
+
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -11,7 +13,7 @@ import (
 func newClients(kubeconfig string) (kubernetes.Interface, dynamic.Interface, error) {
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
-		cfg, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
+		cfg, err = clientConfigFromKubeconfig(kubeconfig)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -25,4 +27,16 @@ func newClients(kubeconfig string) (kubernetes.Interface, dynamic.Interface, err
 		return nil, nil, err
 	}
 	return core, dyn, nil
+}
+
+func clientConfigFromKubeconfig(kubeconfig string) (*rest.Config, error) {
+	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	if kubeconfig != "" {
+		rules.Precedence = filepath.SplitList(kubeconfig)
+		rules.WarnIfAllMissing = true
+	}
+	return clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
+		rules,
+		&clientcmd.ConfigOverrides{},
+	).ClientConfig()
 }
