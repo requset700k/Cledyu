@@ -1,0 +1,6 @@
+apiVersion: v2
+name: redis
+description: Cledyu 공유 카운터 — 세션 분산 락(api) + AI rate limit(ai-tutor)
+type: application
+version: 0.1.0
+appVersion: "7"

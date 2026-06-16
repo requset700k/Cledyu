@@ -6,7 +6,14 @@ import '@xterm/xterm/css/xterm.css';
 // LabTerminal은 lab VM의 serial console에 연결된 실시간 xterm.js 터미널이다.
 // WebSocket은 Next 프록시 대상이 아니므로 Go API에 직접 연결한다(NEXT_PUBLIC_WS_URL).
 // xterm은 DOM/WebSocket에 의존하므로 모든 초기화를 useEffect(클라이언트) 안에서 동적 import한다.
-export function LabTerminal({ terminalPath }: { terminalPath: string }) {
+// heightClass: 좌(문제)/우(터미널) 2분할 레이아웃이 화면 높이에 맞춰 키울 때 사용.
+export function LabTerminal({
+  terminalPath,
+  heightClass = 'h-80',
+}: {
+  terminalPath: string;
+  heightClass?: string;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -74,7 +81,7 @@ export function LabTerminal({ terminalPath }: { terminalPath: string }) {
         <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/70" />
         <span className="ml-2 text-slate-500 text-xs">terminal — Ubuntu (KubeVirt VM)</span>
       </div>
-      <div ref={containerRef} className="h-80 w-full p-2" />
+      <div ref={containerRef} className={`${heightClass} w-full p-2`} />
     </div>
   );
 }

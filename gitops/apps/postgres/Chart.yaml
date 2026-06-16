@@ -1,0 +1,6 @@
+apiVersion: v2
+name: postgres
+description: Cledyu 앱 영속 DB (유저 미러·실습 진행 상태·랩 완료 이력)
+type: application
+version: 0.1.0
+appVersion: "16"

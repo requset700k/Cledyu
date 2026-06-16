@@ -15,6 +15,7 @@ func (h *Handler) GetMe(c *gin.Context) {
 		"email":  c.GetString("user_email"),
 		"name":   c.GetString("user_name"),
 		"role":   c.GetString("user_role"),
+		"org":    c.GetString("user_org"), // 소속 조직(RAG 멀티테넌트). 없으면 빈 문자열/public.
 		"points": 0,
 		"badges": []gin.H{},
 	})

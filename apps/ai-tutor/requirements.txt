@@ -9,3 +9,5 @@ google-genai>=1.16,<2
 prometheus-client>=0.21,<1
 # RAG(선택) — HttpClient + 기본 ONNX 임베딩(all-MiniLM-L6-v2, 기획서의 임베딩 모델과 동일).
 chromadb>=1.0.8,<2
+# Rate limit 공유 카운터(선택) — AI_TUTOR_REDIS_URL 설정 시에만 사용.
+redis>=5,<6

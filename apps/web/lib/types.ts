@@ -63,6 +63,7 @@ export interface Lab {
   step_count: number;
   steps?: StepContent[]; // GET /api/v1/labs/:id 에서만 채워짐 (목록 응답엔 없음)
   environment?: string; // 세션 VM 환경 (ubuntu | k3s). ubuntu만 실시간 터미널 제공(Phase-1).
+  ide?: boolean; // true면 세션에 브라우저 VS Code(IDE 탭) 제공 (예: Terraform 랩)
 }
 
 /** 수강생 1명이 특정 Lab을 수행하는 동안 유지되는 세션 */
@@ -73,6 +74,7 @@ export interface Session {
   status: SessionStatus;
   vm_provider?: VMProvider;
   terminal_url?: string; // status가 ready가 되면 채워짐 (/api/v1/sessions/:id/ws)
+  ide_url?: string; // IDE 랩만 — code-server 프록시 경로 (/api/v1/sessions/:id/ide/)
   current_step: number;
   started_at: string;
   expires_at: string; // 세션 최대 유지 시간 3시간
@@ -98,6 +100,7 @@ export interface User {
   email: string;
   name: string;
   role: UserRole;
+  org?: string; // 소속 조직(RAG 멀티테넌트). 없으면 빈 문자열/public.
   points: number;
 }
 

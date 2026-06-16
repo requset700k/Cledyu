@@ -30,9 +30,10 @@ func newTestRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	// validator=nil(mock 검증), authProvider=nil(OIDC discovery 없이 핸들러 단위만 — 인증 흐름은 503).
-	h := handlers.New(newTestConfig(), zap.NewNop(), nil, nil, nil, nil)
+	h := handlers.New(newTestConfig(), zap.NewNop(), nil, nil, nil, nil, nil, nil)
 
 	r.GET("/health", h.Health)
+	r.GET("/ready", h.Ready)
 	r.GET("/me", func(c *gin.Context) {
 		c.Set("user_id", "test-user")
 		c.Set("user_email", "test@cledyu.local")
@@ -60,6 +61,57 @@ func TestHealth(t *testing.T) {
 	}
 	if body["status"] != "ok" {
 		t.Errorf("expected status=ok, got %q", body["status"])
+	}
+}
+
+func TestReady_DebugAllowsMissingExternalDependencies(t *testing.T) {
+	r := newTestRouter()
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/ready", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 in debug mode, got %d", w.Code)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["status"] != "ok" {
+		t.Errorf("expected status=ok, got %q", body["status"])
+	}
+}
+
+func TestReady_ReleaseReportsMissingExternalDependencies(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := newTestConfig()
+	cfg.Server.Mode = "release"
+	h := handlers.New(cfg, zap.NewNop(), nil, nil, nil, nil, nil, nil)
+	r := gin.New()
+	r.GET("/ready", h.Ready)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/ready", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 in release mode with lab content loaded, got %d", w.Code)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["status"] != "ok" {
+		t.Errorf("expected status=ok, got %q", body["status"])
+	}
+	checks, ok := body["checks"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected checks object, got %T", body["checks"])
+	}
+	keycloak, ok := checks["keycloak"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected keycloak check, got %T", checks["keycloak"])
+	}
+	if keycloak["status"] != "degraded" {
+		t.Errorf("expected keycloak degraded detail in release mode, got %v", keycloak)
 	}
 }
 
@@ -106,7 +158,7 @@ func TestGetLab_HidesValidationChecks(t *testing.T) {
 			Title       string   `json:"title"`
 			Description string   `json:"description"`
 			Commands    []string `json:"commands"`
-			Hint        string   `json:"hint"`
+			HintLevels  []string `json:"hint_levels"`
 			Checks      any      `json:"checks"`
 		} `json:"steps"`
 	}
@@ -119,11 +171,17 @@ func TestGetLab_HidesValidationChecks(t *testing.T) {
 	if len(body.Steps) == 0 {
 		t.Fatal("expected steps in lab detail response")
 	}
-	if body.Steps[0].Title == "" || len(body.Steps[0].Commands) == 0 || body.Steps[0].Hint == "" {
+	// 공개 필드(제목/명령)는 유지되어야 한다. 힌트는 /hint 엔드포인트가 레벨 1→2→3 으로
+	// 단계 제공하므로 랩 상세에는 노출하지 않는다(legacy hint 도 콘텐츠에서 제거됨).
+	if body.Steps[0].Title == "" || len(body.Steps[0].Commands) == 0 {
 		t.Fatalf("expected public step fields to remain, got %+v", body.Steps[0])
 	}
 	if body.Steps[0].Checks != nil {
 		t.Fatalf("validation checks must not be exposed, got %+v", body.Steps[0].Checks)
+	}
+	// 정적 힌트 3종 전체가 상세 응답으로 새면 단계적 힌트 설계가 무력화된다.
+	if len(body.Steps[0].HintLevels) != 0 {
+		t.Fatalf("hint_levels must not be exposed in lab detail, got %+v", body.Steps[0].HintLevels)
 	}
 }
 

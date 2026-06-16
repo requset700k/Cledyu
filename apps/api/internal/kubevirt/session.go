@@ -67,7 +67,14 @@ func NewManager(cfg *config.KubeVirtConfig) (*Manager, error) {
 	return &Manager{core: core, dyn: dyn, cfg: cfg}, nil
 }
 
-func (m *Manager) Create(ctx context.Context, sessionID, labID, userID string) (*Session, error) {
+// BootInit은 랩별 cloud-init 추가 작업이다(content.InitSpec 에서 변환).
+// content 패키지에 대한 역방향 의존을 피하려고 kubevirt 가 자체 타입을 가진다.
+type BootInit struct {
+	Packages []string // cloud-init packages: (apt 설치)
+	Runcmd   []string // cloud-init runcmd: 끝에 추가되는 셸 명령
+}
+
+func (m *Manager) Create(ctx context.Context, sessionID, labID, userID string, init BootInit) (*Session, error) {
 	ns := "lab-" + sessionID
 	vmType := labVMType[labID]
 	if vmType == "" {
@@ -93,13 +100,6 @@ func (m *Manager) Create(ctx context.Context, sessionID, labID, userID string) (
 		return nil, fmt.Errorf("create namespace: %w", err)
 	}
 
-	// 검증엔진(virtctl ssh)이 키로 접속할 수 있도록 lab 사용자에 엔진 공개키를 넣는다.
-	// 공개키 미설정 시 비번/시리얼 콘솔만 유지(키 블록 생략).
-	sshKeyBlock := ""
-	if m.cfg.LabSSHPublicKey != "" {
-		sshKeyBlock = "\n    ssh_authorized_keys:\n      - " + m.cfg.LabSSHPublicKey
-	}
-
 	// 2. cloud-init Secret
 	_, err = m.core.CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -107,29 +107,7 @@ func (m *Manager) Create(ctx context.Context, sessionID, labID, userID string) (
 			Namespace: ns,
 		},
 		StringData: map[string]string{
-			"userdata": fmt.Sprintf(`#cloud-config
-hostname: %s
-ssh_pwauth: true
-users:
-  - name: lab
-    lock_passwd: false
-    shell: /bin/bash
-    sudo: ALL=(ALL) NOPASSWD:ALL%s
-chpasswd:
-  expire: false
-  list: |
-    lab:lab
-write_files:
-  - path: /etc/systemd/system/serial-getty@ttyS0.service.d/override.conf
-    permissions: "0644"
-    content: |
-      [Service]
-      ExecStart=
-      ExecStart=-/sbin/agetty --autologin lab --noclear --keep-baud 115200,38400,9600 ttyS0 xterm-256color
-runcmd:
-  - systemctl daemon-reload
-  - systemctl restart serial-getty@ttyS0.service
-`, "session-"+sessionID, sshKeyBlock),
+			"userdata": renderCloudInit(sessionID, m.cfg.LabSSHPublicKey, init),
 		},
 	}, metav1.CreateOptions{})
 	if err != nil {
@@ -320,6 +298,39 @@ func (m *Manager) ReapStuckSessions(ctx context.Context, timeout time.Duration) 
 	return reaped, nil
 }
 
+// ReapExpiredSessions는 expires_at(세션 TTL)이 지난 세션 namespace를 삭제하고 회수된
+// sessionID 목록을 반환한다. ReapStuckSessions 와 달리 Running 세션도 회수 대상이다 —
+// 광고한 세션 최대 수명(SessionTTLHours)을 지나면 정상 동작 중이어도 종료한다.
+// 만료 enforcement 부재로 세션이 영원히 살아 온프렘 VM 풀·스토리지를 잠그는 것을 막는다.
+func (m *Manager) ReapExpiredSessions(ctx context.Context) ([]string, error) {
+	list, err := m.core.CoreV1().Namespaces().List(ctx, metav1.ListOptions{
+		LabelSelector: labelManagedBy + "=" + managedByValue,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list session namespaces: %w", err)
+	}
+	now := time.Now()
+	var reaped []string
+	for i := range list.Items {
+		ns := &list.Items[i]
+		if ns.Status.Phase == corev1.NamespaceTerminating {
+			continue // 이미 삭제 중
+		}
+		expires, err := time.Parse(time.RFC3339, ns.Annotations["cledyu.io/expires-at"])
+		if err != nil || expires.IsZero() {
+			continue // 만료 시각을 못 읽으면 보수적으로 건너뛴다(레거시/손상 세션은 stuck reaper가 처리)
+		}
+		if now.Before(expires) {
+			continue // 아직 만료 전
+		}
+		if err := m.core.CoreV1().Namespaces().Delete(ctx, ns.Name, metav1.DeleteOptions{}); err != nil && !k8serr.IsNotFound(err) {
+			continue // best-effort — 다음 주기에 재시도
+		}
+		reaped = append(reaped, strings.TrimPrefix(ns.Name, "lab-"))
+	}
+	return reaped, nil
+}
+
 // vmiPhase는 세션 VM(session-vm)의 VMI phase를 반환한다(없거나 오류면 빈 문자열).
 func (m *Manager) vmiPhase(ctx context.Context, ns string) string {
 	vmi, err := m.dyn.Resource(vmiGVR).Namespace(ns).Get(ctx, "session-vm", metav1.GetOptions{})
@@ -328,6 +339,30 @@ func (m *Manager) vmiPhase(ctx context.Context, ns string) string {
 	}
 	phase, _, _ := unstructured.NestedString(vmi.Object, "status", "phase")
 	return phase
+}
+
+// VMIAddress는 세션 VM 의 pod 네트워크 IP 를 반환한다(IDE 등 in-cluster HTTP 프록시용).
+// VMI 가 없거나 아직 IP 를 못 받았으면 ErrNotFound 를 반환한다.
+func (m *Manager) VMIAddress(ctx context.Context, sessionID string) (string, error) {
+	ns := "lab-" + sessionID
+	vmi, err := m.dyn.Resource(vmiGVR).Namespace(ns).Get(ctx, "session-vm", metav1.GetOptions{})
+	if err != nil {
+		if k8serr.IsNotFound(err) {
+			return "", ErrNotFound
+		}
+		return "", fmt.Errorf("get vmi: %w", err)
+	}
+	ifaces, _, _ := unstructured.NestedSlice(vmi.Object, "status", "interfaces")
+	for _, raw := range ifaces {
+		iface, ok := raw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if ip, _ := iface["ipAddress"].(string); ip != "" {
+			return ip, nil
+		}
+	}
+	return "", ErrNotFound
 }
 
 func (m *Manager) Get(ctx context.Context, sessionID string) (*Session, error) {

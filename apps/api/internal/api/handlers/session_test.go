@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/requset700k/cledyu/api/internal/api/handlers"
+	"github.com/requset700k/cledyu/api/internal/content"
 	"go.uber.org/zap"
 )
 
@@ -18,7 +19,7 @@ import (
 func newSessionRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	h := handlers.New(newTestConfig(), zap.NewNop(), nil, nil, nil, nil)
+	h := handlers.New(newTestConfig(), zap.NewNop(), nil, nil, nil, nil, nil, nil)
 	r.Use(func(c *gin.Context) {
 		c.Set("user_id", "test-user")
 		c.Next()
@@ -52,8 +53,18 @@ func doJSON(t *testing.T, r *gin.Engine, method, path string, body any) (*httpte
 }
 
 // TestGetLab_IncludesSteps는 GetLab 응답에 DSL 콘텐츠의 steps가 머지되는지 검증한다.
+// 기대 개수는 임베드 콘텐츠에서 가져온다 — 랩 콘텐츠가 진화해도 테스트가 깨지지 않게(하드코딩 금지).
 // sessions 매니저는 필요 없다(콘텐츠 로드만 사용).
 func TestGetLab_IncludesSteps(t *testing.T) {
+	labs, err := content.Load()
+	if err != nil {
+		t.Fatalf("load lab content: %v", err)
+	}
+	want := len(labs["lab-k8s-basics"].Steps)
+	if want == 0 {
+		t.Fatal("lab-k8s-basics has no steps in embedded content")
+	}
+
 	r := newSessionRouter()
 	w, body := doJSON(t, r, http.MethodGet, "/labs/lab-k8s-basics", nil)
 	if w.Code != http.StatusOK {
@@ -63,8 +74,8 @@ func TestGetLab_IncludesSteps(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected steps array in response, got %T", body["steps"])
 	}
-	if len(steps) != 3 {
-		t.Errorf("expected 3 steps for lab-k8s-basics, got %d", len(steps))
+	if len(steps) != want {
+		t.Errorf("expected %d steps for lab-k8s-basics, got %d", want, len(steps))
 	}
 }
 
