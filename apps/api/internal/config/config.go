@@ -16,7 +16,15 @@ type Config struct {
 	KubeVirt    KubeVirtConfig `mapstructure:"kubevirt"`
 	Kafka       KafkaConfig    `mapstructure:"kafka"`
 	AI          AIConfig       `mapstructure:"ai"`
+	DB          DBConfig       `mapstructure:"db"`
 	FrontendURL string         `mapstructure:"frontend_url"`
+}
+
+// DBConfig는 PostgreSQL 영속 계층 설정이다.
+// DSN 이 비면 영속화 비활성 — 진행 상태는 in-memory 전용으로 동작한다(로컬/CI).
+// DSN 에 비밀번호가 포함되므로 값 전체를 Secret(ESO: cledyu-api-db)으로 주입한다.
+type DBConfig struct {
+	DSN string `mapstructure:"dsn"` // 예: postgres://cledyu:***@postgres.postgres.svc:5432/cledyu
 }
 
 // AIConfig는 AI 학습 도우미 BFF(apps/ai-tutor) 연동 설정이다.
@@ -70,6 +78,11 @@ type KeycloakConfig struct {
 	ClientSecret string `mapstructure:"client_secret"`
 	RedirectURI  string `mapstructure:"redirect_uri"`
 	CookieDomain string `mapstructure:"cookie_domain"`
+	// AdminClientID/Secret: 관리자 유저 관리(역할 승격)용 service-account 클라이언트.
+	// realm-management 의 manage-users·view-realm 역할이 부여된 confidential client 여야 한다
+	// (런북 learner-auth.md §6.2). 비면 역할 승격 API 가 비활성(501)된다.
+	AdminClientID     string `mapstructure:"admin_client_id"`
+	AdminClientSecret string `mapstructure:"admin_client_secret"`
 }
 
 type ServerConfig struct {
@@ -104,6 +117,9 @@ func Load() (*Config, error) {
 	v.SetDefault("keycloak.redirect_uri", "https://api.cledyu.local/api/v1/auth/callback")
 	v.SetDefault("frontend_url", "https://app.cledyu.local")
 	v.SetDefault("keycloak.cookie_domain", ".cledyu.local")
+	// 역할 승격 service-account — 빈 기본값. env CLEDYU_KEYCLOAK_ADMIN_CLIENT_ID/SECRET 로 주입.
+	v.SetDefault("keycloak.admin_client_id", "")
+	v.SetDefault("keycloak.admin_client_secret", "")
 	v.SetDefault("kubevirt.base_image_ns", "kubevirt")
 	v.SetDefault("kubevirt.base_image_name", "ubuntu-2204-base")
 	v.SetDefault("kubevirt.lab_ssh_public_key", "") // 빈 기본값 — env CLEDYU_KUBEVIRT_LAB_SSH_PUBLIC_KEY로 주입
@@ -121,6 +137,7 @@ func Load() (*Config, error) {
 	v.SetDefault("kafka.events_topic", "lab-events")
 	v.SetDefault("ai.base_url", "") // 빈 기본값 — env CLEDYU_AI_BASE_URL 로 주입(미설정 시 정적 힌트 폴백)
 	v.SetDefault("ai.timeout_seconds", 15)
+	v.SetDefault("db.dsn", "") // 빈 기본값 — env CLEDYU_DB_DSN(Secret)으로 주입. 미설정 시 in-memory 전용
 
 	if err := v.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError

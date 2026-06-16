@@ -10,10 +10,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	api "github.com/requset700k/cledyu/api/internal/api"
 	"github.com/requset700k/cledyu/api/internal/config"
 	"github.com/requset700k/cledyu/api/internal/events"
 	"github.com/requset700k/cledyu/api/internal/kubevirt"
+	"github.com/requset700k/cledyu/api/internal/lock"
+	"github.com/requset700k/cledyu/api/internal/store"
 	"github.com/requset700k/cledyu/api/internal/validation"
 	"go.uber.org/zap"
 )
@@ -69,7 +72,43 @@ func main() {
 		)
 	}
 
-	router, h := api.NewRouter(cfg, logger, sessions, validator, eventsPub)
+	// PostgreSQL 영속 계층 — DSN 미설정(로컬/CI) 또는 연결 실패 시 nil 로 두고
+	// in-memory 전용으로 동작한다(시작은 막지 않되 진행 상태가 재시작에 휘발됨을 경고).
+	var db *store.Store
+	if cfg.DB.DSN != "" {
+		if s, dbErr := store.Open(ctx, cfg.DB.DSN, logger); dbErr != nil {
+			logger.Error("db 연결 실패 — 진행 상태 영속화 비활성(in-memory 전용)", zap.Error(dbErr))
+		} else {
+			db = s
+			defer db.Close()
+			logger.Info("db 연결 — 유저/진행 상태 영속화 활성")
+		}
+	} else {
+		logger.Warn("db 미설정(CLEDYU_DB_DSN) — 진행 상태가 API 재시작 시 휘발됨")
+	}
+
+	// 세션 생성 직렬화 락 — Redis 연결되면 분산 락(다중 레플리카 안전), 아니면 in-memory.
+	// 연결 확인(ping)에 실패하면 MemLocker 로 폴백한다(단일 인스턴스 best-effort).
+	var locker lock.Locker = lock.NewMemLocker()
+	if cfg.Redis.Addr != "" {
+		rdb := redis.NewClient(&redis.Options{
+			Addr:     cfg.Redis.Addr,
+			Password: cfg.Redis.Password,
+			DB:       cfg.Redis.DB,
+		})
+		pingCtx, cancelPing := context.WithTimeout(ctx, 3*time.Second)
+		if err := rdb.Ping(pingCtx).Err(); err != nil {
+			logger.Warn("redis 미연결 — 세션 락 in-memory 폴백(다중 레플리카 비권장)", zap.Error(err))
+			_ = rdb.Close()
+		} else {
+			locker = lock.NewRedisLocker(rdb)
+			defer rdb.Close() //nolint:errcheck
+			logger.Info("redis 연결 — 분산 세션 락 활성", zap.String("addr", cfg.Redis.Addr))
+		}
+		cancelPing()
+	}
+
+	router, h := api.NewRouter(cfg, logger, sessions, validator, eventsPub, db, locker)
 
 	// 검증 결과 소비 루프: 결과를 stepStore에 반영한다. ctx 취소(종료 신호) 시 graceful 종료.
 	if consumer != nil {
@@ -80,17 +119,22 @@ func main() {
 		}()
 	}
 
-	// 프로비저닝 타임아웃 reaper: ready 못 된 stuck 세션을 주기적으로 회수해 CDI 클론 thrash를 차단한다.
+	// 세션 reaper 루프(2분): ① stuck(프로비저닝 실패) 회수로 CDI 클론 thrash 차단,
+	// ② TTL(expires_at) 만료 세션 회수로 광고한 세션 수명 강제 + VM 풀 누수 방지.
 	go func() {
 		ticker := time.NewTicker(2 * time.Minute)
 		defer ticker.Stop()
-		h.ReapStuckSessions(ctx) // 시작 직후 1회
+		reap := func() {
+			h.ReapStuckSessions(ctx)
+			h.ReapExpiredSessions(ctx)
+		}
+		reap() // 시작 직후 1회
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				h.ReapStuckSessions(ctx)
+				reap()
 			}
 		}
 	}()

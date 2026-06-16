@@ -60,9 +60,11 @@ No modules.
 | [keycloak_attribute_importer_identity_provider_mapper.naver_name](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/attribute_importer_identity_provider_mapper) | resource |
 | [keycloak_default_groups.learn_default](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/default_groups) | resource |
 | [keycloak_group.groups](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/group) | resource |
+| [keycloak_group.learn_admins](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/group) | resource |
 | [keycloak_group.learn_instructors](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/group) | resource |
 | [keycloak_group.learn_students](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/group) | resource |
 | [keycloak_group_roles.group_roles](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/group_roles) | resource |
+| [keycloak_group_roles.learn_admins](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/group_roles) | resource |
 | [keycloak_group_roles.learn_instructors](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/group_roles) | resource |
 | [keycloak_group_roles.learn_students](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/group_roles) | resource |
 | [keycloak_oidc_google_identity_provider.google](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/oidc_google_identity_provider) | resource |
@@ -76,6 +78,7 @@ No modules.
 | [keycloak_realm.cledyu_learn](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/realm) | resource |
 | [keycloak_realm_events.cledyu](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/realm_events) | resource |
 | [keycloak_realm_events.cledyu_learn](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/realm_events) | resource |
+| [keycloak_role.learn_admin](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/role) | resource |
 | [keycloak_role.learn_instructor](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/role) | resource |
 | [keycloak_role.learn_student](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/role) | resource |
 | [keycloak_role.realm_roles](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/role) | resource |

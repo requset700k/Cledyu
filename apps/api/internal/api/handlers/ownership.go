@@ -37,14 +37,13 @@ func (h *Handler) denyIfNotSessionOwner(c *gin.Context, sess *kubevirt.Session) 
 }
 
 // storeOwner는 stepStore 에 기록된 세션 소유자를 반환한다(세션 미존재 시 ok=false).
+// withSession 경유라 캐시 미스 시 DB 적재(load-on-miss)도 함께 동작한다.
 func (st *stepStore) storeOwner(sessionID string) (owner string, ok bool) {
-	st.mu.Lock()
-	defer st.mu.Unlock()
-	ss, found := st.m[sessionID]
-	if !found {
-		return "", false
-	}
-	return ss.UserID, true
+	ok = st.withSession(sessionID, func(ss *sessionSteps) bool {
+		owner = ss.UserID
+		return false
+	})
+	return owner, ok
 }
 
 // denyIfNotStoreOwner는 stepStore 기반 핸들러(steps/validate/hint)의 소유자 검사다.
