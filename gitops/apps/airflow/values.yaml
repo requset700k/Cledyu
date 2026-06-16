@@ -51,10 +51,10 @@ webserver:
   resources:
     requests:
       cpu: 200m
-      memory: 512Mi
+      memory: 768Mi
     limits:
       cpu: 500m
-      memory: 768Mi
+      memory: 1536Mi
   extraVolumeMounts:
     - name: cledyu-ca
       mountPath: /etc/ssl/certs-cledyu
