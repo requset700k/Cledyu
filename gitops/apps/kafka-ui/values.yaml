@@ -43,6 +43,11 @@ yamlApplicationConfig:
           authorization-grant-type: authorization_code
           custom-params:
             type: oauth
+            # realm role을 평탄화해서 넣는 클레임 이름. Keycloak 기본 클레임인
+            # realm_access.roles는 중첩 구조라 kafbat-ui가 못 읽음(중첩 JSON path 미지원,
+            # https://github.com/kafbat/kafka-ui/issues/1025). infra/terraform/keycloak의
+            # kafka_ui_roles 매퍼가 이 평탄화된 "roles" 클레임을 토큰에 추가해준다.
+            roles-field: roles
 
   # kafka-ui 안에서 로그인한 사용자가 무엇을 볼 수 있는지 결정하는 권한 설정.
   # Kafka 브로커 ACL(KafkaUser)과 완전히 별개 — 이건 kafka-ui 화면 내 권한이다.
