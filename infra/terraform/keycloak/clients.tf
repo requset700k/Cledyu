@@ -58,3 +58,11 @@ resource "keycloak_openid_user_realm_role_protocol_mapper" "kafka_ui_roles" {
   add_to_id_token     = true
   add_to_userinfo     = true
 }
+
+# 위 매퍼는 장애 대응 중 Keycloak Admin API로 먼저 만들어 운영 state엔 아직 없다.
+# import 없이 apply하면 Keycloak이 동일 이름의 매퍼가 이미 있다고 거부한다.
+# 최초 apply 후 이 블록은 지워도 된다.
+import {
+  to = keycloak_openid_user_realm_role_protocol_mapper.kafka_ui_roles
+  id = "${keycloak_realm.cledyu.id}/client/${keycloak_openid_client.clients["kafka-ui"].id}/6675bdbd-cbb5-40aa-ac9a-cd2cd659d714"
+}
