@@ -6,11 +6,19 @@ path "cledyu/metadata/oidc/*" {
   capabilities = ["read"]
 }
 
-path "cledyu/data/airflow/*" {
+path "cledyu/data/airflow/fernet-key" {
   capabilities = ["read"]
 }
 
-path "cledyu/metadata/airflow/*" {
+path "cledyu/metadata/airflow/fernet-key" {
+  capabilities = ["read"]
+}
+
+path "cledyu/data/airflow/webserver-secret-key" {
+  capabilities = ["read"]
+}
+
+path "cledyu/metadata/airflow/webserver-secret-key" {
   capabilities = ["read"]
 }
 
