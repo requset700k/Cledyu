@@ -74,6 +74,7 @@ No modules.
 | [keycloak_openid_client.learn_clients](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/openid_client) | resource |
 | [keycloak_openid_group_membership_protocol_mapper.groups](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/openid_group_membership_protocol_mapper) | resource |
 | [keycloak_openid_group_membership_protocol_mapper.learn_groups](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/openid_group_membership_protocol_mapper) | resource |
+| [keycloak_openid_user_realm_role_protocol_mapper.kafka_ui_roles](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/openid_user_realm_role_protocol_mapper) | resource |
 | [keycloak_realm.cledyu](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/realm) | resource |
 | [keycloak_realm.cledyu_learn](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/realm) | resource |
 | [keycloak_realm_events.cledyu](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/realm_events) | resource |
