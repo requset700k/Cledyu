@@ -13,6 +13,7 @@ spec:
     algorithm: RSA
     size: 2048
     rotationPolicy: Always
+    encoding: PKCS8  # kafka-clients 7.9.5-ccs가 PKCS#8만 지원, 기본값 PKCS#1은 디코딩 실패
   usages:
     - client auth
     - digital signature
