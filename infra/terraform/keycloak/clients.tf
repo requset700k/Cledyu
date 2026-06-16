@@ -60,9 +60,7 @@ resource "keycloak_openid_user_realm_role_protocol_mapper" "kafka_ui_roles" {
 }
 
 # 위 매퍼는 장애 대응 중 Keycloak Admin API로 먼저 만들어 운영 state엔 아직 없다.
-# import 없이 apply하면 Keycloak이 동일 이름의 매퍼가 이미 있다고 거부한다.
-# 최초 apply 후 이 블록은 지워도 된다.
-import {
-  to = keycloak_openid_user_realm_role_protocol_mapper.kafka_ui_roles
-  id = "${keycloak_realm.cledyu.id}/client/${keycloak_openid_client.clients["kafka-ui"].id}/6675bdbd-cbb5-40aa-ac9a-cd2cd659d714"
-}
+# import 블록을 커밋에 남기면 이 매퍼가 없는 환경(재해복구로 새로 세운 Keycloak 등)에서
+# apply 자체가 막힌다. 그래서 커밋하지 않고, 운영 state에는 1회성으로 직접 적용한다:
+#   terraform import keycloak_openid_user_realm_role_protocol_mapper.kafka_ui_roles \
+#     "cledyu/client/<kafka-ui client id>/6675bdbd-cbb5-40aa-ac9a-cd2cd659d714"
