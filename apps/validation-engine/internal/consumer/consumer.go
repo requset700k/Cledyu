@@ -45,10 +45,10 @@ func New(brokers []string, tlsCfg *tls.Config, log *zap.Logger) *Consumer {
 	})
 
 	dlqWriter := &kafka.Writer{
-		Addr:          kafka.TCP(brokers...),
-		Topic:         "validation-requests-dlq",
-		Transport:     &kafka.Transport{TLS: tlsCfg},
-		RequiredAcks:  kafka.RequireAll,
+		Addr:         kafka.TCP(brokers...),
+		Topic:        "validation-requests-dlq",
+		Transport:    &kafka.Transport{TLS: tlsCfg},
+		RequiredAcks: kafka.RequireAll,
 	}
 
 	return &Consumer{
@@ -137,14 +137,19 @@ const dlqMaxRetries = 3
 // 재시도 간격 (0.5초)
 const dlqRetryInterval = 500 * time.Millisecond
 
+// DLQ 발행 시도당 타임아웃 (kafka-go 기본값 10초보다 짧게 잡아 브로커가 응답 없을 때 멈추는 시간을 줄인다)
+const dlqWriteTimeout = 3 * time.Second
+
 // publishToDLQ는 처리 실패한 원본 메시지를 DLQ 토픽에 발행
 // 최대 3회 재시도하고, 모두 실패하면 원본 payload를 로그에 남겨 Loki에서 확인할 수 있게 한다.
 func (c *Consumer) publishToDLQ(msg kafka.Message) {
 	for i := range dlqMaxRetries {
-		err := c.dlqWriter.WriteMessages(context.Background(), kafka.Message{
+		ctx, cancel := context.WithTimeout(context.Background(), dlqWriteTimeout)
+		err := c.dlqWriter.WriteMessages(ctx, kafka.Message{
 			Key:   msg.Key,
 			Value: msg.Value,
 		})
+		cancel()
 		if err == nil {
 			return
 		}
