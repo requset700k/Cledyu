@@ -23,6 +23,12 @@ spec:
           name: validation-results
           patternType: literal
         operations: [Write, Describe]
+      # validation-requests-dlq 토픽 쓰기 권한 — handler 오류 시 오류 난 원본 메시지 그대로 발행
+      - resource:
+          type: topic
+          name: validation-requests-dlq
+          patternType: literal
+        operations: [Write, Describe]
       # 컨슈머 그룹 권한 — GroupID "validation-engine" 사용 권한
       - resource:
           type: group

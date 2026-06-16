@@ -1,0 +1,21 @@
+---
+# validation-requests-dlq: Validation Engine이 처리 실패한 검증 요청을 보관하는 Dead Letter Queue.
+# Validation Engine이 검증 처리 중 오류 나면 원본 메시지를 그대로 이 토픽에 발행.
+# 운영자가 kafka-ui로 오류가 난 원인을 파악하는 용도
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaTopic
+metadata:
+  name: validation-requests-dlq
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: cledyu-kafka
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  partitions: 6
+  replicas: 3
+  config:
+    # 7일 보존 — 운영자가 실패 메시지를 검토할 시간을 확보한다.
+    retention.ms: "604800000"
+    min.insync.replicas: "2"
+    cleanup.policy: delete

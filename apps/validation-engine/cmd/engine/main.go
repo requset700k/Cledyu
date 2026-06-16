@@ -105,7 +105,7 @@ func handle(pub publisher, newExec func(model.VMSpec) (executor.VMExecutor, erro
 
 		// publishFailed는 재처리해도 변하지 않는 영구 요청 오류를 처리한다.
 		// 실패 결과를 Kafka에 발행해 Session API에 알리고 nil을 반환해 오프셋을 커밋한다.
-		// 발행 자체가 실패하면 시스템 오류이므로 에러를 그대로 반환해 재시도한다.
+		// 발행 자체가 실패하면 FatalError로 감싸 consumer를 종료 — 파드 재시작 후 재시도한다.
 		publishFailed := func(reason string) error {
 			log.Warn("요청 오류 — 실패 결과 발행",
 				zap.String("trace_id", req.TraceID),
@@ -113,17 +113,19 @@ func handle(pub publisher, newExec func(model.VMSpec) (executor.VMExecutor, erro
 				zap.Int("step_id", req.StepID),
 				zap.String("reason", reason),
 			)
-			return pub.Publish(ctx, model.ValidationResult{
+			if err := pub.Publish(ctx, model.ValidationResult{
 				TraceID:   req.TraceID,
 				SessionID: req.SessionID,
 				StepID:    req.StepID,
 				Passed:    false,
 				Checks: []model.CheckResult{
-					// reason을 Checks에 담아 Session API / UI가 실패 이유를 알 수 있게 한다
 					{Type: model.CheckRequestError, Passed: false, Detail: reason},
 				},
 				DurationMS: time.Since(start).Milliseconds(),
-			})
+			}); err != nil {
+				return &consumer.FatalError{Err: err}
+			}
+			return nil
 		}
 
 		// 요청 필드 검증 — 아래 조건은 재시도해도 절대 성공하지 않는 영구 오류다
@@ -167,9 +169,9 @@ func handle(pub publisher, newExec func(model.VMSpec) (executor.VMExecutor, erro
 		}
 
 		// 검증 결과를 Kafka의 결과 토픽으로 발행
-		// 실패하면 시스템 오류 — consumer가 종료되고 Pod 재시작 후 재시도한다
+		// 실패하면 FatalError로 감싸 consumer를 종료 — Kafka 장애 등 일시적 오류이므로 파드 재시작 후 재시도
 		if err := pub.Publish(ctx, result); err != nil {
-			return err
+			return &consumer.FatalError{Err: err}
 		}
 
 		log.Info("검증 완료",
