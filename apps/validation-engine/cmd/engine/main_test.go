@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/requset700k/cledyu/validation-engine/internal/consumer"
 	"github.com/requset700k/cledyu/validation-engine/internal/executor"
 	"github.com/requset700k/cledyu/validation-engine/internal/model"
 	"go.uber.org/zap"
@@ -136,17 +137,38 @@ func TestHandle_InvalidVMSpec_PublishFailed(t *testing.T) {
 	assertPublishedFailed(t, pub, "KubeVirt VM은 Name과 Namespace가 필요합니다")
 }
 
-// Kafka 발행 자체가 실패하면 error를 반환해야 한다 (시스템 오류, consumer가 종료됨).
+// Kafka 발행 자체가 실패하면 FatalError를 반환해야 한다 — consumer가 DLQ 대신 종료되어 파드 재시작 후 재시도한다.
 // publishFailed 경로(빈 checks)에서 pub.Publish가 실패하는 상황으로 검증한다.
-func TestHandle_PublishError_ReturnsError(t *testing.T) {
+func TestHandle_PublishError_ReturnsFatalError(t *testing.T) {
 	pub := &mockPublisher{err: errors.New("kafka 장애")}
 	h := handle(pub, executor.New, zap.NewNop())
 
 	req := baseRequest()
 	req.Checks = nil // publishFailed 경로로 유도
 
-	if err := h(context.Background(), req); err == nil {
+	err := h(context.Background(), req)
+	if err == nil {
 		t.Fatal("publish 실패 시 error를 반환해야 함")
+	}
+	var fatal *consumer.FatalError
+	if !errors.As(err, &fatal) {
+		t.Fatalf("publish 실패는 FatalError여야 하지만 %T였다", err)
+	}
+}
+
+// 검증 결과 발행(pub.Publish) 자체가 실패해도 FatalError를 반환해야 한다.
+// publishFailed 경로가 아닌 checker.RunAll 이후 결과 발행 실패 경로를 검증한다.
+func TestHandle_ResultPublishError_ReturnsFatalError(t *testing.T) {
+	pub := &mockPublisher{err: errors.New("kafka 장애")}
+	h := handle(pub, mockExecFactory("ok"), zap.NewNop())
+
+	err := h(context.Background(), baseRequest())
+	if err == nil {
+		t.Fatal("결과 발행 실패 시 error를 반환해야 함")
+	}
+	var fatal *consumer.FatalError
+	if !errors.As(err, &fatal) {
+		t.Fatalf("결과 발행 실패는 FatalError여야 하지만 %T였다", err)
 	}
 }
 
