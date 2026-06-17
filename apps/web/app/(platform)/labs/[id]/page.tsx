@@ -222,9 +222,7 @@ function LabDetail() {
                 </div>
               )}
               {start.isError && !activeSessionConflict && !replaceError && (
-                <span className="ml-3 text-red-400 text-xs">
-                  세션을 시작하지 못했습니다.
-                </span>
+                <span className="ml-3 text-red-400 text-xs">세션을 시작하지 못했습니다.</span>
               )}
             </>
           ) : (
