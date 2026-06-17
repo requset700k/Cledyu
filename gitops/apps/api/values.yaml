@@ -1,6 +1,6 @@
 image:
   repository: ghcr.io/requset700k/api
-  tag: sha-24f3e4c
+  tag: sha-5b0c3c5
   pullPolicy: Always
 
 replicaCount: 1

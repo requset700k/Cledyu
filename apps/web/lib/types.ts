@@ -108,4 +108,5 @@ export interface User {
 export interface ApiError {
   error: string;
   code?: string;
+  session_id?: string;
 }
