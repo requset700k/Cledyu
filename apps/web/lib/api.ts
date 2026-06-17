@@ -16,8 +16,8 @@ interface ApiErrorPayload {
   [key: string]: unknown;
 }
 
-// 백엔드가 내려주는 code/session_id 같은 구조화된 에러 필드를 보존한다.
-// Lab 시작 409(session_exists)처럼 UI가 후속 처리를 해야 하는 응답에서 사용한다.
+// HTTP 상태만으로는 복구 가능한 충돌(session_exists 등)을 구분할 수 없다.
+// 백엔드의 구조화된 에러 필드를 보존해 화면이 이어가기/교체 같은 후속 흐름을 결정하게 한다.
 export class ApiRequestError extends Error {
   readonly status: number;
   readonly code?: string;
