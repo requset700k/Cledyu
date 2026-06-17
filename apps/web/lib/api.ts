@@ -9,6 +9,34 @@ interface Paginated<T> {
   total: number;
 }
 
+interface ApiErrorPayload {
+  error?: string;
+  code?: string;
+  session_id?: string;
+  [key: string]: unknown;
+}
+
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  readonly sessionId?: string;
+  readonly payload: ApiErrorPayload;
+
+  constructor(
+    status: number,
+    payload: ApiErrorPayload,
+    fallbackMessage: string,
+    preferPayloadMessage = true,
+  ) {
+    super(preferPayloadMessage ? (payload.error ?? fallbackMessage) : fallbackMessage);
+    this.name = 'ApiRequestError';
+    this.status = status;
+    this.code = payload.code;
+    this.sessionId = payload.session_id;
+    this.payload = payload;
+  }
+}
+
 // 개발 모드에서는 Keycloak 대신 dev-token으로 백엔드 stub JWT 미들웨어를 통과
 const DEV_HEADERS: Record<string, string> =
   process.env.NODE_ENV === 'development' ? { Authorization: 'Bearer dev-token' } : {};
@@ -25,6 +53,10 @@ function refreshSession(): Promise<boolean> {
       refreshInFlight = null;
     });
   return refreshInFlight;
+}
+
+async function readErrorPayload(res: Response): Promise<ApiErrorPayload> {
+  return res.json().catch(() => ({ error: res.statusText }));
 }
 
 /** 모든 API 요청의 공통 래퍼. 에러 응답은 백엔드의 { error: string } 포맷으로 throw. */
@@ -64,22 +96,21 @@ async function request<T>(path: string, options?: RequestInit, retried = false):
 
   // 인증은 됐지만 역할 권한 없음 (student → instructor 엔드포인트 등)
   if (res.status === 403) {
-    throw new Error('FORBIDDEN');
+    throw new ApiRequestError(res.status, await readErrorPayload(res), 'FORBIDDEN', false);
   }
 
   // 존재하지 않는 리소스 (Lab ID, Session ID 등)
   if (res.status === 404) {
-    throw new Error('NOT_FOUND');
+    throw new ApiRequestError(res.status, await readErrorPayload(res), 'NOT_FOUND', false);
   }
 
   // 500/502/503/504: 서버 측 문제 — 클라이언트 에러(4xx)와 구분해서 UI 처리
   if (res.status >= 500) {
-    throw new Error('SERVER_ERROR');
+    throw new ApiRequestError(res.status, await readErrorPayload(res), 'SERVER_ERROR', false);
   }
 
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error ?? 'Request failed');
+    throw new ApiRequestError(res.status, await readErrorPayload(res), 'Request failed');
   }
 
   // 204 No Content: DELETE 등 응답 바디 없는 경우. T=void 호출 전용.
