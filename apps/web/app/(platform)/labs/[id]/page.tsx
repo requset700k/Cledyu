@@ -16,6 +16,8 @@ interface ActiveSessionConflict {
 
 function LabDetail() {
   const { id } = useParams<{ id: string }>();
+
+  // 세션 시작 전 화면에서 관리하는 로컬 상태다. 실제 세션 진행/TTL 처리는 LabSession이 맡는다.
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [resumedExisting, setResumedExisting] = useState(false);
   const [activeSessionConflict, setActiveSessionConflict] = useState<ActiveSessionConflict | null>(
@@ -58,6 +60,7 @@ function LabDetail() {
     },
   });
 
+  // session_exists 응답에는 session_id만 있으므로, 세션 상세를 다시 읽어 현재 Lab과의 관계를 판정한다.
   async function handleExistingSession(existingSessionId: string) {
     setExistingSessionAction('checking');
     setActiveSessionConflict(null);
@@ -84,6 +87,7 @@ function LabDetail() {
     }
   }
 
+  // 사용자가 명시적으로 기존 실습을 포기하거나, 만료된 세션을 정리할 때만 새 세션으로 교체한다.
   async function replaceExistingSession(existingSessionId: string) {
     setExistingSessionAction('terminating');
     setReplaceError(null);
@@ -99,6 +103,7 @@ function LabDetail() {
       }
       deleted = true;
       const next = await api.sessions.create(id);
+      // 교체가 성공하면 이후 화면은 새 세션의 TTL/진행 상태를 기준으로 다시 시작한다.
       setActiveSessionConflict(null);
       setResumedExisting(false);
       setReplaceError(null);
@@ -177,6 +182,7 @@ function LabDetail() {
               </button>
               {activeSessionConflict && (
                 <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm max-w-2xl">
+                  {/* 다른 Lab 세션은 자동 이동하지 않는다. 사용자가 이어갈지 종료할지 선택해야 한다. */}
                   <p className="text-amber-200 font-medium">
                     이미 진행 중인 다른 실습 세션이 있습니다.
                   </p>
