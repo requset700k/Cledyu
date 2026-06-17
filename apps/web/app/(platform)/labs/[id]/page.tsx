@@ -67,11 +67,6 @@ function LabDetail() {
     setReplaceError(null);
     try {
       const existing = await api.sessions.get(existingSessionId);
-      // TTL 만료와 reaper 실행 사이에는 짧은 지연이 있다. 만료된 세션은 이어가지 않고 현재 Lab으로 교체한다.
-      if (isExpired(existing.expires_at)) {
-        await replaceExistingSession(existing.id);
-        return;
-      }
       if (existing.lab_id === id) {
         setActiveSessionConflict(null);
         setResumedExisting(true);
@@ -87,7 +82,7 @@ function LabDetail() {
     }
   }
 
-  // 사용자가 명시적으로 기존 실습을 포기하거나, 만료된 세션을 정리할 때만 새 세션으로 교체한다.
+  // 진행 중인 다른 Lab 세션은 사용자가 명시적으로 포기할 때만 새 세션으로 교체한다.
   async function replaceExistingSession(existingSessionId: string) {
     setExistingSessionAction('terminating');
     setReplaceError(null);
@@ -234,11 +229,6 @@ function LabDetail() {
       )}
     </div>
   );
-}
-
-function isExpired(expiresAt: string): boolean {
-  const deadline = Date.parse(expiresAt);
-  return !Number.isNaN(deadline) && deadline <= Date.now();
 }
 
 function LabHeader({ lab }: { lab: Lab }) {
