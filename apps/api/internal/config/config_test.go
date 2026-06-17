@@ -14,3 +14,15 @@ func TestLoadUsesKubeconfigEnvFallback(t *testing.T) {
 		t.Fatalf("KubeVirt.Kubeconfig = %q, want %q", got, want)
 	}
 }
+
+func TestLoadReadsKeycloakClientSecretEnv(t *testing.T) {
+	t.Setenv("CLEDYU_KEYCLOAK_CLIENT_SECRET", "dummy-web-secret")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got, want := cfg.Keycloak.ClientSecret, "dummy-web-secret"; got != want {
+		t.Fatalf("Keycloak.ClientSecret = %q, want %q", got, want)
+	}
+}
