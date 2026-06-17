@@ -4,6 +4,7 @@ CVE-2026-28387
 CVE-2026-28388
 CVE-2026-28389
 CVE-2026-28390
+CVE-2026-45447
 
 # libssl3 PKCS7_verify Heap UAF — runner base(gcr.io/distroless/nodejs20-debian12)의 OS 패키지
 # 취약점. distroless라 apt-get 불가로 직접 패치 불가하며, Node 런타임은 자체 번들 OpenSSL을

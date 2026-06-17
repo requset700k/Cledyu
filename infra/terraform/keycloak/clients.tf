@@ -42,3 +42,25 @@ resource "keycloak_openid_group_membership_protocol_mapper" "groups" {
   add_to_id_token     = true
   add_to_userinfo     = true
 }
+
+# kafka-ui RBAC(oauth role 매칭)용. Keycloak realm role은 기본적으로 중첩 클레임
+# realm_access.roles에 들어가는데 kafbat-ui는 중첩 JSON path를 지원하지 않아
+# (https://github.com/kafbat/kafka-ui/issues/1025) 평탄화된 최상위 "roles" 클레임이 필요하다.
+resource "keycloak_openid_user_realm_role_protocol_mapper" "kafka_ui_roles" {
+  realm_id  = keycloak_realm.cledyu.id
+  client_id = keycloak_openid_client.clients["kafka-ui"].id
+  name      = "roles"
+
+  claim_name  = "roles"
+  multivalued = true
+
+  add_to_access_token = true
+  add_to_id_token     = true
+  add_to_userinfo     = true
+}
+
+# 위 매퍼는 장애 대응 중 Keycloak Admin API로 먼저 만들어 운영 state엔 아직 없다.
+# import 블록을 커밋에 남기면 이 매퍼가 없는 환경(재해복구로 새로 세운 Keycloak 등)에서
+# apply 자체가 막힌다. 그래서 커밋하지 않고, 운영 state에는 1회성으로 직접 적용한다:
+#   terraform import keycloak_openid_user_realm_role_protocol_mapper.kafka_ui_roles \
+#     "cledyu/client/<kafka-ui client id>/6675bdbd-cbb5-40aa-ac9a-cd2cd659d714"
