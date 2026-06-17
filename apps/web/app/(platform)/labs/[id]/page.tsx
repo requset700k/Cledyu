@@ -46,6 +46,7 @@ function LabDetail() {
       setSessionId(s.id);
     },
     onError: (err) => {
+      // 사용자당 활성 세션 1개 정책으로 409가 오면, 기존 세션을 조회해 이어가기/교체 UX로 분기한다.
       if (
         err instanceof ApiRequestError &&
         err.status === 409 &&
@@ -63,6 +64,7 @@ function LabDetail() {
     setReplaceError(null);
     try {
       const existing = await api.sessions.get(existingSessionId);
+      // TTL은 백엔드 reaper가 강제하지만, reaper 주기 전의 만료 세션은 프론트에서 새 세션으로 교체한다.
       if (isExpired(existing.expires_at)) {
         await replaceExistingSession(existing.id);
         return;
@@ -90,6 +92,7 @@ function LabDetail() {
       try {
         await api.sessions.delete(existingSessionId);
       } catch (err) {
+        // reaper가 이미 namespace를 정리했을 수 있으므로 404는 삭제 완료로 간주하고 새 세션 생성을 계속한다.
         if (!(err instanceof ApiRequestError && err.status === 404)) {
           throw err;
         }
@@ -286,6 +289,7 @@ export default function LabDetailPage() {
 
   return (
     <Suspense fallback={<DetailSkeleton />}>
+      {/* App Router는 같은 page 인스턴스를 재사용할 수 있어 Lab id 변경 시 내부 세션 상태를 리셋한다. */}
       <LabDetail key={id} />
     </Suspense>
   );
