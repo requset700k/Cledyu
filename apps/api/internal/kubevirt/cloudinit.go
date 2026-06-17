@@ -7,8 +7,9 @@ import (
 
 // renderCloudInit은 세션 VM 의 #cloud-config userdata 를 만든다.
 //
-// 공통부: lab 사용자(autologin·sudo) + serial getty 오버라이드.
+// 공통부: lab 사용자(autologin·sudo) + DNS upstream 보정 + serial getty 오버라이드.
 // 랩별부(init): packages(apt) 와 runcmd 추가 — Lab DSL 의 init 필드에서 온다.
+// DNS 는 packages 모듈보다 먼저 필요하므로 runcmd 가 아니라 bootcmd 에서 적용한다.
 // init.Runcmd 는 공통 runcmd(getty 재시작) 뒤에 붙어, 터미널이 먼저 열리고
 // 도구 설치가 백그라운드로 이어지는 순서를 보장한다.
 func renderCloudInit(sessionID, labSSHPublicKey string, init BootInit) string {
@@ -32,6 +33,10 @@ chpasswd:
   expire: false
   list: |
     lab:lab
+bootcmd:
+  - "mkdir -p /etc/systemd/resolved.conf.d"
+  - "printf '%%s\\n' '[Resolve]' 'DNS=8.8.8.8 1.1.1.1' 'FallbackDNS=8.8.4.4 1.0.0.1' 'Domains=~.' > /etc/systemd/resolved.conf.d/cledyu-lab.conf"
+  - "systemctl restart systemd-resolved || true"
 `, "session-"+sessionID, sshKeyBlock)
 
 	if len(init.Packages) > 0 {
