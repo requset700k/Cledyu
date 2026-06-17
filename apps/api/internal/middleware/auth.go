@@ -58,11 +58,14 @@ func JWT(provider *auth.Provider, log *zap.Logger, devFallback bool) gin.Handler
 }
 
 func extractToken(c *gin.Context) string {
-	if h := c.GetHeader("Authorization"); strings.HasPrefix(h, "Bearer ") {
-		return strings.TrimPrefix(h, "Bearer ")
-	}
+	// 쿠키가 실제 로그인 세션이다. 로컬 dev 의 Authorization 헤더(dev-token stub, apps/web
+	// lib/api.ts DEV_HEADERS)보다 우선해야, 실 Keycloak 로그인 후에도 그 stub 헤더에 가로채여
+	// 매 요청이 401 로 실패 → /login 으로 되돌아가는 문제가 생기지 않는다.
 	if cookie, err := c.Cookie("access_token"); err == nil {
 		return cookie
+	}
+	if h := c.GetHeader("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		return strings.TrimPrefix(h, "Bearer ")
 	}
 	// Query param: WebSocket 업그레이드 시 브라우저가 헤더를 못 보냄.
 	if t := c.Query("token"); t != "" {

@@ -115,6 +115,7 @@ func Load() (*Config, error) {
 	// CLEDYU_KEYCLOAK_CLIENT_SECRET 로 주입(web=confidential BFF client).
 	v.SetDefault("keycloak.realm", "cledyu-learn")
 	v.SetDefault("keycloak.client_id", "web")
+	v.SetDefault("keycloak.client_secret", "")
 	v.SetDefault("keycloak.redirect_uri", "https://api.cledyu.local/api/v1/auth/callback")
 	v.SetDefault("frontend_url", "https://app.cledyu.local")
 	v.SetDefault("keycloak.cookie_domain", ".cledyu.local")
