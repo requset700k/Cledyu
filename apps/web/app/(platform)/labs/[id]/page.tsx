@@ -86,6 +86,7 @@ function LabDetail() {
   async function replaceExistingSession(existingSessionId: string) {
     setExistingSessionAction('terminating');
     setReplaceError(null);
+    // delete 성공 후 create가 실패한 경우와 delete 자체가 실패한 경우의 사용자 안내가 달라야 한다.
     let deleted = false;
     try {
       try {
@@ -216,9 +217,12 @@ function LabDetail() {
                   {replaceError}
                 </div>
               )}
-              {start.isError && !activeSessionConflict && !replaceError && (
-                <span className="ml-3 text-red-400 text-xs">세션을 시작하지 못했습니다.</span>
-              )}
+              {start.isError &&
+                existingSessionAction === null &&
+                !activeSessionConflict &&
+                !replaceError && (
+                  <span className="ml-3 text-red-400 text-xs">세션을 시작하지 못했습니다.</span>
+                )}
             </>
           ) : (
             <p className="text-slate-500 text-sm">
