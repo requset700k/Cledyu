@@ -51,7 +51,9 @@ func newKubeVirtExecutor(vm model.VMSpec) (*KubeVirtExecutor, error) {
 func (e *KubeVirtExecutor) Exec(ctx context.Context, cmd string) (string, error) {
 	// distroless 이미지에는 ssh 바이너리가 없으므로 virtctl native client(기본)를 쓴다.
 	// --username/--identity-file로 인증한다(미설정 시 키 없이 시도).
-	args := []string{"ssh", "--username", e.sshUser}
+	// --known-hosts /dev/null: 기본 경로(/home/nonroot/.ssh/kubevirt_known_hosts)가 distroless
+	// 컨테이너에 없어 virtctl이 20s hang 후 killed되는 문제를 막는다.
+	args := []string{"ssh", "--username", e.sshUser, "--known-hosts", "/dev/null"}
 	if e.sshKey != "" {
 		args = append(args, "--identity-file", e.sshKey)
 	}
