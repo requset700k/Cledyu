@@ -108,8 +108,8 @@ func (h *Handler) sessionResponse(s *kubevirt.Session) gin.H {
 		out["current_step"] = ss.CurrentStep
 		return false
 	})
-	// 라이브 터미널 랩만 WS 경로 제공.
-	if lc, ok := h.labs[s.LabID]; ok && lc.HasLiveTerminal() {
+	// 라이브 터미널 랩이 실제 사용 가능한 상태일 때만 WS 경로 제공.
+	if lc, ok := h.labs[s.LabID]; ok && lc.HasLiveTerminal() && (s.Status == "ready" || s.Status == "active") {
 		out["terminal_url"] = "/api/v1/sessions/" + s.ID + "/ws"
 		// IDE 랩(code-server)은 브라우저 VS Code 프록시 경로도 함께 제공.
 		if lc.IDE {

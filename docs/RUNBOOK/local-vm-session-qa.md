@@ -252,6 +252,17 @@ Temporary failure resolving 'security.ubuntu.com'
 API가 생성하는 cloud-init `bootcmd`에서 public DNS fallback을 설정해
 패키지 설치와 k3s 다운로드 전에 이름 해석이 가능하도록 보정한다.
 
+### 터미널이 설치 로그를 먼저 보여줌
+
+랩별 `init.runcmd`가 끝나기 전에 serial getty가 먼저 재시작되면 학생 터미널에
+cloud-init 설치 로그나 준비 전 프롬프트가 보일 수 있다. API가 생성하는 cloud-init은
+부팅 초기에 `serial-getty@ttyS0`를 멈추고, 랩별 init이 끝난 뒤 autologin getty를
+다시 시작한다.
+
+세션 상태 조회는 VM이 `Running`이 되면 `ready`로 전환한다. 반대로 기본
+프로비저닝 제한 시간(2분)을 넘겼는데도 VM이 `Running`이 아니면 `failed`로 표시하고,
+백그라운드 reaper가 해당 세션 namespace를 회수한다.
+
 ## 참고
 
 - `apps/api/internal/config/config.go`: `KUBECONFIG`를 `kubevirt.kubeconfig` fallback으로 사용
