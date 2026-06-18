@@ -60,7 +60,7 @@ func TestRenderCloudInit_ClearsSerialConsoleOnLogin(t *testing.T) {
 		t.Fatalf("expected .hushlogin to suppress Ubuntu MOTD, got files %v", files)
 	}
 	profile := files["/home/lab/.bash_profile"]
-	for _, want := range []string{`\033[H\033[2J\033[3J`, "cd /home/lab"} {
+	for _, want := range []string{". /home/lab/.bashrc", `\033[H\033[2J\033[3J`, "cd /home/lab"} {
 		if !strings.Contains(profile, want) {
 			t.Fatalf("expected %q in .bash_profile, got:\n%s", want, profile)
 		}

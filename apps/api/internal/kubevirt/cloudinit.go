@@ -62,6 +62,9 @@ bootcmd:
     owner: lab:lab
     permissions: "0644"
     content: |
+      if [ -f /home/lab/.bashrc ]; then
+        . /home/lab/.bashrc
+      fi
       # Clear the KubeVirt serial-console boot scrollback before showing the lab prompt.
       printf '\033[H\033[2J\033[3J'
       cd /home/lab

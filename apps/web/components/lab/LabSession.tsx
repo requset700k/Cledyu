@@ -11,10 +11,10 @@ import { LabWorkspace } from './LabWorkspace';
 import { AiTutorPanel } from './AiTutorPanel';
 import { SessionTimer } from './SessionTimer';
 
-// VM이 Running으로 보고된 이후에도 cloud-init final stage(getty 재시작 + autologin 활성)
-// 까지 약 30–60초가 더 필요하다. 그 사이 학생에게 login 프롬프트가 보이지 않도록
+// VM이 Running으로 보고된 이후에도 cloud-init final stage(랩 init + getty 재시작 + autologin 활성)
+// 까지 최대 1~2분이 더 필요할 수 있다. 그 사이 학생에게 login 프롬프트가 보이지 않도록
 // status=ready 시점부터 BOOT_GRACE_MS 동안 로딩 카드를 유지한다.
-const BOOT_GRACE_MS = 60_000;
+const BOOT_GRACE_MS = 120_000;
 
 // 세션 진행 화면: 좌측 단계 목록 + 우측 현재 단계 지시문/터미널/검증.
 // VM 부팅·자동 로그인 활성화가 끝나기 전까지는 SessionBoot 로딩 카드만 노출.
