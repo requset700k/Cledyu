@@ -19,10 +19,13 @@ kind: ClusterRole
 metadata:
   name: "{{ .Release.Name }}-session-provisioner"
 rules:
-  # 세션 네임스페이스 생성/조회/삭제 (삭제 시 secret·VM 등 자식 리소스는 cascade 정리)
+  # 세션 네임스페이스 생성/조회/삭제 (삭제 시 secret·VM 등 자식 리소스는 cascade 정리).
+  # list: 세션 namespace는 cluster-scope라 user/만료 기준 검색에 namespace 목록 전체 조회가
+  # 필요하다(FindActiveByUser/CountActiveSessions/Reap*Sessions, session.go). 누락 시 그
+  # 함수들이 전부 403으로 실패해 세션 생성(실습 시작)이 막힌다.
   - apiGroups: [""]
     resources: ["namespaces"]
-    verbs: ["create", "get", "delete"]
+    verbs: ["create", "get", "list", "delete"]
   # 세션 네임스페이스에 cloud-init Secret 생성
   - apiGroups: [""]
     resources: ["secrets"]
