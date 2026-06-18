@@ -89,6 +89,38 @@ func newTraceID() string {
 	return hex.EncodeToString(b)
 }
 
+type sessionCreationManager interface {
+	FindActiveByUser(ctx context.Context, userID string) (string, error)
+	Get(ctx context.Context, sessionID string) (*kubevirt.Session, error)
+	Delete(ctx context.Context, sessionID string) error
+}
+
+// prepareSessionCreation은 기존 활성 세션을 확인하고, 이미 failed 상태인 세션은
+// namespace를 정리해 사용자가 reaper 주기를 기다리지 않고 즉시 다시 시작할 수 있게 한다.
+// cleanedSessionID는 handler가 남아 있는 진행 상태를 함께 제거하는 데 사용한다.
+func prepareSessionCreation(ctx context.Context, sessions sessionCreationManager, userID string) (existingSessionID, cleanedSessionID string, err error) {
+	existing, err := sessions.FindActiveByUser(ctx, userID)
+	if err != nil || existing == "" {
+		return existing, "", err
+	}
+
+	sess, err := sessions.Get(ctx, existing)
+	if errors.Is(err, kubevirt.ErrNotFound) {
+		return "", existing, nil
+	}
+	if err != nil {
+		return "", "", err
+	}
+	if sess.Status != "failed" {
+		return existing, "", nil
+	}
+
+	if err := sessions.Delete(ctx, existing); err != nil && !errors.Is(err, kubevirt.ErrNotFound) {
+		return "", "", err
+	}
+	return "", existing, nil
+}
+
 // sessionResponse는 kubevirt.Session에 핸들러 레벨 보강 필드를 덧붙여 프론트 Session 계약에 맞춘다.
 //   - current_step : 스텝 진행은 stepStore(in-memory STUB)에서 조회.
 //   - terminal_url : lab.environment == "ubuntu" 일 때만(실시간 KubeVirt 터미널 제공 랩).
@@ -156,11 +188,14 @@ func (h *Handler) CreateSession(c *gin.Context) {
 		}
 		defer release()
 
-		existing, err := h.sessions.FindActiveByUser(c.Request.Context(), uid)
+		existing, cleaned, err := prepareSessionCreation(c.Request.Context(), h.sessions, uid)
 		if err != nil {
-			h.log.Error("find active session", zap.Error(err))
+			h.log.Error("prepare session creation", zap.Error(err))
 			h.err(c, http.StatusInternalServerError, "check active session failed")
 			return
+		}
+		if cleaned != "" {
+			h.steps.remove(cleaned)
 		}
 		if existing != "" {
 			c.JSON(http.StatusConflict, gin.H{

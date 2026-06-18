@@ -57,10 +57,12 @@ bootcmd:
   - path: /home/lab/.hushlogin
     owner: lab:lab
     permissions: "0644"
+    defer: true
     content: ""
   - path: /home/lab/.bash_profile
     owner: lab:lab
     permissions: "0644"
+    defer: true
     content: |
       if [ -f /home/lab/.bashrc ]; then
         . /home/lab/.bashrc
