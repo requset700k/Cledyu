@@ -160,6 +160,26 @@ kubectl get pods -n kafka -w
 
 브라우저에서 `https://kafka-ui.cledyu.local` 접속 후 cledyu-kafka 클러스터·토픽 목록이 표시되면 정상.
 
+### kafka_ui_roles 매퍼 terraform import (1회, 신규 Keycloak 구축 시)
+
+`kafka_ui_roles` 매퍼는 장애 대응 중 Keycloak Admin API로 먼저 생성했기 때문에
+import 블록을 코드에 남기지 않는다. 재해복구 등으로 Keycloak을 새로 구축한 경우
+terraform apply 전에 반드시 아래 명령을 1회 실행해야 한다.
+import 없이 apply하면 Keycloak이 동일 이름 매퍼가 이미 있다고 409로 거부한다.
+
+```bash
+# kafka-ui client id 조회
+CLIENT_ID=$(cd infra/terraform/keycloak && terraform show -json | \
+  python3 -c "import json,sys; r=json.load(sys.stdin)['values']['root_module']['resources']; \
+  print(next(x['values']['id'] for x in r if x['address']=='keycloak_openid_client.clients[\"kafka-ui\"]'))")
+
+terraform import \
+  keycloak_openid_user_realm_role_protocol_mapper.kafka_ui_roles \
+  "cledyu/client/${CLIENT_ID}/6675bdbd-cbb5-40aa-ac9a-cd2cd659d714"
+```
+
+import 후 `terraform plan` 에서 No changes 가 확인되면 정상.
+
 ---
 
 ## 6. 동작 검증 (produce → consume 왕복)
