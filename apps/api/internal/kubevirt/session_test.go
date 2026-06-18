@@ -29,6 +29,14 @@ func sessionNS(id, userID string, phase corev1.NamespacePhase) *corev1.Namespace
 	}
 }
 
+func deletingSessionNS(id, userID string) *corev1.Namespace {
+	ns := sessionNS(id, userID, corev1.NamespaceActive)
+	now := metav1.Now()
+	ns.DeletionTimestamp = &now
+	ns.Finalizers = []string{"kubernetes"}
+	return ns
+}
+
 func newTestManager(objs ...runtime.Object) *Manager {
 	return &Manager{core: fake.NewSimpleClientset(objs...)}
 }
@@ -67,6 +75,12 @@ func TestFindActiveByUser(t *testing.T) {
 			want:   "",
 		},
 		{
+			name:   "ignores namespace with deletion timestamp",
+			objs:   []runtime.Object{deletingSessionNS("abc123", "alice")},
+			userID: "alice",
+			want:   "",
+		},
+		{
 			name:   "empty userID matches nothing",
 			objs:   []runtime.Object{sessionNS("abc123", "", corev1.NamespaceActive)},
 			userID: "",
@@ -93,6 +107,7 @@ func TestCountActiveSessions(t *testing.T) {
 		sessionNS("a", "u1", corev1.NamespaceActive),
 		sessionNS("b", "u2", corev1.NamespaceActive),
 		sessionNS("c", "u3", corev1.NamespaceTerminating), // 삭제 중 → 제외
+		deletingSessionNS("d", "u4"),                      // 삭제 요청됨 → 제외
 	)
 	n, err := m.CountActiveSessions(context.Background())
 	if err != nil {

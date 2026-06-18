@@ -238,7 +238,7 @@ func (m *Manager) FindActiveByUser(ctx context.Context, userID string) (string, 
 		if ns.Annotations[annUserID] != userID {
 			continue
 		}
-		if ns.Status.Phase == corev1.NamespaceTerminating {
+		if namespaceDeleting(&ns) {
 			continue
 		}
 		return strings.TrimPrefix(ns.Name, "lab-"), nil
@@ -256,11 +256,15 @@ func (m *Manager) CountActiveSessions(ctx context.Context) (int, error) {
 	}
 	n := 0
 	for i := range list.Items {
-		if list.Items[i].Status.Phase != corev1.NamespaceTerminating {
+		if !namespaceDeleting(&list.Items[i]) {
 			n++
 		}
 	}
 	return n, nil
+}
+
+func namespaceDeleting(ns *corev1.Namespace) bool {
+	return ns.Status.Phase == corev1.NamespaceTerminating || ns.DeletionTimestamp != nil
 }
 
 // ReapStuckSessions는 생성 후 timeout 안에 VM이 ready(Running)가 되지 못한 세션 namespace를 삭제하고
@@ -277,7 +281,7 @@ func (m *Manager) ReapStuckSessions(ctx context.Context, timeout time.Duration) 
 	var reaped []string
 	for i := range list.Items {
 		ns := &list.Items[i]
-		if ns.Status.Phase == corev1.NamespaceTerminating {
+		if namespaceDeleting(ns) {
 			continue // 이미 삭제 중
 		}
 		started, _ := time.Parse(time.RFC3339, ns.Annotations["cledyu.io/started-at"])
@@ -313,7 +317,7 @@ func (m *Manager) ReapExpiredSessions(ctx context.Context) ([]string, error) {
 	var reaped []string
 	for i := range list.Items {
 		ns := &list.Items[i]
-		if ns.Status.Phase == corev1.NamespaceTerminating {
+		if namespaceDeleting(ns) {
 			continue // 이미 삭제 중
 		}
 		expires, err := time.Parse(time.RFC3339, ns.Annotations["cledyu.io/expires-at"])

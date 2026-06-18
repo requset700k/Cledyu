@@ -46,20 +46,38 @@ func TestRenderCloudInit_ClearsSerialConsoleOnLogin(t *testing.T) {
 		WriteFiles []struct {
 			Path    string `yaml:"path"`
 			Content string `yaml:"content"`
+			Defer   bool   `yaml:"defer"`
 		} `yaml:"write_files"`
 	}
 	if err := yaml.Unmarshal([]byte(out), &parsed); err != nil {
 		t.Fatalf("rendered cloud-init is not valid YAML: %v\n%s", err, out)
 	}
 
-	files := map[string]string{}
+	files := map[string]struct {
+		content string
+		deferIt bool
+	}{}
 	for _, f := range parsed.WriteFiles {
-		files[f.Path] = f.Content
+		files[f.Path] = struct {
+			content string
+			deferIt bool
+		}{content: f.Content, deferIt: f.Defer}
 	}
-	if _, ok := files["/home/lab/.hushlogin"]; !ok {
+	hushlogin, ok := files["/home/lab/.hushlogin"]
+	if !ok {
 		t.Fatalf("expected .hushlogin to suppress Ubuntu MOTD, got files %v", files)
 	}
-	profile := files["/home/lab/.bash_profile"]
+	if !hushlogin.deferIt {
+		t.Fatal("expected .hushlogin write to be deferred until the lab user exists")
+	}
+	profileFile, ok := files["/home/lab/.bash_profile"]
+	if !ok {
+		t.Fatalf("expected .bash_profile, got files %v", files)
+	}
+	if !profileFile.deferIt {
+		t.Fatal("expected .bash_profile write to be deferred until the lab user exists")
+	}
+	profile := profileFile.content
 	for _, want := range []string{". /home/lab/.bashrc", `\033[H\033[2J\033[3J`, "cd /home/lab"} {
 		if !strings.Contains(profile, want) {
 			t.Fatalf("expected %q in .bash_profile, got:\n%s", want, profile)
