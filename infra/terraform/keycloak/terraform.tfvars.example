@@ -54,12 +54,25 @@ oidc_clients = {
       "http://127.0.0.1:18000",
     ]
   }
+
+  airflow = {
+    name                            = "Cledyu Airflow"
+    access_type                     = "CONFIDENTIAL"
+    standard_flow_enabled           = true
+    direct_access_grants_enabled    = false
+    implicit_flow_enabled           = false
+    service_accounts_enabled        = false
+    valid_redirect_uris             = ["https://airflow.cledyu.local/oauth-authorized/keycloak"]
+    valid_post_logout_redirect_uris = ["https://airflow.cledyu.local/"]
+    web_origins                     = ["https://airflow.cledyu.local"]
+  }
 }
 
 oidc_client_secrets = {
   argocd  = "REPLACE_WITH_ARGOCD_CLIENT_SECRET"
   grafana = "REPLACE_WITH_GRAFANA_CLIENT_SECRET"
   vault   = "REPLACE_WITH_VAULT_CLIENT_SECRET"
+  airflow = "REPLACE_WITH_AIRFLOW_CLIENT_SECRET"
 }
 
 # ─────────────────────────────────────────────────────────────────────────

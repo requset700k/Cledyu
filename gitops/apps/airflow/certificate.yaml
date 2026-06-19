@@ -1,0 +1,25 @@
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: airflow-tls
+  namespace: airflow
+spec:
+  secretName: airflow-tls
+  duration: "2160h"
+  renewBefore: "720h"
+  commonName: airflow.cledyu.local
+  dnsNames:
+    - airflow.cledyu.local
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    rotationPolicy: Always
+  usages:
+    - server auth
+    - digital signature
+    - key encipherment
+  issuerRef:
+    name: cledyu-ca
+    kind: ClusterIssuer
+    group: cert-manager.io
