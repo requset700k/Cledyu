@@ -47,6 +47,10 @@ bootcmd:
 		}
 	}
 
+	// write_files 모듈은 보통 users-groups 모듈보다 먼저 실행되므로, lab 계정을
+	// owner로 쓰는 항목은 defer: true 로 final stage(유저 생성 이후)로 미뤄야 한다.
+	// (write_files normally runs before users-groups; without defer, these
+	// lab-owned files fail with "Unknown user or group: lab".)
 	b.WriteString(`write_files:
   - path: /etc/systemd/system/serial-getty@ttyS0.service.d/override.conf
     permissions: "0644"
@@ -67,7 +71,8 @@ bootcmd:
       if [ -f /home/lab/.bashrc ]; then
         . /home/lab/.bashrc
       fi
-      # Clear the KubeVirt serial-console boot scrollback before showing the lab prompt.
+      # 부팅 시 보이던 cloud-init/시리얼 콘솔 스크롤백을 지운다 (Clear the KubeVirt
+      # serial-console boot scrollback before showing the lab prompt).
       printf '\033[H\033[2J\033[3J'
       cd /home/lab
 runcmd:
