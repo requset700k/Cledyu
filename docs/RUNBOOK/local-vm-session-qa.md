@@ -251,6 +251,7 @@ Temporary failure resolving 'security.ubuntu.com'
 
 API가 생성하는 cloud-init `bootcmd`에서 public DNS fallback을 설정해
 패키지 설치와 k3s 다운로드 전에 이름 해석이 가능하도록 보정한다.
+<<<<<<< HEAD
 
 ### 터미널이 설치 로그를 먼저 보여줌
 
@@ -263,6 +264,8 @@ cloud-init 설치 로그나 준비 전 프롬프트가 보일 수 있다. API가
 부팅 카드를 유지해 랩별 init 완료와 autologin getty 재시작을 기다린다. 반대로 기본
 프로비저닝 제한 시간(5분)을 넘겼는데도 VM이 `Running`이 아니면 `failed`로 표시하고,
 백그라운드 reaper가 해당 세션 namespace를 회수한다.
+=======
+>>>>>>> origin/main
 
 ## 참고
 

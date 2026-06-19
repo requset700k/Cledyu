@@ -1,0 +1,4 @@
+# git은 빈 디렉토리를 추적하지 않아서 이 파일을 넣어둔다.
+# Airflow Helm 차트의 git-sync 사이드카가 이 경로(apps/airflow/dags/)를
+# 60초마다 pull하는데, 경로가 없으면 git-sync가 에러로 종료되기 때문
+# DAG 파일(.py)이 추가되면 이 파일은 지워도 됨
