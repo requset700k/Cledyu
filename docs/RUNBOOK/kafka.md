@@ -168,8 +168,9 @@ terraform apply 전에 반드시 아래 명령을 1회 실행해야 한다.
 import 없이 apply하면 Keycloak이 동일 이름 매퍼가 이미 있다고 409로 거부한다.
 
 ```bash
-# kafka-ui client id 조회
-CLIENT_ID=$(cd infra/terraform/keycloak && terraform show -json | \
+cd infra/terraform/keycloak
+
+CLIENT_ID=$(terraform show -json | \
   python3 -c "import json,sys; r=json.load(sys.stdin)['values']['root_module']['resources']; \
   print(next(x['values']['id'] for x in r if x['address']=='keycloak_openid_client.clients[\"kafka-ui\"]'))")
 
