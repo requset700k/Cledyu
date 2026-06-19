@@ -1,0 +1,87 @@
+apiVersion: sloth.slok.dev/v1
+kind: PrometheusServiceLevelObjective
+metadata:
+  name: lab-crd-slo
+  namespace: monitoring
+  labels:
+    app: lab-platform
+    role: slo
+spec:
+  service: "lab-service"
+  labels:
+    owner: "cledyu-team"
+    tier: "biz"
+  objectives:
+    # -------------------------------------------------------------------------
+    # 1. Lab Startup Duration SLO (On-Premises)
+    # -------------------------------------------------------------------------
+    - name: "lab-startup-duration-onprem"
+      description: "On-premise lab environments must start within 60 seconds."
+      target: 95.0
+      window: "7d"
+      sli:
+        events:
+          errorQuery: |
+            sum(rate(lab_startup_duration_seconds_bucket{env="onprem", le="+Inf"}[{{.window}}]))
+            -
+            sum(rate(lab_startup_duration_seconds_bucket{env="onprem", le="60"}[{{.window}}]))
+          totalQuery: |
+            sum(rate(lab_startup_duration_seconds_bucket{env="onprem", le="+Inf"}[{{.window}}]))
+      alerting:
+        name: "LabStartupOnPremBurnRateAlert"
+        labels:
+          severity: "warning"
+        pageAlert:
+          disable: true
+        ticketAlert:
+          labels:
+            channel: "slack-cledyu-alerts"
+
+    # -------------------------------------------------------------------------
+    # 2. Lab Startup Duration SLO (AWS EC2 Overflow)
+    # -------------------------------------------------------------------------
+    - name: "lab-startup-duration-ec2"
+      description: "AWS EC2 overflowed lab environments must start within 90 seconds."
+      target: 90.0
+      window: "7d"
+      sli:
+        events:
+          errorQuery: |
+            sum(rate(lab_startup_duration_seconds_bucket{env="ec2", le="+Inf"}[{{.window}}]))
+            -
+            sum(rate(lab_startup_duration_seconds_bucket{env="ec2", le="90"}[{{.window}}]))
+          totalQuery: |
+            sum(rate(lab_startup_duration_seconds_bucket{env="ec2", le="+Inf"}[{{.window}}]))
+      alerting:
+        name: "LabStartupEC2BurnRateAlert"
+        labels:
+          severity: "warning"
+        pageAlert:
+          disable: true
+        ticketAlert:
+          labels:
+            channel: "slack-cledyu-alerts"
+
+    # -------------------------------------------------------------------------
+    # 3. VM Boot Success Rate SLO
+    # -------------------------------------------------------------------------
+    - name: "vm-boot-success-rate"
+      description: "KubeVirt/EC2 VM boot success rate should be above 99.5%."
+      target: 99.5
+      window: "7d"
+      sli:
+        events:
+          errorQuery: |
+            sum(rate(vm_boot_success_rate_total{status="fail"}[{{.window}}])) or vector(0)
+          totalQuery: |
+            sum(rate(vm_boot_success_rate_total[{{.window}}])) or vector(1)
+      alerting:
+        name: "VMBootSuccessCriticalAlert"
+        labels:
+          severity: "critical"
+        pageAlert:
+          labels:
+            pager: "ops-duty"
+        ticketAlert:
+          labels:
+            channel: "slack-cledyu-alerts"
