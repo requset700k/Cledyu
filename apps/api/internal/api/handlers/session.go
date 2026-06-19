@@ -89,6 +89,10 @@ func newTraceID() string {
 	return hex.EncodeToString(b)
 }
 
+// sessionCreationManager는 prepareSessionCreation이 필요로 하는 *kubevirt.Manager의 부분 집합이다.
+// 전체 Manager 대신 이 인터페이스를 받게 해 KubeVirt 클러스터 없이도 stub으로 단위 테스트한다.
+// (Subset of *kubevirt.Manager so prepareSessionCreation can be unit-tested with a stub,
+// without a real KubeVirt cluster.)
 type sessionCreationManager interface {
 	FindActiveByUser(ctx context.Context, userID string) (string, error)
 	Get(ctx context.Context, sessionID string) (*kubevirt.Session, error)
