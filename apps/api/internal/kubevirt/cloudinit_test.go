@@ -39,6 +39,9 @@ func TestRenderCloudInit_NoSSHKey(t *testing.T) {
 	}
 }
 
+// .hushlogin/.bash_profile이 lab 사용자 소유로 생성되는지, 그리고 write_files가
+// users-groups보다 먼저 실행돼 "Unknown user or group: lab" 으로 실패하지 않도록
+// defer: true 로 users-groups 모듈 뒤로 미뤄지는지 확인한다.
 func TestRenderCloudInit_ClearsSerialConsoleOnLogin(t *testing.T) {
 	out := renderCloudInit("abc123", "", BootInit{})
 

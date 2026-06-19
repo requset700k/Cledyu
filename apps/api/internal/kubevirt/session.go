@@ -266,8 +266,6 @@ func (m *Manager) CountActiveSessions(ctx context.Context) (int, error) {
 // namespaceDeleting은 namespace가 삭제 진행 중인지 판단한다.
 // Phase 만으로는 부족하다 — finalizer(예: kubernetes) 가 남아 있으면
 // DeletionTimestamp 는 찍혀도 Phase 갱신이 한 박자 늦을 수 있어 두 필드를 함께 본다.
-// (Phase alone can lag — DeletionTimestamp may be set before Phase flips to
-// Terminating when finalizers are still pending, so check both.)
 func namespaceDeleting(ns *corev1.Namespace) bool {
 	return ns.Status.Phase == corev1.NamespaceTerminating || ns.DeletionTimestamp != nil
 }
