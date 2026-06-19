@@ -11,10 +11,10 @@ import { LabWorkspace } from './LabWorkspace';
 import { AiTutorPanel } from './AiTutorPanel';
 import { SessionTimer } from './SessionTimer';
 
-// VM이 Running으로 보고된 이후에도 cloud-init final stage(getty 재시작 + autologin 활성)
-// 까지 약 30–60초가 더 필요하다. 그 사이 학생에게 login 프롬프트가 보이지 않도록
+// VM이 Running으로 보고된 이후에도 cloud-init final stage(랩 init + getty 재시작 + autologin 활성)
+// 까지 최대 1~2분이 더 필요할 수 있다. 그 사이 학생에게 login 프롬프트가 보이지 않도록
 // status=ready 시점부터 BOOT_GRACE_MS 동안 로딩 카드를 유지한다.
-const BOOT_GRACE_MS = 60_000;
+const BOOT_GRACE_MS = 120_000;
 
 // 세션 진행 화면: 좌측 단계 목록 + 우측 현재 단계 지시문/터미널/검증.
 // VM 부팅·자동 로그인 활성화가 끝나기 전까지는 SessionBoot 로딩 카드만 노출.
@@ -67,7 +67,12 @@ export function LabSession({ sessionId, lab }: { sessionId: string; lab: Lab }) 
   const status = session?.status;
   const inGrace = readyAtRef.current !== null && Date.now() - readyAtRef.current < BOOT_GRACE_MS;
   const booting = !status || status === 'provisioning' || inGrace;
-  const wantsLiveTerminal = !!session?.terminal_url;
+  const wantsLiveTerminal = lab.environment === 'ubuntu';
+
+  // 프로비저닝 실패 — booting grace 보다 먼저 확인해, 실패 상태가 부팅 카드에 가려지지 않게 한다.
+  if (status === 'failed') {
+    return <SessionFailed labId={lab.id} />;
+  }
 
   // 라이브 터미널 랩은 부팅 동안 학생에게 로그인 프롬프트가 노출되지 않도록 SessionBoot로 가린다.
   if (booting && wantsLiveTerminal) {
@@ -224,6 +229,35 @@ export function LabSession({ sessionId, lab }: { sessionId: string; lab: Lab }) 
   );
 }
 
+// SessionFailed는 VM 이 프로비저닝 타임아웃/실패 상태가 됐을 때 노출되는 안내 카드다.
+function SessionFailed({ labId }: { labId: string }) {
+  return (
+    <div className="mt-6 bg-slate-800/50 border border-red-500/30 rounded-xl p-8 text-center">
+      <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-red-500/10 border border-red-500/30 mb-4">
+        <svg className="w-7 h-7 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={1.6}
+            d="M12 9v4m0 4h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"
+          />
+        </svg>
+      </div>
+      <h3 className="text-white font-semibold">실습 환경 준비에 실패했습니다</h3>
+      <p className="text-slate-400 text-sm mt-2">
+        VM 프로비저닝이 제한 시간 안에 완료되지 않았습니다. 새 세션을 시작하면 깨끗한 환경으로 다시
+        준비합니다.
+      </p>
+      <a
+        href={`/labs/${labId}`}
+        className="inline-block mt-5 bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors"
+      >
+        실습 다시 시작하기
+      </a>
+    </div>
+  );
+}
+
 // SessionExpired는 TTL 만료(서버가 VM 회수) 시 터미널 대신 노출되는 안내 카드다.
 function SessionExpired({ labId }: { labId: string }) {
   return (
@@ -290,7 +324,7 @@ function SessionBoot({
         <div>
           <p className="text-white font-semibold">실습 환경을 준비하고 있습니다</p>
           <p className="text-slate-400 text-sm mt-1">
-            보통 1분 이내에 완료됩니다. 잠시만 기다려주세요.
+            보통 1~2분 안에 완료됩니다. 잠시만 기다려주세요.
           </p>
         </div>
       </div>
