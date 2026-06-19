@@ -249,7 +249,8 @@ VM은 뜨지만 cloud-init 중 apt/k3s 설치가 DNS 문제로 실패할 수 있
 Temporary failure resolving 'security.ubuntu.com'
 ```
 
-이 문제는 별도 PR에서 cloud-init DNS fallback으로 보정한다.
+API가 생성하는 cloud-init `bootcmd`에서 public DNS fallback을 설정해
+패키지 설치와 k3s 다운로드 전에 이름 해석이 가능하도록 보정한다.
 
 ## 참고
 
