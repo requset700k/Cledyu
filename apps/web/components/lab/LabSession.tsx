@@ -69,16 +69,16 @@ export function LabSession({ sessionId, lab }: { sessionId: string; lab: Lab }) 
   const booting = !status || status === 'provisioning' || inGrace;
   const wantsLiveTerminal = lab.environment === 'ubuntu';
 
+  // 프로비저닝 실패 — booting grace 보다 먼저 확인해, 실패 상태가 부팅 카드에 가려지지 않게 한다.
+  if (status === 'failed') {
+    return <SessionFailed labId={lab.id} />;
+  }
+
   // 라이브 터미널 랩은 부팅 동안 학생에게 로그인 프롬프트가 노출되지 않도록 SessionBoot로 가린다.
   if (booting && wantsLiveTerminal) {
     return (
       <SessionBoot status={status} graceStartedAt={readyAtRef.current} graceMs={BOOT_GRACE_MS} />
     );
-  }
-
-  // 프로비저닝 실패 — 터미널을 열지 않고 새 세션 시작을 안내한다.
-  if (status === 'failed') {
-    return <SessionFailed labId={lab.id} />;
   }
 
   // 세션 TTL 만료 — 서버가 VM 을 회수하므로 터미널을 가리고 재시작을 안내한다.
