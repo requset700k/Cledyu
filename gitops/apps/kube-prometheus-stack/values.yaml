@@ -89,6 +89,38 @@ alertmanager:
             - alertname =~ "Certificate.*"
           receiver: "discord-certmanager"
 
+        # severity=none 이거나 alertname=InfoInhibitor 인 알림 억제 설정
+        - matchers:
+            - alertname = "InfoInhibitor"
+          receiver: "null"
+          continue: false
+
+        - matchers:
+            - severity = "none"
+          receiver: "null"
+
+        # Suspended 앱은 null로
+        - matchers:
+            - alertname =~ "ArgoCD.*"
+            - health_status = "Suspended"
+          receiver: "null"
+
+        # ArgoCD 관련 알림 그룹으로 처리
+        - matchers:
+            - alertname =~ "ArgoCD.*"
+            - health_status != "Suspended"
+          group_by: ["alertname"]
+          group_wait: 1m
+          group_interval: 10m
+          repeat_interval: 24h
+          receiver: "discord"
+
+        # TraefikLatencySLO 플래핑 억제
+        - matchers:
+            - alertname = "TraefikLatencySLO"
+          repeat_interval: 4h
+          receiver: "discord"
+
     receivers:
       - name: "null"
       - name: "discord"
@@ -102,11 +134,26 @@ alertmanager:
             send_resolved: true
 
     inhibit_rules:
+      # 서비스내 Critical 발생 시 Warning 억제
       - source_matchers:
           - severity = "critical"
         target_matchers:
           - severity = "warning"
-        equal: ["namespace", "alertname"] # critical 알림이 있을 때 중복 알림 방지
+        equal: ["namespace", "app", "service"] # critical 알림이 있을 때 중복 알림 방지
+
+      # 노드 다운 시 해당 노드의 파생 알림 무시
+      - source_matchers:
+          - alertname = "NodeDown" # 노드 다운 알림 이름 (환경에 맞게 수정)
+        target_matchers:
+          - severity =~ "critical|warning"
+        equal: ["node"]
+
+      # kubevirt 우운  다시 파생 워크로드 알림 억제
+      - source_matchers:
+          - alertname =~ "KubeVirtApiAvailabilitySLO|KubeVirtControllerAvailabilitySLO"
+        target_matchers:
+          - severity =~ "warning|critical"
+          - namespace = "kubevirt"
 
 # ── Grafana ───────────────────────────────────────────────────
 grafana:
