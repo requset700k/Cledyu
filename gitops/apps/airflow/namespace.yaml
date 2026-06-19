@@ -1,0 +1,14 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: airflow
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    # trust-manager 가 cledyu Root CA 번들(ConfigMap cledyu-root-ca-bundle)을 이 ns에 배포 →
+    # webserver 가 keycloak.cledyu.local(내부 CA 발급 인증서) OIDC discovery TLS 검증 가능.
+    cledyu.io/trust-bundle: root-ca
