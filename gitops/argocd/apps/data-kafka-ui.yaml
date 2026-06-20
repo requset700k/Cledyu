@@ -29,6 +29,13 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: kafka
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      name: kafka-ui
+      namespace: kafka
+      jsonPointers:
+        - /spec/template/metadata/annotations/cledyu.io~1tls-secret-checksum
   syncPolicy:
     automated:
       prune: true
