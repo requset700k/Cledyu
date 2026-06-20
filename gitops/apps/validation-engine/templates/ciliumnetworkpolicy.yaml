@@ -12,9 +12,14 @@ spec:
     # Kubernetes API — virtctl이 VM portforward에 사용
     # toEntities는 Cilium 전용 필드라 CiliumNetworkPolicy로 분리한다.
     # HA 환경에서 컨트롤플레인 IP가 바뀌어도 정확히 동작한다.
+    # kube-apiserver 엔티티로 트래픽 대상을 식별한다.
+    # kube-proxy가 ClusterIP(10.43.0.1:443)를 실제 API 서버(node:6443)로 DNAT하므로
+    # Cilium이 정책을 평가하는 시점엔 포트가 이미 6443으로 바뀌어 있다. 443과 6443을 모두 허용한다.
     - toEntities:
         - kube-apiserver
       toPorts:
         - ports:
             - port: "443"
+              protocol: TCP
+            - port: "6443"
               protocol: TCP

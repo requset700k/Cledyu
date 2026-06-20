@@ -390,6 +390,9 @@ func (m *Manager) Get(ctx context.Context, sessionID string) (*Session, error) {
 			status = "failed"
 		}
 	}
+	if status == "provisioning" && m.provisioningTimedOut(startedAt) {
+		status = "failed"
+	}
 
 	return &Session{
 		ID:        sessionID,
@@ -399,6 +402,14 @@ func (m *Manager) Get(ctx context.Context, sessionID string) (*Session, error) {
 		StartedAt: startedAt,
 		ExpiresAt: expiresAt,
 	}, nil
+}
+
+func (m *Manager) provisioningTimedOut(startedAt time.Time) bool {
+	if m.cfg == nil || m.cfg.ProvisionTimeoutMinutes <= 0 || startedAt.IsZero() {
+		return false
+	}
+	timeout := time.Duration(m.cfg.ProvisionTimeoutMinutes) * time.Minute
+	return time.Since(startedAt) >= timeout
 }
 
 func (m *Manager) Delete(ctx context.Context, sessionID string) error {

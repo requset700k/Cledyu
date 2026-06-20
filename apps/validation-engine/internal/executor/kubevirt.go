@@ -47,18 +47,25 @@ func newKubeVirtExecutor(vm model.VMSpec) (*KubeVirtExecutor, error) {
 }
 
 // Exec는 virtctl ssh로 VM에 접속해서 명령어를 실행하고 결과를 반환
-// 실행 예시: virtctl ssh --username lab --identity-file /etc/lab-ssh/id_ed25519 session-vm -n lab-abc -- stat -c %a /x
+// 실행 예시: virtctl ssh --username lab --namespace lab-abc --local-ssh-opts "..." --identity-file /etc/lab-ssh/id_ed25519 --command "stat -c %a /x" vmi/session-vm
 func (e *KubeVirtExecutor) Exec(ctx context.Context, cmd string) (string, error) {
-	// distroless 이미지에는 ssh 바이너리가 없으므로 virtctl native client(기본)를 쓴다.
-	// --username/--identity-file로 인증한다(미설정 시 키 없이 시도).
-	args := []string{"ssh", "--username", e.sshUser}
+	// v1.8.2: --command/-c 로 명령 전달, vmi/ 접두어로 타깃 지정.
+	// --local-ssh-opts: OpenSSH에 StrictHostKeyChecking=no, UserKnownHostsFile=/dev/null 전달해
+	// 새 VM 접속 시 host key 프롬프트 없이 진행. kube-apiserver WebSocket TLS 터널이 보호하므로
+	// lab 검증 용도에서 수용 가능.
+	args := []string{
+		"ssh",
+		"--username", e.sshUser,
+		"--namespace", e.namespace,
+		"--local-ssh-opts", "-o StrictHostKeyChecking=no",
+		"--local-ssh-opts", "-o UserKnownHostsFile=/dev/null",
+	}
 	if e.sshKey != "" {
 		args = append(args, "--identity-file", e.sshKey)
 	}
 	args = append(args,
-		e.vmName,          // 어느 VM에 접속할지
-		"-n", e.namespace, // VM이 어느 네임스페이스에 있는지
-		"--", cmd, // VM 안에서 실행할 명령어
+		"--command", cmd,
+		"vmi/"+e.vmName,
 	)
 
 	// 인증/연결 단계에서 멈추는 경우를 대비해 한 체크당 타임아웃을 건다.

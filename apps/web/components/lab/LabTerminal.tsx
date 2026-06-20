@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import '@xterm/xterm/css/xterm.css';
 
 // LabTerminal은 lab VM의 serial console에 연결된 실시간 xterm.js 터미널이다.
@@ -15,11 +15,15 @@ export function LabTerminal({
   heightClass?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const [connectionState, setConnectionState] = useState<
+    'connecting' | 'connected' | 'closed' | 'error'
+  >('connecting');
 
   useEffect(() => {
     let disposed = false;
     let ws: WebSocket | null = null;
     let dispose: (() => void) | null = null;
+    setConnectionState('connecting');
 
     void (async () => {
       const [{ Terminal }, { FitAddon }] = await Promise.all([
@@ -46,12 +50,15 @@ export function LabTerminal({
 
       ws = new WebSocket(url);
       ws.binaryType = 'arraybuffer';
-      ws.onopen = () => term.writeln('\x1b[90m[VM 터미널 연결됨]\x1b[0m');
+      ws.onopen = () => {
+        setConnectionState('connected');
+        term.focus();
+      };
       ws.onmessage = (e) => {
         term.write(typeof e.data === 'string' ? e.data : new Uint8Array(e.data));
       };
-      ws.onclose = () => term.writeln('\r\n\x1b[90m[연결이 종료되었습니다]\x1b[0m');
-      ws.onerror = () => term.writeln('\r\n\x1b[31m[연결 오류 — API/VM 상태를 확인하세요]\x1b[0m');
+      ws.onclose = () => setConnectionState('closed');
+      ws.onerror = () => setConnectionState('error');
 
       term.onData((d) => {
         if (ws && ws.readyState === WebSocket.OPEN) ws.send(d);
@@ -80,6 +87,23 @@ export function LabTerminal({
         <span className="w-2.5 h-2.5 rounded-full bg-amber-500/70" />
         <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/70" />
         <span className="ml-2 text-slate-500 text-xs">terminal — Ubuntu (KubeVirt VM)</span>
+        <span
+          className={`ml-auto text-[11px] ${
+            connectionState === 'connected'
+              ? 'text-emerald-400'
+              : connectionState === 'error'
+                ? 'text-red-400'
+                : 'text-slate-500'
+          }`}
+        >
+          {connectionState === 'connected'
+            ? '연결됨'
+            : connectionState === 'error'
+              ? '연결 오류'
+              : connectionState === 'closed'
+                ? '연결 종료'
+                : '연결 중…'}
+        </span>
       </div>
       <div ref={containerRef} className={`${heightClass} w-full p-2`} />
     </div>

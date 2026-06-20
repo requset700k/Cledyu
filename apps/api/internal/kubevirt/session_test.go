@@ -13,6 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/requset700k/cledyu/api/internal/config"
 )
 
 // sessionNS는 Create가 만드는 세션 namespace와 동일한 라벨/annotation을 가진 테스트 객체를 만든다.
@@ -151,5 +153,60 @@ func TestReapStuckSessions(t *testing.T) {
 		if _, err := m.core.CoreV1().Namespaces().Get(context.Background(), keep, metav1.GetOptions{}); err != nil {
 			t.Errorf("%s should remain, got err=%v", keep, err)
 		}
+	}
+}
+
+func sessionNSWithTimes(id string, startedAt time.Time) *corev1.Namespace {
+	return &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name:   "lab-" + id,
+		Labels: map[string]string{labelManagedBy: managedByValue},
+		Annotations: map[string]string{
+			annUserID:              "alice",
+			"cledyu.io/lab-id":     "lab-k8s-basics",
+			"cledyu.io/started-at": startedAt.UTC().Format(time.RFC3339),
+			"cledyu.io/expires-at": time.Now().Add(time.Hour).UTC().Format(time.RFC3339),
+		},
+	}}
+}
+
+func TestGetMarksProvisioningSessionFailedAfterTimeout(t *testing.T) {
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{vmiGVR: "VirtualMachineInstanceList"},
+		vmiObj("timeout", "Pending"),
+	)
+	m := &Manager{
+		core: fake.NewSimpleClientset(sessionNSWithTimes("timeout", time.Now().Add(-3*time.Minute))),
+		dyn:  dyn,
+		cfg:  &config.KubeVirtConfig{ProvisionTimeoutMinutes: 2},
+	}
+
+	got, err := m.Get(context.Background(), "timeout")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != "failed" {
+		t.Fatalf("status = %q, want failed", got.Status)
+	}
+}
+
+func TestGetKeepsProvisioningSessionBeforeTimeout(t *testing.T) {
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{vmiGVR: "VirtualMachineInstanceList"},
+		vmiObj("young", "Pending"),
+	)
+	m := &Manager{
+		core: fake.NewSimpleClientset(sessionNSWithTimes("young", time.Now().Add(-90*time.Second))),
+		dyn:  dyn,
+		cfg:  &config.KubeVirtConfig{ProvisionTimeoutMinutes: 2},
+	}
+
+	got, err := m.Get(context.Background(), "young")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != "provisioning" {
+		t.Fatalf("status = %q, want provisioning", got.Status)
 	}
 }

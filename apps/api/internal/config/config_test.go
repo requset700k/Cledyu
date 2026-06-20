@@ -26,3 +26,13 @@ func TestLoadReadsKeycloakClientSecretEnv(t *testing.T) {
 		t.Fatalf("Keycloak.ClientSecret = %q, want %q", got, want)
 	}
 }
+
+func TestLoadDefaultsProvisionTimeoutToFiveMinutes(t *testing.T) {
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got, want := cfg.KubeVirt.ProvisionTimeoutMinutes, 5; got != want {
+		t.Fatalf("KubeVirt.ProvisionTimeoutMinutes = %d, want %d", got, want)
+	}
+}
