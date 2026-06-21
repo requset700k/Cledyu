@@ -2,6 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import '@xterm/xterm/css/xterm.css';
+import {
+  browserWebSocketOrigin,
+  reconnectDelayMs,
+  shouldReconnect,
+} from '@/lib/runtime-api-origin';
+
+type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'error';
 
 // LabTerminal은 lab VM의 serial console에 연결된 실시간 xterm.js 터미널이다.
 // WebSocket은 Next 프록시 대상이 아니므로 Go API에 직접 연결한다(NEXT_PUBLIC_WS_URL).
@@ -15,13 +22,13 @@ export function LabTerminal({
   heightClass?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [connectionState, setConnectionState] = useState<
-    'connecting' | 'connected' | 'closed' | 'error'
-  >('connecting');
+  const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
 
   useEffect(() => {
     let disposed = false;
     let ws: WebSocket | null = null;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let retryAttempt = 0;
     let dispose: (() => void) | null = null;
     setConnectionState('connecting');
 
@@ -43,25 +50,59 @@ export function LabTerminal({
       term.open(containerRef.current);
       fit.fit();
 
-      const base = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:8080';
-      // dev 모드에서는 stub JWT를 통과하기 위해 dev-token을 쿼리로 전달(WS는 헤더를 못 보냄).
-      const token = process.env.NODE_ENV === 'development' ? 'dev-token' : '';
-      const url = `${base}${terminalPath}${token ? `?token=${token}` : ''}`;
+      const scheduleReconnect = () => {
+        if (disposed || retryTimer) return;
+        setConnectionState('reconnecting');
+        retryTimer = setTimeout(() => {
+          retryTimer = null;
+          retryAttempt += 1;
+          connect();
+        }, reconnectDelayMs(retryAttempt));
+      };
 
-      ws = new WebSocket(url);
-      ws.binaryType = 'arraybuffer';
-      ws.onopen = () => {
-        setConnectionState('connected');
-        term.focus();
+      const connect = () => {
+        if (disposed) return;
+
+        const base = browserWebSocketOrigin();
+        // dev 모드에서는 stub JWT를 통과하기 위해 dev-token을 쿼리로 전달(WS는 헤더를 못 보냄).
+        const token = process.env.NODE_ENV === 'development' ? 'dev-token' : '';
+        const url = `${base}${terminalPath}${token ? `?token=${token}` : ''}`;
+
+        let socket: WebSocket;
+        try {
+          socket = new WebSocket(url);
+        } catch {
+          setConnectionState('error');
+          scheduleReconnect();
+          return;
+        }
+
+        ws = socket;
+        socket.binaryType = 'arraybuffer';
+        socket.onopen = () => {
+          retryAttempt = 0;
+          setConnectionState('connected');
+          term.focus();
+        };
+        socket.onmessage = (event) => {
+          term.write(
+            typeof event.data === 'string' ? event.data : new Uint8Array(event.data),
+          );
+        };
+        socket.onerror = () => {
+          setConnectionState('error');
+          socket.close();
+        };
+        socket.onclose = (event) => {
+          if (ws === socket) ws = null;
+          if (shouldReconnect(disposed, event.code)) scheduleReconnect();
+        };
       };
-      ws.onmessage = (e) => {
-        term.write(typeof e.data === 'string' ? e.data : new Uint8Array(e.data));
-      };
-      ws.onclose = () => setConnectionState('closed');
-      ws.onerror = () => setConnectionState('error');
+
+      connect();
 
       term.onData((d) => {
-        if (ws && ws.readyState === WebSocket.OPEN) ws.send(d);
+        if (ws?.readyState === WebSocket.OPEN) ws.send(d);
       });
 
       const onResize = () => fit.fit();
@@ -75,7 +116,8 @@ export function LabTerminal({
 
     return () => {
       disposed = true;
-      ws?.close();
+      if (retryTimer) clearTimeout(retryTimer);
+      ws?.close(1000, 'component disposed');
       dispose?.();
     };
   }, [terminalPath]);
@@ -91,6 +133,8 @@ export function LabTerminal({
           className={`ml-auto text-[11px] ${
             connectionState === 'connected'
               ? 'text-emerald-400'
+              : connectionState === 'reconnecting'
+                ? 'text-amber-400'
               : connectionState === 'error'
                 ? 'text-red-400'
                 : 'text-slate-500'
@@ -98,11 +142,11 @@ export function LabTerminal({
         >
           {connectionState === 'connected'
             ? '연결됨'
+            : connectionState === 'reconnecting'
+              ? '재연결 중…'
             : connectionState === 'error'
               ? '연결 오류'
-              : connectionState === 'closed'
-                ? '연결 종료'
-                : '연결 중…'}
+              : '연결 중…'}
         </span>
       </div>
       <div ref={containerRef} className={`${heightClass} w-full p-2`} />
