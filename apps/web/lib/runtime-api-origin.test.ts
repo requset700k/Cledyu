@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   apiHttpOrigin,
+  browserWebSocketOrigin,
   reconnectDelayMs,
   resolveWebSocketOrigin,
   shouldReconnect,
@@ -32,6 +33,10 @@ describe('resolveWebSocketOrigin', () => {
         hostname: 'localhost',
       }),
     ).toBe('ws://localhost:8080');
+  });
+
+  it('is safe during server rendering before window exists', () => {
+    expect(browserWebSocketOrigin()).toBe('ws://localhost:8080');
   });
 });
 

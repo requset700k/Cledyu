@@ -74,9 +74,15 @@ function IdePane({
 }) {
   const [ready, setReady] = useState(false);
   const [waitedLong, setWaitedLong] = useState(false);
-  const origin = apiHttpOrigin();
+  const [origin, setOrigin] = useState<string | null>(null);
 
   useEffect(() => {
+    setOrigin(apiHttpOrigin());
+  }, []);
+
+  useEffect(() => {
+    if (!origin) return;
+
     let cancelled = false;
     const startedAt = Date.now();
 
@@ -102,7 +108,7 @@ function IdePane({
     };
   }, [origin, idePath, sessionId]);
 
-  if (!ready) {
+  if (!ready || !origin) {
     return (
       <div
         className={`${heightClass} rounded-xl border border-slate-700 bg-slate-900/60 flex flex-col items-center justify-center gap-3`}
