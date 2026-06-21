@@ -3,8 +3,10 @@ import { describe, it } from 'node:test';
 import {
   apiHttpOrigin,
   browserWebSocketOrigin,
+  connectionWasStable,
   reconnectDelayMs,
   resolveWebSocketOrigin,
+  shouldAttemptAuthRefresh,
   shouldReconnect,
 } from './runtime-api-origin.mjs';
 
@@ -72,5 +74,17 @@ describe('reconnect policy', () => {
     assert.equal(shouldReconnect(false, 1000), false);
     assert.equal(shouldReconnect(false, undefined), false);
     assert.equal(shouldReconnect(false, 1006), true);
+  });
+
+  it('resets backoff only after a connection stays open for thirty seconds', () => {
+    assert.equal(connectionWasStable(null, 30_000), false);
+    assert.equal(connectionWasStable(1_000, 30_999), false);
+    assert.equal(connectionWasStable(1_000, 31_000), true);
+  });
+
+  it('throttles failed auth refresh attempts to once per minute', () => {
+    assert.equal(shouldAttemptAuthRefresh(null, 1_000), true);
+    assert.equal(shouldAttemptAuthRefresh(1_000, 60_999), false);
+    assert.equal(shouldAttemptAuthRefresh(1_000, 61_000), true);
   });
 });

@@ -4,9 +4,12 @@ import { useEffect, useRef, useState } from 'react';
 import '@xterm/xterm/css/xterm.css';
 import {
   browserWebSocketOrigin,
+  connectionWasStable,
   reconnectDelayMs,
+  shouldAttemptAuthRefresh,
   shouldReconnect,
 } from '@/lib/runtime-api-origin.mjs';
+import { refreshSession } from '@/lib/auth-session.mjs';
 
 type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'error';
 
@@ -33,8 +36,11 @@ export function LabTerminal({
     let ws: WebSocket | null = null;
     // onerror/onclose가 연달아 호출돼도 재연결 timer는 하나만 예약한다.
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    // 연속 실패 횟수. 연결 성공 시 0으로 초기화해 다음 장애는 다시 1초부터 재시도한다.
+    // 연속 실패 횟수. 30초 이상 안정적으로 유지된 연결만 0으로 초기화한다.
     let retryAttempt = 0;
+    // 같은 장애 구간에서 refresh token을 반복 회전하지 않되 실패 시 1분 뒤 다시 시도한다.
+    let authRefreshedForOutage = false;
+    let lastAuthRefreshAttemptAt: number | null = null;
     // xterm과 resize listener 정리를 비동기 초기화 완료 후 effect cleanup에 연결한다.
     let dispose: (() => void) | null = null;
     setConnectionState('connecting');
@@ -64,9 +70,24 @@ export function LabTerminal({
         if (disposed || retryTimer) return;
         setConnectionState('reconnecting');
         retryTimer = setTimeout(() => {
-          retryTimer = null;
-          retryAttempt += 1;
-          connect();
+          void (async () => {
+            const now = Date.now();
+            if (
+              process.env.NODE_ENV !== 'development' &&
+              !authRefreshedForOutage &&
+              shouldAttemptAuthRefresh(lastAuthRefreshAttemptAt, now)
+            ) {
+              lastAuthRefreshAttemptAt = now;
+              authRefreshedForOutage = await refreshSession();
+            }
+            if (disposed) {
+              retryTimer = null;
+              return;
+            }
+            retryAttempt += 1;
+            retryTimer = null;
+            connect();
+          })();
         }, reconnectDelayMs(retryAttempt));
       };
 
@@ -90,9 +111,10 @@ export function LabTerminal({
 
         ws = socket;
         socket.binaryType = 'arraybuffer';
+        let openedAt: number | null = null;
         socket.onopen = () => {
-          // 한 번 연결되면 이전 실패 횟수는 더 이상 현재 연결의 품질을 나타내지 않는다.
-          retryAttempt = 0;
+          // HTTP upgrade 성공만으로 KubeVirt SerialConsole 연결 성공을 보장할 수 없다.
+          openedAt = Date.now();
           setConnectionState('connected');
           term.focus();
         };
@@ -107,6 +129,12 @@ export function LabTerminal({
         socket.onclose = (event) => {
           // 오래된 socket callback이 새 활성 socket을 null로 덮어쓰지 않게 동일 객체일 때만 비운다.
           if (ws === socket) ws = null;
+          // API의 10초 SerialConsole timeout보다 긴 30초 유지 연결만 안정 상태로 인정한다.
+          if (connectionWasStable(openedAt, Date.now())) {
+            retryAttempt = 0;
+            authRefreshedForOutage = false;
+            lastAuthRefreshAttemptAt = null;
+          }
           // component dispose와 정상 종료(1000)는 의도된 종료이므로 재연결하지 않는다.
           if (shouldReconnect(disposed, event.code)) scheduleReconnect();
         };

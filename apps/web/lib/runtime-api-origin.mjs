@@ -5,6 +5,8 @@
 // localhost는 운영의 app.* → api.* 변환 대상이 아니다. Web을 로컬에서 3000 포트로 띄울 때
 // API는 별도 Go 서버의 8080 포트를 사용하므로 IPv4·IPv6 loopback을 모두 명시한다.
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+const STABLE_CONNECTION_MS = 30_000;
+const AUTH_REFRESH_RETRY_MS = 60_000;
 
 /**
  * 명시적 설정 또는 현재 페이지 주소에서 터미널 WebSocket origin을 계산한다.
@@ -66,4 +68,27 @@ export function reconnectDelayMs(attempt) {
  */
 export function shouldReconnect(disposed, closeCode) {
   return !disposed && typeof closeCode === 'number' && closeCode !== 1000;
+}
+
+/**
+ * API의 SerialConsole 연결 timeout(10초)보다 충분히 오래 유지된 socket만 안정 연결로 본다.
+ * upgrade 직후 KubeVirt 연결이 실패한 socket은 backoff 횟수를 초기화하면 안 된다.
+ *
+ * @param {number | null} openedAt WebSocket open 시각
+ * @param {number} closedAt WebSocket close 시각
+ * @returns {boolean}
+ */
+export function connectionWasStable(openedAt, closedAt) {
+  return openedAt !== null && closedAt - openedAt >= STABLE_CONNECTION_MS;
+}
+
+/**
+ * 실패한 refresh를 매 WebSocket retry마다 반복하지 않고 1분 간격으로 제한한다.
+ *
+ * @param {number | null} lastAttemptAt 마지막 refresh 시도 시각
+ * @param {number} now 현재 시각
+ * @returns {boolean}
+ */
+export function shouldAttemptAuthRefresh(lastAttemptAt, now) {
+  return lastAttemptAt === null || now - lastAttemptAt >= AUTH_REFRESH_RETRY_MS;
 }
