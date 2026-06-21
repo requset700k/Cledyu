@@ -6,7 +6,7 @@ import {
   browserWebSocketOrigin,
   reconnectDelayMs,
   shouldReconnect,
-} from '@/lib/runtime-api-origin';
+} from '@/lib/runtime-api-origin.mjs';
 
 type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'error';
 

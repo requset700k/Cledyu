@@ -1,14 +1,11 @@
-export interface BrowserLocation {
-  protocol: string;
-  hostname: string;
-}
-
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
 
-export function resolveWebSocketOrigin(
-  explicitOrigin: string | undefined,
-  location: BrowserLocation,
-): string {
+/**
+ * @param {string | undefined} explicitOrigin
+ * @param {{ protocol: string, hostname: string }} location
+ * @returns {string}
+ */
+export function resolveWebSocketOrigin(explicitOrigin, location) {
   if (explicitOrigin?.trim()) return explicitOrigin.replace(/\/+$/, '');
   if (LOOPBACK_HOSTS.has(location.hostname)) return 'ws://localhost:8080';
 
@@ -19,20 +16,24 @@ export function resolveWebSocketOrigin(
   return `${protocol}//${hostname}`;
 }
 
-export function browserWebSocketOrigin(): string {
+/** @returns {string} */
+export function browserWebSocketOrigin() {
   const location =
     typeof window === 'undefined' ? { protocol: 'http:', hostname: 'localhost' } : window.location;
   return resolveWebSocketOrigin(process.env.NEXT_PUBLIC_WS_URL, location);
 }
 
-export function apiHttpOrigin(webSocketOrigin = browserWebSocketOrigin()): string {
+/** @param {string} [webSocketOrigin] @returns {string} */
+export function apiHttpOrigin(webSocketOrigin = browserWebSocketOrigin()) {
   return webSocketOrigin.replace(/^wss:/, 'https:').replace(/^ws:/, 'http:');
 }
 
-export function reconnectDelayMs(attempt: number): number {
+/** @param {number} attempt @returns {number} */
+export function reconnectDelayMs(attempt) {
   return Math.min(1000 * 2 ** attempt, 10_000);
 }
 
-export function shouldReconnect(disposed: boolean, closeCode: number): boolean {
+/** @param {boolean} disposed @param {number} closeCode @returns {boolean} */
+export function shouldReconnect(disposed, closeCode) {
   return !disposed && closeCode !== 1000;
 }

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { LabTerminal } from './LabTerminal';
-import { apiHttpOrigin } from '@/lib/runtime-api-origin';
+import { apiHttpOrigin } from '@/lib/runtime-api-origin.mjs';
 
 // LabWorkspace는 IDE 랩의 작업 영역 — [터미널 | IDE] 탭을 제공한다.
 // 두 패널 모두 마운트를 유지한 채 CSS 로만 전환한다(언마운트 시 WS/에디터 세션이 끊김).
