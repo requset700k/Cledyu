@@ -10,6 +10,7 @@ import { LabTerminal } from './LabTerminal';
 import { LabWorkspace } from './LabWorkspace';
 import { AiTutorPanel } from './AiTutorPanel';
 import { SessionTimer } from './SessionTimer';
+import { shouldShowSessionBoot } from '@/lib/lab-session-boot.mjs';
 
 // VM이 Running으로 보고된 이후에도 cloud-init final stage(랩 init + getty 재시작 + autologin 활성)
 // 까지 최대 1~2분이 더 필요할 수 있다. 그 사이 학생에게 login 프롬프트가 보이지 않도록
@@ -37,6 +38,8 @@ export function LabSession({ sessionId, lab }: { sessionId: string; lab: Lab }) 
     const s = session?.status;
     if ((s === 'ready' || s === 'active') && readyAtRef.current === null) {
       readyAtRef.current = Date.now();
+      // ref 변경만으로는 부모가 다시 렌더되지 않으므로 grace 진행 단계를 즉시 반영한다.
+      forceTick((n) => n + 1);
       const t = setTimeout(() => forceTick((n) => n + 1), BOOT_GRACE_MS);
       return () => clearTimeout(t);
     }
@@ -65,8 +68,7 @@ export function LabSession({ sessionId, lab }: { sessionId: string; lab: Lab }) 
 
   // ── 분기 계산 ──────────────────────────────────────────────────────────
   const status = session?.status;
-  const inGrace = readyAtRef.current !== null && Date.now() - readyAtRef.current < BOOT_GRACE_MS;
-  const booting = !status || status === 'provisioning' || inGrace;
+  const booting = shouldShowSessionBoot(status, readyAtRef.current, Date.now(), BOOT_GRACE_MS);
   const wantsLiveTerminal = lab.environment === 'ubuntu';
 
   // 프로비저닝 실패 — booting grace 보다 먼저 확인해, 실패 상태가 부팅 카드에 가려지지 않게 한다.
