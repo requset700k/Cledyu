@@ -21,9 +21,7 @@ export function resolveWebSocketOrigin(
 
 export function browserWebSocketOrigin(): string {
   const location =
-    typeof window === 'undefined'
-      ? { protocol: 'http:', hostname: 'localhost' }
-      : window.location;
+    typeof window === 'undefined' ? { protocol: 'http:', hostname: 'localhost' } : window.location;
   return resolveWebSocketOrigin(process.env.NEXT_PUBLIC_WS_URL, location);
 }
 
