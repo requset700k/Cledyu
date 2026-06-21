@@ -85,9 +85,7 @@ export function LabTerminal({
           term.focus();
         };
         socket.onmessage = (event) => {
-          term.write(
-            typeof event.data === 'string' ? event.data : new Uint8Array(event.data),
-          );
+          term.write(typeof event.data === 'string' ? event.data : new Uint8Array(event.data));
         };
         socket.onerror = () => {
           setConnectionState('error');
@@ -135,18 +133,18 @@ export function LabTerminal({
               ? 'text-emerald-400'
               : connectionState === 'reconnecting'
                 ? 'text-amber-400'
-              : connectionState === 'error'
-                ? 'text-red-400'
-                : 'text-slate-500'
+                : connectionState === 'error'
+                  ? 'text-red-400'
+                  : 'text-slate-500'
           }`}
         >
           {connectionState === 'connected'
             ? '연결됨'
             : connectionState === 'reconnecting'
               ? '재연결 중…'
-            : connectionState === 'error'
-              ? '연결 오류'
-              : '연결 중…'}
+              : connectionState === 'error'
+                ? '연결 오류'
+                : '연결 중…'}
         </span>
       </div>
       <div ref={containerRef} className={`${heightClass} w-full p-2`} />

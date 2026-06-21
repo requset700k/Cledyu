@@ -2,13 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { LabTerminal } from './LabTerminal';
-
-// API 직접 접근 origin — WS 와 동일 호스트를 쓰므로 NEXT_PUBLIC_WS_URL 에서 유도한다.
-// (IDE iframe/healthz 는 Next 프록시를 타지 않고 API 로 직접 간다. 쿠키는 same-site 라 전송됨.)
-function apiHttpOrigin(): string {
-  const ws = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:8080';
-  return ws.replace(/^ws/, 'http');
-}
+import { apiHttpOrigin } from '@/lib/runtime-api-origin';
 
 // LabWorkspace는 IDE 랩의 작업 영역 — [터미널 | IDE] 탭을 제공한다.
 // 두 패널 모두 마운트를 유지한 채 CSS 로만 전환한다(언마운트 시 WS/에디터 세션이 끊김).
