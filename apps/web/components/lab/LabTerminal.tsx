@@ -12,7 +12,7 @@ type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'error';
 
 // LabTerminal은 lab VM의 serial console에 연결된 실시간 xterm.js 터미널이다.
 // WebSocket은 Next HTTP route handler의 프록시 대상이 아니므로 Go API에 직접 연결한다.
-// 운영/로컬 API origin 결정과 backoff 계산은 runtime-api-origin.mjs에 모아 IDE와 공유한다.
+// 운영/로컬 API origin은 IDE와 공유하고, 터미널 backoff 정책도 runtime-api-origin.mjs에서 관리한다.
 // xterm은 DOM/WebSocket에 의존하므로 모든 초기화를 useEffect(클라이언트) 안에서 동적 import한다.
 // 연결이 끊겨도 xterm 인스턴스와 출력은 유지하고 WebSocket만 교체해 학습 흐름을 보존한다.
 // heightClass: 좌(문제)/우(터미널) 2분할 레이아웃이 화면 높이에 맞춰 키울 때 사용.
@@ -83,9 +83,8 @@ export function LabTerminal({
         try {
           socket = new WebSocket(url);
         } catch {
-          // 잘못된 URL 등 생성 단계의 동기 오류도 네트워크 종료와 같은 정책으로 복구한다.
+          // 잘못된 URL 같은 생성 단계 오류는 같은 값으로 재시도해도 복구되지 않으므로 오류를 유지한다.
           setConnectionState('error');
-          scheduleReconnect();
           return;
         }
 

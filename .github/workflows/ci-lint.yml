@@ -1,5 +1,5 @@
 ---
-# Fast feedback (~10s): Python / JS-TS 소스가 바뀐 PR 에서만 Ruff + ESLint.
+# Fast feedback: Python / JS-TS 소스가 바뀐 PR 에서만 Ruff + ESLint + JS 테스트.
 # 경로 필터가 맞는 변경이 없으면 workflow 자체가 뜨지 않아 runner 비용 0.
 # (lint.yml 의 pre-commit 은 ruff 를 SKIP 해 ci-lint 와 중복 실행을 피한다.)
 name: ci-lint
@@ -15,6 +15,7 @@ on:
       - '**/*.tsx'
       - '**/*.js'
       - '**/*.jsx'
+      - '**/*.mjs'
       - '**/package.json'
       - '**/pnpm-lock.yaml'
       - '.github/workflows/ci-lint.yml'
@@ -28,6 +29,7 @@ on:
       - '**/*.tsx'
       - '**/*.js'
       - '**/*.jsx'
+      - '**/*.mjs'
       - '**/package.json'
       - '**/pnpm-lock.yaml'
       - '.github/workflows/ci-lint.yml'
@@ -62,7 +64,7 @@ jobs:
         run: ruff format --check --diff .
 
   eslint:
-    name: eslint (js/ts lint)
+    name: eslint + test (js/ts)
     runs-on: ubuntu-latest
     # hashFiles() 는 job-level if 에서 평가 불가 → step-level 에서 우회.
     # 프론트엔드 스캐폴드(package.json) 가 들어오기 전에는 이후 step 들이 skip.
@@ -104,4 +106,11 @@ jobs:
         run: |
           for dir in $(git ls-files '**/pnpm-lock.yaml' | sed 's|/pnpm-lock.yaml||'); do
             pnpm --dir "$dir" run --if-present lint
+          done
+
+      - name: Run JS/TS tests
+        if: steps.pkg.outputs.found == 'true'
+        run: |
+          for dir in $(git ls-files '**/pnpm-lock.yaml' | sed 's|/pnpm-lock.yaml||'); do
+            pnpm --dir "$dir" run --if-present test
           done

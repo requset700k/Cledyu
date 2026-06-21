@@ -61,9 +61,9 @@ export function reconnectDelayMs(attempt) {
 /**
  * 화면 이동·정상 종료는 의도된 연결 해제이므로 재연결하지 않고, 비정상 종료만 복구한다.
  * @param {boolean} disposed React cleanup으로 이미 컴포넌트가 제거됐는지 여부
- * @param {number} closeCode WebSocket close code(1000은 정상 종료)
+ * @param {number | undefined} closeCode WebSocket close code(1000은 정상 종료)
  * @returns {boolean}
  */
 export function shouldReconnect(disposed, closeCode) {
-  return !disposed && closeCode !== 1000;
+  return !disposed && typeof closeCode === 'number' && closeCode !== 1000;
 }

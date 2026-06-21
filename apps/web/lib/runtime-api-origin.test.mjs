@@ -66,10 +66,11 @@ describe('reconnect policy', () => {
     );
   });
 
-  it('does not reconnect after disposal or a normal close', () => {
-    // 화면 이동과 정상 종료는 존중하고, 네트워크 단절 같은 비정상 종료만 복구한다.
+  it('only reconnects after an abnormal close event', () => {
+    // 화면 이동·정상 종료와 close event 전에 발생한 URL 생성 오류는 재시도하지 않는다.
     assert.equal(shouldReconnect(true, 1006), false);
     assert.equal(shouldReconnect(false, 1000), false);
+    assert.equal(shouldReconnect(false, undefined), false);
     assert.equal(shouldReconnect(false, 1006), true);
   });
 });
