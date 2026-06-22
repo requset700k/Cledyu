@@ -140,7 +140,7 @@ alertmanager:
           - severity = "critical"
         target_matchers:
           - severity = "warning"
-        equal: ["namespace", "alertname"] # critical 알림이 있을 때 중복 알림 방지
+        equal: ["namespace"]
 
       # 노드 다운 시 해당 노드의 파생 알림 무시
       - source_matchers:
