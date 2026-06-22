@@ -28,6 +28,7 @@ spec:
 # Strimzi KafkaUser — CN=api 인증서로 인증한다(최소권한):
 #  - validation-requests 토픽에 발행(검증 요청)
 #  - validation-results 토픽을 구독(검증 결과 소비)하고, 전용 컨슈머 그룹 사용
+#  - lab-events 토픽에 발행(학습 이벤트 — 분석 파이프라인이 소비)
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaUser
 metadata:
@@ -59,3 +60,9 @@ spec:
           name: cledyu-api-validation-results
           patternType: literal
         operations: [Read]
+      # lab-events 토픽 발행 권한(학습 이벤트 — 분석 파이프라인이 소비)
+      - resource:
+          type: topic
+          name: lab-events
+          patternType: literal
+        operations: [Write, Describe]
