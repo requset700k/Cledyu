@@ -41,7 +41,10 @@ func TestSSHRunnerUsesFixedCommandAndReturnsBoundedOutput(t *testing.T) {
 		}()
 		return net.Dial("tcp", listener.Addr().String())
 	})
-	runner := newSSHRunner(connector, clientSigner)
+	runner, err := NewSSHRunner(connector, clientSigner, ssh.FixedHostKey(serverSigner.PublicKey()))
+	if err != nil {
+		t.Fatalf("NewSSHRunner() error = %v", err)
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -62,12 +65,30 @@ func TestSSHRunnerAppliesContextToPortForwardConnection(t *testing.T) {
 		<-ctx.Done()
 		return nil, ctx.Err()
 	})
-	runner := newSSHRunner(connector, testSigner(t))
+	runner, err := NewSSHRunner(connector, testSigner(t), ssh.InsecureIgnoreHostKey())
+	if err != nil {
+		t.Fatalf("NewSSHRunner() error = %v", err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 
 	if _, err := runner.Run(ctx, "abc123"); err == nil {
 		t.Fatal("Run() error = nil, want connection deadline error")
+	}
+}
+
+func TestNewSSHRunnerRejectsMissingDependencies(t *testing.T) {
+	if _, err := NewSSHRunner(nil, testSigner(t), ssh.InsecureIgnoreHostKey()); err == nil {
+		t.Fatal("NewSSHRunner() error = nil for missing connector")
+	}
+	connector := connectorFunc(func(context.Context, string) (net.Conn, error) {
+		return nil, fmt.Errorf("not called")
+	})
+	if _, err := NewSSHRunner(connector, nil, ssh.InsecureIgnoreHostKey()); err == nil {
+		t.Fatal("NewSSHRunner() error = nil for missing signer")
+	}
+	if _, err := NewSSHRunner(connector, testSigner(t), nil); err == nil {
+		t.Fatal("NewSSHRunner() error = nil for missing host key callback")
 	}
 }
 
