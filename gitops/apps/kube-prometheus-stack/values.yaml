@@ -144,12 +144,12 @@ alertmanager:
 
       # 노드 다운 시 해당 노드의 파생 알림 무시
       - source_matchers:
-          - alertname = "NodeDown" # 노드 다운 알림 이름 (환경에 맞게 수정)
+          - alertname =~ "KubeNodeNotReady|KubeNodeUnreachable"
         target_matchers:
           - severity =~ "critical|warning"
         equal: ["node"]
 
-      # kubevirt 우운  다시 파생 워크로드 알림 억제
+      # KubeVirt 컨트롤플레인 다운 시 kubevirt namespace 파생 알림 억제
       - source_matchers:
           - alertname =~ "KubeVirtApiAvailabilitySLO|KubeVirtControllerAvailabilitySLO"
         target_matchers:
