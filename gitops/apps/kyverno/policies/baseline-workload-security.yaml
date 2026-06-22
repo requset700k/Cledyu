@@ -11,16 +11,16 @@ metadata:
     policies.kyverno.io/severity: medium
     policies.kyverno.io/subject: Pod
     policies.kyverno.io/description: >-
-      Audits risky pod settings before enforcement. System namespaces are
-      excluded because Cilium, KubeVirt, Longhorn, MetalLB, and node exporters
-      currently require host-level privileges.
+      Enforces baseline workload security for application namespaces. System
+      namespaces are excluded for platform components that require host-level
+      privileges.
 spec:
   admission: true
-  validationFailureAction: Audit
+  validationFailureAction: Enforce
   emitWarning: true
   background: true
   rules:
-    - name: audit-privileged-containers
+    - name: enforce-privileged-containers
       match:
         any:
           - resources:
@@ -68,7 +68,7 @@ spec:
                     operator: Equals
                     value: true
 
-    - name: audit-hostpath-volumes
+    - name: enforce-hostpath-volumes
       match:
         any:
           - resources:
@@ -88,7 +88,7 @@ spec:
                     operator: NotEquals
                     value: ""
 
-    - name: audit-pod-root-user
+    - name: enforce-pod-root-user
       match:
         any:
           - resources:
@@ -109,7 +109,7 @@ spec:
                 operator: Equals
                 value: false
 
-    - name: audit-container-root-user
+    - name: enforce-container-root-user
       match:
         any:
           - resources:
@@ -143,7 +143,7 @@ spec:
                     operator: Equals
                     value: 0
 
-    - name: audit-run-as-non-root-required
+    - name: enforce-run-as-non-root-required
       match:
         any:
           - resources:
@@ -186,7 +186,7 @@ spec:
                     operator: NotEquals
                     value: true
 
-    - name: audit-host-namespaces
+    - name: enforce-host-namespaces
       match:
         any:
           - resources:
@@ -210,7 +210,7 @@ spec:
                 operator: Equals
                 value: true
 
-    - name: audit-privilege-escalation
+    - name: enforce-privilege-escalation
       match:
         any:
           - resources:
