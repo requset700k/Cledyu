@@ -12,8 +12,8 @@ metadata:
     policies.kyverno.io/subject: Pod
     policies.kyverno.io/description: >-
       Enforces baseline workload security for application namespaces. System
-      namespaces and managed lab session namespaces are excluded because
-      platform controllers currently require host-level privileges there.
+      namespaces are excluded for platform components that require host-level
+      privileges.
 spec:
   admission: true
   validationFailureAction: Enforce
@@ -41,10 +41,6 @@ spec:
                 - loki
                 - cdi
                 - cert-manager
-          - resources:
-              namespaceSelector:
-                matchLabels:
-                  cledyu.io/managed-by: cledyu-session
       skipBackgroundRequests: true
       validate:
         allowExistingViolations: true
