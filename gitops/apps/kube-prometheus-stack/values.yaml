@@ -93,7 +93,6 @@ alertmanager:
         - matchers:
             - alertname = "InfoInhibitor"
           receiver: "null"
-          continue: false
 
         - matchers:
             - severity = "none"
