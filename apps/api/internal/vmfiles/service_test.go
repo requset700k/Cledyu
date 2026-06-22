@@ -99,3 +99,23 @@ func TestServiceAppliesRunnerTimeout(t *testing.T) {
 		t.Fatalf("List() error = %v, want context deadline exceeded", err)
 	}
 }
+
+func TestServiceDoesNotStartRunnerForAlreadyCancelledContext(t *testing.T) {
+	called := make(chan struct{}, 1)
+	runner := runnerFunc(func(ctx context.Context, sessionID string) ([]byte, error) {
+		called <- struct{}{}
+		return emptySnapshot, nil
+	})
+	service := NewService(runner, time.Second, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := service.List(ctx, "abc123"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("List() error = %v, want context canceled", err)
+	}
+	select {
+	case <-called:
+		t.Fatal("runner was called for an already cancelled context")
+	case <-time.After(50 * time.Millisecond):
+	}
+}

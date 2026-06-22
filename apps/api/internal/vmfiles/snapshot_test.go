@@ -1,6 +1,7 @@
 package vmfiles
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -61,5 +62,27 @@ func TestParseSnapshotRejectsWrongRootAndTooManyEntries(t *testing.T) {
 	raw := []byte(`{"root":"/home/lab","items":[` + strings.Join(entries, ",") + `],"truncated":true}`)
 	if _, err := ParseSnapshot(raw); err == nil {
 		t.Fatal("ParseSnapshot() error = nil for oversized snapshot")
+	}
+}
+
+func TestParseSnapshotNormalizesMissingItemsToEmptyArray(t *testing.T) {
+	for _, raw := range [][]byte{
+		[]byte(`{"root":"/home/lab","items":null,"truncated":false}`),
+		[]byte(`{"root":"/home/lab","truncated":false}`),
+	} {
+		got, err := ParseSnapshot(raw)
+		if err != nil {
+			t.Fatalf("ParseSnapshot() error = %v", err)
+		}
+		if got.Items == nil {
+			t.Fatal("ParseSnapshot().Items = nil, want empty slice")
+		}
+		encoded, err := json.Marshal(got)
+		if err != nil {
+			t.Fatalf("json.Marshal() error = %v", err)
+		}
+		if !strings.Contains(string(encoded), `"items":[]`) {
+			t.Fatalf("json.Marshal() = %s, want items array", encoded)
+		}
 	}
 }

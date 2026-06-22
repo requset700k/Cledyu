@@ -56,6 +56,10 @@ func ParseSnapshot(raw []byte) (Snapshot, error) {
 	if err := ensureJSONEOF(dec); err != nil {
 		return Snapshot{}, err
 	}
+	// 누락되거나 null인 items도 Web 계약에서는 항상 빈 JSON 배열로 반환한다.
+	if snapshot.Items == nil {
+		snapshot.Items = []Entry{}
+	}
 	if snapshot.Root != RootPath {
 		return Snapshot{}, fmt.Errorf("unexpected file snapshot root %q", snapshot.Root)
 	}

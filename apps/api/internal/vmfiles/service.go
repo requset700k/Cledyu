@@ -47,6 +47,10 @@ func NewService(runner Runner, timeout time.Duration, maxConcurrent int) *Servic
 // List는 sessionID의 검증된 파일 목록을 반환한다. 같은 세션의 동시 요청은 하나의
 // VM 작업을 공유하고, 서로 다른 세션의 요청은 전역 한도 안에서만 실행한다.
 func (s *Service) List(ctx context.Context, sessionID string) (Snapshot, error) {
+	// 이미 종료된 HTTP 요청은 singleflight 작업이나 VM 조회 슬롯을 만들지 않는다.
+	if err := ctx.Err(); err != nil {
+		return Snapshot{}, err
+	}
 	if s == nil || s.runner == nil {
 		return Snapshot{}, errors.New("VM file listing is unavailable")
 	}
