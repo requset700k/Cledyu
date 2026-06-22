@@ -128,7 +128,7 @@ func Load() (*Config, error) {
 	v.SetDefault("kubevirt.lab_ssh_public_key", "") // 빈 기본값 — env CLEDYU_KUBEVIRT_LAB_SSH_PUBLIC_KEY로 주입
 	v.SetDefault("kubevirt.storage_class", "longhorn-r2")
 	v.SetDefault("kubevirt.session_ttl_hours", 3)
-	v.SetDefault("kubevirt.provision_timeout_minutes", 5)
+	v.SetDefault("kubevirt.provision_timeout_minutes", 10)
 	v.SetDefault("kubevirt.max_active_sessions", 24)
 	v.SetDefault("kafka.brokers", "cledyu-kafka-kafka-bootstrap.kafka.svc:9093")
 	v.SetDefault("kafka.topic", "validation-requests")
