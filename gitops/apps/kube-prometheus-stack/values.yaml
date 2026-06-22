@@ -147,7 +147,8 @@ alertmanager:
           - alertname =~ "KubeNodeNotReady|KubeNodeUnreachable"
         target_matchers:
           - severity =~ "critical|warning"
-        equal: ["node"]
+          - alertname =~ "KubePodNotReady|KubeContainerWaiting|KubeStatefulSetReplicasMismatch|KubeDaemonSetRolloutStuck|KubeDaemonSetNotScheduled"
+        equal: ["namespace"]
 
       # KubeVirt 컨트롤플레인 다운 시 kubevirt namespace 파생 알림 억제
       - source_matchers:
