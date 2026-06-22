@@ -1,0 +1,725 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-cilium-metrics
+  namespace: monitoring
+  labels:
+    app: kube-prometheus-stack-grafana
+    grafana_dashboard: "1"
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+data:
+  dashboard-hubble-slo.json: |
+    {
+        "title": "Cilium Network Overview",
+        "description": "Cilium 네트워크 트래픽 관측 — 드롭, 정책 위반, 이벤트 유실 모니터링",
+        "tags": [
+            "hubble",
+            "cilium",
+            "network",
+            "platform"
+        ],
+        "timezone": "utc",
+        "refresh": "30s",
+        "time": {
+            "from": "now-1h",
+            "to": "now"
+        },
+        "graphTooltip": 1,
+        "templating": {
+            "list": [
+                {
+                    "name": "pod",
+                    "type": "query",
+                    "datasource": "prometheus",
+                    "query": "label_values(hubble_flows_processed_total, pod)",
+                    "includeAll": true,
+                    "allValue": ".*",
+                    "refresh": 2,
+                    "sort": 1
+                }
+            ]
+        },
+        "panels": [
+            {
+                "id": 20,
+                "type": "row",
+                "title": "현황 요약",
+                "collapsed": false,
+                "gridPos": {
+                    "h": 1,
+                    "w": 24,
+                    "x": 0,
+                    "y": 0
+                }
+            },
+            {
+                "id": 10,
+                "title": "현재 드롭률",
+                "type": "gauge",
+                "gridPos": {
+                    "h": 5,
+                    "w": 6,
+                    "x": 0,
+                    "y": 1
+                },
+                "datasource": {
+                    "type": "prometheus",
+                    "uid": "prometheus"
+                },
+                "fieldConfig": {
+                    "defaults": {
+                        "unit": "percentunit",
+                        "min": 0,
+                        "max": 0.02,
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": null
+                                },
+                                {
+                                    "color": "yellow",
+                                    "value": 0.005
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 0.01
+                                }
+                            ]
+                        }
+                    }
+                },
+                "options": {
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ]
+                    },
+                    "orientation": "auto",
+                    "showThresholdLabels": false,
+                    "showThresholdMarkers": true
+                },
+                "targets": [
+                    {
+                        "expr": "sum(rate(hubble_drop_total{pod=~\"$pod\"}[5m])) / sum(rate(hubble_flows_processed_total{pod=~\"$pod\"}[5m]))",
+                        "legendFormat": "드롭률",
+                        "refId": "A"
+                    }
+                ]
+            },
+            {
+                "id": 11,
+                "title": "총 드롭 (1h)",
+                "type": "stat",
+                "gridPos": {
+                    "h": 2,
+                    "w": 6,
+                    "x": 6,
+                    "y": 1
+                },
+                "datasource": {
+                    "type": "prometheus",
+                    "uid": "prometheus"
+                },
+                "fieldConfig": {
+                    "defaults": {
+                        "unit": "short",
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": null
+                                },
+                                {
+                                    "color": "yellow",
+                                    "value": 100
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 1000
+                                }
+                            ]
+                        }
+                    }
+                },
+                "options": {
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ]
+                    },
+                    "colorMode": "background",
+                    "graphMode": "none",
+                    "textMode": "auto"
+                },
+                "targets": [
+                    {
+                        "expr": "sum(increase(hubble_drop_total{pod=~\"$pod\"}[1h]))",
+                        "legendFormat": "드롭 수",
+                        "refId": "A"
+                    }
+                ]
+            },
+            {
+                "id": 12,
+                "title": "이벤트 유실 (1h)",
+                "type": "stat",
+                "gridPos": {
+                    "h": 2,
+                    "w": 6,
+                    "x": 12,
+                    "y": 1
+                },
+                "datasource": {
+                    "type": "prometheus",
+                    "uid": "prometheus"
+                },
+                "fieldConfig": {
+                    "defaults": {
+                        "unit": "short",
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": null
+                                },
+                                {
+                                    "color": "yellow",
+                                    "value": 100
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 1000
+                                }
+                            ]
+                        }
+                    }
+                },
+                "options": {
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ]
+                    },
+                    "colorMode": "background",
+                    "graphMode": "none",
+                    "textMode": "auto"
+                },
+                "targets": [
+                    {
+                        "expr": "sum(increase(hubble_lost_events_total{pod=~\"$pod\"}[1h]))",
+                        "legendFormat": "유실 이벤트",
+                        "refId": "A"
+                    }
+                ]
+            },
+            {
+                "id": 13,
+                "title": "정책 차단 (1h)",
+                "type": "stat",
+                "gridPos": {
+                    "h": 2,
+                    "w": 6,
+                    "x": 18,
+                    "y": 1
+                },
+                "datasource": {
+                    "type": "prometheus",
+                    "uid": "prometheus"
+                },
+                "fieldConfig": {
+                    "defaults": {
+                        "unit": "short",
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": null
+                                },
+                                {
+                                    "color": "yellow",
+                                    "value": 10
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 100
+                                }
+                            ]
+                        }
+                    }
+                },
+                "options": {
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ]
+                    },
+                    "colorMode": "background",
+                    "graphMode": "none",
+                    "textMode": "auto"
+                },
+                "targets": [
+                    {
+                        "expr": "sum(increase(hubble_drop_total{reason=\"POLICY_DENIED\",pod=~\"$pod\"}[1h]))",
+                        "legendFormat": "정책 차단",
+                        "refId": "A"
+                    }
+                ]
+            },
+            {
+                "id": 21,
+                "title": "드롭 추이 (1h)",
+                "type": "stat",
+                "gridPos": {
+                    "h": 3,
+                    "w": 6,
+                    "x": 6,
+                    "y": 3
+                },
+                "datasource": {
+                    "type": "prometheus",
+                    "uid": "prometheus"
+                },
+                "fieldConfig": {
+                    "defaults": {
+                        "unit": "pps",
+                        "color": {
+                            "mode": "fixed",
+                            "fixedColor": "red"
+                        },
+                        "custom": {}
+                    }
+                },
+                "options": {
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ]
+                    },
+                    "colorMode": "none",
+                    "graphMode": "area",
+                    "textMode": "value_and_name"
+                },
+                "targets": [
+                    {
+                        "expr": "sum(rate(hubble_drop_total{pod=~\"$pod\"}[5m]))",
+                        "legendFormat": "드롭/s",
+                        "refId": "A"
+                    }
+                ]
+            },
+            {
+                "id": 22,
+                "title": "유실 추이 (1h)",
+                "type": "stat",
+                "gridPos": {
+                    "h": 3,
+                    "w": 6,
+                    "x": 12,
+                    "y": 3
+                },
+                "datasource": {
+                    "type": "prometheus",
+                    "uid": "prometheus"
+                },
+                "fieldConfig": {
+                    "defaults": {
+                        "unit": "short",
+                        "color": {
+                            "mode": "fixed",
+                            "fixedColor": "orange"
+                        },
+                        "custom": {}
+                    }
+                },
+                "options": {
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ]
+                    },
+                    "colorMode": "none",
+                    "graphMode": "area",
+                    "textMode": "value_and_name"
+                },
+                "targets": [
+                    {
+                        "expr": "sum(rate(hubble_lost_events_total{pod=~\"$pod\"}[5m]))",
+                        "legendFormat": "유실/s",
+                        "refId": "A"
+                    }
+                ]
+            },
+            {
+                "id": 23,
+                "title": "정책 차단 추이 (1h)",
+                "type": "stat",
+                "gridPos": {
+                    "h": 3,
+                    "w": 6,
+                    "x": 18,
+                    "y": 3
+                },
+                "datasource": {
+                    "type": "prometheus",
+                    "uid": "prometheus"
+                },
+                "fieldConfig": {
+                    "defaults": {
+                        "unit": "pps",
+                        "color": {
+                            "mode": "fixed",
+                            "fixedColor": "dark-red"
+                        },
+                        "custom": {}
+                    }
+                },
+                "options": {
+                    "reduceOptions": {
+                        "calcs": [
+                            "lastNotNull"
+                        ]
+                    },
+                    "colorMode": "none",
+                    "graphMode": "area",
+                    "textMode": "value_and_name"
+                },
+                "targets": [
+                    {
+                        "expr": "sum(rate(hubble_drop_total{reason=\"POLICY_DENIED\",pod=~\"$pod\"}[5m]))",
+                        "legendFormat": "차단/s",
+                        "refId": "A"
+                    }
+                ]
+            },
+            {
+                "id": 1,
+                "type": "row",
+                "title": "드롭 & 이상 트래픽",
+                "gridPos": {
+                    "h": 1,
+                    "w": 24,
+                    "x": 0,
+                    "y": 6
+                }
+            },
+            {
+                "id": 2,
+                "title": "전체 드롭 패킷 rate (reason별)",
+                "description": "이유별 드롭 패킷 수. STALE_OR_UNROUTABLE_IP 급증 시 VM 네트워크 이상 의심",
+                "type": "timeseries",
+                "gridPos": {
+                    "h": 7,
+                    "w": 12,
+                    "x": 0,
+                    "y": 7
+                },
+                "datasource": {
+                    "type": "prometheus",
+                    "uid": "prometheus"
+                },
+                "fieldConfig": {
+                    "defaults": {
+                        "unit": "pps",
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "drawStyle": "line",
+                            "fillOpacity": 10,
+                            "lineWidth": 2
+                        }
+                    }
+                },
+                "options": {
+                    "tooltip": {
+                        "mode": "multi"
+                    },
+                    "legend": {
+                        "displayMode": "table",
+                        "placement": "bottom",
+                        "calcs": [
+                            "mean",
+                            "max"
+                        ]
+                    }
+                },
+                "targets": [
+                    {
+                        "expr": "sum(rate(hubble_drop_total{pod=~\"$pod\"}[5m])) by (reason, protocol)",
+                        "legendFormat": "{{reason}} / {{protocol}}",
+                        "refId": "A"
+                    }
+                ]
+            },
+            {
+                "id": 3,
+                "title": "드롭률 (드롭 / 전체 흐름)",
+                "description": "전체 트래픽 대비 드롭 비율. SLO 위반 기준선으로 활용",
+                "type": "timeseries",
+                "gridPos": {
+                    "h": 7,
+                    "w": 12,
+                    "x": 12,
+                    "y": 7
+                },
+                "datasource": {
+                    "type": "prometheus",
+                    "uid": "prometheus"
+                },
+                "fieldConfig": {
+                    "defaults": {
+                        "unit": "percentunit",
+                        "min": 0,
+                        "color": {
+                            "mode": "fixed",
+                            "fixedColor": "red"
+                        },
+                        "custom": {
+                            "drawStyle": "line",
+                            "fillOpacity": 20,
+                            "lineWidth": 2
+                        },
+                        "thresholds": {
+                            "mode": "absolute",
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": null
+                                },
+                                {
+                                    "color": "yellow",
+                                    "value": 0.005
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 0.01
+                                }
+                            ]
+                        }
+                    }
+                },
+                "options": {
+                    "tooltip": {
+                        "mode": "multi"
+                    },
+                    "legend": {
+                        "displayMode": "list",
+                        "placement": "bottom"
+                    }
+                },
+                "targets": [
+                    {
+                        "expr": "sum(rate(hubble_drop_total{pod=~\"$pod\"}[5m])) / sum(rate(hubble_flows_processed_total{pod=~\"$pod\"}[5m]))",
+                        "legendFormat": "드롭률",
+                        "refId": "A"
+                    }
+                ]
+            },
+            {
+                "id": 4,
+                "title": "Hubble 이벤트 유실 (ring buffer)",
+                "description": "hubble_lost_events_total 급증 시 관측 데이터 누락 — 알림 필요",
+                "type": "timeseries",
+                "gridPos": {
+                    "h": 6,
+                    "w": 12,
+                    "x": 0,
+                    "y": 14
+                },
+                "datasource": {
+                    "type": "prometheus",
+                    "uid": "prometheus"
+                },
+                "fieldConfig": {
+                    "defaults": {
+                        "unit": "short",
+                        "color": {
+                            "mode": "fixed",
+                            "fixedColor": "orange"
+                        },
+                        "custom": {
+                            "drawStyle": "bars",
+                            "fillOpacity": 80
+                        }
+                    }
+                },
+                "options": {
+                    "tooltip": {
+                        "mode": "multi"
+                    },
+                    "legend": {
+                        "displayMode": "list",
+                        "placement": "bottom"
+                    }
+                },
+                "targets": [
+                    {
+                        "expr": "increase(hubble_lost_events_total{pod=~\"$pod\"}[5m])",
+                        "legendFormat": "{{pod}} 유실",
+                        "refId": "A"
+                    }
+                ]
+            },
+            {
+                "id": 5,
+                "title": "정책 위반 드롭 (Policy Denied)",
+                "description": "CiliumNetworkPolicy에 의해 차단된 트래픽. 급증 시 정책 오류 또는 침입 시도 의심",
+                "type": "timeseries",
+                "gridPos": {
+                    "h": 6,
+                    "w": 12,
+                    "x": 12,
+                    "y": 14
+                },
+                "datasource": {
+                    "type": "prometheus",
+                    "uid": "prometheus"
+                },
+                "fieldConfig": {
+                    "defaults": {
+                        "unit": "pps",
+                        "color": {
+                            "mode": "fixed",
+                            "fixedColor": "dark-red"
+                        },
+                        "custom": {
+                            "drawStyle": "line",
+                            "fillOpacity": 15,
+                            "lineWidth": 2
+                        }
+                    }
+                },
+                "options": {
+                    "tooltip": {
+                        "mode": "multi"
+                    },
+                    "legend": {
+                        "displayMode": "list",
+                        "placement": "bottom"
+                    }
+                },
+                "targets": [
+                    {
+                        "expr": "sum(rate(hubble_drop_total{reason=\"POLICY_DENIED\",pod=~\"$pod\"}[5m])) by (protocol)",
+                        "legendFormat": "Policy Denied / {{protocol}}",
+                        "refId": "A"
+                    }
+                ]
+            },
+            {
+                "id": 6,
+                "type": "row",
+                "title": "전체 트래픽 흐름",
+                "gridPos": {
+                    "h": 1,
+                    "w": 24,
+                    "x": 0,
+                    "y": 20
+                }
+            },
+            {
+                "id": 7,
+                "title": "전체 흐름 처리량 (verdict별)",
+                "description": "FORWARDED vs DROPPED 추이. DROPPED 비율 증가 시 이상 징후",
+                "type": "timeseries",
+                "gridPos": {
+                    "h": 7,
+                    "w": 12,
+                    "x": 0,
+                    "y": 21
+                },
+                "datasource": {
+                    "type": "prometheus",
+                    "uid": "prometheus"
+                },
+                "fieldConfig": {
+                    "defaults": {
+                        "unit": "pps",
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "drawStyle": "line",
+                            "fillOpacity": 10,
+                            "lineWidth": 1
+                        }
+                    }
+                },
+                "options": {
+                    "tooltip": {
+                        "mode": "multi"
+                    },
+                    "legend": {
+                        "displayMode": "table",
+                        "placement": "bottom",
+                        "calcs": [
+                            "mean"
+                        ]
+                    }
+                },
+                "targets": [
+                    {
+                        "expr": "sum(rate(hubble_flows_processed_total{pod=~\"$pod\"}[5m])) by (verdict)",
+                        "legendFormat": "{{verdict}}",
+                        "refId": "A"
+                    }
+                ]
+            },
+            {
+                "id": 8,
+                "title": "프로토콜별 트래픽",
+                "description": "TCP/UDP/ICMPv4 트래픽 분포",
+                "type": "timeseries",
+                "gridPos": {
+                    "h": 7,
+                    "w": 12,
+                    "x": 12,
+                    "y": 21
+                },
+                "datasource": {
+                    "type": "prometheus",
+                    "uid": "prometheus"
+                },
+                "fieldConfig": {
+                    "defaults": {
+                        "unit": "pps",
+                        "color": {
+                            "mode": "palette-classic"
+                        },
+                        "custom": {
+                            "drawStyle": "line",
+                            "fillOpacity": 10,
+                            "lineWidth": 1
+                        }
+                    }
+                },
+                "options": {
+                    "tooltip": {
+                        "mode": "multi"
+                    },
+                    "legend": {
+                        "displayMode": "table",
+                        "placement": "bottom",
+                        "calcs": [
+                            "mean"
+                        ]
+                    }
+                },
+                "targets": [
+                    {
+                        "expr": "sum(rate(hubble_flows_processed_total{pod=~\"$pod\",verdict=\"FORWARDED\"}[5m])) by (protocol)",
+                        "legendFormat": "{{protocol}}",
+                        "refId": "A"
+                    }
+                ]
+            }
+        ],
+        "schemaVersion": 40
+    }
