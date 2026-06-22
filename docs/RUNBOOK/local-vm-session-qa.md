@@ -261,8 +261,10 @@ cloud-init 설치 로그나 준비 전 프롬프트가 보일 수 있다. API가
 
 세션 상태 조회는 VM이 `Running`이 되면 `ready`로 전환한다. Web은 이후 최대 2분간
 부팅 카드를 유지해 랩별 init 완료와 autologin getty 재시작을 기다린다. 반대로 기본
-프로비저닝 제한 시간(5분)을 넘겼는데도 VM이 `Running`이 아니면 `failed`로 표시하고,
-백그라운드 reaper가 해당 세션 namespace를 회수한다.
+프로비저닝 제한 시간(10분, CDI/Longhorn clone이 정상적으로 7분까지 걸리는 케이스를
+감안한 값)을 넘겼는데도 VM이 `Running`이 아니면 `failed`로 표시한다. 이 namespace는
+백그라운드 reaper가 주기적으로 회수하지만, 사용자가 그 전에 같은 lab을 다시 시작하면
+`CreateSession`이 reaper를 기다리지 않고 즉시 정리한 뒤 새 세션을 만든다.
 
 ## 참고
 
