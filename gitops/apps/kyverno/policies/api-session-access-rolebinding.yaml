@@ -27,7 +27,8 @@ spec:
                 - Namespace
               names:
                 - "lab-*"
-      skipBackgroundRequests: true
+      # generateExisting 백필은 background controller 요청으로 실행되므로 건너뛰지 않는다.
+      skipBackgroundRequests: false
       generate:
         apiVersion: rbac.authorization.k8s.io/v1
         kind: RoleBinding
