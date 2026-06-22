@@ -153,9 +153,26 @@ alertmanager:
       # KubeVirt 컨트롤플레인 다운 시 kubevirt namespace 파생 알림 억제
       - source_matchers:
           - alertname =~ "KubeVirtApiAvailabilitySLO|KubeVirtControllerAvailabilitySLO"
+          - severity = "critical"
         target_matchers:
-          - severity =~ "warning|critical"
-          - namespace = "kubevirt"
+          - alertname =~ "KubeVirtApiAvailabilitySLO|KubeVirtControllerAvailabilitySLO|KubeVirtHandlerAvailabilitySLO"
+          - severity = "warning"
+        equal: ["sloth_service"]
+
+      # KubeVirt SLO critical → KubevirtComponentDown/VirtControllerNotReady 억제
+      # source SLO에 namespace 라벨 없어 equal 적용 불가, target을 alertname으로 명시해 범위 제한
+      - source_matchers:
+          - alertname =~ "KubeVirtApiAvailabilitySLO|KubeVirtControllerAvailabilitySLO"
+          - severity = "critical"
+        target_matchers:
+          - alertname =~ "KubevirtComponentDown|KubevirtVirtControllerNotReady"
+
+      # KubevirtComponentDown → VMI 파생 알림 억제
+      - source_matchers:
+          - alertname = "KubevirtComponentDown"
+        target_matchers:
+          - alertname =~ "KubevirtVMIHighCPU|KubevirtVMIMemorySwap"
+        equal: ["namespace"]
 
 # ── Grafana ───────────────────────────────────────────────────
 grafana:
