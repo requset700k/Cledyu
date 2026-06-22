@@ -3,6 +3,7 @@
 // WebSocket은 rewrite 대상이 아니므로 Terminal 컴포넌트에서 NEXT_PUBLIC_WS_URL로 직접 연결.
 
 import type { HintResponse, Lab, Session, StepProgress, User } from './types';
+import { refreshSession } from './auth-session.mjs';
 
 interface Paginated<T> {
   items: T[];
@@ -42,20 +43,6 @@ export class ApiRequestError extends Error {
 // 개발 모드에서는 Keycloak 대신 dev-token으로 백엔드 stub JWT 미들웨어를 통과
 const DEV_HEADERS: Record<string, string> =
   process.env.NODE_ENV === 'development' ? { Authorization: 'Bearer dev-token' } : {};
-
-// silent refresh — 401 을 받으면 refresh_token 쿠키로 access_token 을 갱신한 뒤 1회 재시도.
-// 동시 다발 401(폴링 + 사용자 액션)은 같은 refresh 호출을 공유한다(single-flight).
-let refreshInFlight: Promise<boolean> | null = null;
-
-function refreshSession(): Promise<boolean> {
-  refreshInFlight ??= fetch('/api/v1/auth/refresh', { method: 'POST', credentials: 'include' })
-    .then((r) => r.ok)
-    .catch(() => false)
-    .finally(() => {
-      refreshInFlight = null;
-    });
-  return refreshInFlight;
-}
 
 async function readErrorPayload(res: Response): Promise<ApiErrorPayload> {
   return res.json().catch(() => ({ error: res.statusText }));
