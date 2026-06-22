@@ -117,7 +117,9 @@ alertmanager:
         # TraefikLatencySLO 플래핑 억제
         - matchers:
             - alertname = "TraefikLatencySLO"
-          repeat_interval: 4h
+          group_wait: 1m
+          group_interval: 15m
+          repeat_interval: 24h
           receiver: "discord"
 
     receivers:
