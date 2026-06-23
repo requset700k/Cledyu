@@ -99,9 +99,13 @@ spec:
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 15
+          # readiness 는 /ready 로 전환 예정이나, 현재 핀된 이미지에는 아직 /ready 가 없다.
+          # GitOps 매니페스트가 이미지 태그 bump(머지 후 비동기)보다 먼저 적용되면 kubelet 이
+          # /ready 에서 404 를 받아 롤아웃이 멈춘다. /ready 코드가 포함된 이미지가 배포된 뒤
+          # 후속 커밋에서 readinessProbe 를 /ready 로 전환한다. (그때까지 readiness=liveness=/health)
           readinessProbe:
             httpGet:
-              path: /ready
+              path: /health
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 10
