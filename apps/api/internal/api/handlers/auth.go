@@ -28,14 +28,14 @@ const (
 	refreshTTLFallback = 1800
 )
 
-// allowedIdP 는 kc_idp_hint 로 통과시킬 Keycloak IdP alias 화이트리스트다
+// allowedIDP 는 kc_idp_hint 로 통과시킬 Keycloak IdP alias 화이트리스트다
 // (infra/terraform/keycloak/idp-learn.tf 의 alias 와 일치).
-var allowedIdP = map[string]bool{"google": true, "kakao": true, "naver": true}
+var allowedIDP = map[string]bool{"google": true, "kakao": true, "naver": true}
 
-// normalizeIdP 는 허용된 alias 만 반환하고, 그 외(미지정·임의 값)는 "" 로 폴백한다.
+// normalizeIDP 는 허용된 alias 만 반환하고, 그 외(미지정·임의 값)는 "" 로 폴백한다.
 // 오픈 리다이렉트·파라미터 주입을 막는 서버측 검증 지점이다.
-func normalizeIdP(raw string) string {
-	if allowedIdP[raw] {
+func normalizeIDP(raw string) string {
+	if allowedIDP[raw] {
 		return raw
 	}
 	return ""
@@ -72,7 +72,7 @@ func (h *Handler) Login(c *gin.Context) {
 
 	// ?screen=register → Keycloak 회원가입 폼으로 딥링크.
 	register := c.Query("screen") == "register"
-	idp := normalizeIdP(c.Query("idp"))
+	idp := normalizeIDP(c.Query("idp"))
 	c.Redirect(http.StatusFound, h.auth.AuthCodeURL(state, nonce, pkce, register, idp))
 }
 
