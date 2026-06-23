@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/requset700k/cledyu/api/internal/auth"
-	"github.com/requset700k/cledyu/api/internal/kubevirt"
+	"github.com/requset700k/cledyu/api/internal/session"
 	"go.uber.org/zap"
 )
 
@@ -120,7 +120,7 @@ func (h *Handler) TerminateUserSession(c *gin.Context) {
 		return
 	}
 
-	if err := h.sessions.Delete(c.Request.Context(), sessionID); err != nil && !errors.Is(err, kubevirt.ErrNotFound) {
+	if err := h.sessions.Delete(c.Request.Context(), sessionID); err != nil && !errors.Is(err, session.ErrNotFound) {
 		h.log.Error("terminate session", zap.Error(err), zap.String("session_id", sessionID))
 		h.err(c, http.StatusInternalServerError, "terminate session failed")
 		return

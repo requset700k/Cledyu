@@ -12,8 +12,8 @@ import (
 	"github.com/requset700k/cledyu/api/internal/content"
 	"github.com/requset700k/cledyu/api/internal/events"
 	"github.com/requset700k/cledyu/api/internal/kube"
-	"github.com/requset700k/cledyu/api/internal/kubevirt"
 	"github.com/requset700k/cledyu/api/internal/lock"
+	"github.com/requset700k/cledyu/api/internal/session"
 	"github.com/requset700k/cledyu/api/internal/store"
 	"github.com/requset700k/cledyu/api/internal/validation"
 	"go.uber.org/zap"
@@ -26,7 +26,7 @@ type Handler struct {
 	log       *zap.Logger
 	auth      *auth.Provider                // Keycloak OIDC. nil 허용 — discovery 실패(CI/로컬) 시 인증 흐름 비활성.
 	labs      map[string]content.LabContent // lab id → DSL 콘텐츠(스텝). GetLab/세션에서 사용.
-	sessions  *kubevirt.Manager             // KubeVirt VM 수명주기. nil 허용 — 클러스터 미연결 시 세션 API 503.
+	sessions  session.Provider              // 세션 VM 수명주기(KubeVirt 또는 EC2 오버플로우 디스패처). nil 허용 — 미연결 시 세션 API 503.
 	steps     *stepStore                    // 세션별 스텝 진행 상태 — in-memory 캐시 + DB write-through(progress.go).
 	virt      kubecli.KubevirtClient        // VM serial console 접속용 KubeVirt 클라이언트. nil이면 콘솔 비활성.
 	validator validation.Publisher          // validation-requests Kafka 발행기. nil이면 debug 모드에서 mock 검증.
@@ -46,7 +46,7 @@ type roleAssigner interface {
 // sessions·authProvider·eventsPub·db 는 nil 허용. 시작 시 임베드된 Lab DSL 콘텐츠를
 // 로드하고, serial console 용 KubeVirt 클라이언트를 초기화한다.
 // 클러스터 미연결(CI/로컬) 환경에서도 New가 성공하도록 둘 다 실패 시 nil/empty 폴백한다.
-func New(cfg *config.Config, log *zap.Logger, sessions *kubevirt.Manager, validator validation.Publisher, eventsPub events.Publisher, db *store.Store, locks lock.Locker, authProvider *auth.Provider) *Handler {
+func New(cfg *config.Config, log *zap.Logger, sessions session.Provider, validator validation.Publisher, eventsPub events.Publisher, db *store.Store, locks lock.Locker, authProvider *auth.Provider) *Handler {
 	labs, err := content.Load()
 	if err != nil {
 		log.Error("lab content load failed; detail pages will lack steps", zap.Error(err))

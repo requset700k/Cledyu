@@ -77,6 +77,36 @@ spec:
             # (redis 평문, kafka mTLS 는 자체 인증서, kubevirt 는 kubeconfig CA).
             - name: SSL_CERT_FILE
               value: /etc/ssl/cledyu/ca.crt
+            {{- if .Values.aws.enabled }}
+            # AWS EC2 오버플로우 — 온프렘 풀 만석 시 세션 버스트(Phase 13). enabled=false 면 미주입.
+            - name: CLEDYU_AWS_REGION
+              value: {{ .Values.aws.region | quote }}
+            - name: CLEDYU_AWS_LAUNCH_TEMPLATE_ID
+              value: {{ .Values.aws.launchTemplateId | quote }}
+            - name: CLEDYU_AWS_INSTANCE_TYPE
+              value: {{ .Values.aws.instanceType | quote }}
+            - name: CLEDYU_AWS_MAX_ACTIVE_SESSIONS
+              value: {{ .Values.aws.maxActiveSessions | quote }}
+            # 최소권한 IAM 키 — Vault(cledyu/aws/api)→ESO(cledyu-api-aws). 표준 AWS SDK env.
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.aws.secretName | quote }}
+                  key: access_key_id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.aws.secretName | quote }}
+                  key: secret_access_key
+            # Tailscale ephemeral authkey — 세션 인스턴스 cloud-init 의 tailscale up 에 쓰인다.
+            # 미설정 시(optional) EC2 세션은 SSM 채점만 가능하고 라이브 터미널/IDE 는 비활성.
+            - name: CLEDYU_AWS_TAILSCALE_AUTH_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.aws.secretName | quote }}
+                  key: tailscale_authkey
+                  optional: true
+            {{- end }}
           volumeMounts:
             - name: kafka-certs
               mountPath: /etc/kafka-certs

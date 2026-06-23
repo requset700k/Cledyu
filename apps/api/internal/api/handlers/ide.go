@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/requset700k/cledyu/api/internal/kubevirt"
+	"github.com/requset700k/cledyu/api/internal/session"
 	"go.uber.org/zap"
 )
 
@@ -28,7 +28,7 @@ func (h *Handler) IDE(c *gin.Context) {
 
 	sess, err := h.sessions.Get(c.Request.Context(), sessionID)
 	if err != nil {
-		if errors.Is(err, kubevirt.ErrNotFound) {
+		if errors.Is(err, session.ErrNotFound) {
 			h.err(c, http.StatusNotFound, "session not found")
 			return
 		}

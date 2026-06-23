@@ -15,6 +15,7 @@ type Config struct {
 	Redis       RedisConfig    `mapstructure:"redis"`
 	Keycloak    KeycloakConfig `mapstructure:"keycloak"`
 	KubeVirt    KubeVirtConfig `mapstructure:"kubevirt"`
+	AWS         AWSConfig      `mapstructure:"aws"`
 	Kafka       KafkaConfig    `mapstructure:"kafka"`
 	AI          AIConfig       `mapstructure:"ai"`
 	DB          DBConfig       `mapstructure:"db"`
@@ -70,6 +71,28 @@ type KubeVirtConfig struct {
 	// MaxActiveSessions: 클러스터 전체 동시 활성 세션 상한. 초과 시 세션 생성을 429로 거부한다.
 	// 스토리지/컴퓨트 용량을 넘어서는 무한정 세션 생성으로 Longhorn이 마르는 것을 방지. 0이면 무제한.
 	MaxActiveSessions int `mapstructure:"max_active_sessions"`
+}
+
+// AWSConfig는 EC2 오버플로우(온프렘 KubeVirt 풀이 가득 찼을 때 AWS EC2로 버스트) 설정이다.
+// Region·LaunchTemplateID·MaxActiveSessions 가 모두 채워져야 EC2 오버플로우가 활성화된다.
+// 미설정(기본값)이면 EC2 비활성 — 세션은 KubeVirt 전용으로 동작한다(현행 동작 보존).
+// AWS 자격증명은 표준 SDK 환경변수(AWS_ACCESS_KEY_ID/SECRET/REGION)로 주입한다 — 최소권한
+// IAM 키를 Vault→External Secrets 로 컨테이너 env 에 넣는다(코드에 키를 두지 않는다).
+type AWSConfig struct {
+	Region           string `mapstructure:"region"`             // EC2 리전(예: ap-northeast-2)
+	LaunchTemplateID string `mapstructure:"launch_template_id"` // 세션 VM 베이스 Launch Template(W1 terraform 산출물)
+	InstanceType     string `mapstructure:"instance_type"`      // 인스턴스 타입 오버라이드. 빈 값이면 LT 기본값 사용.
+	SessionTTLHours  int    `mapstructure:"session_ttl_hours"`  // EC2 세션 TTL. reaper가 만료 인스턴스를 terminate.
+	// ProvisionTimeoutMinutes: EC2 인스턴스가 이 시간 내 running 이 안 되면 reaper가 terminate. 0이면 비활성.
+	ProvisionTimeoutMinutes int `mapstructure:"provision_timeout_minutes"`
+	// MaxActiveSessions: EC2 동시 세션 상한(오버플로우 용량). 0이면 EC2 오버플로우 비활성.
+	MaxActiveSessions int `mapstructure:"max_active_sessions"`
+	// TailnetHostnamePrefix: 세션 인스턴스가 tailscale up 시 쓰는 MagicDNS 호스트네임 prefix.
+	// API/검증엔진은 "<prefix>-<sessionID>" 로 인스턴스에 도달한다(라이브 터미널/IDE 프록시·SSH).
+	TailnetHostnamePrefix string `mapstructure:"tailnet_hostname_prefix"`
+	// TailscaleAuthKey: 세션 인스턴스 cloud-init 이 tailnet 에 가입할 때 쓰는 ephemeral authkey.
+	// Vault→ESO 로 주입. 비면 cloud-init 이 tailscale 가입을 생략(라이브 터미널/IDE 불가, SSM 채점만).
+	TailscaleAuthKey string `mapstructure:"tailscale_auth_key"`
 }
 
 type KeycloakConfig struct {
@@ -130,6 +153,15 @@ func Load() (*Config, error) {
 	v.SetDefault("kubevirt.session_ttl_hours", 3)
 	v.SetDefault("kubevirt.provision_timeout_minutes", 10)
 	v.SetDefault("kubevirt.max_active_sessions", 24)
+	// AWS EC2 오버플로우 — 기본 비활성(max_active_sessions=0). W1 terraform 적용 후 env 로 주입해 활성화.
+	v.SetDefault("aws.region", "ap-northeast-2")
+	v.SetDefault("aws.launch_template_id", "") // env CLEDYU_AWS_LAUNCH_TEMPLATE_ID 로 주입
+	v.SetDefault("aws.instance_type", "t3.medium")
+	v.SetDefault("aws.session_ttl_hours", 3)
+	v.SetDefault("aws.provision_timeout_minutes", 10)
+	v.SetDefault("aws.max_active_sessions", 0) // 0 = EC2 오버플로우 비활성(현행 KubeVirt 전용 동작 보존)
+	v.SetDefault("aws.tailnet_hostname_prefix", "lab")
+	v.SetDefault("aws.tailscale_auth_key", "") // env CLEDYU_AWS_TAILSCALE_AUTH_KEY(Secret)로 주입
 	v.SetDefault("kafka.brokers", "cledyu-kafka-kafka-bootstrap.kafka.svc:9093")
 	v.SetDefault("kafka.topic", "validation-requests")
 	v.SetDefault("kafka.tls_cert", "/etc/kafka-certs/tls.crt")

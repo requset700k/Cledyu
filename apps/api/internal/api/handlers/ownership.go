@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
-	"github.com/requset700k/cledyu/api/internal/kubevirt"
+	"github.com/requset700k/cledyu/api/internal/session"
 )
 
 // 세션 소유자 검증 — 세션 ID 만 알면 타인의 세션(터미널 포함)에 접근할 수 있던
@@ -31,8 +31,8 @@ func (h *Handler) denyIfNotOwner(c *gin.Context, ownerUID string) bool {
 	return false
 }
 
-// denyIfNotSessionOwner는 kubevirt 세션(namespace annotation 기반 — 영속) 소유자를 검사한다.
-func (h *Handler) denyIfNotSessionOwner(c *gin.Context, sess *kubevirt.Session) bool {
+// denyIfNotSessionOwner는 세션(프로바이더가 영속화한 소유자 메타) 소유자를 검사한다.
+func (h *Handler) denyIfNotSessionOwner(c *gin.Context, sess *session.Session) bool {
 	return h.denyIfNotOwner(c, sess.UserID)
 }
 

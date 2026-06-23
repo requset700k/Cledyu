@@ -1,0 +1,33 @@
+#cloud-config
+# Cledyu 세션 인스턴스 베이스 cloud-init.
+#
+# 주의: 운영 세션은 apps/api(internal/ec2)가 RunInstances 에서 세션별 user-data 로 이 값을
+# 덮어쓴다(EC2 는 user-data 를 병합하지 않고 대체한다). 따라서 SSM Agent·tailscale·code-server 는
+# 베이스 AMI 에 미리 설치돼 있어야 하며(권장: packer 커스텀 AMI), 이 파일은 stock AMI 직접 부팅
+# (수동 검증)용 폴백이다. api 의 세션 user-data 는 tailscale up 과 랩별 초기화만 수행한다.
+
+# lab 사용자 — 랩 콘텐츠가 /home/lab 과 `lab` 계정에 의존한다(api 세션 user-data 도 동일 블록 생성).
+# 커스텀 AMI 를 굽는다면 이미지에 lab 사용자를 미리 포함시켜도 된다.
+users:
+  - name: lab
+    lock_passwd: false
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+chpasswd:
+  expire: false
+  list: |
+    lab:lab
+
+package_update: true
+packages:
+  - curl
+  - jq
+
+runcmd:
+  # SSM Agent — Canonical Ubuntu AMI 에는 snap 으로 동봉돼 있으나, 누락 대비 보장.
+  - snap install amazon-ssm-agent --classic || true
+  - systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service || systemctl enable --now amazon-ssm-agent || true
+  # Tailscale 설치(가입은 api 세션 user-data 의 `tailscale up --authkey`가 수행).
+  - curl -fsSL https://tailscale.com/install.sh | sh || true
+  # code-server(브라우저 IDE 랩) 설치 — 세션 user-data 가 필요 시 기동.
+  - curl -fsSL https://code-server.dev/install.sh | sh || true

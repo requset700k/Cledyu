@@ -57,6 +57,20 @@ spec:
               value: lab
             - name: LAB_SSH_KEY
               value: /etc/lab-ssh/id_ed25519
+            {{- if .Values.aws.enabled }}
+            # EC2 세션 SSM 채점용 최소권한 키 — Vault(cledyu/aws/validation-engine)→ESO. 표준 AWS SDK env.
+            # 리전은 ec2.go 가 검증요청 VM spec 의 Region 으로 설정하므로 AWS_REGION env 는 두지 않는다.
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.aws.secretName | quote }}
+                  key: access_key_id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.aws.secretName | quote }}
+                  key: secret_access_key
+            {{- end }}
 
           volumeMounts:
             # 아래 volumes에서 정의한 kafka-certs를 컨테이너 안 /etc/kafka-certs/에 마운트

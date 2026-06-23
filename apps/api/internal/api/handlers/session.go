@@ -12,7 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/requset700k/cledyu/api/internal/content"
 	"github.com/requset700k/cledyu/api/internal/events"
-	"github.com/requset700k/cledyu/api/internal/kubevirt"
+	"github.com/requset700k/cledyu/api/internal/session"
 	"github.com/requset700k/cledyu/api/internal/validation"
 	"go.uber.org/zap"
 )
@@ -89,11 +89,11 @@ func newTraceID() string {
 	return hex.EncodeToString(b)
 }
 
-// sessionCreationManager는 prepareSessionCreation이 필요로 하는 *kubevirt.Manager의 부분 집합이다.
-// 전체 Manager 대신 이 인터페이스를 받게 해 실제 KubeVirt 클러스터 없이도 stub으로 단위 테스트한다.
+// sessionCreationManager는 prepareSessionCreation이 필요로 하는 session.Provider의 부분 집합이다.
+// 전체 Provider 대신 이 인터페이스를 받게 해 실제 프로바이더 없이도 stub으로 단위 테스트한다.
 type sessionCreationManager interface {
 	FindActiveByUser(ctx context.Context, userID string) (string, error)
-	Get(ctx context.Context, sessionID string) (*kubevirt.Session, error)
+	Get(ctx context.Context, sessionID string) (*session.Session, error)
 	Delete(ctx context.Context, sessionID string) error
 }
 
@@ -107,7 +107,7 @@ func prepareSessionCreation(ctx context.Context, sessions sessionCreationManager
 	}
 
 	sess, err := sessions.Get(ctx, existing)
-	if errors.Is(err, kubevirt.ErrNotFound) {
+	if errors.Is(err, session.ErrNotFound) {
 		return "", existing, nil
 	}
 	if err != nil {
@@ -117,17 +117,18 @@ func prepareSessionCreation(ctx context.Context, sessions sessionCreationManager
 		return existing, "", nil
 	}
 
-	if err := sessions.Delete(ctx, existing); err != nil && !errors.Is(err, kubevirt.ErrNotFound) {
+	if err := sessions.Delete(ctx, existing); err != nil && !errors.Is(err, session.ErrNotFound) {
 		return "", "", err
 	}
 	return "", existing, nil
 }
 
-// sessionResponse는 kubevirt.Session에 핸들러 레벨 보강 필드를 덧붙여 프론트 Session 계약에 맞춘다.
+// sessionResponse는 session.Session에 핸들러 레벨 보강 필드를 덧붙여 프론트 Session 계약에 맞춘다.
 //   - current_step : 스텝 진행은 stepStore(in-memory STUB)에서 조회.
-//   - terminal_url : lab.environment == "ubuntu" 일 때만(실시간 KubeVirt 터미널 제공 랩).
-//   - vm_provider  : Phase-1 단일 프로바이더(kubevirt).
-func (h *Handler) sessionResponse(s *kubevirt.Session) gin.H {
+//   - terminal_url : 라이브 터미널 랩 + KubeVirt 세션일 때만. EC2 세션은 시리얼 콘솔(/ws)을
+//     제공하지 않으므로(console.go 가 501) 광고하지 않는다 — 라이브 셸은 IDE(ide_url) 경로로 제공.
+//   - vm_provider  : 세션을 띄운 프로바이더(kubevirt | ec2).
+func (h *Handler) sessionResponse(s *session.Session) gin.H {
 	out := gin.H{
 		"id":          s.ID,
 		"lab_id":      s.LabID,
@@ -135,16 +136,20 @@ func (h *Handler) sessionResponse(s *kubevirt.Session) gin.H {
 		"status":      s.Status,
 		"started_at":  s.StartedAt.UTC().Format(time.RFC3339),
 		"expires_at":  s.ExpiresAt.UTC().Format(time.RFC3339),
-		"vm_provider": "kubevirt",
+		"vm_provider": s.Provider,
 	}
 	out["current_step"] = 0
 	h.steps.withSession(s.ID, func(ss *sessionSteps) bool {
 		out["current_step"] = ss.CurrentStep
 		return false
 	})
-	// 라이브 터미널 랩이 실제 사용 가능한 상태(VMI Running=ready)일 때만 WS 경로 제공.
+	// 라이브 터미널 랩이 실제 사용 가능한 상태(VMI Running=ready)일 때만 WS 경로 제공. 단 시리얼
+	// 콘솔(/ws)은 KubeVirt 전용이므로 EC2 세션엔 광고하지 않는다(깨진 터미널 탭 방지) — EC2 의
+	// 라이브 셸은 아래 IDE 경로로만 제공한다.
 	if lc, ok := h.labs[s.LabID]; ok && lc.HasLiveTerminal() && s.Status == "ready" {
-		out["terminal_url"] = "/api/v1/sessions/" + s.ID + "/ws"
+		if s.Provider != session.ProviderEC2 {
+			out["terminal_url"] = "/api/v1/sessions/" + s.ID + "/ws"
+		}
 		// IDE 랩(code-server)은 브라우저 VS Code 프록시 경로도 함께 제공.
 		if lc.IDE {
 			out["ide_url"] = "/api/v1/sessions/" + s.ID + "/ide/"
@@ -209,8 +214,11 @@ func (h *Handler) CreateSession(c *gin.Context) {
 		}
 	}
 
-	// 동시 활성 세션 쿼터 — 용량 초과 무한 생성으로 스토리지가 마르는 것을 막는다(0이면 무제한).
-	if max := h.cfg.KubeVirt.MaxActiveSessions; max > 0 {
+	// 동시 활성 세션 쿼터 — 용량 초과 무한 생성을 막는다(0이면 무제한). 상한은 실제로 배선된
+	// 프로바이더의 Capacity()로 산출한다 — 설정값(KubeVirt+AWS)을 무조건 합산하면 한쪽이 미연결일 때
+	// (프로비저너 init 실패 등) 살아있는 프로바이더를 초과 허용한다. 디스패처는 두 cap 합을, 단일
+	// 프로바이더는 자기 cap 을 돌려주고, CountActiveSessions 도 같은 범위를 세므로 정합적이다.
+	if max := h.sessions.Capacity(); max > 0 {
 		active, err := h.sessions.CountActiveSessions(c.Request.Context())
 		if err != nil {
 			h.log.Error("count active sessions", zap.Error(err))
@@ -227,7 +235,7 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	}
 
 	// 랩별 초기화(init)는 cloud-init 으로 VM 부팅 시 실행된다(도구 설치 등).
-	sess, err := h.sessions.Create(c.Request.Context(), newSessionID(), req.LabID, uid, kubevirt.BootInit{
+	sess, err := h.sessions.Create(c.Request.Context(), newSessionID(), req.LabID, uid, session.BootInit{
 		Packages: lc.Init.Packages,
 		Runcmd:   lc.Init.Runcmd,
 	})
@@ -251,10 +259,10 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	}
 	h.steps.put(sess.ID, ss)
 
-	// 학습 분석: vm_provisioned_source 로 온프렘/EC2 분포를 집계한다(Phase-1: kubevirt 고정).
+	// 학습 분석: vm_provisioned_source 로 온프렘/EC2 분포를 집계한다 — 실제 프로비저닝된 프로바이더를 채운다.
 	h.emitEvent(events.Event{
 		Type: events.LabStarted, UserID: uid, SessionID: sess.ID, LabID: req.LabID,
-		VMProvider: "kubevirt",
+		VMProvider: sess.Provider,
 	})
 
 	c.JSON(http.StatusCreated, h.sessionResponse(sess))
@@ -269,7 +277,7 @@ func (h *Handler) GetSession(c *gin.Context) {
 	}
 	sess, err := h.sessions.Get(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		if errors.Is(err, kubevirt.ErrNotFound) {
+		if errors.Is(err, session.ErrNotFound) {
 			h.err(c, http.StatusNotFound, "session not found")
 			return
 		}
@@ -295,7 +303,7 @@ func (h *Handler) DeleteSession(c *gin.Context) {
 	// 삭제 전 소유자 확인 — 세션 ID 추측만으로 타인의 실습을 종료시킬 수 없게 한다.
 	sess, err := h.sessions.Get(c.Request.Context(), id)
 	if err != nil {
-		if errors.Is(err, kubevirt.ErrNotFound) {
+		if errors.Is(err, session.ErrNotFound) {
 			h.err(c, http.StatusNotFound, "session not found")
 			return
 		}
@@ -308,7 +316,7 @@ func (h *Handler) DeleteSession(c *gin.Context) {
 	}
 
 	if err := h.sessions.Delete(c.Request.Context(), id); err != nil {
-		if errors.Is(err, kubevirt.ErrNotFound) {
+		if errors.Is(err, session.ErrNotFound) {
 			h.err(c, http.StatusNotFound, "session not found")
 			return
 		}
@@ -451,7 +459,7 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 
 	sess, err := h.sessions.Get(c.Request.Context(), sessionID)
 	if err != nil {
-		if errors.Is(err, kubevirt.ErrNotFound) {
+		if errors.Is(err, session.ErrNotFound) {
 			h.err(c, http.StatusNotFound, "session not found")
 			return
 		}
@@ -480,12 +488,8 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 		TraceID:   traceID,
 		SessionID: sessionID,
 		StepID:    req.StepID,
-		VM: validation.VMSpec{
-			Type:      validation.VMTypeKubeVirt,
-			Name:      "session-vm",
-			Namespace: "lab-" + sessionID,
-		},
-		Checks: toValidationChecks(step.Checks),
+		VM:        vmSpecForSession(sess, sessionID),
+		Checks:    toValidationChecks(step.Checks),
 	}
 	if err := h.validator.PublishRequest(c.Request.Context(), msg); err != nil {
 		h.log.Error("publish validation request", zap.Error(err), zap.String("session_id", sessionID), zap.Int("step_id", req.StepID))
@@ -630,6 +634,24 @@ func findContentStep(lc content.LabContent, stepID int) (content.Step, bool) {
 		}
 	}
 	return content.Step{}, false
+}
+
+// vmSpecForSession은 세션 프로바이더에 맞는 검증 대상 VM 스펙을 만든다.
+// EC2 세션은 InstanceID/Region 으로(검증엔진이 SSM 으로 접속), KubeVirt 세션은
+// namespace/name 으로(검증엔진이 virtctl ssh 로 접속) 라우팅한다.
+func vmSpecForSession(sess *session.Session, sessionID string) validation.VMSpec {
+	if sess.Provider == session.ProviderEC2 {
+		return validation.VMSpec{
+			Type:       validation.VMTypeEC2,
+			InstanceID: sess.InstanceID,
+			Region:     sess.Region,
+		}
+	}
+	return validation.VMSpec{
+		Type:      validation.VMTypeKubeVirt,
+		Name:      "session-vm",
+		Namespace: "lab-" + sessionID,
+	}
 }
 
 func toValidationChecks(checks []content.Check) []validation.Check {
