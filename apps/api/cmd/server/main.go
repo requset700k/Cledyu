@@ -13,9 +13,11 @@ import (
 	"github.com/redis/go-redis/v9"
 	api "github.com/requset700k/cledyu/api/internal/api"
 	"github.com/requset700k/cledyu/api/internal/config"
+	"github.com/requset700k/cledyu/api/internal/ec2"
 	"github.com/requset700k/cledyu/api/internal/events"
 	"github.com/requset700k/cledyu/api/internal/kubevirt"
 	"github.com/requset700k/cledyu/api/internal/lock"
+	"github.com/requset700k/cledyu/api/internal/session"
 	"github.com/requset700k/cledyu/api/internal/store"
 	"github.com/requset700k/cledyu/api/internal/validation"
 	"go.uber.org/zap"
@@ -39,11 +41,41 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// kubevirt Manager: 클러스터 외부 실행 시 nil로 폴백 — 세션 API가 503을 반환한다.
-	sessions, err := kubevirt.NewManager(&cfg.KubeVirt)
-	if err != nil {
-		logger.Warn("kubevirt manager init failed, sessions disabled", zap.Error(err))
-		sessions = nil
+	// 세션 프로바이더 배선:
+	//   - 온프렘 KubeVirt 매니저(primary)
+	//   - AWS EC2 오버플로우 프로비저너(선택) — AWS.LaunchTemplateID 와 MaxActiveSessions>0 이면 활성
+	//   - 둘 다 있으면 디스패처(온프렘 우선, 만석 시 EC2 버스트)로 묶는다
+	// 주의: 타입 있는 nil 포인터를 인터페이스에 담으면 non-nil 인터페이스가 되는 Go 함정을
+	// 피하려고, 각 프로바이더는 생성 성공 시에만 인터페이스에 대입한다.
+	var onprem session.Provider
+	if mgr, err := kubevirt.NewManager(&cfg.KubeVirt); err != nil {
+		logger.Warn("kubevirt manager init failed, on-prem sessions disabled", zap.Error(err))
+	} else {
+		onprem = mgr
+	}
+
+	var overflow session.Provider
+	if cfg.AWS.LaunchTemplateID != "" && cfg.AWS.MaxActiveSessions > 0 {
+		if prov, err := ec2.NewProvisioner(ctx, &cfg.AWS); err != nil {
+			logger.Warn("ec2 provisioner init failed, overflow disabled", zap.Error(err))
+		} else {
+			overflow = prov
+		}
+	}
+
+	// 세션 API 가 503 을 반환하도록 둘 다 없으면 nil 인터페이스로 둔다.
+	var sessions session.Provider
+	switch {
+	case onprem != nil && overflow != nil:
+		sessions = session.NewDispatcher(onprem, overflow, cfg.KubeVirt.MaxActiveSessions, logger)
+		logger.Info("EC2 오버플로우 활성 — 온프렘 만석 시 AWS 버스트",
+			zap.Int("onprem_cap", cfg.KubeVirt.MaxActiveSessions),
+			zap.Int("ec2_cap", cfg.AWS.MaxActiveSessions),
+			zap.String("region", cfg.AWS.Region))
+	case onprem != nil:
+		sessions = onprem
+	case overflow != nil:
+		sessions = overflow
 	}
 
 	// validation publisher: Kafka mTLS 인증서가 있으면 연결하고, 없으면(로컬/CI) nil로 두어

@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/requset700k/cledyu/api/internal/session"
 	"go.uber.org/zap"
 	kvcorev1 "kubevirt.io/client-go/kubevirt/typed/core/v1"
 )
@@ -47,6 +48,13 @@ func (h *Handler) Console(c *gin.Context) {
 		return
 	}
 	if h.denyIfNotSessionOwner(c, sess) {
+		return
+	}
+
+	// 시리얼 콘솔은 KubeVirt VM 전용 경로(virtctl SerialConsole)다. EC2 오버플로우 세션은
+	// tailnet 의 IDE(code-server) 터미널로 라이브 셸을 제공하므로, 여기서는 명확히 거부한다.
+	if sess.Provider == session.ProviderEC2 {
+		h.err(c, http.StatusNotImplemented, "serial console not available for ec2 sessions; use the IDE terminal")
 		return
 	}
 
