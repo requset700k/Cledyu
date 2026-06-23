@@ -21,6 +21,21 @@ func renderCloudInit(sessionID string, cfg *config.AWSConfig, init session.BootI
 	var b strings.Builder
 	b.WriteString("#cloud-config\n")
 
+	// lab 사용자 — KubeVirt cloud-init 과 동일하게 생성한다. 랩 콘텐츠가 /home/lab 과 `lab` 계정에
+	// 의존하고(예: usermod -aG docker lab, /home/lab/... 파일 작성), RunInstances user-data 가
+	// Launch Template 의 base user-data 를 대체하므로(EC2 는 병합 안 함), 여기서 만들지 않으면
+	// 베이스 AMI 가 미리 굽지 않는 한 오버플로우 세션의 init/채점이 깨진다.
+	b.WriteString(`users:
+  - name: lab
+    lock_passwd: false
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+chpasswd:
+  expire: false
+  list: |
+    lab:lab
+`)
+
 	if len(init.Packages) > 0 {
 		b.WriteString("package_update: true\n")
 		b.WriteString("packages:\n")

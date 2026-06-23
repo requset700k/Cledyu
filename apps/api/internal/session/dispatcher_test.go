@@ -11,7 +11,10 @@ type fakeProvider struct {
 	name     string
 	sessions map[string]*Session
 	created  []string
+	cap      int
 }
+
+func (f *fakeProvider) Capacity() int { return f.cap }
 
 func newFake(name string) *fakeProvider {
 	return &fakeProvider{name: name, sessions: map[string]*Session{}}
@@ -112,6 +115,20 @@ func TestDispatcher_GetDeleteAcrossProviders(t *testing.T) {
 	}
 	if n, _ := d.CountActiveSessions(ctx); n != 0 {
 		t.Errorf("count after delete = %d", n)
+	}
+}
+
+func TestDispatcher_CapacityReflectsWiredProviders(t *testing.T) {
+	onprem, overflow := newFake("kubevirt"), newFake("ec2")
+	overflow.cap = 5
+
+	// 오버플로우 배선 시: 온프렘 cap + 오버플로우 cap.
+	if got := NewDispatcher(onprem, overflow, 24, nil).Capacity(); got != 29 {
+		t.Errorf("both wired Capacity = %d, want 29", got)
+	}
+	// 오버플로우 미연결 시: 온프렘 cap 만(과다 허용 방지).
+	if got := NewDispatcher(onprem, nil, 24, nil).Capacity(); got != 24 {
+		t.Errorf("onprem-only Capacity = %d, want 24", got)
 	}
 }
 

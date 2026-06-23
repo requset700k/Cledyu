@@ -73,6 +73,9 @@ func (p *Provisioner) Create(ctx context.Context, sessionID, labID, userID strin
 	in := &awsec2.RunInstancesInput{
 		LaunchTemplate: &ectypes.LaunchTemplateSpecification{
 			LaunchTemplateId: aws.String(p.cfg.LaunchTemplateID),
+			// $Latest 를 명시한다 — 생략 시 템플릿 default 버전이 쓰여, terraform 이 AMI/SG/
+			// user-data 변경으로 새 버전을 만들어도(default 갱신 없이는) stale 템플릿으로 계속 기동한다.
+			Version: aws.String("$Latest"),
 		},
 		MinCount: aws.Int32(1),
 		MaxCount: aws.Int32(1),
@@ -151,6 +154,9 @@ func (p *Provisioner) FindActiveByUser(ctx context.Context, userID string) (stri
 	}
 	return tagValue(inst, tagSessionID), nil
 }
+
+// Capacity는 EC2 오버플로우 동시 세션 상한(AWS.MaxActiveSessions)을 반환한다.
+func (p *Provisioner) Capacity() int { return p.cfg.MaxActiveSessions }
 
 func (p *Provisioner) CountActiveSessions(ctx context.Context) (int, error) {
 	insts, err := p.listActive(ctx)

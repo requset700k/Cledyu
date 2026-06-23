@@ -6,6 +6,18 @@
 # 베이스 AMI 에 미리 설치돼 있어야 하며(권장: packer 커스텀 AMI), 이 파일은 stock AMI 직접 부팅
 # (수동 검증)용 폴백이다. api 의 세션 user-data 는 tailscale up 과 랩별 초기화만 수행한다.
 
+# lab 사용자 — 랩 콘텐츠가 /home/lab 과 `lab` 계정에 의존한다(api 세션 user-data 도 동일 블록 생성).
+# 커스텀 AMI 를 굽는다면 이미지에 lab 사용자를 미리 포함시켜도 된다.
+users:
+  - name: lab
+    lock_passwd: false
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+chpasswd:
+  expire: false
+  list: |
+    lab:lab
+
 package_update: true
 packages:
   - curl

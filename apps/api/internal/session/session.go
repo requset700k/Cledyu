@@ -62,4 +62,8 @@ type Provider interface {
 	// VMIAddress는 세션 VM 에 in-cluster/in-tailnet 으로 도달할 IP 를 반환한다(라이브 터미널/IDE 프록시용).
 	// 아직 주소를 못 받았으면 ErrNotFound.
 	VMIAddress(ctx context.Context, sessionID string) (string, error)
+	// Capacity는 이 프로바이더가 수용 가능한 동시 활성 세션 상한을 반환한다(0이면 무제한).
+	// 글로벌 쿼터는 실제로 배선된 프로바이더의 Capacity 합으로 산출해야 한다 — 설정값(KubeVirt+AWS)을
+	// 무조건 합산하면 한쪽이 미연결일 때(프로비저너 init 실패 등) 살아있는 프로바이더를 초과 허용한다.
+	Capacity() int
 }

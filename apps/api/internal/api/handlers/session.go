@@ -89,11 +89,11 @@ func newTraceID() string {
 	return hex.EncodeToString(b)
 }
 
-// sessionCreationManager는 prepareSessionCreation이 필요로 하는 *kubevirt.Manager의 부분 집합이다.
-// 전체 Manager 대신 이 인터페이스를 받게 해 실제 KubeVirt 클러스터 없이도 stub으로 단위 테스트한다.
+// sessionCreationManager는 prepareSessionCreation이 필요로 하는 session.Provider의 부분 집합이다.
+// 전체 Provider 대신 이 인터페이스를 받게 해 실제 프로바이더 없이도 stub으로 단위 테스트한다.
 type sessionCreationManager interface {
 	FindActiveByUser(ctx context.Context, userID string) (string, error)
-	Get(ctx context.Context, sessionID string) (*kubevirt.Session, error)
+	Get(ctx context.Context, sessionID string) (*session.Session, error)
 	Delete(ctx context.Context, sessionID string) error
 }
 
@@ -107,7 +107,7 @@ func prepareSessionCreation(ctx context.Context, sessions sessionCreationManager
 	}
 
 	sess, err := sessions.Get(ctx, existing)
-	if errors.Is(err, kubevirt.ErrNotFound) {
+	if errors.Is(err, session.ErrNotFound) {
 		return "", existing, nil
 	}
 	if err != nil {
@@ -117,15 +117,16 @@ func prepareSessionCreation(ctx context.Context, sessions sessionCreationManager
 		return existing, "", nil
 	}
 
-	if err := sessions.Delete(ctx, existing); err != nil && !errors.Is(err, kubevirt.ErrNotFound) {
+	if err := sessions.Delete(ctx, existing); err != nil && !errors.Is(err, session.ErrNotFound) {
 		return "", "", err
 	}
 	return "", existing, nil
 }
 
-// sessionResponse는 kubevirt.Session에 핸들러 레벨 보강 필드를 덧붙여 프론트 Session 계약에 맞춘다.
+// sessionResponse는 session.Session에 핸들러 레벨 보강 필드를 덧붙여 프론트 Session 계약에 맞춘다.
 //   - current_step : 스텝 진행은 stepStore(in-memory STUB)에서 조회.
-//   - terminal_url : lab.environment == "ubuntu" 일 때만(실시간 KubeVirt 터미널 제공 랩).
+//   - terminal_url : 라이브 터미널 랩 + KubeVirt 세션일 때만. EC2 세션은 시리얼 콘솔(/ws)을
+//     제공하지 않으므로(console.go 가 501) 광고하지 않는다 — 라이브 셸은 IDE(ide_url) 경로로 제공.
 //   - vm_provider  : 세션을 띄운 프로바이더(kubevirt | ec2).
 func (h *Handler) sessionResponse(s *session.Session) gin.H {
 	out := gin.H{
@@ -142,9 +143,13 @@ func (h *Handler) sessionResponse(s *session.Session) gin.H {
 		out["current_step"] = ss.CurrentStep
 		return false
 	})
-	// 라이브 터미널 랩이 실제 사용 가능한 상태(VMI Running=ready)일 때만 WS 경로 제공.
+	// 라이브 터미널 랩이 실제 사용 가능한 상태(VMI Running=ready)일 때만 WS 경로 제공. 단 시리얼
+	// 콘솔(/ws)은 KubeVirt 전용이므로 EC2 세션엔 광고하지 않는다(깨진 터미널 탭 방지) — EC2 의
+	// 라이브 셸은 아래 IDE 경로로만 제공한다.
 	if lc, ok := h.labs[s.LabID]; ok && lc.HasLiveTerminal() && s.Status == "ready" {
-		out["terminal_url"] = "/api/v1/sessions/" + s.ID + "/ws"
+		if s.Provider != session.ProviderEC2 {
+			out["terminal_url"] = "/api/v1/sessions/" + s.ID + "/ws"
+		}
 		// IDE 랩(code-server)은 브라우저 VS Code 프록시 경로도 함께 제공.
 		if lc.IDE {
 			out["ide_url"] = "/api/v1/sessions/" + s.ID + "/ide/"
@@ -209,10 +214,11 @@ func (h *Handler) CreateSession(c *gin.Context) {
 		}
 	}
 
-	// 동시 활성 세션 쿼터 — 용량 초과 무한 생성을 막는다(0이면 무제한). 글로벌 상한은
-	// 온프렘(KubeVirt) + EC2 오버플로우 용량의 합이다. 디스패처의 CountActiveSessions 가
-	// 두 프로바이더 합을 돌려주므로, 이 합산 상한에 도달했을 때만 429 로 거부한다.
-	if max := h.cfg.KubeVirt.MaxActiveSessions + h.cfg.AWS.MaxActiveSessions; max > 0 {
+	// 동시 활성 세션 쿼터 — 용량 초과 무한 생성을 막는다(0이면 무제한). 상한은 실제로 배선된
+	// 프로바이더의 Capacity()로 산출한다 — 설정값(KubeVirt+AWS)을 무조건 합산하면 한쪽이 미연결일 때
+	// (프로비저너 init 실패 등) 살아있는 프로바이더를 초과 허용한다. 디스패처는 두 cap 합을, 단일
+	// 프로바이더는 자기 cap 을 돌려주고, CountActiveSessions 도 같은 범위를 세므로 정합적이다.
+	if max := h.sessions.Capacity(); max > 0 {
 		active, err := h.sessions.CountActiveSessions(c.Request.Context())
 		if err != nil {
 			h.log.Error("count active sessions", zap.Error(err))

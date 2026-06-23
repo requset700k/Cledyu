@@ -80,6 +80,15 @@ func (d *Dispatcher) FindActiveByUser(ctx context.Context, userID string) (strin
 	return d.overflow.FindActiveByUser(ctx, userID)
 }
 
+// Capacity는 배선된 프로바이더의 수용량 합을 반환한다 — 온프렘 cap 에 오버플로우가 있으면 그 cap 을
+// 더한다. 핸들러 글로벌 쿼터가 이 값을 쓰면, 오버플로우 미연결 시 온프렘 cap 만 적용된다(과다 허용 방지).
+func (d *Dispatcher) Capacity() int {
+	if d.overflow == nil {
+		return d.onpremCap
+	}
+	return d.onpremCap + d.overflow.Capacity()
+}
+
 // CountActiveSessions는 두 프로바이더의 활성 세션 합을 반환한다(글로벌 쿼터 판정용).
 func (d *Dispatcher) CountActiveSessions(ctx context.Context) (int, error) {
 	n, err := d.onprem.CountActiveSessions(ctx)

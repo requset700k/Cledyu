@@ -242,6 +242,9 @@ func (m *Manager) FindActiveByUser(ctx context.Context, userID string) (string, 
 	return "", nil
 }
 
+// Capacity는 온프렘 동시 세션 상한(KubeVirt.MaxActiveSessions)을 반환한다.
+func (m *Manager) Capacity() int { return m.cfg.MaxActiveSessions }
+
 // CountActiveSessions는 현재 활성(삭제 중이 아닌) 세션 namespace 수를 반환한다(동시 세션 쿼터용).
 func (m *Manager) CountActiveSessions(ctx context.Context) (int, error) {
 	list, err := m.core.CoreV1().Namespaces().List(ctx, metav1.ListOptions{
