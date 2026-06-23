@@ -178,13 +178,25 @@ kubectl get clusterrole api-session-access
 kubectl get clusterpolicy api-session-access-rolebinding
 kubectl get rolebinding api-session-access -n lab-<session_id>
 
-kubectl auth can-i get virtualmachineinstances \
-  --subresource=console \
-  --as=system:serviceaccount:api:api \
-  -n lab-<session_id>
+# console 은 subresources.kubevirt.io 그룹의 서브리소스다. kubectl auth can-i 는
+# apiGroup 을 고정하지 못해 virtualmachineinstances 를 주 그룹 kubevirt.io 로 해석,
+# 권한이 있어도 no 를 돌려준다(false negative). apiGroup 을 명시한 SubjectAccessReview
+# 로 확인한다.
+kubectl create -o jsonpath='{.status.allowed}{"\n"}' -f - <<EOF
+apiVersion: authorization.k8s.io/v1
+kind: SubjectAccessReview
+spec:
+  user: system:serviceaccount:api:api
+  resourceAttributes:
+    namespace: lab-<session_id>
+    verb: get
+    group: subresources.kubevirt.io
+    resource: virtualmachineinstances
+    subresource: console
+EOF
 ```
 
-마지막 명령은 `yes`를 반환해야 한다. Kyverno 정책의 `generateExisting`이 기존
+마지막 명령은 `true` 를 반환해야 한다. Kyverno 정책의 `generateExisting`이 기존
 `lab-*` 네임스페이스에도 RoleBinding을 생성하므로, 배포 전에 생성된 활성 세션도
 같은 방법으로 확인한다.
 
@@ -197,7 +209,7 @@ kubectl auth can-i get virtualmachineinstances \
 - `GET /api/v1/labs`가 Lab 목록을 반환한다.
 - `POST /api/v1/sessions`가 새 session id를 반환한다.
 - `kubectl get vm,vmi -n lab-<session_id>`에서 VM/VMI가 Running이 된다.
-- 배포 환경에서 API ServiceAccount의 `virtualmachineinstances/console` 권한이 `yes`다.
+- 배포 환경에서 API ServiceAccount의 `virtualmachineinstances/console` SubjectAccessReview가 `true`다.
 - Web xterm 터미널에서 `lab/lab` 로그인에 성공한다.
 
 ## 롤백 / 정리
@@ -280,10 +292,20 @@ kubectl get clusterrole api-session-access
 kubectl get clusterpolicy api-session-access-rolebinding
 kubectl get rolebinding api-session-access -n lab-<session_id> -o yaml
 
-kubectl auth can-i get virtualmachineinstances \
-  --subresource=console \
-  --as=system:serviceaccount:api:api \
-  -n lab-<session_id>
+# kubectl auth can-i 는 apiGroup 을 고정하지 못해 false negative 를 낸다.
+# apiGroup 을 명시한 SubjectAccessReview 로 확인한다(true 면 정상).
+kubectl create -o jsonpath='{.status.allowed}{"\n"}' -f - <<EOF
+apiVersion: authorization.k8s.io/v1
+kind: SubjectAccessReview
+spec:
+  user: system:serviceaccount:api:api
+  resourceAttributes:
+    namespace: lab-<session_id>
+    verb: get
+    group: subresources.kubevirt.io
+    resource: virtualmachineinstances
+    subresource: console
+EOF
 ```
 
 리소스가 없으면 ArgoCD에서 API와 Kyverno 애플리케이션의 동기화 상태 및 정책
