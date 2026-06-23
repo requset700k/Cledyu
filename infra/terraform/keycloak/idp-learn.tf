@@ -10,6 +10,7 @@
 
 # ── Google (네이티브 OIDC) ───────────────────────────────────────────────
 resource "keycloak_oidc_google_identity_provider" "google" {
+  # alias 는 provider 타입에서 "google" 로 고정된다(kc_idp_hint=google 와 일치).
   count = var.enable_social_idp ? 1 : 0
 
   realm         = keycloak_realm.cledyu_learn.id
