@@ -43,3 +43,15 @@ variable "name_prefix" {
   type        = string
   default     = "cledyu-lab"
 }
+
+variable "budget_limit_usd" {
+  description = "EC2 오버플로우 월 예산(USD). 0이면 예산 알람을 만들지 않는다."
+  type        = number
+  default     = 0
+}
+
+variable "budget_notification_emails" {
+  description = "예산 임계 도달 시 알림 받을 이메일 목록(budget_limit_usd>0 일 때 사용)."
+  type        = list(string)
+  default     = []
+}
