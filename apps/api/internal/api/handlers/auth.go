@@ -59,7 +59,7 @@ func (h *Handler) Login(c *gin.Context) {
 
 	// ?screen=register → Keycloak 회원가입 폼으로 딥링크.
 	register := c.Query("screen") == "register"
-	c.Redirect(http.StatusFound, h.auth.AuthCodeURL(state, nonce, pkce, register))
+	c.Redirect(http.StatusFound, h.auth.AuthCodeURL(state, nonce, pkce, register, ""))
 }
 
 // Callback은 Keycloak이 돌려준 code를 토큰으로 교환하고 검증한 뒤 세션 쿠키를 설정한다.

@@ -128,13 +128,17 @@ func NewProvider(ctx context.Context, cfg config.KeycloakConfig) (*Provider, err
 
 // AuthCodeURL은 state/nonce/PKCE(S256) 를 적용한 Keycloak 인가 URL을 만든다.
 // register=true 면 로그인 대신 회원가입 폼으로 딥링크한다(Keycloak 의 /registrations
-// 엔드포인트) — OIDC 흐름(state/PKCE/redirect)은 그대로 유지된다.
-func (p *Provider) AuthCodeURL(state, nonce, pkceVerifier string, register bool) string {
-	u := p.oauth2.AuthCodeURL(
-		state,
+// 엔드포인트). idp != "" 면 kc_idp_hint 를 붙여 해당 IdP 로 직행한다 —
+// OIDC 흐름(state/PKCE/redirect)은 그대로 유지된다.
+func (p *Provider) AuthCodeURL(state, nonce, pkceVerifier string, register bool, idp string) string {
+	opts := []oauth2.AuthCodeOption{
 		oidc.Nonce(nonce),
 		oauth2.S256ChallengeOption(pkceVerifier),
-	)
+	}
+	if idp != "" {
+		opts = append(opts, oauth2.SetAuthURLParam("kc_idp_hint", idp))
+	}
+	u := p.oauth2.AuthCodeURL(state, opts...)
 	if register {
 		u = strings.Replace(u, "/protocol/openid-connect/auth", "/protocol/openid-connect/registrations", 1)
 	}

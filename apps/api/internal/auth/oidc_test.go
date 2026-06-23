@@ -1,6 +1,11 @@
 package auth
 
-import "testing"
+import (
+	"net/url"
+	"testing"
+
+	"golang.org/x/oauth2"
+)
 
 func TestIdentityRole_Priority(t *testing.T) {
 	cases := []struct {
@@ -54,5 +59,42 @@ func TestClaimsIdentity_NameFallsBackToUsername(t *testing.T) {
 	}
 	if id.Subject != "abc" || id.Email != "a@b.c" {
 		t.Errorf("unexpected identity: %+v", id)
+	}
+}
+
+func testProvider() *Provider {
+	return &Provider{
+		oauth2: oauth2.Config{
+			ClientID:    "web",
+			RedirectURL: "https://api.cledyu.local/api/v1/auth/callback",
+			Endpoint: oauth2.Endpoint{
+				AuthURL:  "https://keycloak.cledyu.local/realms/cledyu-learn/protocol/openid-connect/auth",
+				TokenURL: "https://keycloak.cledyu.local/realms/cledyu-learn/protocol/openid-connect/token",
+			},
+			Scopes: []string{"openid", "profile", "email"},
+		},
+	}
+}
+
+func TestAuthCodeURL_IdPHint(t *testing.T) {
+	p := testProvider()
+
+	got := p.AuthCodeURL("st", "no", "verifier", false, "google")
+	u, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("parse url: %v", err)
+	}
+	if u.Query().Get("kc_idp_hint") != "google" {
+		t.Errorf("kc_idp_hint = %q, want google", u.Query().Get("kc_idp_hint"))
+	}
+}
+
+func TestAuthCodeURL_NoHint_WhenEmpty(t *testing.T) {
+	p := testProvider()
+
+	got := p.AuthCodeURL("st", "no", "verifier", false, "")
+	u, _ := url.Parse(got)
+	if u.Query().Has("kc_idp_hint") {
+		t.Errorf("kc_idp_hint must be absent, got %q", u.Query().Get("kc_idp_hint"))
 	}
 }
