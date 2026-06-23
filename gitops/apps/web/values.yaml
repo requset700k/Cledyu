@@ -19,6 +19,9 @@ env:
   AUTH_ENABLED: "true"
   # In-cluster Session API endpoint — Next.js route handler가 런타임에 읽어 백엔드로 프록시.
   CLEDYU_BACKEND_URL: "http://api.api.svc.cluster.local"
+  # 소셜 로그인 버튼 노출 여부 — terraform enable_social_idp 와 정렬한다.
+  # 현재 클러스터는 google/kakao/naver IdP 프로비저닝 완료 → true.
+  CLEDYU_SOCIAL_LOGIN_ENABLED: "true"
 
 resources:
   requests:
