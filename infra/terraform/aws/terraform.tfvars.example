@@ -1,0 +1,14 @@
+# infra/terraform/aws 입력 예시. 복사해서 terraform.tfvars 로 쓴다(tfvars 는 커밋 금지).
+
+region = "ap-northeast-2"
+
+# 비우면 default VPC + 자동 서브넷 선택. 격리된 VPC 가 있으면 ID 를 지정한다.
+# vpc_id    = "vpc-0123456789abcdef0"
+# subnet_id = "subnet-0123456789abcdef0"
+
+instance_type  = "t3.medium"
+root_volume_gb = 20
+
+# 운영: SSM Agent·tailscale·code-server 를 미리 구운 커스텀 AMI(packer) ID 권장.
+# 비우면 Canonical Ubuntu 22.04 최신 AMI 를 자동 조회한다(런타임 설치 → 부팅 느림).
+# ami_id = "ami-0123456789abcdef0"

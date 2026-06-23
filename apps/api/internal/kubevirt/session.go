@@ -2,7 +2,6 @@ package kubevirt
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -16,9 +15,14 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/requset700k/cledyu/api/internal/config"
+	"github.com/requset700k/cledyu/api/internal/session"
 )
 
-var ErrNotFound = errors.New("session not found")
+// ErrNotFound는 session.ErrNotFound 의 별칭이다(기존 호출부·테스트 호환).
+var ErrNotFound = session.ErrNotFound
+
+// Manager가 프로바이더 중립 계약을 구현함을 컴파일 타임에 보장한다.
+var _ session.Provider = (*Manager)(nil)
 
 const (
 	// annUserID는 세션 소유자(JWT sub)를 세션 namespace에 보관하는 annotation 키다.
@@ -44,14 +48,9 @@ var labVMType = map[string]string{
 	"lab-helm-advanced":    "lab-medium",
 }
 
-type Session struct {
-	ID        string    `json:"id"`
-	LabID     string    `json:"lab_id"`
-	UserID    string    `json:"user_id"`
-	Status    string    `json:"status"` // provisioning | ready | failed
-	StartedAt time.Time `json:"started_at"`
-	ExpiresAt time.Time `json:"expires_at"`
-}
+// Session/BootInit은 session 패키지 타입의 별칭이다 — kubevirt 패키지 내부 코드와
+// 기존 테스트가 무수정으로 컴파일되도록 유지하면서, 프로바이더 중립 타입과 동일성을 보장한다.
+type Session = session.Session
 
 type Manager struct {
 	core kubernetes.Interface
@@ -67,12 +66,8 @@ func NewManager(cfg *config.KubeVirtConfig) (*Manager, error) {
 	return &Manager{core: core, dyn: dyn, cfg: cfg}, nil
 }
 
-// BootInit은 랩별 cloud-init 추가 작업이다(content.InitSpec 에서 변환).
-// content 패키지에 대한 역방향 의존을 피하려고 kubevirt 가 자체 타입을 가진다.
-type BootInit struct {
-	Packages []string // cloud-init packages: (apt 설치)
-	Runcmd   []string // cloud-init runcmd: 끝에 추가되는 셸 명령
-}
+// BootInit은 session.BootInit 의 별칭이다(랩별 cloud-init 추가 작업).
+type BootInit = session.BootInit
 
 func (m *Manager) Create(ctx context.Context, sessionID, labID, userID string, init BootInit) (*Session, error) {
 	ns := "lab-" + sessionID
@@ -218,6 +213,7 @@ func (m *Manager) Create(ctx context.Context, sessionID, labID, userID string, i
 		Status:    "provisioning",
 		StartedAt: now,
 		ExpiresAt: expires,
+		Provider:  session.ProviderKubeVirt,
 	}, nil
 }
 
@@ -245,6 +241,9 @@ func (m *Manager) FindActiveByUser(ctx context.Context, userID string) (string, 
 	}
 	return "", nil
 }
+
+// Capacity는 온프렘 동시 세션 상한(KubeVirt.MaxActiveSessions)을 반환한다.
+func (m *Manager) Capacity() int { return m.cfg.MaxActiveSessions }
 
 // CountActiveSessions는 현재 활성(삭제 중이 아닌) 세션 namespace 수를 반환한다(동시 세션 쿼터용).
 func (m *Manager) CountActiveSessions(ctx context.Context) (int, error) {
@@ -408,6 +407,7 @@ func (m *Manager) Get(ctx context.Context, sessionID string) (*Session, error) {
 		Status:    status,
 		StartedAt: startedAt,
 		ExpiresAt: expiresAt,
+		Provider:  session.ProviderKubeVirt,
 	}, nil
 }
 

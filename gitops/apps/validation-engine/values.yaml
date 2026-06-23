@@ -10,6 +10,13 @@ replicaCount: 1 # validation-engine Pod를 1개만 띄움
 env:
   KAFKA_BROKERS: "cledyu-kafka-kafka-bootstrap.kafka.svc:9093"
 
+# AWS EC2 오버플로우 채점 — EC2 세션은 SSM(SendCommand)으로 채점한다(Phase 13).
+# enabled=false 가 기본(KubeVirt 전용). 활성 시 최소권한 SSM 키를 Vault→ESO 로 주입한다.
+# 리전은 검증 요청의 VM spec(api 가 세션별로 채움)에서 오므로 env 불필요 — 자격증명만 주입한다.
+aws:
+  enabled: false
+  secretName: "cledyu-validation-engine-aws"
+
 resources:
   requests: # Pod 시작 시 Kubernetes가 보장해주는 최소 자원
     cpu: 50m # CPU 0.05코어

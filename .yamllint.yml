@@ -33,5 +33,7 @@ ignore: |
   node_modules/
   infra/terraform/**/.terraform/
   **/charts/*/templates/
+  # Helm 차트 템플릿 — {{- if }} 등 Go 템플릿 제어문은 순수 YAML 이 아니다.
+  gitops/apps/*/templates/
   **/vendor/
   ansible/.omc/
