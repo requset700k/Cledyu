@@ -168,6 +168,26 @@ password: lab
 
 비밀번호 입력 중에는 화면에 문자가 표시되지 않는 것이 정상이다.
 
+### 8. 배포 환경의 VM 콘솔 RBAC 확인
+
+ArgoCD 동기화 후 API ServiceAccount가 세션 네임스페이스의 KubeVirt serial
+console에 접근할 수 있는지 확인한다.
+
+```bash
+kubectl get clusterrole api-session-access
+kubectl get clusterpolicy api-session-access-rolebinding
+kubectl get rolebinding api-session-access -n lab-<session_id>
+
+kubectl auth can-i get virtualmachineinstances \
+  --subresource=console \
+  --as=system:serviceaccount:api:api \
+  -n lab-<session_id>
+```
+
+마지막 명령은 `yes`를 반환해야 한다. Kyverno 정책의 `generateExisting`이 기존
+`lab-*` 네임스페이스에도 RoleBinding을 생성하므로, 배포 전에 생성된 활성 세션도
+같은 방법으로 확인한다.
+
 ## 검증
 
 성공 기준:
@@ -177,6 +197,7 @@ password: lab
 - `GET /api/v1/labs`가 Lab 목록을 반환한다.
 - `POST /api/v1/sessions`가 새 session id를 반환한다.
 - `kubectl get vm,vmi -n lab-<session_id>`에서 VM/VMI가 Running이 된다.
+- 배포 환경에서 API ServiceAccount의 `virtualmachineinstances/console` 권한이 `yes`다.
 - Web xterm 터미널에서 `lab/lab` 로그인에 성공한다.
 
 ## 롤백 / 정리
@@ -240,6 +261,34 @@ curl -s http://localhost:8080/ready | jq '.checks.kubevirt'
 username: lab
 password: lab
 ```
+
+### 터미널에 virtualmachineinstances/console forbidden이 반복됨
+
+배포 API는 로컬 OIDC kubeconfig가 아니라 `system:serviceaccount:api:api` 권한으로
+Kubernetes API를 호출한다. 다음 오류는 세션 네임스페이스에
+`api-session-access` RoleBinding이 없거나 Kyverno generate 정책이 적용되지 않은
+상태를 뜻한다.
+
+```text
+cannot get resource "virtualmachineinstances/console"
+```
+
+ClusterRole, ClusterPolicy, 세션별 RoleBinding과 최종 권한을 순서대로 확인한다.
+
+```bash
+kubectl get clusterrole api-session-access
+kubectl get clusterpolicy api-session-access-rolebinding
+kubectl get rolebinding api-session-access -n lab-<session_id> -o yaml
+
+kubectl auth can-i get virtualmachineinstances \
+  --subresource=console \
+  --as=system:serviceaccount:api:api \
+  -n lab-<session_id>
+```
+
+리소스가 없으면 ArgoCD에서 API와 Kyverno 애플리케이션의 동기화 상태 및 정책
+이벤트를 확인한다. 임시 `ClusterRoleBinding`으로 API ServiceAccount에 전역 권한을
+부여하지 않는다.
 
 ### VM 내부 DNS 문제
 

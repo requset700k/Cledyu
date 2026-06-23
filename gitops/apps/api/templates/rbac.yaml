@@ -52,3 +52,17 @@ subjects:
   - kind: ServiceAccount
     name: {{ .Release.Name }}
     namespace: {{ .Release.Namespace }}
+
+---
+# 세션 VM의 serial console 접근 권한.
+# ClusterRoleBinding으로 전역 부여하지 않고 Kyverno가 lab-* namespace마다 RoleBinding을
+# 생성해, API가 현재 세션 namespace의 console에만 접근하도록 제한한다.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: "{{ .Release.Name }}-session-access"
+rules:
+  # Web 터미널이 사용하는 KubeVirt serial console.
+  - apiGroups: ["subresources.kubevirt.io"]
+    resources: ["virtualmachineinstances/console"]
+    verbs: ["get"]

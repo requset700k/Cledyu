@@ -1,0 +1,50 @@
+---
+# lab-{sessionID} namespace가 생성되면 Session API가 해당 세션 VM의 console에만
+# 접근할 수 있도록 namespace-scoped RoleBinding을 자동 생성한다.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: api-session-access-rolebinding
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    policies.kyverno.io/title: Session API VM access RoleBinding
+    policies.kyverno.io/category: Lab Session RBAC
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: >-
+      lab-* 세션 네임스페이스마다 api-session-access ClusterRole을 바인딩해
+      Session API의 console 접근을 해당 세션으로 제한한다.
+spec:
+  admission: true
+  background: true
+  # 이미 실행 중인 세션에도 RoleBinding을 생성해 현재 serial console 403을 복구한다.
+  generateExisting: true
+  rules:
+    - name: generate-api-session-access-rolebinding
+      match:
+        any:
+          - resources:
+              kinds:
+                - Namespace
+              names:
+                - "lab-*"
+      # generateExisting 백필은 background controller 요청으로 실행되므로 건너뛰지 않는다.
+      skipBackgroundRequests: false
+      generate:
+        apiVersion: rbac.authorization.k8s.io/v1
+        kind: RoleBinding
+        name: api-session-access
+        namespace: "{{request.object.metadata.name}}"
+        synchronize: true
+        data:
+          metadata:
+            labels:
+              app.kubernetes.io/managed-by: kyverno
+              app.kubernetes.io/part-of: api
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: api-session-access
+          subjects:
+            - kind: ServiceAccount
+              name: api
+              namespace: api
