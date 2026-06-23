@@ -1,14 +1,17 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { bootGraceSchedule, shouldShowSessionBoot } from './lab-session-boot.mjs';
+import { bootGraceViewState, shouldShowSessionBoot } from './lab-session-boot.mjs';
 
-describe('bootGraceSchedule', () => {
-  it('reschedules the remaining grace when an effect is set up again', () => {
-    const first = bootGraceSchedule(null, 1_000, 120_000);
-    assert.deepEqual(first, { startedAt: 1_000, remainingMs: 120_000 });
+describe('bootGraceViewState', () => {
+  it('marks grace complete at the same boundary that fills progress to 100 percent', () => {
+    const beforeBoundary = bootGraceViewState('ready', 1_000, 120_999, 120_000);
+    assert.equal(beforeBoundary.complete, false);
+    assert.ok(beforeBoundary.progress < 100);
 
-    const second = bootGraceSchedule(first.startedAt, 1_500, 120_000);
-    assert.deepEqual(second, { startedAt: 1_000, remainingMs: 119_500 });
+    assert.deepEqual(bootGraceViewState('ready', 1_000, 121_000, 120_000), {
+      progress: 100,
+      complete: true,
+    });
   });
 });
 

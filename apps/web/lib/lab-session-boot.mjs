@@ -1,18 +1,22 @@
 /**
- * effect가 정리된 뒤 다시 setup되어도 같은 grace 시작 시각을 유지하며 남은 시간을 계산한다.
- * React 개발 모드의 setup → cleanup → setup 순서에서도 두 번째 setup이 타이머를 복구해야 한다.
+ * 준비 화면 진행률과 완료 여부를 하나의 시각 기준으로 계산한다.
+ * 진행률만 100%가 되고 화면 전환은 별도 timer에 남는 상태가 생기지 않게 두 값을 함께 반환한다.
  *
+ * @param {string | undefined} status
  * @param {number | null} startedAt
  * @param {number} now
  * @param {number} graceMs
- * @returns {{ startedAt: number, remainingMs: number }}
+ * @returns {{ progress: number, complete: boolean }}
  */
-export function bootGraceSchedule(startedAt, now, graceMs) {
-  const resolvedStartedAt = startedAt ?? now;
-  return {
-    startedAt: resolvedStartedAt,
-    remainingMs: Math.max(0, graceMs - (now - resolvedStartedAt)),
-  };
+export function bootGraceViewState(status, startedAt, now, graceMs) {
+  if (startedAt === null) {
+    return { progress: status === 'provisioning' ? 15 : 0, complete: false };
+  }
+
+  const elapsed = Math.max(0, now - startedAt);
+  const complete = graceMs <= 0 || elapsed >= graceMs;
+  const ratio = graceMs <= 0 ? 1 : Math.min(1, elapsed / graceMs);
+  return { progress: 30 + ratio * 70, complete };
 }
 
 /**

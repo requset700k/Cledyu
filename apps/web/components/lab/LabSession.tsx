@@ -10,7 +10,7 @@ import { LabTerminal } from './LabTerminal';
 import { LabWorkspace } from './LabWorkspace';
 import { AiTutorPanel } from './AiTutorPanel';
 import { SessionTimer } from './SessionTimer';
-import { bootGraceSchedule, shouldShowSessionBoot } from '@/lib/lab-session-boot.mjs';
+import { bootGraceViewState, shouldShowSessionBoot } from '@/lib/lab-session-boot.mjs';
 
 // VM이 Running으로 보고된 이후에도 cloud-init final stage(랩 init + getty 재시작 + autologin 활성)
 // 까지 최대 1~2분이 더 필요할 수 있다. 그 사이 학생에게 login 프롬프트가 보이지 않도록
@@ -41,24 +41,15 @@ export function LabSession({
 
   // status=ready/active로 처음 전환된 시점을 기록 → 거기서 BOOT_GRACE_MS 추가 대기.
   const readyAtRef = useRef<number | null>(null);
+  const [bootGraceComplete, setBootGraceComplete] = useState(false);
   const [, forceTick] = useState(0);
   useEffect(() => {
     const s = session?.status;
     if (skipBootGrace) return;
-    if (s === 'ready' || s === 'active') {
-      const schedule = bootGraceSchedule(readyAtRef.current, Date.now(), BOOT_GRACE_MS);
-      if (readyAtRef.current === null) {
-        readyAtRef.current = schedule.startedAt;
-        // ref 변경만으로는 렌더되지 않으므로 grace 진행 상태를 즉시 반영한다.
-        forceTick((n) => n + 1);
-      }
-      if (schedule.remainingMs === 0) {
-        forceTick((n) => n + 1);
-        return;
-      }
-      // 개발 모드에서 effect가 setup → cleanup → setup되어도 남은 시간으로 타이머를 복구한다.
-      const t = setTimeout(() => forceTick((n) => n + 1), schedule.remainingMs);
-      return () => clearTimeout(t);
+    if ((s === 'ready' || s === 'active') && readyAtRef.current === null) {
+      readyAtRef.current = Date.now();
+      // ref 변경만으로는 렌더되지 않으므로 grace 진행 상태를 즉시 반영한다.
+      forceTick((n) => n + 1);
     }
   }, [session?.status, skipBootGrace]);
 
@@ -90,7 +81,7 @@ export function LabSession({
     readyAtRef.current,
     Date.now(),
     BOOT_GRACE_MS,
-    skipBootGrace,
+    skipBootGrace || bootGraceComplete,
   );
   const wantsLiveTerminal = lab.environment === 'ubuntu';
 
@@ -102,7 +93,12 @@ export function LabSession({
   // 라이브 터미널 랩은 부팅 동안 학생에게 로그인 프롬프트가 노출되지 않도록 SessionBoot로 가린다.
   if (booting && wantsLiveTerminal) {
     return (
-      <SessionBoot status={status} graceStartedAt={readyAtRef.current} graceMs={BOOT_GRACE_MS} />
+      <SessionBoot
+        status={status}
+        graceStartedAt={readyAtRef.current}
+        graceMs={BOOT_GRACE_MS}
+        onGraceComplete={() => setBootGraceComplete(true)}
+      />
     );
   }
 
@@ -319,10 +315,12 @@ function SessionBoot({
   status,
   graceStartedAt,
   graceMs,
+  onGraceComplete,
 }: {
   status: string | undefined;
   graceStartedAt: number | null;
   graceMs: number;
+  onGraceComplete: () => void;
 }) {
   // 진행률 표시(0~100%). provisioning 단계는 첫 30%까지만 채워 시각적 진행 인상을 준다.
   const [now, setNow] = useState(Date.now());
@@ -331,13 +329,10 @@ function SessionBoot({
     return () => clearInterval(t);
   }, []);
 
-  let progress = 0;
-  if (graceStartedAt === null) {
-    progress = status === 'provisioning' ? 15 : 0;
-  } else {
-    const elapsed = now - graceStartedAt;
-    progress = 30 + Math.min(70, (elapsed / graceMs) * 70);
-  }
+  const graceState = bootGraceViewState(status, graceStartedAt, now, graceMs);
+  useEffect(() => {
+    if (graceState.complete) onGraceComplete();
+  }, [graceState.complete, onGraceComplete]);
 
   const stage1Done = status !== undefined;
   const stage2Done = graceStartedAt !== null;
@@ -357,7 +352,7 @@ function SessionBoot({
       <div className="h-1.5 w-full bg-slate-700 rounded-full overflow-hidden mb-6">
         <div
           className="h-full bg-brand-500 transition-[width] duration-500 ease-out"
-          style={{ width: `${Math.round(progress)}%` }}
+          style={{ width: `${Math.round(graceState.progress)}%` }}
         />
       </div>
 
