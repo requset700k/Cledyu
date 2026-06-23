@@ -10,7 +10,7 @@ import { LabTerminal } from './LabTerminal';
 import { LabWorkspace } from './LabWorkspace';
 import { AiTutorPanel } from './AiTutorPanel';
 import { SessionTimer } from './SessionTimer';
-import { shouldShowSessionBoot } from '@/lib/lab-session-boot.mjs';
+import { bootGraceSchedule, shouldShowSessionBoot } from '@/lib/lab-session-boot.mjs';
 
 // VM이 Running으로 보고된 이후에도 cloud-init final stage(랩 init + getty 재시작 + autologin 활성)
 // 까지 최대 1~2분이 더 필요할 수 있다. 그 사이 학생에게 login 프롬프트가 보이지 않도록
@@ -45,11 +45,19 @@ export function LabSession({
   useEffect(() => {
     const s = session?.status;
     if (skipBootGrace) return;
-    if ((s === 'ready' || s === 'active') && readyAtRef.current === null) {
-      readyAtRef.current = Date.now();
-      // ref 변경만으로는 렌더되지 않으므로 grace 진행 상태를 즉시 반영한다.
-      forceTick((n) => n + 1);
-      const t = setTimeout(() => forceTick((n) => n + 1), BOOT_GRACE_MS);
+    if (s === 'ready' || s === 'active') {
+      const schedule = bootGraceSchedule(readyAtRef.current, Date.now(), BOOT_GRACE_MS);
+      if (readyAtRef.current === null) {
+        readyAtRef.current = schedule.startedAt;
+        // ref 변경만으로는 렌더되지 않으므로 grace 진행 상태를 즉시 반영한다.
+        forceTick((n) => n + 1);
+      }
+      if (schedule.remainingMs === 0) {
+        forceTick((n) => n + 1);
+        return;
+      }
+      // 개발 모드에서 effect가 setup → cleanup → setup되어도 남은 시간으로 타이머를 복구한다.
+      const t = setTimeout(() => forceTick((n) => n + 1), schedule.remainingMs);
       return () => clearTimeout(t);
     }
   }, [session?.status, skipBootGrace]);

@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { shouldShowSessionBoot } from './lab-session-boot.mjs';
+import { bootGraceSchedule, shouldShowSessionBoot } from './lab-session-boot.mjs';
+
+describe('bootGraceSchedule', () => {
+  it('reschedules the remaining grace when an effect is set up again', () => {
+    const first = bootGraceSchedule(null, 1_000, 120_000);
+    assert.deepEqual(first, { startedAt: 1_000, remainingMs: 120_000 });
+
+    const second = bootGraceSchedule(first.startedAt, 1_500, 120_000);
+    assert.deepEqual(second, { startedAt: 1_000, remainingMs: 119_500 });
+  });
+});
 
 describe('shouldShowSessionBoot', () => {
   it('shows the boot screen while session data or VM provisioning is pending', () => {
