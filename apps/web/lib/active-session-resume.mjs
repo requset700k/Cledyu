@@ -25,12 +25,16 @@ export function readActiveSessionResumeId(searchParams) {
  * 조회한 세션이 현재 Lab에서 이어갈 수 있는지 판정한다.
  *
  * @param {string} currentLabId
- * @param {{ id: string, lab_id: string }} session
- * @returns {{ status: 'resume', sessionId: string } | { status: 'lab_mismatch' }}
+ * @param {{ id: string, lab_id: string, status: string }} session
+ * @returns {{ status: 'resume', sessionId: string, skipBootGrace: boolean } | { status: 'lab_mismatch' }}
  */
 export function resolveActiveSessionResume(currentLabId, session) {
   if (session.lab_id !== currentLabId) {
     return { status: 'lab_mismatch' };
   }
-  return { status: 'resume', sessionId: session.id };
+  return {
+    status: 'resume',
+    sessionId: session.id,
+    skipBootGrace: session.status === 'ready' || session.status === 'active',
+  };
 }

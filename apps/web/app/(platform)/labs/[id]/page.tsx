@@ -28,6 +28,7 @@ function LabDetail() {
   // 세션 시작 전 화면에서 관리하는 로컬 상태다. 실제 세션 진행/TTL 처리는 LabSession이 맡는다.
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [resumedExisting, setResumedExisting] = useState(false);
+  const [skipBootGrace, setSkipBootGrace] = useState(false);
   const [activeSessionConflict, setActiveSessionConflict] = useState<ActiveSessionConflict | null>(
     null,
   );
@@ -53,6 +54,7 @@ function LabDetail() {
     setExistingSessionAction('checking');
     setActiveSessionConflict(null);
     setReplaceError(null);
+    setSkipBootGrace(false);
 
     // URL의 session_id는 힌트일 뿐이다. Session API의 소유권 검사와 lab_id 일치 판정을
     // 모두 통과한 경우에만 기존 실습 화면을 연다.
@@ -63,6 +65,7 @@ function LabDetail() {
         const result = resolveActiveSessionResume(id, existing);
         if (result.status === 'resume') {
           setResumedExisting(true);
+          setSkipBootGrace(result.skipBootGrace);
           setSessionId(result.sessionId);
           return;
         }
@@ -91,6 +94,7 @@ function LabDetail() {
     // terminal_url은 LabSession이 자체 polling으로 derive하므로 sessionId만 보관.
     onSuccess: (s) => {
       setResumedExisting(false);
+      setSkipBootGrace(false);
       setActiveSessionConflict(null);
       setReplaceError(null);
       setSessionId(s.id);
@@ -115,10 +119,12 @@ function LabDetail() {
     setReplaceError(null);
     try {
       const existing = await api.sessions.get(existingSessionId);
-      if (existing.lab_id === id) {
+      const result = resolveActiveSessionResume(id, existing);
+      if (result.status === 'resume') {
         setActiveSessionConflict(null);
         setResumedExisting(true);
-        setSessionId(existing.id);
+        setSkipBootGrace(result.skipBootGrace);
+        setSessionId(result.sessionId);
         return;
       }
       setActiveSessionConflict({ sessionId: existing.id, labId: existing.lab_id });
@@ -150,6 +156,7 @@ function LabDetail() {
       // 교체가 성공하면 이후 화면은 새 세션의 TTL/진행 상태를 기준으로 다시 시작한다.
       setActiveSessionConflict(null);
       setResumedExisting(false);
+      setSkipBootGrace(false);
       setReplaceError(null);
       setSessionId(next.id);
     } catch {
@@ -194,7 +201,7 @@ function LabDetail() {
               이미 진행 중인 실습 세션이 있어 기존 세션으로 이어서 열었습니다.
             </div>
           )}
-          <LabSession sessionId={sessionId} lab={lab} />
+          <LabSession sessionId={sessionId} lab={lab} skipBootGrace={skipBootGrace} />
         </>
       ) : (
         <div className="mt-6 bg-slate-800/50 border border-slate-700 rounded-xl p-6">

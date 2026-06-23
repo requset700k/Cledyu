@@ -35,8 +35,20 @@ describe('resolveActiveSessionResume', () => {
       resolveActiveSessionResume('lab-k8s', {
         id: 'session-1',
         lab_id: 'lab-k8s',
+        status: 'ready',
       }),
-      { status: 'resume', sessionId: 'session-1' },
+      { status: 'resume', sessionId: 'session-1', skipBootGrace: true },
+    );
+  });
+
+  it('keeps boot grace for an existing session that is still provisioning', () => {
+    assert.deepEqual(
+      resolveActiveSessionResume('lab-k8s', {
+        id: 'session-1',
+        lab_id: 'lab-k8s',
+        status: 'provisioning',
+      }),
+      { status: 'resume', sessionId: 'session-1', skipBootGrace: false },
     );
   });
 
@@ -45,6 +57,7 @@ describe('resolveActiveSessionResume', () => {
       resolveActiveSessionResume('lab-linux', {
         id: 'session-1',
         lab_id: 'lab-k8s',
+        status: 'ready',
       }),
       { status: 'lab_mismatch' },
     );
