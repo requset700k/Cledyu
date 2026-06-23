@@ -178,8 +178,8 @@ kubectl get clusterrole api-session-access
 kubectl get clusterpolicy api-session-access-rolebinding
 kubectl get rolebinding api-session-access -n lab-<session_id>
 
-kubectl auth can-i get virtualmachineinstances/console \
-  --api-group=subresources.kubevirt.io \
+kubectl auth can-i get virtualmachineinstances \
+  --subresource=console \
   --as=system:serviceaccount:api:api \
   -n lab-<session_id>
 ```
@@ -280,8 +280,8 @@ kubectl get clusterrole api-session-access
 kubectl get clusterpolicy api-session-access-rolebinding
 kubectl get rolebinding api-session-access -n lab-<session_id> -o yaml
 
-kubectl auth can-i get virtualmachineinstances/console \
-  --api-group=subresources.kubevirt.io \
+kubectl auth can-i get virtualmachineinstances \
+  --subresource=console \
   --as=system:serviceaccount:api:api \
   -n lab-<session_id>
 ```
