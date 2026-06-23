@@ -15,13 +15,50 @@ export default function LoginPage() {
           <h2 className="text-lg font-semibold text-white mb-1">시작하기</h2>
           <p className="text-slate-400 text-sm mb-6">Cledyu 계정으로 로그인하세요</p>
 
+          {/* 이메일(Keycloak 폼) — 주 버튼 */}
           {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
           <a
             href="/api/v1/auth/login"
+            aria-label="이메일로 로그인"
             className="flex items-center justify-center gap-2 w-full bg-brand-500 hover:bg-brand-600 text-white font-medium py-3 px-4 rounded-xl transition-colors duration-150"
           >
-            로그인 / 소셜 로그인
+            이메일로 로그인
           </a>
+
+          <div className="flex items-center gap-3 my-5">
+            <span className="h-px flex-1 bg-slate-700" />
+            <span className="text-slate-500 text-xs">또는 소셜 계정으로</span>
+            <span className="h-px flex-1 bg-slate-700" />
+          </div>
+
+          <div className="space-y-3">
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+            <a
+              href="/api/v1/auth/login?idp=google"
+              aria-label="Google 계정으로 계속"
+              className="flex items-center justify-center gap-2 w-full bg-white hover:bg-slate-100 text-slate-800 font-medium py-3 px-4 rounded-xl transition-colors duration-150"
+            >
+              <span className="font-bold text-[#4285F4]">G</span>
+              Google 로 계속
+            </a>
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+            <a
+              href="/api/v1/auth/login?idp=kakao"
+              aria-label="카카오 계정으로 계속"
+              className="flex items-center justify-center gap-2 w-full bg-[#FEE500] hover:brightness-95 text-[#191600] font-medium py-3 px-4 rounded-xl transition-all duration-150"
+            >
+              Kakao 로 계속
+            </a>
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+            <a
+              href="/api/v1/auth/login?idp=naver"
+              aria-label="네이버 계정으로 계속"
+              className="flex items-center justify-center gap-2 w-full bg-[#03C75A] hover:brightness-95 text-white font-medium py-3 px-4 rounded-xl transition-all duration-150"
+            >
+              <span className="font-bold">N</span>
+              Naver 로 계속
+            </a>
+          </div>
 
           <p className="text-center text-slate-400 text-sm mt-4">
             처음이신가요? {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
