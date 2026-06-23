@@ -89,6 +89,39 @@ alertmanager:
             - alertname =~ "Certificate.*"
           receiver: "discord-certmanager"
 
+        # severity=none 이거나 alertname=InfoInhibitor 인 알림 억제 설정
+        - matchers:
+            - alertname = "InfoInhibitor"
+          receiver: "null"
+
+        - matchers:
+            - severity = "none"
+          receiver: "null"
+
+        # Suspended 앱은 null로
+        - matchers:
+            - alertname =~ "ArgoCD.*"
+            - health_status = "Suspended"
+          receiver: "null"
+
+        # ArgoCD 관련 알림 그룹으로 처리
+        - matchers:
+            - alertname =~ "ArgoCD.*"
+            - health_status != "Suspended"
+          group_by: ["alertname"]
+          group_wait: 1m
+          group_interval: 10m
+          repeat_interval: 24h
+          receiver: "discord"
+
+        # TraefikLatencySLO 플래핑 억제
+        - matchers:
+            - alertname = "TraefikLatencySLO"
+          group_wait: 1m
+          group_interval: 15m
+          repeat_interval: 24h
+          receiver: "discord"
+
     receivers:
       - name: "null"
       - name: "discord"
@@ -102,11 +135,47 @@ alertmanager:
             send_resolved: true
 
     inhibit_rules:
+      # 서비스내 Critical 발생 시 Warning 억제
       - source_matchers:
           - severity = "critical"
         target_matchers:
           - severity = "warning"
-        equal: ["namespace", "alertname"] # critical 알림이 있을 때 중복 알림 방지
+        equal: ["namespace"]
+
+      # 노드 다운 시 파생 워크로드 알림 억제
+      # source(KubeNodeNotReady)는 namespace="monitoring"(kube-state-metrics 위치), target pod 알림은
+      # 워크로드 namespace라 값이 달라 equal:[namespace]가 매칭되지 않음(공유 토폴로지 라벨 없음).
+      # target을 alertname으로 한정해 범위 제한, equal 제거(노드 다운 시 해당 워크로드 알림 전역 억제).
+      - source_matchers:
+          - alertname =~ "KubeNodeNotReady|KubeNodeUnreachable"
+        target_matchers:
+          - severity =~ "critical|warning"
+          - alertname =~ "KubePodNotReady|KubeContainerWaiting|KubeStatefulSetReplicasMismatch|KubeDaemonSetRolloutStuck|KubeDaemonSetNotScheduled"
+
+      # KubeVirt 컨트롤플레인 다운 시 kubevirt namespace 파생 알림 억제
+      - source_matchers:
+          - alertname =~ "KubeVirtApiAvailabilitySLO|KubeVirtControllerAvailabilitySLO"
+          - severity = "critical"
+        target_matchers:
+          - alertname =~ "KubeVirtApiAvailabilitySLO|KubeVirtControllerAvailabilitySLO|KubeVirtHandlerAvailabilitySLO"
+          - severity = "warning"
+        equal: ["sloth_service"]
+
+      # KubeVirt SLO critical → KubevirtComponentDown/VirtControllerNotReady 억제
+      # source SLO에 namespace 라벨 없어 equal 적용 불가, target을 alertname으로 명시해 범위 제한
+      - source_matchers:
+          - alertname =~ "KubeVirtApiAvailabilitySLO|KubeVirtControllerAvailabilitySLO"
+          - severity = "critical"
+        target_matchers:
+          - alertname =~ "KubevirtComponentDown|KubevirtVirtControllerNotReady"
+
+      # KubevirtComponentDown → VMI 파생 알림 억제
+      # source(KubevirtComponentDown)는 namespace="kubevirt", target VMI 알림은 테넌트 namespace="lab-*"라
+      # equal:[namespace]가 매칭되지 않음. target을 alertname으로 한정, equal 제거(컴포넌트 다운 시 VMI 알림 전역 억제).
+      - source_matchers:
+          - alertname = "KubevirtComponentDown"
+        target_matchers:
+          - alertname =~ "KubevirtVMIHighCPU|KubevirtVMIMemorySwap"
 
 # ── Grafana ───────────────────────────────────────────────────
 grafana:

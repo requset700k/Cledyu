@@ -17,9 +17,9 @@ rules:
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["rolebindings"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-  # 생성하는 RoleBinding 이 ClusterRole 을 참조하므로, 권한 상승 방지 규칙상 그 ClusterRole 에
-  # bind 권한이 필요하다. validation-engine ClusterRole 로만 한정해 최소권한을 유지한다.
+  # 생성하는 RoleBinding 이 ClusterRole 을 참조하므로, 권한 상승 방지 규칙상 해당 역할에
+  # bind 권한이 필요하다. 세션 접근용 두 ClusterRole 로만 한정해 최소권한을 유지한다.
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["clusterroles"]
     verbs: ["bind"]
-    resourceNames: ["validation-engine"]
+    resourceNames: ["validation-engine", "api-session-access"]
