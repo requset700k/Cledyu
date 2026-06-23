@@ -76,3 +76,69 @@ user-data 를 **대체**하므로(병합 아님), 베이스 도구는 AMI 에 �
 세션 인스턴스는 `apps/api` 의 reaper 가 TTL 만료·프로비저닝 타임아웃 시 terminate 한다.
 가드레일·고아 인스턴스 청소·Budgets 알람은 W4 에서 다룬다. 수동 확인/청소 절차는
 `docs/RUNBOOK/ec2-overflow.md`(W5) 참고.
+
+<!-- BEGIN_TF_DOCS -->
+## Requirements
+
+| Name | Version |
+| ---- | ------- |
+| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.5.0 |
+| <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 5.0 |
+
+## Providers
+
+| Name | Version |
+| ---- | ------- |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | ~> 5.0 |
+
+## Modules
+
+No modules.
+
+## Resources
+
+| Name | Type |
+| ---- | ---- |
+| [aws_budgets_budget.lab_ec2](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/budgets_budget) | resource |
+| [aws_iam_instance_profile.lab_instance](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_instance_profile) | resource |
+| [aws_iam_role.lab_instance](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role_policy_attachment.ssm_core](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
+| [aws_iam_user.api](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_user) | resource |
+| [aws_iam_user.engine](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_user) | resource |
+| [aws_iam_user_policy.api_ec2](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_user_policy) | resource |
+| [aws_iam_user_policy.engine_ssm](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_user_policy) | resource |
+| [aws_launch_template.lab_session](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/launch_template) | resource |
+| [aws_security_group.lab_session](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
+| [aws_ami.ubuntu](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ami) | data source |
+| [aws_iam_policy_document.api_ec2](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.ec2_assume](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.engine_ssm](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_subnets.selected](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/subnets) | data source |
+| [aws_vpc.selected](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/vpc) | data source |
+
+## Inputs
+
+| Name | Description | Type | Default | Required |
+| ---- | ----------- | ---- | ------- | :------: |
+| <a name="input_ami_id"></a> [ami\_id](#input\_ami\_id) | 세션 인스턴스 AMI. 빈 값이면 Canonical Ubuntu 22.04(amd64) 최신 AMI 를 자동 조회한다.<br/>운영에서는 SSM Agent·tailscale·code-server 를 미리 구운 커스텀 AMI(packer) ID 를 넣는 것을 권장한다<br/>(런타임 설치 시간 단축). README 의 'AMI 전략' 참고. | `string` | `""` | no |
+| <a name="input_budget_limit_usd"></a> [budget\_limit\_usd](#input\_budget\_limit\_usd) | EC2 오버플로우 월 예산(USD). 0이면 예산 알람을 만들지 않는다. | `number` | `0` | no |
+| <a name="input_budget_notification_emails"></a> [budget\_notification\_emails](#input\_budget\_notification\_emails) | 예산 임계 도달 시 알림 받을 이메일 목록(budget\_limit\_usd>0 일 때 사용). | `list(string)` | `[]` | no |
+| <a name="input_instance_type"></a> [instance\_type](#input\_instance\_type) | 세션 인스턴스 타입. Launch Template 기본값이며 api 가 런타임에 오버라이드할 수 있다. | `string` | `"t3.medium"` | no |
+| <a name="input_name_prefix"></a> [name\_prefix](#input\_name\_prefix) | 생성 리소스 이름 prefix. 레거시 hackathon 류 금지(레포 네이밍 규칙). | `string` | `"cledyu-lab"` | no |
+| <a name="input_region"></a> [region](#input\_region) | EC2 오버플로우 리전. 온프렘과 가까운 서울 리전을 기본값으로 둔다. | `string` | `"ap-northeast-2"` | no |
+| <a name="input_root_volume_gb"></a> [root\_volume\_gb](#input\_root\_volume\_gb) | 세션 인스턴스 루트 볼륨 크기(GiB). | `number` | `20` | no |
+| <a name="input_subnet_id"></a> [subnet\_id](#input\_subnet\_id) | 세션 인스턴스 서브넷. 빈 값이면 선택된 VPC 의 서브넷 중 하나를 자동 선택한다. | `string` | `""` | no |
+| <a name="input_vpc_id"></a> [vpc\_id](#input\_vpc\_id) | 세션 인스턴스를 띄울 VPC. 빈 값이면 리전의 default VPC 를 사용한다. | `string` | `""` | no |
+
+## Outputs
+
+| Name | Description |
+| ---- | ----------- |
+| <a name="output_api_iam_user"></a> [api\_iam\_user](#output\_api\_iam\_user) | apps/api 용 IAM 사용자명 — 이 사용자의 액세스 키를 발급해 Vault 에 보관한다. |
+| <a name="output_instance_profile_arn"></a> [instance\_profile\_arn](#output\_instance\_profile\_arn) | 세션 인스턴스 IAM 인스턴스 프로파일 ARN(SSM Core). |
+| <a name="output_launch_template_id"></a> [launch\_template\_id](#output\_launch\_template\_id) | apps/api 의 CLEDYU\_AWS\_LAUNCH\_TEMPLATE\_ID 로 주입할 Launch Template ID. |
+| <a name="output_launch_template_latest_version"></a> [launch\_template\_latest\_version](#output\_launch\_template\_latest\_version) | Launch Template 최신 버전(api 는 $Latest 를 쓰지만 참고용으로 노출). |
+| <a name="output_region"></a> [region](#output\_region) | EC2 오버플로우 리전(apps/api 의 CLEDYU\_AWS\_REGION). |
+| <a name="output_security_group_id"></a> [security\_group\_id](#output\_security\_group\_id) | 세션 인스턴스 Security Group ID(인바운드 0). |
+| <a name="output_validation_engine_iam_user"></a> [validation\_engine\_iam\_user](#output\_validation\_engine\_iam\_user) | validation-engine 용 IAM 사용자명 — 이 사용자의 액세스 키를 발급해 Vault 에 보관한다. |
+<!-- END_TF_DOCS -->

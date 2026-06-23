@@ -158,7 +158,12 @@ resource "aws_launch_template" "lab_session" {
     arn = aws_iam_instance_profile.lab_instance.arn
   }
 
-  vpc_security_group_ids = [aws_security_group.lab_session.id]
+  # 세션 인스턴스를 선택된 subnet 에 띄우고 egress-only SG 를 붙인다. network_interfaces 로
+  # subnet 을 지정하면 top-level vpc_security_group_ids 와 공존할 수 없어 SG 도 여기로 옮긴다.
+  network_interfaces {
+    subnet_id       = local.subnet_id
+    security_groups = [aws_security_group.lab_session.id]
+  }
 
   # IMDSv2 강제(SSRF 완화).
   metadata_options {
