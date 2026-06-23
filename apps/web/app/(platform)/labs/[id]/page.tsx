@@ -1,10 +1,15 @@
 'use client';
 
-import { Suspense, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { api, ApiRequestError } from '@/lib/api';
+import {
+  buildActiveSessionResumeHref,
+  readActiveSessionResumeId,
+  resolveActiveSessionResume,
+} from '@/lib/active-session-resume.mjs';
 import { DIFFICULTY_CONFIG } from '@/components/lab/difficulty';
 import { LabSession } from '@/components/lab/LabSession';
 import type { Lab } from '@/lib/types';
@@ -16,10 +21,14 @@ interface ActiveSessionConflict {
 
 function LabDetail() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedResumeId = readActiveSessionResumeId(searchParams);
 
   // 세션 시작 전 화면에서 관리하는 로컬 상태다. 실제 세션 진행/TTL 처리는 LabSession이 맡는다.
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [resumedExisting, setResumedExisting] = useState(false);
+  const [skipBootGrace, setSkipBootGrace] = useState(false);
   const [activeSessionConflict, setActiveSessionConflict] = useState<ActiveSessionConflict | null>(
     null,
   );
@@ -38,11 +47,54 @@ function LabDetail() {
     queryFn: () => api.labs.get(id),
   });
 
+  useEffect(() => {
+    if (!requestedResumeId) return;
+
+    let cancelled = false;
+    setExistingSessionAction('checking');
+    setActiveSessionConflict(null);
+    setReplaceError(null);
+    setSkipBootGrace(false);
+
+    // URL의 session_id는 힌트일 뿐이다. Session API의 소유권 검사와 lab_id 일치 판정을
+    // 모두 통과한 경우에만 기존 실습 화면을 연다.
+    void api.sessions
+      .get(requestedResumeId)
+      .then((existing) => {
+        if (cancelled) return;
+        const result = resolveActiveSessionResume(id, existing);
+        if (result.status === 'resume') {
+          setResumedExisting(true);
+          setSkipBootGrace(result.skipBootGrace);
+          setSessionId(result.sessionId);
+          return;
+        }
+        setReplaceError('진행 중인 세션이 현재 Lab과 일치하지 않습니다.');
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setReplaceError('진행 중인 세션을 확인하지 못했습니다. 다시 시도해주세요.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setExistingSessionAction(null);
+          // 처리된 내부 식별자가 주소창과 이후 Lab 이동 상태에 남지 않도록 정리한다.
+          router.replace(`/labs/${encodeURIComponent(id)}`, { scroll: false });
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id, requestedResumeId, router]);
+
   const start = useMutation({
     mutationFn: () => api.sessions.create(id),
     // terminal_url은 LabSession이 자체 polling으로 derive하므로 sessionId만 보관.
     onSuccess: (s) => {
       setResumedExisting(false);
+      setSkipBootGrace(false);
       setActiveSessionConflict(null);
       setReplaceError(null);
       setSessionId(s.id);
@@ -67,10 +119,12 @@ function LabDetail() {
     setReplaceError(null);
     try {
       const existing = await api.sessions.get(existingSessionId);
-      if (existing.lab_id === id) {
+      const result = resolveActiveSessionResume(id, existing);
+      if (result.status === 'resume') {
         setActiveSessionConflict(null);
         setResumedExisting(true);
-        setSessionId(existing.id);
+        setSkipBootGrace(result.skipBootGrace);
+        setSessionId(result.sessionId);
         return;
       }
       setActiveSessionConflict({ sessionId: existing.id, labId: existing.lab_id });
@@ -102,6 +156,7 @@ function LabDetail() {
       // 교체가 성공하면 이후 화면은 새 세션의 TTL/진행 상태를 기준으로 다시 시작한다.
       setActiveSessionConflict(null);
       setResumedExisting(false);
+      setSkipBootGrace(false);
       setReplaceError(null);
       setSessionId(next.id);
     } catch {
@@ -146,7 +201,7 @@ function LabDetail() {
               이미 진행 중인 실습 세션이 있어 기존 세션으로 이어서 열었습니다.
             </div>
           )}
-          <LabSession sessionId={sessionId} lab={lab} />
+          <LabSession sessionId={sessionId} lab={lab} skipBootGrace={skipBootGrace} />
         </>
       ) : (
         <div className="mt-6 bg-slate-800/50 border border-slate-700 rounded-xl p-6">
@@ -167,18 +222,24 @@ function LabDetail() {
               <button
                 type="button"
                 onClick={() => start.mutate()}
-                disabled={start.isPending || existingSessionAction !== null}
+                disabled={
+                  start.isPending || existingSessionAction !== null || requestedResumeId !== null
+                }
                 className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors"
               >
-                {start.isPending || existingSessionAction === 'checking'
-                  ? '세션 확인 중...'
-                  : existingSessionAction === 'terminating'
-                    ? '기존 세션 종료 중...'
-                    : '실습 시작'}
+                {existingSessionAction === 'checking'
+                  ? requestedResumeId
+                    ? '진행 중인 세션 확인 중...'
+                    : '세션 확인 중...'
+                  : start.isPending
+                    ? '세션 확인 중...'
+                    : existingSessionAction === 'terminating'
+                      ? '기존 세션 종료 중...'
+                      : '실습 시작'}
               </button>
               {activeSessionConflict && (
                 <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm max-w-2xl">
-                  {/* 다른 Lab 세션은 자동 이동하지 않는다. 사용자가 이어갈지 종료할지 선택해야 한다. */}
+                  {/* 다른 Lab 세션은 사용자가 이어가기나 종료를 명시적으로 선택해야 한다. */}
                   <p className="text-amber-200 font-medium">
                     이미 진행 중인 다른 실습 세션이 있습니다.
                   </p>
@@ -186,17 +247,17 @@ function LabDetail() {
                     한 계정은 동시에 하나의 실습 세션만 사용할 수 있습니다. 기존 실습으로
                     돌아가거나, 기존 세션을 종료하고 이 실습을 새로 시작할 수 있습니다.
                   </p>
-                  <p className="text-amber-100/60 mt-1 text-xs">
-                    기존 세션 ID: {activeSessionConflict.sessionId}
-                  </p>
                   {replaceError && <p className="text-red-200 mt-2 text-xs">{replaceError}</p>}
                   <div className="flex flex-wrap gap-2 mt-3">
                     {activeSessionConflict.labId && (
                       <Link
-                        href={`/labs/${activeSessionConflict.labId}`}
+                        href={buildActiveSessionResumeHref(
+                          activeSessionConflict.labId,
+                          activeSessionConflict.sessionId,
+                        )}
                         className="inline-flex items-center rounded-md border border-amber-400/40 px-3 py-1.5 text-amber-100 hover:bg-amber-400/10 transition-colors"
                       >
-                        기존 실습으로 이동
+                        진행 중인 실습 이어가기
                       </Link>
                     )}
                     <button
