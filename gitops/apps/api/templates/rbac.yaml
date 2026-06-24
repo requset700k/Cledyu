@@ -56,7 +56,7 @@ subjects:
 ---
 # 세션 VM의 serial console 접근 권한.
 # ClusterRoleBinding으로 전역 부여하지 않고 Kyverno가 lab-* namespace마다 RoleBinding을
-# 생성해, API가 현재 세션 namespace의 console에만 접근하도록 제한한다.
+# 생성해, API가 현재 세션 namespace의 console/portforward에만 접근하도록 제한한다.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -66,3 +66,8 @@ rules:
   - apiGroups: ["subresources.kubevirt.io"]
     resources: ["virtualmachineinstances/console"]
     verbs: ["get"]
+  # 읽기 전용 파일 목록은 세션 VM의 22/tcp로 KubeVirt port-forward를 열고,
+  # VM 내부 authorized_keys forced command로 범용 셸 실행을 차단한다.
+  - apiGroups: ["subresources.kubevirt.io"]
+    resources: ["virtualmachineinstances/portforward"]
+    verbs: ["get", "update"]

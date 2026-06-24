@@ -17,6 +17,8 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
+        # Secret volume의 private key를 nonroot API 프로세스가 읽을 수 있게 그룹 소유권을 부여한다.
+        fsGroup: 65532
       containers:
         - name: api
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
@@ -45,6 +47,15 @@ spec:
             # 세션 VM cloud-init이 lab authorized_keys로 넣는 검증엔진 공개키(공개값이라 평문 OK).
             - name: CLEDYU_KUBEVIRT_LAB_SSH_PUBLIC_KEY
               value: {{ .Values.kubevirt.labSshPublicKey | quote }}
+            # 파일 목록 전용 public key. Vault key 미등록 시 빈 값으로 남아 기능만 비활성화된다.
+            - name: CLEDYU_KUBEVIRT_FILE_LIST_SSH_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.kubevirt.fileListSSH.secretName | quote }}
+                  key: {{ .Values.kubevirt.fileListSSH.publicKey | quote }}
+                  optional: true
+            - name: CLEDYU_KUBEVIRT_FILE_LIST_SSH_PRIVATE_KEY_PATH
+              value: {{ .Values.kubevirt.fileListSSH.privateKeyPath | quote }}
             # Keycloak OIDC (학습자 realm cledyu-learn). client_secret 은 Vault→ESO Secret 에서.
             - name: CLEDYU_KEYCLOAK_URL
               value: {{ .Values.keycloak.url | quote }}
@@ -114,6 +125,9 @@ spec:
             - name: cledyu-ca
               mountPath: /etc/ssl/cledyu
               readOnly: true
+            - name: vm-file-ssh
+              mountPath: {{ .Values.kubevirt.fileListSSH.mountPath | quote }}
+              readOnly: true
           resources:
             requests:
               cpu: {{ .Values.resources.requests.cpu }}
@@ -142,3 +156,12 @@ spec:
         - name: cledyu-ca
           configMap:
             name: cledyu-root-ca-bundle  # trust-manager 가 ns 라벨 기준으로 배포(키: ca.crt)
+        # Vault key가 아직 없더라도 API Pod는 정상 기동하고 파일 목록 기능만 비활성화한다.
+        - name: vm-file-ssh
+          secret:
+            secretName: {{ .Values.kubevirt.fileListSSH.secretName | quote }}
+            optional: true
+            defaultMode: 288 # 0o440 — root와 fsGroup(65532)만 읽기 가능
+            items:
+              - key: {{ .Values.kubevirt.fileListSSH.privateKey | quote }}
+                path: id_ed25519
