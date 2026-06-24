@@ -125,8 +125,8 @@ Traefik 경유 필수). 프록시 cloud-init 은 `tailscale up --accept-routes` 
 issuer 를 검증하므로, 단순히 `hostname=https://auth.cledyu.io` 로 고정하면 그들이 깨진다.
 두 가지 중 선택한다:
 
-- **옵션 A — 동적 hostname (권장, 영향 최소):** `hostname` 을 비워(키 생략) 요청
-  Host/X-Forwarded-Host 로 URL 을 만들게 한다. 내부 요청(Host: keycloak.cledyu.local)은
+- **옵션 A — 동적 hostname (권장, 단 XFH 하드닝 선행 필수):** `hostname` 을 비워(키 생략)
+  요청 Host/X-Forwarded-Host 로 URL 을 만들게 한다. 내부 요청(Host: keycloak.cledyu.local)은
   `.local` issuer, 공개 요청(프록시가 X-Forwarded-Host: auth.cledyu.io)은 auth issuer 로
   realm 별·요청별로 올바르게 생성된다. `strict` 는 반드시 false.
 
@@ -135,6 +135,29 @@ issuer 를 검증하므로, 단순히 `hostname=https://auth.cledyu.io` 로 고�
   keycloak_foundation_hostname: ""          # 키 생략 → 동적(요청 Host 기반)
   keycloak_foundation_hostname_strict: false
   ```
+
+  > **[보안 전제 — 반드시 선행] X-Forwarded-Host 주입 차단.** 동적 모드는 Keycloak 이
+  > `X-Forwarded-Host` 로 issuer·redirect·비밀번호재설정 링크를 만든다. 현재 Traefik 은
+  > forwardedHeaders.trustedIPs 로 `10.10.0.0/24` + 전체 tailnet `100.64.0.0/10` 을 신뢰하므로
+  > (`gitops/apps/traefik/values.yaml`), 하드닝 없이 동적을 켜면 그 네트워크의 임의
+  > 클라이언트가 `Host: keycloak.cledyu.local` 로 라우팅하면서 `X-Forwarded-Host: evil.example.com`
+  > 을 주입해 악성 issuer·action link 를 생성할 수 있다(2026-06-24 라이브 실증 후 정적 롤백).
+  > 동적 전환 전에 아래 중 하나로 XFH 를 신뢰 프록시로만 제한한다:
+  >
+  > - **(권장) per-host XFH overwrite:** keycloak ingress 를 host 별 Ingress 로 분리하고 각
+  >   라우터에 Traefik headers 미들웨어로 `X-Forwarded-Host` 를 그 host 값으로 강제 세팅
+  >   (클라이언트 값 무시). keycloak.cledyu.local→keycloak.cledyu.local,
+  >   auth.cledyu.io→auth.cledyu.io.
+  > - **proxy-only trust:** 공개 경로를 전용 Traefik entrypoint/route 로 분리해 Caddy/ALB
+  >   프록시 IP 만 trustedIPs 에 두거나, keycloak 경로에서 클라이언트 XFH 를 신뢰하지 않게 한다.
+  >
+  > 하드닝·검증(아래 curl 로 주입이 무시되는지)이 끝나기 전에는 정적(strict=true)을 유지한다.
+  >
+  > ```bash
+  > # 주입이 무시되면 issuer 가 evil 이 아니어야 한다(하드닝 검증).
+  > curl -ksS -H 'Host: keycloak.cledyu.local' -H 'X-Forwarded-Host: evil.example.com' \
+  >   https://10.10.0.101/realms/cledyu-learn/.well-known/openid-configuration | grep -o '"issuer":"[^"]*"'
+  > ```
 
 - **옵션 B — 단일 공개 issuer:** `hostname=https://auth.cledyu.io` 로 고정(strict 무시)하고,
   내부 `cledyu` realm 소비자 5종을 새 issuer(`https://auth.cledyu.io/realms/cledyu`)로 **전부
