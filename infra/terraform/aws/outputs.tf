@@ -32,3 +32,19 @@ output "region" {
   description = "EC2 오버플로우 리전(apps/api 의 CLEDYU_AWS_REGION)."
   value       = var.region
 }
+
+# ── 공개 진입점(enable_public_ingress=true 일 때만 값이 채워진다) ──────────
+output "public_zone_name_servers" {
+  description = "public_domain hosted zone 의 NS 4개. 도메인 등록기관에 이 값으로 위임해야 공개 해석된다."
+  value       = var.enable_public_ingress ? aws_route53_zone.public[0].name_servers : []
+}
+
+output "public_alb_dns_name" {
+  description = "공개 ALB 의 DNS 이름(auth.cledyu.io A ALIAS 타겟). 디버깅·검증용."
+  value       = var.enable_public_ingress ? aws_lb.public[0].dns_name : ""
+}
+
+output "keycloak_proxy_instance_id" {
+  description = "tailnet Keycloak 프록시 인스턴스 ID(tailnet 가입·로그 확인용)."
+  value       = var.enable_public_ingress ? aws_instance.proxy[0].id : ""
+}
