@@ -207,3 +207,67 @@ func TestRenderCloudInit_WithInit(t *testing.T) {
 		t.Errorf("runcmd round-trip mismatch:\n got %q\nwant %q", parsed.Runcmd[1], init.Runcmd[1])
 	}
 }
+
+func TestRenderCloudInitWithAccess_AddsRestrictedFileListKeyAndCommand(t *testing.T) {
+	out := renderCloudInitWithAccess(
+		"abc123",
+		"ssh-ed25519 AAAA-validation validation@cledyu",
+		"ssh-ed25519 AAAA-file-list api-file-list@cledyu",
+		BootInit{},
+	)
+
+	var parsed struct {
+		Users []struct {
+			Name              string   `yaml:"name"`
+			SSHAuthorizedKeys []string `yaml:"ssh_authorized_keys"`
+		} `yaml:"users"`
+		WriteFiles []struct {
+			Path        string `yaml:"path"`
+			Permissions string `yaml:"permissions"`
+			Content     string `yaml:"content"`
+		} `yaml:"write_files"`
+	}
+	if err := yaml.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatalf("rendered cloud-init is not valid YAML: %v\n%s", err, out)
+	}
+	if len(parsed.Users) != 1 {
+		t.Fatalf("users = %v, want one lab user", parsed.Users)
+	}
+	keys := parsed.Users[0].SSHAuthorizedKeys
+	if len(keys) != 2 {
+		t.Fatalf("ssh_authorized_keys = %v, want validation and file-list keys", keys)
+	}
+	const restricted = `command="/usr/local/libexec/cledyu-list-files",restrict ssh-ed25519 AAAA-file-list api-file-list@cledyu`
+	if keys[1] != restricted {
+		t.Fatalf("file-list key = %q, want %q", keys[1], restricted)
+	}
+
+	for _, file := range parsed.WriteFiles {
+		if file.Path != "/usr/local/libexec/cledyu-list-files" {
+			continue
+		}
+		if file.Permissions != "0755" {
+			t.Fatalf("file-list command permissions = %q, want 0755", file.Permissions)
+		}
+		for _, want := range []string{
+			`ROOT = "/home/lab"`,
+			"MAX_DEPTH = 4",
+			"MAX_ENTRIES = 500",
+			"entry.is_symlink()",
+			`json.dump({"root": ROOT, "items": items, "truncated": truncated}`,
+		} {
+			if !strings.Contains(file.Content, want) {
+				t.Fatalf("expected %q in file-list command:\n%s", want, file.Content)
+			}
+		}
+		return
+	}
+	t.Fatalf("file-list command not found in write_files:\n%s", out)
+}
+
+func TestRenderCloudInitWithAccess_OmitsFileListCommandWithoutKey(t *testing.T) {
+	out := renderCloudInitWithAccess("abc123", "", "", BootInit{})
+	if strings.Contains(out, "cledyu-list-files") {
+		t.Fatalf("file-list access must be omitted without a public key:\n%s", out)
+	}
+}

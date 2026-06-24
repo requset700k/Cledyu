@@ -2,6 +2,7 @@ package kubevirt
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -13,13 +14,15 @@ import (
 // init.Runcmd 는 공통 runcmd(getty 재시작) 앞에 붙어, 도구 설치가 끝난 뒤
 // 학생 터미널 autologin 이 열리는 순서를 보장한다.
 func renderCloudInit(sessionID, labSSHPublicKey string, init BootInit) string {
-	// 검증엔진(virtctl ssh)이 키로 접속할 수 있도록 lab 사용자에 엔진 공개키를 넣는다.
-	// 공개키 미설정 시 비번/시리얼 콘솔만 유지(키 블록 생략).
-	sshKeyBlock := ""
-	if labSSHPublicKey != "" {
-		sshKeyBlock = "\n    ssh_authorized_keys:\n      - " + labSSHPublicKey
-	}
+	return renderCloudInitWithAccess(sessionID, labSSHPublicKey, "", init)
+}
 
+// renderCloudInitWithAccess는 검증엔진 key와 파일 목록 전용 제한 key를 함께 렌더링한다.
+// 파일 목록 public key가 비어 있으면 관련 key와 강제 명령을 모두 생략한다.
+func renderCloudInitWithAccess(
+	sessionID, labSSHPublicKey, fileListSSHPublicKey string,
+	init BootInit,
+) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, `#cloud-config
 hostname: %s
@@ -28,8 +31,26 @@ users:
   - name: lab
     lock_passwd: false
     shell: /bin/bash
-    sudo: ALL=(ALL) NOPASSWD:ALL%s
-chpasswd:
+    sudo: ALL=(ALL) NOPASSWD:ALL
+`, "session-"+sessionID)
+
+	var sshKeys []string
+	if key := strings.TrimSpace(labSSHPublicKey); key != "" {
+		sshKeys = append(sshKeys, key)
+	}
+	if key := strings.TrimSpace(fileListSSHPublicKey); key != "" {
+		// Session API 파일 목록 key는 VM 안에서 범용 셸이 아니라 고정된 JSON 출력 명령만 실행한다.
+		sshKeys = append(sshKeys, `command="/usr/local/libexec/cledyu-list-files",restrict `+key)
+	}
+	if len(sshKeys) > 0 {
+		b.WriteString("    ssh_authorized_keys:\n")
+		for _, key := range sshKeys {
+			// strconv.Quote의 double-quoted scalar는 key 옵션 내부 따옴표도 YAML-safe하게 보존한다.
+			fmt.Fprintf(&b, "      - %s\n", strconv.Quote(key))
+		}
+	}
+
+	b.WriteString(`chpasswd:
   expire: false
   list: |
     lab:lab
@@ -38,7 +59,7 @@ bootcmd:
   - "printf '%%s\\n' '[Resolve]' 'DNS=8.8.8.8 1.1.1.1' 'FallbackDNS=8.8.4.4 1.0.0.1' 'Domains=~.' > /etc/systemd/resolved.conf.d/cledyu-lab.conf"
   - "systemctl restart systemd-resolved || true"
   - "systemctl stop serial-getty@ttyS0.service || true"
-`, "session-"+sessionID, sshKeyBlock)
+`)
 
 	if len(init.Packages) > 0 {
 		b.WriteString("packages:\n")
@@ -57,7 +78,61 @@ bootcmd:
       [Service]
       ExecStart=
       ExecStart=-/sbin/agetty --autologin lab --noclear --keep-baud 115200,38400,9600 ttyS0 xterm-256color
-  - path: /home/lab/.hushlogin
+`)
+	if strings.TrimSpace(fileListSSHPublicKey) != "" {
+		b.WriteString(`  - path: /usr/local/libexec/cledyu-list-files
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env python3
+      import json
+      import os
+
+      ROOT = "/home/lab"
+      MAX_DEPTH = 4
+      MAX_ENTRIES = 500
+      items = []
+      truncated = False
+
+      def walk(directory, relative, depth):
+          global truncated
+          try:
+              entries = sorted(os.scandir(directory), key=lambda entry: entry.name)
+          except OSError:
+              return
+          for entry in entries:
+              if entry.name.startswith(".") or entry.is_symlink():
+                  continue
+              child_relative = f"{relative}/{entry.name}" if relative else entry.name
+              try:
+                  if entry.is_dir(follow_symlinks=False):
+                      entry_type = "directory"
+                  elif entry.is_file(follow_symlinks=False):
+                      entry_type = "file"
+                  else:
+                      continue
+              except OSError:
+                  continue
+              if len(items) >= MAX_ENTRIES:
+                  truncated = True
+                  return
+              items.append({
+                  "path": child_relative,
+                  "name": entry.name,
+                  "type": entry_type,
+                  "depth": depth,
+              })
+              if entry_type == "directory" and depth < MAX_DEPTH:
+                  walk(entry.path, child_relative, depth + 1)
+                  if truncated:
+                      return
+
+      walk(ROOT, "", 1)
+      json.dump({"root": ROOT, "items": items, "truncated": truncated}, os.sys.stdout)
+      os.sys.stdout.write("\n")
+`)
+	}
+	b.WriteString(`  - path: /home/lab/.hushlogin
     owner: lab:lab
     permissions: "0644"
     defer: true
