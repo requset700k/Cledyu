@@ -150,3 +150,6 @@ steps:
       - type: command
         command: stat -c %F /home/lab/latest-log
         expect: symbolic link
+      - type: command
+        command: readlink /home/lab/latest-log
+        expect: /home/lab/work/logs/app1.log
