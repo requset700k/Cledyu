@@ -93,6 +93,11 @@ type AWSConfig struct {
 	// TailscaleAuthKey: 세션 인스턴스 cloud-init 이 tailnet 에 가입할 때 쓰는 ephemeral authkey.
 	// Vault→ESO 로 주입. 비면 cloud-init 이 tailscale 가입을 생략(라이브 터미널/IDE 불가, SSM 채점만).
 	TailscaleAuthKey string `mapstructure:"tailscale_auth_key"`
+	// LiveTerminalSSHUser/Password: api 가 EC2 세션에 라이브 터미널(SSH PTY)을 붙일 때 쓰는 계정.
+	// cloud-init 이 만드는 lab 계정(기본 lab/lab)과 일치한다. tailnet 경유로만 도달 가능하며,
+	// Tailscale SSH(accept) 면 none 인증이 먼저 통과하고, 일반 sshd 면 이 비밀번호로 폴백한다.
+	LiveTerminalSSHUser     string `mapstructure:"live_terminal_ssh_user"`
+	LiveTerminalSSHPassword string `mapstructure:"live_terminal_ssh_password"`
 }
 
 type KeycloakConfig struct {
@@ -162,6 +167,8 @@ func Load() (*Config, error) {
 	v.SetDefault("aws.max_active_sessions", 0) // 0 = EC2 오버플로우 비활성(현행 KubeVirt 전용 동작 보존)
 	v.SetDefault("aws.tailnet_hostname_prefix", "lab")
 	v.SetDefault("aws.tailscale_auth_key", "") // env CLEDYU_AWS_TAILSCALE_AUTH_KEY(Secret)로 주입
+	v.SetDefault("aws.live_terminal_ssh_user", "lab")
+	v.SetDefault("aws.live_terminal_ssh_password", "lab")
 	v.SetDefault("kafka.brokers", "cledyu-kafka-kafka-bootstrap.kafka.svc:9093")
 	v.SetDefault("kafka.topic", "validation-requests")
 	v.SetDefault("kafka.tls_cert", "/etc/kafka-certs/tls.crt")

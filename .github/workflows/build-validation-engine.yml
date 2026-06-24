@@ -27,6 +27,7 @@ jobs:
     with:
       context: apps/validation-engine       # Dockerfile이 있는 폴더
       image-name: validation-engine         # ghcr.io/requset700k/validation-engine
-      trivyignores: ""
+      # virtctl(업스트림 KubeVirt 바이너리)의 Go stdlib CVE 를 무시한다 — 패치 불가, 코멘트 참고.
+      trivyignores: apps/validation-engine/.trivyignore
       gitops-values-file: gitops/apps/validation-engine/values.yaml
     secrets: inherit
