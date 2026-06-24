@@ -217,6 +217,9 @@ resource "aws_instance" "proxy" {
     upstream_url       = var.keycloak_upstream_url
     public_host        = var.public_keycloak_host
     hostname           = "${var.name_prefix}-kc-proxy"
+    # tls_* 옵션은 upstream 스킴과 무관하게 Caddy 의 backend TLS 를 켜므로, https
+    # upstream 일 때만 transport 블록을 렌더한다(http upstream 평문 502 방지).
+    upstream_tls = startswith(var.keycloak_upstream_url, "https://")
   }))
 
   tags = { Name = "${var.name_prefix}-kc-proxy" }

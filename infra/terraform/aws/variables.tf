@@ -86,12 +86,14 @@ variable "public_keycloak_host" {
 variable "keycloak_upstream_url" {
   description = <<-EOT
     프록시가 auth.cledyu.io 요청을 포워딩할 tailnet 상의 Keycloak 업스트림 URL.
-    환경의 tailnet 토폴로지에 맞춰 채운다 — 예: 클러스터 서브넷이 tailnet 에 광고돼 있으면
-    "http://keycloak.cledyu.local:8080"(서브넷 라우터+split DNS) 또는 Keycloak service 의
-    tailnet 도달 주소. 프록시는 Host 헤더를 public_keycloak_host 로 보존해 전달한다.
+    Cledyu 토폴로지에서는 하이퍼바이저 subnet router 가 10.10.0.0/24 를 tailnet 에
+    광고하고 Traefik LB 가 10.10.0.101 이므로 "https://10.10.0.101" 를 쓴다(프록시는
+    --accept-routes 로 이 라우트를 받고, Host=public_keycloak_host 로 보내 Traefik 이
+    keycloak ingress 로 라우팅). pod/service ClusterIP 는 라우팅 불가하므로 Traefik LB
+    경유 필수. Traefik 내부 CA 인증서는 프록시가 검증 생략(tailnet WireGuard 암호화).
   EOT
   type        = string
-  default     = ""
+  default     = "https://10.10.0.101"
 }
 
 variable "tailscale_auth_key" {

@@ -106,10 +106,17 @@ terraform apply
 terraform output public_alb_dns_name        # 디버깅용
 ```
 
-`keycloak_upstream_url` 은 프록시가 tailnet 으로 Keycloak 에 닿는 주소다 — 환경에 따라
-클러스터 서브넷 광고(subnet router)+split DNS 로 `http://keycloak.cledyu.local:8080`,
-또는 Keycloak service 의 tailnet 도달 주소를 넣는다. 프록시(Caddy)는 `Host` 와
-`X-Forwarded-Host` 를 `auth.cledyu.io` 로 보존해 전달한다.
+`keycloak_upstream_url` 은 프록시가 tailnet 으로 Keycloak 에 닿는 주소다. Cledyu
+토폴로지에서는 하이퍼바이저 subnet router 가 `10.10.0.0/24` 를 광고하고 Traefik LB 가
+`10.10.0.101` 이므로 기본값 `https://10.10.0.101` 을 쓴다(ClusterIP 는 라우팅 불가 →
+Traefik 경유 필수). 프록시 cloud-init 은 `tailscale up --accept-routes` 로 이 라우트를
+받고, Caddy 는 `Host: auth.cledyu.io` 로 보내 Traefik 의 keycloak ingress(auth.cledyu.io
+규칙)로 라우팅한다. Traefik 내부 CA 인증서는 검증 생략(tailnet WireGuard 암호화 hop).
+
+> 사전 점검(운영자, tailnet 접속 상태에서): subnet route 가 Tailscale admin 에서
+> 승인됐는지(`tailscale status` 에 10.10.0.0/24), 그리고
+> `curl -ksS -H 'Host: auth.cledyu.io' https://10.10.0.101/realms/cledyu-learn -o /dev/null -w '%{http_code}\n'`
+> 가 200 을 반환하는지 확인한다. 200 이면 ALB→프록시 경로도 동일하게 동작한다.
 
 이어서 Keycloak 이 공개 도메인 기준으로 broker·콜백 URL 을 만들도록 hostname 을 구성한다
 (`ansible/roles/keycloak_foundation`). **Keycloak hostname v2 주의:** `hostname` 에 고정값을

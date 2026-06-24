@@ -11,6 +11,9 @@ spec:
   commonName: keycloak.cledyu.local
   dnsNames:
     - keycloak.cledyu.local
+    # 공개 노출 경로(ALB→tailnet 프록시)가 Host: auth.cledyu.io 로 Traefik 에 닿을 때
+    # SAN 일치용. 내부 CA 라 공개 신뢰는 ALB(ACM)가 담당하고 이건 내부 hop 전용.
+    - auth.cledyu.io
   privateKey:
     algorithm: RSA
     size: 2048
