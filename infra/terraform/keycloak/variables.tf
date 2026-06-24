@@ -179,10 +179,15 @@ variable "learn_oidc_client_secrets" {
   sensitive   = true
 }
 
-variable "enable_social_idp" {
-  description = "소셜 IdP(구글/카카오/네이버) 생성 여부. 실 client 발급 전까지 false."
-  type        = bool
-  default     = false
+variable "enabled_social_idps" {
+  description = "생성할 소셜 IdP alias 목록(google/kakao/naver). provider 별로 단계적 활성화한다 — 예 [\"google\"]. 실 client id/secret 발급된 것만 넣는다. 빈 목록이면 IdP 미생성."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for a in var.enabled_social_idps : contains(["google", "kakao", "naver"], a)])
+    error_message = "enabled_social_idps 는 google/kakao/naver 만 허용한다."
+  }
 }
 
 variable "idp_client_ids" {

@@ -4,14 +4,15 @@
 # Keycloak 이 구글로 위임 인증한 뒤 cledyu-learn realm 토큰을 자체 발급한다.
 # 따라서 앱(web/api)은 여전히 Keycloak 하나만 바라본다.
 #
-# enable_social_idp=false 면 IdP 리소스를 만들지 않는다 (실 client id/secret
-# 발급 전 안전). client id 는 공개값(idp_client_ids), secret 은 보안 저장소
+# enabled_social_idps 에 포함된 alias 만 IdP 리소스를 만든다 (실 client id/secret
+# 발급된 provider 만 단계적으로 활성화 — 미발급 provider 로 라우팅돼 실패하는 것을
+# 막는다). client id 는 공개값(idp_client_ids), secret 은 보안 저장소
 # (idp_client_secrets)에서 주입.
 
 # ── Google (네이티브 OIDC) ───────────────────────────────────────────────
 resource "keycloak_oidc_google_identity_provider" "google" {
   # alias 는 provider 타입에서 "google" 로 고정된다(kc_idp_hint=google 와 일치).
-  count = var.enable_social_idp ? 1 : 0
+  count = contains(var.enabled_social_idps, "google") ? 1 : 0
 
   realm         = keycloak_realm.cledyu_learn.id
   client_id     = var.idp_client_ids["google"]
@@ -27,7 +28,7 @@ resource "keycloak_oidc_google_identity_provider" "google" {
 
 # ── Kakao (OIDC 지원) ────────────────────────────────────────────────────
 resource "keycloak_oidc_identity_provider" "kakao" {
-  count = var.enable_social_idp ? 1 : 0
+  count = contains(var.enabled_social_idps, "kakao") ? 1 : 0
 
   realm        = keycloak_realm.cledyu_learn.id
   alias        = "kakao"
@@ -56,7 +57,7 @@ resource "keycloak_oidc_identity_provider" "kakao" {
 # userinfo 응답이 { "response": { id, email, name, ... } } 형태로 중첩되어 있어
 # 아래 attribute importer 매퍼로 평탄화한다.
 resource "keycloak_oidc_identity_provider" "naver" {
-  count = var.enable_social_idp ? 1 : 0
+  count = contains(var.enabled_social_idps, "naver") ? 1 : 0
 
   realm        = keycloak_realm.cledyu_learn.id
   alias        = "naver"
@@ -79,7 +80,7 @@ resource "keycloak_oidc_identity_provider" "naver" {
 
 # Naver username: response.id 를 고유 키로.
 resource "keycloak_user_template_importer_identity_provider_mapper" "naver_username" {
-  count = var.enable_social_idp ? 1 : 0
+  count = contains(var.enabled_social_idps, "naver") ? 1 : 0
 
   realm                   = keycloak_realm.cledyu_learn.id
   name                    = "naver-username"
@@ -93,7 +94,7 @@ resource "keycloak_user_template_importer_identity_provider_mapper" "naver_usern
 
 # Naver email → user.email
 resource "keycloak_attribute_importer_identity_provider_mapper" "naver_email" {
-  count = var.enable_social_idp ? 1 : 0
+  count = contains(var.enabled_social_idps, "naver") ? 1 : 0
 
   realm                   = keycloak_realm.cledyu_learn.id
   name                    = "naver-email"
@@ -108,7 +109,7 @@ resource "keycloak_attribute_importer_identity_provider_mapper" "naver_email" {
 
 # Naver name → user.firstName
 resource "keycloak_attribute_importer_identity_provider_mapper" "naver_name" {
-  count = var.enable_social_idp ? 1 : 0
+  count = contains(var.enabled_social_idps, "naver") ? 1 : 0
 
   realm                   = keycloak_realm.cledyu_learn.id
   name                    = "naver-name"

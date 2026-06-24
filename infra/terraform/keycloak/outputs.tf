@@ -34,7 +34,7 @@ output "learn_oidc_client_ids" {
   value       = keys(keycloak_openid_client.learn_clients)
 }
 
-output "social_idp_enabled" {
-  description = "소셜 IdP(구글/카카오/네이버) 생성 여부."
-  value       = var.enable_social_idp
+output "social_idps_enabled" {
+  description = "생성된 소셜 IdP alias 목록(구글/카카오/네이버)."
+  value       = var.enabled_social_idps
 }
