@@ -1,5 +1,11 @@
 // 버튼 클릭 시 /api/v1/auth/login → 백엔드가 Keycloak 인증 페이지로 리다이렉트.
+// 소셜 버튼은 CLEDYU_SOCIAL_LOGIN_ENABLED=true 일 때만 노출한다. terraform 의
+// enable_social_idp 기본값 false(IdP 미생성)와 정렬 — 미프로비저닝 환경에서 없는
+// alias 로 라우팅돼 실패하는 것을 막는다. 런타임 env 를 읽으려면 동적 렌더가 필요하다.
+export const dynamic = 'force-dynamic';
+
 export default function LoginPage() {
+  const socialEnabled = process.env.CLEDYU_SOCIAL_LOGIN_ENABLED === 'true';
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
@@ -15,13 +21,54 @@ export default function LoginPage() {
           <h2 className="text-lg font-semibold text-white mb-1">시작하기</h2>
           <p className="text-slate-400 text-sm mb-6">Cledyu 계정으로 로그인하세요</p>
 
+          {/* 이메일(Keycloak 폼) — 주 버튼 */}
           {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
           <a
             href="/api/v1/auth/login"
+            aria-label="이메일로 로그인"
             className="flex items-center justify-center gap-2 w-full bg-brand-500 hover:bg-brand-600 text-white font-medium py-3 px-4 rounded-xl transition-colors duration-150"
           >
-            로그인 / 소셜 로그인
+            이메일로 로그인
           </a>
+
+          {socialEnabled && (
+            <>
+              <div className="flex items-center gap-3 my-5">
+                <span className="h-px flex-1 bg-slate-700" />
+                <span className="text-slate-500 text-xs">또는 소셜 계정으로</span>
+                <span className="h-px flex-1 bg-slate-700" />
+              </div>
+
+              <div className="space-y-3">
+                {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+                <a
+                  href="/api/v1/auth/login?idp=google"
+                  aria-label="Google 계정으로 계속"
+                  className="flex items-center justify-center gap-2 w-full bg-white hover:bg-slate-100 text-slate-800 font-medium py-3 px-4 rounded-xl transition-colors duration-150"
+                >
+                  <span className="font-bold text-[#4285F4]">G</span>
+                  Google 로 계속
+                </a>
+                {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+                <a
+                  href="/api/v1/auth/login?idp=kakao"
+                  aria-label="카카오 계정으로 계속"
+                  className="flex items-center justify-center gap-2 w-full bg-[#FEE500] hover:brightness-95 text-[#191600] font-medium py-3 px-4 rounded-xl transition-all duration-150"
+                >
+                  Kakao 로 계속
+                </a>
+                {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+                <a
+                  href="/api/v1/auth/login?idp=naver"
+                  aria-label="네이버 계정으로 계속"
+                  className="flex items-center justify-center gap-2 w-full bg-[#03C75A] hover:brightness-95 text-white font-medium py-3 px-4 rounded-xl transition-all duration-150"
+                >
+                  <span className="font-bold">N</span>
+                  Naver 로 계속
+                </a>
+              </div>
+            </>
+          )}
 
           <p className="text-center text-slate-400 text-sm mt-4">
             처음이신가요? {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
