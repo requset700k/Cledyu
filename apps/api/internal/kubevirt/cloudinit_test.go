@@ -103,21 +103,29 @@ func TestRenderCloudInit_UsesLearnerFriendlyPrompt(t *testing.T) {
 		t.Fatalf("rendered cloud-init is not valid YAML: %v\n%s", err, out)
 	}
 
-	var profile string
+	files := map[string]string{}
 	for _, f := range parsed.WriteFiles {
-		if f.Path == "/home/lab/.bash_profile" {
-			profile = f.Content
-			break
-		}
+		files[f.Path] = f.Content
 	}
+	profile := files["/home/lab/.bash_profile"]
 	if profile == "" {
 		t.Fatalf("expected .bash_profile in cloud-init:\n%s", out)
 	}
-	if !strings.Contains(profile, `PS1='\[\033[1;32m\]Cledyu\[\033[0m\] \w ➜ '`) {
-		t.Fatalf("expected Cledyu prompt in .bash_profile, got:\n%s", profile)
+	if !strings.Contains(profile, ". /home/lab/.bashrc") {
+		t.Fatalf("login shell must source .bashrc for the shared prompt, got:\n%s", profile)
 	}
-	if strings.Contains(profile, "\\h") || strings.Contains(profile, "session-") {
-		t.Fatalf("prompt must not expose session hostname, got:\n%s", profile)
+
+	bashrc := files["/home/lab/.bashrc"]
+	if bashrc == "" {
+		t.Fatalf("expected .bashrc for non-login interactive shells:\n%s", out)
+	}
+	if !strings.Contains(bashrc, `PS1='\[\033[1;32m\]Cledyu\[\033[0m\] \w ➜ '`) {
+		t.Fatalf("expected Cledyu prompt in .bashrc, got:\n%s", bashrc)
+	}
+	for path, content := range map[string]string{"/home/lab/.bash_profile": profile, "/home/lab/.bashrc": bashrc} {
+		if strings.Contains(content, "\\h") || strings.Contains(content, "session-") {
+			t.Fatalf("prompt must not expose session hostname in %s, got:\n%s", path, content)
+		}
 	}
 }
 
