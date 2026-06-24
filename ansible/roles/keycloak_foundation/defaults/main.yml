@@ -24,7 +24,7 @@ keycloak_foundation_service_account_name: cledyu-keycloak
 #   이때 strict 는 사실상 무시된다(고정값이 항상 우선). 단일 공개 issuer 로 통일할 때 쓴다.
 # - 빈 값("")이면: hostname 키를 생략해 동적 모드가 된다 — Keycloak 이 요청의
 #   Host/X-Forwarded-Host(proxy.headers=xforwarded)로 URL 을 생성한다. 단일 Keycloak 으로
-#   내부(keycloak.cledyu.local)와 공개(auth.cledyu.io)를 동시에 서빙하려면 이 모드 + strict=false.
+#   내부(keycloak.cledyu.local)와 공개(auth.cledyu.com)를 동시에 서빙하려면 이 모드 + strict=false.
 # 자세한 전환 절차·트레이드오프는 docs/RUNBOOK/learner-auth.md §4.1 참고.
 keycloak_foundation_hostname: keycloak.cledyu.local
 

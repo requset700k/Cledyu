@@ -139,12 +139,12 @@ No modules.
 | <a name="input_budget_notification_emails"></a> [budget\_notification\_emails](#input\_budget\_notification\_emails) | 예산 임계 도달 시 알림 받을 이메일 목록(budget\_limit\_usd>0 일 때 사용). | `list(string)` | `[]` | no |
 | <a name="input_enable_public_ingress"></a> [enable\_public\_ingress](#input\_enable\_public\_ingress) | 공개 진입점 스택(Route53/ACM/ALB/프록시) 생성 여부. 도메인 위임·tailscale authkey 준비 후 true. | `bool` | `false` | no |
 | <a name="input_instance_type"></a> [instance\_type](#input\_instance\_type) | 세션 인스턴스 타입. Launch Template 기본값이며 api 가 런타임에 오버라이드할 수 있다. | `string` | `"t3.medium"` | no |
-| <a name="input_keycloak_upstream_url"></a> [keycloak\_upstream\_url](#input\_keycloak\_upstream\_url) | 프록시가 auth.cledyu.io 요청을 포워딩할 tailnet 상의 Keycloak 업스트림 URL.<br/>Cledyu 토폴로지에서는 하이퍼바이저 subnet router 가 10.10.0.0/24 를 tailnet 에<br/>광고하고 Traefik LB 가 10.10.0.101 이므로 "https://10.10.0.101" 를 쓴다(프록시는<br/>--accept-routes 로 이 라우트를 받고, Host=public\_keycloak\_host 로 보내 Traefik 이<br/>keycloak ingress 로 라우팅). pod/service ClusterIP 는 라우팅 불가하므로 Traefik LB<br/>경유 필수. Traefik 내부 CA 인증서는 프록시가 검증 생략(tailnet WireGuard 암호화). | `string` | `"https://10.10.0.101"` | no |
+| <a name="input_keycloak_upstream_url"></a> [keycloak\_upstream\_url](#input\_keycloak\_upstream\_url) | 프록시가 auth.cledyu.com 요청을 포워딩할 tailnet 상의 Keycloak 업스트림 URL.<br/>Cledyu 토폴로지에서는 하이퍼바이저 subnet router 가 10.10.0.0/24 를 tailnet 에<br/>광고하고 Traefik LB 가 10.10.0.101 이므로 "https://10.10.0.101" 를 쓴다(프록시는<br/>--accept-routes 로 이 라우트를 받고, Host=public\_keycloak\_host 로 보내 Traefik 이<br/>keycloak ingress 로 라우팅). pod/service ClusterIP 는 라우팅 불가하므로 Traefik LB<br/>경유 필수. Traefik 내부 CA 인증서는 프록시가 검증 생략(tailnet WireGuard 암호화). | `string` | `"https://10.10.0.101"` | no |
 | <a name="input_name_prefix"></a> [name\_prefix](#input\_name\_prefix) | 생성 리소스 이름 prefix. 레거시 hackathon 류 금지(레포 네이밍 규칙). | `string` | `"cledyu-lab"` | no |
 | <a name="input_proxy_instance_type"></a> [proxy\_instance\_type](#input\_proxy\_instance\_type) | tailnet 리버스프록시 인스턴스 타입. 경량 프록시이므로 작게(비용 절감). | `string` | `"t3.nano"` | no |
-| <a name="input_public_domain"></a> [public\_domain](#input\_public\_domain) | 공개 루트 도메인(Route53 hosted zone 으로 관리). 예 cledyu.io. NS 를 도메인 등록기관에 위임해야 한다. | `string` | `"cledyu.io"` | no |
+| <a name="input_public_domain"></a> [public\_domain](#input\_public\_domain) | 공개 루트 도메인(Route53 hosted zone 으로 관리). 예 cledyu.com. NS 를 도메인 등록기관에 위임해야 한다. | `string` | `"cledyu.com"` | no |
 | <a name="input_public_ingress_allowed_cidrs"></a> [public\_ingress\_allowed\_cidrs](#input\_public\_ingress\_allowed\_cidrs) | ALB 443/80 인바운드 허용 CIDR. 기본은 공개(0.0.0.0/0) — 검증 단계에서 사무실 IP 로 좁힐 수 있다. | `list(string)` | <pre>[<br/>  "0.0.0.0/0"<br/>]</pre> | no |
-| <a name="input_public_keycloak_host"></a> [public\_keycloak\_host](#input\_public\_keycloak\_host) | Keycloak 공개 FQDN. 구글 OAuth redirect URI 의 호스트가 된다(.../realms/cledyu-learn/broker/google/endpoint). | `string` | `"auth.cledyu.io"` | no |
+| <a name="input_public_keycloak_host"></a> [public\_keycloak\_host](#input\_public\_keycloak\_host) | Keycloak 공개 FQDN. 구글 OAuth redirect URI 의 호스트가 된다(.../realms/cledyu-learn/broker/google/endpoint). | `string` | `"auth.cledyu.com"` | no |
 | <a name="input_region"></a> [region](#input\_region) | EC2 오버플로우 리전. 온프렘과 가까운 서울 리전을 기본값으로 둔다. | `string` | `"ap-northeast-2"` | no |
 | <a name="input_root_volume_gb"></a> [root\_volume\_gb](#input\_root\_volume\_gb) | 세션 인스턴스 루트 볼륨 크기(GiB). | `number` | `20` | no |
 | <a name="input_subnet_id"></a> [subnet\_id](#input\_subnet\_id) | 세션 인스턴스 서브넷. 빈 값이면 선택된 VPC 의 서브넷 중 하나를 자동 선택한다. | `string` | `""` | no |
@@ -160,7 +160,7 @@ No modules.
 | <a name="output_keycloak_proxy_instance_id"></a> [keycloak\_proxy\_instance\_id](#output\_keycloak\_proxy\_instance\_id) | tailnet Keycloak 프록시 인스턴스 ID(tailnet 가입·로그 확인용). |
 | <a name="output_launch_template_id"></a> [launch\_template\_id](#output\_launch\_template\_id) | apps/api 의 CLEDYU\_AWS\_LAUNCH\_TEMPLATE\_ID 로 주입할 Launch Template ID. |
 | <a name="output_launch_template_latest_version"></a> [launch\_template\_latest\_version](#output\_launch\_template\_latest\_version) | Launch Template 최신 버전(api 는 $Latest 를 쓰지만 참고용으로 노출). |
-| <a name="output_public_alb_dns_name"></a> [public\_alb\_dns\_name](#output\_public\_alb\_dns\_name) | 공개 ALB 의 DNS 이름(auth.cledyu.io A ALIAS 타겟). 디버깅·검증용. |
+| <a name="output_public_alb_dns_name"></a> [public\_alb\_dns\_name](#output\_public\_alb\_dns\_name) | 공개 ALB 의 DNS 이름(auth.cledyu.com A ALIAS 타겟). 디버깅·검증용. |
 | <a name="output_public_zone_name_servers"></a> [public\_zone\_name\_servers](#output\_public\_zone\_name\_servers) | public\_domain hosted zone 의 NS 4개. 도메인 등록기관에 이 값으로 위임해야 공개 해석된다. |
 | <a name="output_region"></a> [region](#output\_region) | EC2 오버플로우 리전(apps/api 의 CLEDYU\_AWS\_REGION). |
 | <a name="output_security_group_id"></a> [security\_group\_id](#output\_security\_group\_id) | 세션 인스턴스 Security Group ID(인바운드 0). |
