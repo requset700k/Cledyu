@@ -111,21 +111,37 @@ terraform output public_alb_dns_name        # 디버깅용
 또는 Keycloak service 의 tailnet 도달 주소를 넣는다. 프록시(Caddy)는 `Host` 와
 `X-Forwarded-Host` 를 `auth.cledyu.io` 로 보존해 전달한다.
 
-이어서 Keycloak 이 공개 도메인 기준으로 URL 을 만들도록 hostname 을 전환한다
-(`ansible/roles/keycloak_foundation`):
+이어서 Keycloak 이 공개 도메인 기준으로 broker·콜백 URL 을 만들도록 hostname 을 구성한다
+(`ansible/roles/keycloak_foundation`). **Keycloak hostname v2 주의:** `hostname` 에 고정값을
+주면 그 host 가 *모든 realm* 의 frontend URL(issuer 포함)에 강제되고 `strict` 는 무시된다.
+운영 `cledyu` realm 소비자(kube-apiserver/ArgoCD/Grafana/Vault)는 `keycloak.cledyu.local`
+issuer 를 검증하므로, 단순히 `hostname=https://auth.cledyu.io` 로 고정하면 그들이 깨진다.
+두 가지 중 선택한다:
 
-```yaml
-# group_vars 등에서 오버라이드 — 단일 Keycloak 으로 내부(.local)와 공개(auth)를 동시
-# 서빙하려면 strict=false 로 X-Forwarded-Host 를 따르게 한다(proxy.headers=xforwarded 는 기본).
-keycloak_foundation_hostname: "https://auth.cledyu.io"
-keycloak_foundation_hostname_strict: false
-```
+- **옵션 A — 동적 hostname (권장, 영향 최소):** `hostname` 을 비워(키 생략) 요청
+  Host/X-Forwarded-Host 로 URL 을 만들게 한다. 내부 요청(Host: keycloak.cledyu.local)은
+  `.local` issuer, 공개 요청(프록시가 X-Forwarded-Host: auth.cledyu.io)은 auth issuer 로
+  realm 별·요청별로 올바르게 생성된다. `strict` 는 반드시 false.
 
-> strict 를 끄는 이유: 기본값 `strict=true` + `.local` hostname 이면 Keycloak 이 모든 URL 을
-> `.local` 로 강제해, 학습자가 auth.cledyu.io 로 들어와도 broker redirect·콜백이 `.local`
-> 로 생성돼 social 로그인이 깨진다. (운영 `cledyu` realm SSO 는 issuer 가 바뀌므로 영향
-> 범위를 먼저 점검 — 내부 도구가 keycloak.cledyu.local 을 계속 쓰면 strict=false 의 동적
-> hostname 으로 양쪽을 모두 서빙하는 편이 안전하다.)
+  ```yaml
+  # group_vars 등에서 오버라이드
+  keycloak_foundation_hostname: ""          # 키 생략 → 동적(요청 Host 기반)
+  keycloak_foundation_hostname_strict: false
+  ```
+
+- **옵션 B — 단일 공개 issuer:** `hostname=https://auth.cledyu.io` 로 고정(strict 무시)하고,
+  내부 `cledyu` realm 소비자 5종을 새 issuer(`https://auth.cledyu.io/realms/cledyu`)로 **전부
+  마이그레이션**하고 auth.cledyu.io 가 클러스터 내부에서도 해석되게 한다(split DNS). blast
+  radius 가 크므로 별도 변경으로 분리해 진행한다.
+
+  ```yaml
+  keycloak_foundation_hostname: "https://auth.cledyu.io"
+  keycloak_foundation_hostname_strict: true
+  ```
+
+> 기본값(`hostname=keycloak.cledyu.local`, strict=true)을 그대로 두면 학습자가
+> auth.cledyu.io 로 들어와도 broker redirect·콜백이 `.local` 로 생성돼 social 로그인이
+> 깨진다. 공개 전환 시 위 옵션 A/B 중 하나를 반드시 적용한다.
 
 ### 4.2 구글 연동 (먼저)
 

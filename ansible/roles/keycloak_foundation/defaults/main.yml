@@ -19,16 +19,17 @@ keycloak_foundation_db_service_name: keycloak-db-postgresql
 keycloak_foundation_db_secret_name: keycloak-db-credentials
 keycloak_foundation_service_name: "{{ keycloak_foundation_name }}-service"
 keycloak_foundation_service_account_name: cledyu-keycloak
-# Keycloak 서버 프론트엔드 hostname. 내부 전용일 때는 bare host(keycloak.cledyu.local).
-# 공개 노출(학습자 social 로그인) 시에는 공개 base URL(예 https://auth.cledyu.io)로 둔다 —
-# issuer·broker redirect·콜백 URL 이 이 값으로 생성된다. 자세한 전환 절차는
-# docs/RUNBOOK/learner-auth.md 의 '공개 노출' 절 참고.
+# Keycloak 서버 프론트엔드 hostname (Keycloak hostname v2).
+# - 값이 있으면: 그 host 가 모든 realm 의 frontend URL(issuer·broker·redirect)에 고정된다.
+#   이때 strict 는 사실상 무시된다(고정값이 항상 우선). 단일 공개 issuer 로 통일할 때 쓴다.
+# - 빈 값("")이면: hostname 키를 생략해 동적 모드가 된다 — Keycloak 이 요청의
+#   Host/X-Forwarded-Host(proxy.headers=xforwarded)로 URL 을 생성한다. 단일 Keycloak 으로
+#   내부(keycloak.cledyu.local)와 공개(auth.cledyu.io)를 동시에 서빙하려면 이 모드 + strict=false.
+# 자세한 전환 절차·트레이드오프는 docs/RUNBOOK/learner-auth.md §4.1 참고.
 keycloak_foundation_hostname: keycloak.cledyu.local
 
-# hostname strict 모드. true 면 Keycloak 이 모든 URL 을 위 hostname 으로 강제한다
-# (X-Forwarded-Host 무시). 내부/공개 단일 도메인이면 true 유지가 안전하다.
-# 단일 Keycloak 으로 내부(keycloak.cledyu.local)와 공개(auth.cledyu.io)를 동시에
-# 서빙하려면 false 로 두어 요청 Host(proxy.headers=xforwarded)를 따르게 한다.
+# hostname strict 모드. 동적 모드(hostname="")에서는 반드시 false 여야 요청 Host 를 따른다.
+# hostname 이 고정값이면 이 값과 무관하게 그 host 로 강제된다.
 keycloak_foundation_hostname_strict: true
 
 keycloak_foundation_tls_certificate_name: keycloak-tls
