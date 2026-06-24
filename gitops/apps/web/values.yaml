@@ -19,9 +19,11 @@ env:
   AUTH_ENABLED: "true"
   # In-cluster Session API endpoint — Next.js route handler가 런타임에 읽어 백엔드로 프록시.
   CLEDYU_BACKEND_URL: "http://api.api.svc.cluster.local"
-  # 소셜 로그인 버튼 노출 여부 — terraform enable_social_idp 와 정렬한다.
-  # 현재 클러스터는 google/kakao/naver IdP 프로비저닝 완료 → true.
-  CLEDYU_SOCIAL_LOGIN_ENABLED: "true"
+  # 노출할 소셜 로그인 버튼 목록(쉼표 구분 alias) — terraform enabled_social_idps
+  # (실제 생성된 Keycloak IdP)와 반드시 정렬한다. 미프로비저닝 alias 를 켜면 버튼
+  # 클릭 시 "Identity Provider not found" 로 실패한다. 빈 값이면 소셜 섹션 숨김.
+  # 구글 IdP 프로비저닝 완료 후 "google", 카카오/네이버 추가 시 확장.
+  CLEDYU_SOCIAL_LOGIN_PROVIDERS: ""
 
 resources:
   requests:
