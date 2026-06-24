@@ -1,8 +1,8 @@
 # 런타임 의존성 — Dockerfile 에서 설치. 테스트 전용 의존은 requirements-dev.txt.
 # fastapi 는 chromadb 자체 핀과의 충돌을 피해 범위 핀으로 두고 pip resolver 에 맡긴다.
-# starlette 하한은 CVE-2025-62727(Range 헤더 DoS, < 0.49.1) 차단용.
+# starlette 하한은 CVE-2025-62727(Range 헤더 DoS, < 0.49.1)·CVE-2026-54283(< 1.3.1) 차단용.
 fastapi>=0.118,<1
-starlette>=0.49.1
+starlette>=1.3.1
 uvicorn[standard]>=0.30,<1
 pydantic-settings>=2.7,<3
 google-genai>=1.16,<2
