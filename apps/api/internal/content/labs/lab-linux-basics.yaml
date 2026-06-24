@@ -33,9 +33,17 @@ steps:
       - "mkdir -p ~/work/{logs,backup,scripts} 후 touch 로 logs 안에 app1.log, app2.log, debug.txt 세 파일을 만드세요."
     checks:
       - type: dir_exists
+        path: /home/lab/work/logs
+      - type: dir_exists
+        path: /home/lab/work/backup
+      - type: dir_exists
         path: /home/lab/work/scripts
       - type: file_exists
+        path: /home/lab/work/logs/app1.log
+      - type: file_exists
         path: /home/lab/work/logs/app2.log
+      - type: file_exists
+        path: /home/lab/work/logs/debug.txt
   - id: 2
     title: find로 검색하고 복사
     description: >
