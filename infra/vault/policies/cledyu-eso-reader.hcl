@@ -37,3 +37,13 @@ path "cledyu/data/alerting/*" {
 path "cledyu/metadata/alerting/*" {
   capabilities = ["read"]
 }
+
+# EC2 오버플로우(Phase 13) — api/validation-engine 의 AWS 최소권한 키·Tailscale authkey.
+# cledyu-api-aws / cledyu-validation-engine-aws ExternalSecret 이 읽는다.
+path "cledyu/data/aws/*" {
+  capabilities = ["read"]
+}
+
+path "cledyu/metadata/aws/*" {
+  capabilities = ["read"]
+}
