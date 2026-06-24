@@ -125,8 +125,8 @@ func prepareSessionCreation(ctx context.Context, sessions sessionCreationManager
 
 // sessionResponse는 session.Session에 핸들러 레벨 보강 필드를 덧붙여 프론트 Session 계약에 맞춘다.
 //   - current_step : 스텝 진행은 stepStore(in-memory STUB)에서 조회.
-//   - terminal_url : 라이브 터미널 랩 + KubeVirt 세션일 때만. EC2 세션은 시리얼 콘솔(/ws)을
-//     제공하지 않으므로(console.go 가 501) 광고하지 않는다 — 라이브 셸은 IDE(ide_url) 경로로 제공.
+//   - terminal_url : 라이브 터미널 랩이 ready 일 때 제공. KubeVirt 는 serial console,
+//     EC2 는 tailnet SSH PTY 로 같은 /ws 경로가 프로바이더에 맞게 접속한다(console.go).
 //   - vm_provider  : 세션을 띄운 프로바이더(kubevirt | ec2).
 func (h *Handler) sessionResponse(s *session.Session) gin.H {
 	out := gin.H{
@@ -143,16 +143,19 @@ func (h *Handler) sessionResponse(s *session.Session) gin.H {
 		out["current_step"] = ss.CurrentStep
 		return false
 	})
-	// 라이브 터미널 랩이 실제 사용 가능한 상태(VMI Running=ready)일 때만 WS 경로 제공. 단 시리얼
-	// 콘솔(/ws)은 KubeVirt 전용이므로 EC2 세션엔 광고하지 않는다(깨진 터미널 탭 방지) — EC2 의
-	// 라이브 셸은 아래 IDE 경로로만 제공한다.
+	// 라이브 터미널 랩이 실제 사용 가능한 상태(ready)일 때만 WS 경로를 제공한다. KubeVirt 는
+	// serial console, EC2 는 tailnet SSH PTY 로 동일 /ws 경로가 프로바이더에 맞게 접속한다.
+	// 단 EC2 는 tailnet 가입(authkey 설정) 시에만 도달 가능하다 — 미설정(SSM 채점 전용 구성)이면
+	// VMIAddress 가 ErrNotFound 라 /ws·/ide 가 항상 503 이므로, 깨진 터미널/IDE 탭을 띄우지
+	// 않도록 URL 을 광고하지 않는다(프론트는 placeholder 를 유지).
 	if lc, ok := h.labs[s.LabID]; ok && lc.HasLiveTerminal() && s.Status == "ready" {
-		if s.Provider != session.ProviderEC2 {
+		reachable := s.Provider != session.ProviderEC2 || h.cfg.AWS.TailscaleAuthKey != ""
+		if reachable {
 			out["terminal_url"] = "/api/v1/sessions/" + s.ID + "/ws"
-		}
-		// IDE 랩(code-server)은 브라우저 VS Code 프록시 경로도 함께 제공.
-		if lc.IDE {
-			out["ide_url"] = "/api/v1/sessions/" + s.ID + "/ide/"
+			// IDE 랩(code-server)은 브라우저 VS Code 프록시 경로도 함께 제공.
+			if lc.IDE {
+				out["ide_url"] = "/api/v1/sessions/" + s.ID + "/ide/"
+			}
 		}
 	}
 	return out
