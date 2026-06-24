@@ -167,6 +167,9 @@ password: lab
 ```
 
 비밀번호 입력 중에는 화면에 문자가 표시되지 않는 것이 정상이다.
+새로 생성한 세션 VM의 프롬프트는 내부 hostname인 `lab@session-xxxx` 대신
+`Cledyu ~ ➜` 형태로 보여야 한다. 기존에 이미 생성된 VM에는 cloud-init 변경이
+소급 적용되지 않으므로 프롬프트 변경을 검증할 때는 새 세션을 생성한다.
 
 ### 8. 배포 환경의 VM 콘솔 RBAC 확인
 
@@ -211,6 +214,7 @@ EOF
 - `kubectl get vm,vmi -n lab-<session_id>`에서 VM/VMI가 Running이 된다.
 - 배포 환경에서 API ServiceAccount의 `virtualmachineinstances/console` SubjectAccessReview가 `true`다.
 - Web xterm 터미널에서 `lab/lab` 로그인에 성공한다.
+- 새 세션 VM의 shell prompt가 `lab@session-xxxx`가 아니라 `Cledyu ~ ➜` 형태로 표시된다.
 
 ## 롤백 / 정리
 
@@ -273,6 +277,22 @@ curl -s http://localhost:8080/ready | jq '.checks.kubevirt'
 username: lab
 password: lab
 ```
+
+### 터미널 프롬프트에 lab@session-xxxx가 계속 보임
+
+프롬프트 변경은 cloud-init이 생성하는 `/home/lab/.bash_profile`에 들어가므로 이미
+생성된 VM에는 소급 적용되지 않는다. 기존 세션을 resume하면 이전 프롬프트가 계속
+보일 수 있다.
+
+새 세션 VM을 생성한 뒤에도 같은 현상이 보이면 VM 안에서 다음 파일을 확인한다.
+
+```bash
+grep PS1 ~/.bash_profile
+```
+
+정상이라면 `Cledyu` 라벨을 설정하는 `PS1`이 보여야 한다. 파일이 없거나 기본
+Ubuntu 프롬프트가 남아 있으면 API 서버가 최신 브랜치 코드로 실행 중인지 확인하고
+새 세션을 다시 만든다.
 
 ### 터미널에 virtualmachineinstances/console forbidden이 반복됨
 
