@@ -88,6 +88,39 @@ func TestRenderCloudInit_ClearsSerialConsoleOnLogin(t *testing.T) {
 	}
 }
 
+// 학생 터미널 프롬프트에는 내부 세션 hostname(session-xxxx)이 보이지 않아야 한다.
+// VM/namespace 이름은 운영·디버깅 식별자로 유지하되, 학습자 화면에서는 Cledyu 라벨만 노출한다.
+func TestRenderCloudInit_UsesLearnerFriendlyPrompt(t *testing.T) {
+	out := renderCloudInit("abc123", "", BootInit{})
+
+	var parsed struct {
+		WriteFiles []struct {
+			Path    string `yaml:"path"`
+			Content string `yaml:"content"`
+		} `yaml:"write_files"`
+	}
+	if err := yaml.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatalf("rendered cloud-init is not valid YAML: %v\n%s", err, out)
+	}
+
+	var profile string
+	for _, f := range parsed.WriteFiles {
+		if f.Path == "/home/lab/.bash_profile" {
+			profile = f.Content
+			break
+		}
+	}
+	if profile == "" {
+		t.Fatalf("expected .bash_profile in cloud-init:\n%s", out)
+	}
+	if !strings.Contains(profile, `PS1='\[\033[1;32m\]Cledyu\[\033[0m\] \w ➜ '`) {
+		t.Fatalf("expected Cledyu prompt in .bash_profile, got:\n%s", profile)
+	}
+	if strings.Contains(profile, "\\h") || strings.Contains(profile, "session-") {
+		t.Fatalf("prompt must not expose session hostname, got:\n%s", profile)
+	}
+}
+
 // VM 내부 DNS upstream 이 비어 있으면 cloud-init 중 apt/curl/get.k3s.io 가 실패한다.
 // bootcmd 는 packages/runcmd 보다 먼저 실행되므로, 랩별 초기화 전에 systemd-resolved 를 보정해야 한다.
 func TestRenderCloudInit_ConfiguresDNSBeforePackages(t *testing.T) {

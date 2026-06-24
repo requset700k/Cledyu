@@ -70,6 +70,8 @@ bootcmd:
       if [ -f /home/lab/.bashrc ]; then
         . /home/lab/.bashrc
       fi
+      # 학습자 화면에는 내부 session hostname 대신 Cledyu 라벨만 보여준다.
+      PS1='\[\033[1;32m\]Cledyu\[\033[0m\] \w ➜ '
       # 부팅 시 보이던 cloud-init/시리얼 콘솔 스크롤백을 지운다 (Clear the KubeVirt
       # serial-console boot scrollback before showing the lab prompt).
       printf '\033[H\033[2J\033[3J'
