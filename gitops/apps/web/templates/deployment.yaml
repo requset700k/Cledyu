@@ -28,8 +28,8 @@ spec:
               value: {{ .Values.env.AUTH_ENABLED | quote }}
             - name: CLEDYU_BACKEND_URL
               value: {{ .Values.env.CLEDYU_BACKEND_URL | quote }}
-            - name: CLEDYU_SOCIAL_LOGIN_ENABLED
-              value: {{ .Values.env.CLEDYU_SOCIAL_LOGIN_ENABLED | quote }}
+            - name: CLEDYU_SOCIAL_LOGIN_PROVIDERS
+              value: {{ .Values.env.CLEDYU_SOCIAL_LOGIN_PROVIDERS | quote }}
           resources:
             requests:
               cpu: {{ .Values.resources.requests.cpu }}

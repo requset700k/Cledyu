@@ -119,8 +119,10 @@ learn_oidc_client_secrets = {
   web = "REPLACE_WITH_WEB_CLIENT_SECRET"
 }
 
-# 소셜 IdP 게이트. 카카오/네이버/구글 개발자 콘솔에서 client 발급 후 true.
-enable_social_idp = false
+# 소셜 IdP 단계적 게이트. 개발자 콘솔에서 client 발급된 provider 만 넣는다.
+# 구글 OAuth 발급 + auth.cledyu.io 공개 노출 완료 후 ["google"], 이후 카카오/네이버 추가.
+# 빈 목록이면 IdP 미생성. (google/kakao/naver 만 허용)
+enabled_social_idps = []
 
 # 이메일 인증. learn_smtp 설정 후 true 로(아래 Brevo 블록 채우고 켤 것).
 learn_verify_email = true

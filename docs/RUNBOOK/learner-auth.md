@@ -64,22 +64,131 @@ kubectl -n api get secret cledyu-api-oidc -o jsonpath='{.data.client_secret}' | 
 
 ## 4. 소셜 IdP 추가 (구글 / 카카오 / 네이버)
 
-기본은 `enable_social_idp=false`(IdP 미생성). 실 client 발급 후 켠다.
+소셜 IdP 는 **provider 별로 단계적으로** 켠다 — terraform `enabled_social_idps`(생성할
+alias 목록, 예 `["google"]`)와 web `CLEDYU_SOCIAL_LOGIN_PROVIDERS`(노출할 버튼 목록)를
+**항상 정렬**한다. 둘 중 하나만 켜면 깨진다:
+- terraform 만 켜면 web 에 버튼이 안 보임.
+- web 만 켜면(IdP 미생성) 버튼 클릭 시 Keycloak 이 `Identity Provider not found`.
+
+> **전제: 공개 노출.** 소셜 브로커링은 학습자 브라우저가 구글/카카오/네이버로 갔다가
+> `https://auth.cledyu.io/realms/cledyu-learn/broker/<alias>/endpoint` 로 **콜백**한다.
+> 즉 Keycloak 이 공개+공개신뢰 TLS 로 도달 가능해야 한다. 홈랩은 NAT 뒤·`*.cledyu.local`
+> 내부 도메인·내부 CA 라서, 먼저 §4.1 로 공개 진입점을 세운 뒤 §4.2(구글)로 간다.
+
+### 4.1 공개 진입점 구축 (auth.cledyu.io) — 1회
+
+구조: `브라우저 → Route53(auth.cledyu.io) → ALB(443, ACM) → tailnet 프록시(:80) → (tailnet) → Keycloak`.
+terraform 은 `infra/terraform/aws`(profile `cledyu`, region `ap-northeast-2`)에 게이트된
+초안으로 들어있다(`public-ingress.tf`, `enable_public_ingress=false` 기본).
+
+```bash
+cd infra/terraform/aws
+export AWS_PROFILE=cledyu
+
+# 1) Route53 공개 zone 먼저 만들고 NS 위임 (ACM DNS 검증이 위임에 의존하므로 선행)
+#    terraform.tfvars (gitignored) 에:
+#      enable_public_ingress = true
+#      public_domain         = "cledyu.io"
+#      public_keycloak_host  = "auth.cledyu.io"
+#      keycloak_upstream_url = "http://<tailnet 도달 Keycloak>:8080"  # ← 환경 토폴로지
+#      proxy_instance_type   = "t3.nano"
+#    프록시 tailnet 가입 키(state 평문 회피 위해 env 로만):
+export TF_VAR_tailscale_auth_key='<tailscale reusable/ephemeral authkey>'
+
+#    먼저 zone 만 만들어 NS 를 받는다(전체 apply 는 검증에서 멈출 수 있음):
+terraform apply -target=aws_route53_zone.public
+terraform output public_zone_name_servers   # NS 4개
+
+# 2) 도메인 등록기관(cledyu.io)에서 위 NS 4개로 네임서버 위임. 전파(수분~수시간) 후 진행.
+
+# 3) 나머지 스택 apply (ACM DNS 검증 → ALB → 프록시 → A ALIAS)
+terraform apply
+terraform output public_alb_dns_name        # 디버깅용
+```
+
+`keycloak_upstream_url` 은 프록시가 tailnet 으로 Keycloak 에 닿는 주소다 — 환경에 따라
+클러스터 서브넷 광고(subnet router)+split DNS 로 `http://keycloak.cledyu.local:8080`,
+또는 Keycloak service 의 tailnet 도달 주소를 넣는다. 프록시(Caddy)는 `Host` 와
+`X-Forwarded-Host` 를 `auth.cledyu.io` 로 보존해 전달한다.
+
+이어서 Keycloak 이 공개 도메인 기준으로 broker·콜백 URL 을 만들도록 hostname 을 구성한다
+(`ansible/roles/keycloak_foundation`). **Keycloak hostname v2 주의:** `hostname` 에 고정값을
+주면 그 host 가 *모든 realm* 의 frontend URL(issuer 포함)에 강제되고 `strict` 는 무시된다.
+운영 `cledyu` realm 소비자(kube-apiserver/ArgoCD/Grafana/Vault)는 `keycloak.cledyu.local`
+issuer 를 검증하므로, 단순히 `hostname=https://auth.cledyu.io` 로 고정하면 그들이 깨진다.
+두 가지 중 선택한다:
+
+- **옵션 A — 동적 hostname (권장, 영향 최소):** `hostname` 을 비워(키 생략) 요청
+  Host/X-Forwarded-Host 로 URL 을 만들게 한다. 내부 요청(Host: keycloak.cledyu.local)은
+  `.local` issuer, 공개 요청(프록시가 X-Forwarded-Host: auth.cledyu.io)은 auth issuer 로
+  realm 별·요청별로 올바르게 생성된다. `strict` 는 반드시 false.
+
+  ```yaml
+  # group_vars 등에서 오버라이드
+  keycloak_foundation_hostname: ""          # 키 생략 → 동적(요청 Host 기반)
+  keycloak_foundation_hostname_strict: false
+  ```
+
+- **옵션 B — 단일 공개 issuer:** `hostname=https://auth.cledyu.io` 로 고정(strict 무시)하고,
+  내부 `cledyu` realm 소비자 5종을 새 issuer(`https://auth.cledyu.io/realms/cledyu`)로 **전부
+  마이그레이션**하고 auth.cledyu.io 가 클러스터 내부에서도 해석되게 한다(split DNS). blast
+  radius 가 크므로 별도 변경으로 분리해 진행한다.
+
+  ```yaml
+  keycloak_foundation_hostname: "https://auth.cledyu.io"
+  keycloak_foundation_hostname_strict: true
+  ```
+
+> 기본값(`hostname=keycloak.cledyu.local`, strict=true)을 그대로 두면 학습자가
+> auth.cledyu.io 로 들어와도 broker redirect·콜백이 `.local` 로 생성돼 social 로그인이
+> 깨진다. 공개 전환 시 위 옵션 A/B 중 하나를 반드시 적용한다.
+
+### 4.2 구글 연동 (먼저)
+
+redirect URI 는 **공개 호스트** 기준이다.
 
 | 제공자 | 콘솔 | redirect URI 등록값 |
 |---|---|---|
-| Google | Google Cloud Console → OAuth client | `https://keycloak.cledyu.local/realms/cledyu-learn/broker/google/endpoint` |
-| Kakao | Kakao Developers → 내 앱 → 카카오 로그인 | `…/realms/cledyu-learn/broker/kakao/endpoint` |
-| Naver | Naver Developers → 애플리케이션 | `…/realms/cledyu-learn/broker/naver/endpoint` |
+| Google | Google Cloud Console → APIs & Services → Credentials → OAuth 2.0 Client | `https://auth.cledyu.io/realms/cledyu-learn/broker/google/endpoint` |
+
+1. Google Cloud Console 에서 OAuth 동의화면(External) 구성 → OAuth 2.0 Client ID(Web) 생성.
+   - Authorized redirect URI 에 위 값 등록. (검증 단계에서 `http://localhost` 도 임시 허용 가능.)
+   - 발급된 **Client ID** / **Client secret** 확보.
+2. terraform 적용 (client id 는 공개값 tfvars, secret 은 env 로 주입):
 
 ```bash
-# tfvars: 공개값은 idp_client_ids, secret 은 idp_client_secrets
-idp_client_ids     = { google = "...", kakao = "...", naver = "..." }
-idp_client_secrets = { google = "...", kakao = "...", naver = "..." }
-enable_social_idp  = true
+cd infra/terraform/keycloak
 
-terraform apply
+# terraform.tfvars (gitignored):
+#   idp_client_ids = { google = "<GOOGLE_CLIENT_ID>", kakao = "...", naver = "..." }
+#   enabled_social_idps = ["google"]
+export TF_VAR_idp_client_secrets='{ google = "<GOOGLE_CLIENT_SECRET>", kakao = "x", naver = "x" }'
+
+terraform apply   # cledyu-learn realm 에 google IdP 만 생성
+terraform output social_idps_enabled   # ["google"] 확인
 ```
+
+3. web 버튼 노출 — `gitops/apps/web/values.yaml`:
+
+```yaml
+env:
+  CLEDYU_SOCIAL_LOGIN_PROVIDERS: "google"   # terraform enabled_social_idps 와 정렬
+```
+
+   커밋 → ArgoCD 동기화(또는 `argocd app sync web`). web 이미지 태그 bump 불필요(런타임 env).
+
+4. 검증: 로그인 페이지에 'Google 로 계속' 버튼만 노출 → 클릭 → 구글 동의 → 콜백 →
+   `app.cledyu.io` 로 로그인 완료. 신규 사용자는 `student` 로 생성된다(§6.1.1).
+
+### 4.3 카카오 / 네이버 (이후)
+
+같은 절차로 콘솔에서 발급 후 `enabled_social_idps` 와 `CLEDYU_SOCIAL_LOGIN_PROVIDERS` 에
+alias 를 추가한다(`["google","kakao","naver"]` / `"google,kakao,naver"`).
+
+| 제공자 | 콘솔 | redirect URI 등록값 |
+|---|---|---|
+| Kakao | Kakao Developers → 내 앱 → 카카오 로그인 | `https://auth.cledyu.io/realms/cledyu-learn/broker/kakao/endpoint` |
+| Naver | Naver Developers → 애플리케이션 | `https://auth.cledyu.io/realms/cledyu-learn/broker/naver/endpoint` |
 
 - Naver 는 OIDC 가 아닌 OAuth2 라서 서명검증을 끄고(`validate_signature=false`) userinfo 의 중첩 `response.{id,email,name}` 를 attribute mapper 로 평탄화한다(`idp-learn.tf`).
 - Kakao 는 OIDC 지원 → 표준 discovery 사용.
@@ -246,5 +355,7 @@ Keycloak 그룹 "/org-<이름>"  ──(groups 클레임)──►  api JWT 미�
 | callback `invalid oauth state` | state 쿠키 유실(SameSite/도메인). `CLEDYU_KEYCLOAK_COOKIE_DOMAIN`(`.cledyu.local`) 확인. |
 | 보호 API 401 `invalid token` | access_token 만료/realm 불일치. api 의 `CLEDYU_KEYCLOAK_REALM=cledyu-learn` 확인. 만료라면 프론트가 자동으로 refresh 후 재시도하므로 사용자 영향 없음. |
 | 실습 중 주기적으로 로그인 페이지로 튕김 | refresh 실패 — Keycloak SSO Session Idle 이 너무 짧거나(§2 참고) refresh_token 이 폐기됨. `POST /api/v1/auth/refresh` 응답 코드(`refresh_failed`)와 Keycloak 세션 설정 확인. |
-| 소셜 버튼 안 보임 | `enable_social_idp=false` 또는 IdP redirect URI 미등록. |
+| 소셜 버튼 안 보임 | web `CLEDYU_SOCIAL_LOGIN_PROVIDERS` 가 비었거나 해당 alias 누락. terraform `enabled_social_idps` 와 정렬됐는지 확인(§4). |
+| 소셜 버튼 클릭 시 `Identity Provider not found` | web 은 켰는데 terraform `enabled_social_idps` 에 IdP 미생성. 둘을 정렬. |
+| 구글 콜백 `redirect_uri_mismatch` | 구글 콘솔 redirect URI 가 `https://auth.cledyu.io/realms/cledyu-learn/broker/google/endpoint` 와 불일치, 또는 Keycloak hostname 이 공개 도메인으로 안 바뀜(§4.1 strict=false). |
 | 학습자가 ArgoCD 접근됨 | **격리 실패** — 학습자가 `cledyu`(운영) realm 에 생성되었는지 확인. learn realm 이어야 함. |

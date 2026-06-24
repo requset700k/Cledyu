@@ -13,7 +13,7 @@ Cledyu Keycloak의 realm, OIDC client, realm role, group, 팀원 초기 계정�
 | `cledyu-learn` (외부) | `realm-learn.tf`, `clients-learn.tf`, `roles-learn.tf`, `idp-learn.tf` | 학습자 자가가입 + 소셜 IdP(구글/카카오/네이버) + `web`/`api`/`tutor` 클라이언트. |
 
 - 운영자 realm 이름·issuer(`…/realms/cledyu`)는 절대 바꾸지 않는다 — SSO 소비자 5종이 의존.
-- 소셜 IdP 는 `enable_social_idp`, 이메일 인증은 `learn_verify_email` 로 게이트(실 발급/SMTP 설정 전 false).
+- 소셜 IdP 는 `enabled_social_idps`(provider 별 목록, 예 `["google"]`), 이메일 인증은 `learn_verify_email` 로 게이트(실 발급/SMTP 설정 전 빈 목록/false).
 - 운영 절차는 RUNBOOK `docs/RUNBOOK/learner-auth.md`.
 
 ## 시크릿 관리
@@ -102,7 +102,7 @@ No modules.
 | <a name="input_oidc_clients"></a> [oidc\_clients](#input\_oidc\_clients) | Cledyu realm에서 관리하는 OIDC client 목록. | <pre>map(object({<br/>    name                            = string<br/>    access_type                     = string<br/>    standard_flow_enabled           = bool<br/>    direct_access_grants_enabled    = bool<br/>    implicit_flow_enabled           = bool<br/>    service_accounts_enabled        = bool<br/>    pkce_code_challenge_method      = optional(string)<br/>    valid_redirect_uris             = optional(list(string), [])<br/>    valid_post_logout_redirect_uris = optional(list(string), [])<br/>    web_origins                     = optional(list(string), [])<br/>    root_url                        = optional(string)<br/>    base_url                        = optional(string)<br/>    admin_url                       = optional(string)<br/>  }))</pre> | n/a | yes |
 | <a name="input_team_member_initial_passwords"></a> [team\_member\_initial\_passwords](#input\_team\_member\_initial\_passwords) | 팀원 초기 임시 비밀번호. 실제 값은 보안 tfvars 저장소에만 보관. | `map(string)` | n/a | yes |
 | <a name="input_team_members"></a> [team\_members](#input\_team\_members) | 생성할 팀원 사용자와 그룹 매핑 정보. | <pre>map(object({<br/>    username           = string<br/>    email              = string<br/>    first_name         = string<br/>    last_name          = string<br/>    groups             = list(string)<br/>    temporary_password = optional(bool, true)<br/>    enabled            = optional(bool, true)<br/>    email_verified     = optional(bool, true)<br/>  }))</pre> | n/a | yes |
-| <a name="input_enable_social_idp"></a> [enable\_social\_idp](#input\_enable\_social\_idp) | 소셜 IdP(구글/카카오/네이버) 생성 여부. 실 client 발급 전까지 false. | `bool` | `false` | no |
+| <a name="input_enabled_social_idps"></a> [enabled\_social\_idps](#input\_enabled\_social\_idps) | 생성할 소셜 IdP alias 목록(google/kakao/naver). provider 별로 단계적 활성화한다 — 예 ["google"]. 실 client id/secret 발급된 것만 넣는다. 빈 목록이면 IdP 미생성. | `list(string)` | `[]` | no |
 | <a name="input_idp_client_ids"></a> [idp\_client\_ids](#input\_idp\_client\_ids) | 소셜 IdP client id(공개값). google/kakao/naver 키. | `map(string)` | `{}` | no |
 | <a name="input_idp_client_secrets"></a> [idp\_client\_secrets](#input\_idp\_client\_secrets) | 소셜 IdP client secret. 실제 값은 보안 저장소/Vault에만 보관. | `map(string)` | `{}` | no |
 | <a name="input_keycloak_admin_client_id"></a> [keycloak\_admin\_client\_id](#input\_keycloak\_admin\_client\_id) | Terraform provider가 사용하는 admin client ID. | `string` | `"admin-cli"` | no |
@@ -132,5 +132,5 @@ No modules.
 | <a name="output_oidc_client_ids"></a> [oidc\_client\_ids](#output\_oidc\_client\_ids) | Terraform이 관리하는 OIDC client ID 목록. |
 | <a name="output_realm_id"></a> [realm\_id](#output\_realm\_id) | Terraform이 관리하는 Cledyu realm ID. |
 | <a name="output_realm_roles"></a> [realm\_roles](#output\_realm\_roles) | Terraform이 관리하는 realm role 이름 목록. |
-| <a name="output_social_idp_enabled"></a> [social\_idp\_enabled](#output\_social\_idp\_enabled) | 소셜 IdP(구글/카카오/네이버) 생성 여부. |
+| <a name="output_social_idps_enabled"></a> [social\_idps\_enabled](#output\_social\_idps\_enabled) | 생성된 소셜 IdP alias 목록(구글/카카오/네이버). |
 <!-- END_TF_DOCS -->
