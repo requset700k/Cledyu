@@ -21,11 +21,19 @@ write_files:
     permissions: "0644"
     content: |
       # ALB→프록시 hop 은 평문 :80. 공개 TLS 는 ALB(ACM)가 종단한다.
+      # upstream 은 tailnet 너머 Traefik LB(예 https://10.10.0.101). Host 를
+      # public_host 로 보내면 Traefik 이 해당 ingress(keycloak)로 라우팅하고,
+      # Keycloak 동적 hostname 이 X-Forwarded-Host 로 공개 URL 을 만든다.
       :80 {
         reverse_proxy ${upstream_url} {
           header_up Host ${public_host}
           header_up X-Forwarded-Host ${public_host}
           header_up X-Forwarded-Proto https
+          # Traefik 은 내부 CA(cledyu-ca) 인증서를 제시한다 — tailnet(WireGuard)
+          # 암호화 hop 이라 여기서 TLS 검증은 생략한다. upstream 이 http 면 무시됨.
+          transport http {
+            tls_insecure_skip_verify
+          }
         }
         # ALB 헬스체크(/realms/cledyu-learn)는 위 reverse_proxy 로 그대로 흘러간다.
       }
@@ -33,9 +41,11 @@ write_files:
 runcmd:
   # 호스트네임(태그와 정렬, tailnet 식별 용이).
   - hostnamectl set-hostname ${hostname} || true
-  # Tailscale 설치 + tailnet 가입(authkey 주입). 광고 없이 클라이언트로만 참여.
+  # Tailscale 설치 + tailnet 가입(authkey 주입). --accept-routes 필수 —
+  # 하이퍼바이저 subnet router 가 광고한 10.10.0.0/24(Traefik LB 포함) 라우트를
+  # 받아야 Keycloak 에 닿는다. 광고는 하지 않고 클라이언트로만 참여.
   - curl -fsSL https://tailscale.com/install.sh | sh
-  - tailscale up --authkey "${tailscale_auth_key}" --hostname "${hostname}" --ssh || true
+  - tailscale up --authkey "${tailscale_auth_key}" --hostname "${hostname}" --accept-routes --ssh || true
   # Caddy 설치(공식 apt 저장소).
   - curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
   - curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
