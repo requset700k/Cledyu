@@ -32,10 +32,18 @@ steps:
       - "mkdir -p 는 중간 경로를 함께 만들고, ~/work/{logs,backup,scripts} 처럼 brace 확장을 쓰면 한 번에 됩니다. 빈 파일은 touch."
       - "mkdir -p ~/work/{logs,backup,scripts} 후 touch 로 logs 안에 app1.log, app2.log, debug.txt 세 파일을 만드세요."
     checks:
-      - type: file_exists
+      - type: dir_exists
+        path: /home/lab/work/logs
+      - type: dir_exists
+        path: /home/lab/work/backup
+      - type: dir_exists
         path: /home/lab/work/scripts
       - type: file_exists
+        path: /home/lab/work/logs/app1.log
+      - type: file_exists
         path: /home/lab/work/logs/app2.log
+      - type: file_exists
+        path: /home/lab/work/logs/debug.txt
   - id: 2
     title: find로 검색하고 복사
     description: >
@@ -54,6 +62,8 @@ steps:
         path: /home/lab/work/backup/app1.log
       - type: file_exists
         path: /home/lab/work/backup/app2.log
+      - type: file_absent
+        path: /home/lab/work/backup/debug.txt
   - id: 3
     title: 권한 설계
     description: >
@@ -95,6 +105,9 @@ steps:
       - type: file_content
         path: /home/lab/work/bash-users.txt
         expect: /bin/bash
+      - type: file_content_absent
+        path: /home/lab/work/bash-users.txt
+        expect: nologin
   - id: 5
     title: tar 아카이브
     description: >
@@ -114,6 +127,12 @@ steps:
       - type: command
         command: tar tzf /home/lab/work/backup/logs.tar.gz
         expect: logs/app1.log
+      - type: command
+        command: tar tzf /home/lab/work/backup/logs.tar.gz
+        expect: logs/app2.log
+      - type: command
+        command: tar tzf /home/lab/work/backup/logs.tar.gz
+        expect: logs/debug.txt
   - id: 6
     title: 심볼릭 링크
     description: >
@@ -131,3 +150,6 @@ steps:
       - type: command
         command: stat -c %F /home/lab/latest-log
         expect: symbolic link
+      - type: command
+        command: readlink -f /home/lab/latest-log
+        expect: /home/lab/work/logs/app1.log

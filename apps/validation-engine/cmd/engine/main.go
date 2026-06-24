@@ -231,7 +231,7 @@ func validateCheck(c model.Check) error {
 		if c.Command == "" {
 			return fmt.Errorf("cmd가 비어있음")
 		}
-	case model.CheckFileExists:
+	case model.CheckFileExists, model.CheckDirExists, model.CheckFileAbsent:
 		if c.Path == "" {
 			return fmt.Errorf("path가 비어있음")
 		}
@@ -244,6 +244,15 @@ func validateCheck(c model.Check) error {
 		// 확인할 문자열 없이 파일 내용 체크는 의미가 없으므로 필수로 요구한다.
 		if c.Expect == "" {
 			return fmt.Errorf("expect가 비어있음 — 파일에서 찾을 문자열을 지정해야 합니다")
+		}
+	case model.CheckFileContentAbsent:
+		if c.Path == "" {
+			return fmt.Errorf("path가 비어있음")
+		}
+		// Expect="" 면 strings.Contains(output, "")=true 라 항상 "있음"으로 판정돼
+		// 절대 통과할 수 없다. 없어야 할 문자열을 반드시 지정해야 한다.
+		if c.Expect == "" {
+			return fmt.Errorf("expect가 비어있음 — 파일에 없어야 할 문자열을 지정해야 합니다")
 		}
 	case model.CheckProcessRunning:
 		if c.Name == "" {
