@@ -29,6 +29,10 @@ const (
 	// file_exists(test -f)는 디렉터리를 인정하지 않으므로 디렉터리 검증은 이 타입을 쓴다.
 	CheckDirExists CheckType = "dir_exists"
 
+	// CheckFileAbsent: 파일이 존재하지 "않는지" 확인 (test ! -f)
+	// 예) ~/work/backup/debug.txt 가 복사되지 않았는지 같은 음수(부재) 조건
+	CheckFileAbsent CheckType = "file_absent"
+
 	// CheckFileContent: 파일 내용에 특정 문자열이 있는지 확인
 	// 예) /etc/hosts 에 "myapp" 라인이 있는지
 	CheckFileContent CheckType = "file_content"

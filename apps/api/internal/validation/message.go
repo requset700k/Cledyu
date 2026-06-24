@@ -23,6 +23,7 @@ const (
 	CheckCommand        CheckType = "command"
 	CheckFileExists     CheckType = "file_exists"
 	CheckDirExists      CheckType = "dir_exists"
+	CheckFileAbsent     CheckType = "file_absent"
 	CheckFileContent    CheckType = "file_content"
 	CheckProcessRunning CheckType = "process_running"
 	CheckHTTPResponse   CheckType = "http_response"

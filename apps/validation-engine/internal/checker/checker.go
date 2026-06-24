@@ -37,6 +37,8 @@ func Run(ctx context.Context, exe executor.VMExecutor, check model.Check) model.
 		return runFileExists(ctx, exe, check) // 파일 존재 여부 확인
 	case model.CheckDirExists:
 		return runDirExists(ctx, exe, check) // 디렉터리 존재 여부 확인
+	case model.CheckFileAbsent:
+		return runFileAbsent(ctx, exe, check) // 파일이 존재하지 않는지 확인
 	case model.CheckFileContent:
 		return runFileContent(ctx, exe, check) // 파일 내용에 특정 문자열 포함 여부 확인
 	case model.CheckProcessRunning:
@@ -127,6 +129,24 @@ func runDirExists(ctx context.Context, exe executor.VMExecutor, check model.Chec
 			return requestError("VM 연결 timeout")
 		}
 		return fail(check.Type, fmt.Sprintf("디렉터리 없음: %s", check.Path))
+	}
+	return pass(check.Type)
+}
+
+// 파일이 존재하지 않는지 검사 (음수 조건)
+func runFileAbsent(ctx context.Context, exe executor.VMExecutor, check model.Check) model.CheckResult {
+	// 허용되지 않는 문자가 포함된 경로 차단 (예: ; rm -rf /) 차단
+	if !safePathRe.MatchString(check.Path) {
+		return fail(check.Type, fmt.Sprintf("허용되지 않는 경로: %s", check.Path))
+	}
+
+	// 'test ! -f' 로 파일이 없을 때(=조건 충족) 종료코드 0이 되게 한다
+	_, err := exe.Exec(ctx, "test ! -f "+check.Path)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return requestError("VM 연결 timeout")
+		}
+		return fail(check.Type, fmt.Sprintf("존재하면 안 되는 파일이 있음: %s", check.Path))
 	}
 	return pass(check.Type)
 }

@@ -170,6 +170,50 @@ func TestRunDirExists_Fail_RelativePath(t *testing.T) {
 	}
 }
 
+// --- file_absent ---
+
+func TestRunFileAbsent_Pass(t *testing.T) {
+	// test ! -f 가 성공(파일 없음) → 통과
+	result := Run(context.Background(), mockOk(""), model.Check{
+		Type: model.CheckFileAbsent,
+		Path: "/home/lab/work/backup/debug.txt",
+	})
+	if !result.Passed {
+		t.Errorf("파일이 없으면 통과해야 함: %s", result.Detail)
+	}
+}
+
+func TestRunFileAbsent_Fail_Present(t *testing.T) {
+	// test ! -f 가 실패(파일 있음) → 실패
+	result := Run(context.Background(), mockFail("exit 1"), model.Check{
+		Type: model.CheckFileAbsent,
+		Path: "/home/lab/work/backup/debug.txt",
+	})
+	if result.Passed {
+		t.Error("존재하면 안 되는 파일이 있으면 실패해야 함")
+	}
+}
+
+func TestRunFileAbsent_Fail_Injection(t *testing.T) {
+	result := Run(context.Background(), mockOk(""), model.Check{
+		Type: model.CheckFileAbsent,
+		Path: "/home/lab/work/backup/debug.txt; rm -rf /",
+	})
+	if result.Passed {
+		t.Error("인젝션 시도는 실패해야 함")
+	}
+}
+
+func TestRunFileAbsent_Fail_RelativePath(t *testing.T) {
+	result := Run(context.Background(), mockOk(""), model.Check{
+		Type: model.CheckFileAbsent,
+		Path: "home/lab/work/backup/debug.txt",
+	})
+	if result.Passed {
+		t.Error("상대경로는 실패해야 함")
+	}
+}
+
 // --- file_content ---
 
 func TestRunFileContent_Pass(t *testing.T) {
