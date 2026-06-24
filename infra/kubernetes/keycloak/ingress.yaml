@@ -1,18 +1,61 @@
 ---
+# Keycloak Traefik ingress + X-Forwarded-Host 하드닝.
+#
+# 동적 hostname(strict=false) 모드에서 Keycloak 은 X-Forwarded-Host 로 issuer·redirect·
+# 비밀번호재설정 링크를 만든다. Traefik 은 forwardedHeaders.trustedIPs 로 10.10.0.0/24 +
+# 전체 tailnet(100.64.0.0/10)을 신뢰하므로(gitops/apps/traefik/values.yaml), 하드닝이 없으면
+# 그 네트워크의 클라이언트가 X-Forwarded-Host 를 주입해 issuer 를 오염시킬 수 있다.
+# 아래 미들웨어가 라우트별로 X-Forwarded-Host 를 매칭된 host 값으로 강제 덮어써서
+# 클라이언트가 보낸 값을 무시한다(주입 차단). host 별 라우터에 미들웨어를 붙이기 위해
+# ingress 를 host 별로 분리한다.
+#
+# 이 파일은 multi-doc 으로 Middleware 2개 + Ingress 2개를 담는다. keycloak_foundation
+# 역할이 `kubectl apply -f ingress.yaml` 로 일괄 적용한다.
+
+# Keycloak(proxy.headers=xforwarded)은 X-Forwarded-Host 뿐 아니라 Proto/Port/Prefix 도
+# issuer·action link 생성에 쓴다. 따라서 URL 에 영향을 주는 X-Forwarded-* 를 모두 고정해
+# 클라이언트 주입(scheme 다운그레이드·port·prefix 오염)을 차단한다. 두 호스트 모두 Traefik
+# websecure(443/https) + 루트 경로(prefix 없음). X-Forwarded-For(클라이언트 IP, 로깅용)는
+# URL 에 무관하므로 건드리지 않는다. 빈 값은 헤더를 제거한다(prefix 삭제).
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: keycloak-xfh-local
+  namespace: keycloak
+spec:
+  headers:
+    customRequestHeaders:
+      X-Forwarded-Host: keycloak.cledyu.local
+      X-Forwarded-Proto: https
+      X-Forwarded-Port: "443"
+      X-Forwarded-Prefix: ""
+---
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: keycloak-xfh-auth
+  namespace: keycloak
+spec:
+  headers:
+    customRequestHeaders:
+      X-Forwarded-Host: auth.cledyu.io
+      X-Forwarded-Proto: https
+      X-Forwarded-Port: "443"
+      X-Forwarded-Prefix: ""
+---
+# 내부 ingress (keycloak.cledyu.local) — XFH 를 자기 host 로 강제.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: keycloak
   namespace: keycloak
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: keycloak-keycloak-xfh-local@kubernetescrd
 spec:
   ingressClassName: traefik
   tls:
     - hosts:
         - keycloak.cledyu.local
-        # 공개 노출 경로(ALB→tailnet 프록시)가 Host: auth.cledyu.io 로 보내면
-        # Traefik 이 이 규칙으로 라우팅한다. 공개 TLS 는 ALB(ACM)가 종단하고,
-        # 프록시→Traefik hop 은 내부 CA 인증서(검증 생략)라 SAN 일치는 부가적.
-        - auth.cledyu.io
       secretName: keycloak-tls
   rules:
     - host: keycloak.cledyu.local
@@ -25,6 +68,24 @@ spec:
                 name: cledyu-keycloak-service
                 port:
                   number: 8080
+---
+# 공개 ingress (auth.cledyu.io) — 공개 노출 경로(ALB→tailnet 프록시)가 Host: auth.cledyu.io
+# 로 보내면 이 라우터로 매칭되고, XFH 를 auth.cledyu.io 로 강제한다. 공개 TLS 는 ALB(ACM)가
+# 종단하고 프록시→Traefik hop 은 내부 CA(검증 생략)다.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: keycloak-auth
+  namespace: keycloak
+  annotations:
+    traefik.ingress.kubernetes.io/router.middlewares: keycloak-keycloak-xfh-auth@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - auth.cledyu.io
+      secretName: keycloak-tls
+  rules:
     - host: auth.cledyu.io
       http:
         paths:
