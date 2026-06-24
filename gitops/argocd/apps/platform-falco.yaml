@@ -30,9 +30,8 @@ spec:
     server: https://kubernetes.default.svc
     namespace: falco
   syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
+    # Falco must be synced manually after the Kyverno falco namespace exception
+    # is live; otherwise baseline-workload-security can block the DaemonSet.
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
