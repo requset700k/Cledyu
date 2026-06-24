@@ -88,6 +88,58 @@ func TestRenderCloudInit_ClearsSerialConsoleOnLogin(t *testing.T) {
 	}
 }
 
+// 학생 터미널 프롬프트에는 내부 세션 hostname(session-xxxx)이 보이지 않아야 한다.
+// VM/namespace 이름은 운영·디버깅 식별자로 유지하되, 학습자 화면에서는 Cledyu 라벨만 노출한다.
+func TestRenderCloudInit_UsesLearnerFriendlyPrompt(t *testing.T) {
+	out := renderCloudInit("abc123", "", BootInit{})
+
+	var parsed struct {
+		WriteFiles []struct {
+			Path    string `yaml:"path"`
+			Content string `yaml:"content"`
+			Append  bool   `yaml:"append"`
+		} `yaml:"write_files"`
+	}
+	if err := yaml.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatalf("rendered cloud-init is not valid YAML: %v\n%s", err, out)
+	}
+
+	files := map[string]struct {
+		content string
+		append  bool
+	}{}
+	for _, f := range parsed.WriteFiles {
+		files[f.Path] = struct {
+			content string
+			append  bool
+		}{content: f.Content, append: f.Append}
+	}
+	profile := files["/home/lab/.bash_profile"].content
+	if profile == "" {
+		t.Fatalf("expected .bash_profile in cloud-init:\n%s", out)
+	}
+	if !strings.Contains(profile, ". /home/lab/.bashrc") {
+		t.Fatalf("login shell must source .bashrc for the shared prompt, got:\n%s", profile)
+	}
+
+	bashrcFile := files["/home/lab/.bashrc"]
+	bashrc := bashrcFile.content
+	if bashrc == "" {
+		t.Fatalf("expected .bashrc for non-login interactive shells:\n%s", out)
+	}
+	if !bashrcFile.append {
+		t.Fatal("expected .bashrc write_files entry to append so Ubuntu skel .bashrc stays intact")
+	}
+	if !strings.Contains(bashrc, `PS1='\[\033[1;32m\]Cledyu\[\033[0m\] \w ➜ '`) {
+		t.Fatalf("expected Cledyu prompt in .bashrc, got:\n%s", bashrc)
+	}
+	for path, content := range map[string]string{"/home/lab/.bash_profile": profile, "/home/lab/.bashrc": bashrc} {
+		if strings.Contains(content, "\\h") || strings.Contains(content, "session-") {
+			t.Fatalf("prompt must not expose session hostname in %s, got:\n%s", path, content)
+		}
+	}
+}
+
 // VM 내부 DNS upstream 이 비어 있으면 cloud-init 중 apt/curl/get.k3s.io 가 실패한다.
 // bootcmd 는 packages/runcmd 보다 먼저 실행되므로, 랩별 초기화 전에 systemd-resolved 를 보정해야 한다.
 func TestRenderCloudInit_ConfiguresDNSBeforePackages(t *testing.T) {
