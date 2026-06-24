@@ -78,6 +78,7 @@ bootcmd:
     owner: lab:lab
     permissions: "0644"
     defer: true
+    append: true
     content: |
       # 학습자 화면에는 내부 session hostname 대신 Cledyu 라벨만 보여준다.
       PS1='\[\033[1;32m\]Cledyu\[\033[0m\] \w ➜ '

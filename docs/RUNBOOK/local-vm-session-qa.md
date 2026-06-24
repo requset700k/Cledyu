@@ -280,9 +280,9 @@ password: lab
 
 ### 터미널 프롬프트에 lab@session-xxxx가 계속 보임
 
-프롬프트 변경은 cloud-init이 생성하는 `/home/lab/.bashrc`와 이를 읽는
-`/home/lab/.bash_profile`에 들어가므로 이미 생성된 VM에는 소급 적용되지 않는다.
-기존 세션을 resume하면 이전 프롬프트가 계속 보일 수 있다.
+프롬프트 변경은 cloud-init이 기본 `/home/lab/.bashrc` 끝에 `PS1` override를 append하고,
+`/home/lab/.bash_profile`이 이를 읽는 방식으로 적용된다. 이미 생성된 VM에는 소급 적용되지
+않으므로 기존 세션을 resume하면 이전 프롬프트가 계속 보일 수 있다.
 
 새 세션 VM을 생성한 뒤에도 같은 현상이 보이면 VM 안에서 다음 파일을 확인한다.
 
@@ -290,10 +290,10 @@ password: lab
 grep PS1 ~/.bashrc
 ```
 
-정상이라면 `Cledyu` 라벨을 설정하는 `PS1`이 보여야 한다. `bash`를 다시 실행하거나
-code-server 터미널을 열어도 같은 프롬프트가 유지되어야 한다. 파일이 없거나 기본
-Ubuntu 프롬프트가 남아 있으면 API 서버가 최신 브랜치 코드로 실행 중인지 확인하고 새
-세션을 다시 만든다.
+정상이라면 Ubuntu 기본 `.bashrc` 내용은 유지된 채 파일 끝에 `Cledyu` 라벨을 설정하는
+`PS1`이 보여야 한다. `bash`를 다시 실행하거나 code-server 터미널을 열어도 같은 프롬프트가
+유지되어야 한다. 파일이 없거나 기본 Ubuntu 프롬프트가 남아 있으면 API 서버가 최신 브랜치
+코드로 실행 중인지 확인하고 새 세션을 다시 만든다.
 
 ### 터미널에 virtualmachineinstances/console forbidden이 반복됨
 

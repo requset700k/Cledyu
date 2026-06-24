@@ -97,17 +97,24 @@ func TestRenderCloudInit_UsesLearnerFriendlyPrompt(t *testing.T) {
 		WriteFiles []struct {
 			Path    string `yaml:"path"`
 			Content string `yaml:"content"`
+			Append  bool   `yaml:"append"`
 		} `yaml:"write_files"`
 	}
 	if err := yaml.Unmarshal([]byte(out), &parsed); err != nil {
 		t.Fatalf("rendered cloud-init is not valid YAML: %v\n%s", err, out)
 	}
 
-	files := map[string]string{}
+	files := map[string]struct {
+		content string
+		append  bool
+	}{}
 	for _, f := range parsed.WriteFiles {
-		files[f.Path] = f.Content
+		files[f.Path] = struct {
+			content string
+			append  bool
+		}{content: f.Content, append: f.Append}
 	}
-	profile := files["/home/lab/.bash_profile"]
+	profile := files["/home/lab/.bash_profile"].content
 	if profile == "" {
 		t.Fatalf("expected .bash_profile in cloud-init:\n%s", out)
 	}
@@ -115,9 +122,13 @@ func TestRenderCloudInit_UsesLearnerFriendlyPrompt(t *testing.T) {
 		t.Fatalf("login shell must source .bashrc for the shared prompt, got:\n%s", profile)
 	}
 
-	bashrc := files["/home/lab/.bashrc"]
+	bashrcFile := files["/home/lab/.bashrc"]
+	bashrc := bashrcFile.content
 	if bashrc == "" {
 		t.Fatalf("expected .bashrc for non-login interactive shells:\n%s", out)
+	}
+	if !bashrcFile.append {
+		t.Fatal("expected .bashrc write_files entry to append so Ubuntu skel .bashrc stays intact")
 	}
 	if !strings.Contains(bashrc, `PS1='\[\033[1;32m\]Cledyu\[\033[0m\] \w ➜ '`) {
 		t.Fatalf("expected Cledyu prompt in .bashrc, got:\n%s", bashrc)
