@@ -14,7 +14,7 @@ env:
 # enabled=false 가 기본(KubeVirt 전용). 활성 시 최소권한 SSM 키를 Vault→ESO 로 주입한다.
 # 리전은 검증 요청의 VM spec(api 가 세션별로 채움)에서 오므로 env 불필요 — 자격증명만 주입한다.
 aws:
-  enabled: false
+  enabled: true
   secretName: "cledyu-validation-engine-aws"
 
 resources:

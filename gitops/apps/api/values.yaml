@@ -63,10 +63,10 @@ kubevirt:
 #   2) AWS 최소권한 키·Tailscale authkey 를 Vault 등록 → cledyu-api-aws-externalsecret.yaml
 #   3) enabled=true, launchTemplateId 설정, maxActiveSessions>0
 aws:
-  enabled: false
+  enabled: true
   region: "ap-northeast-2"
-  launchTemplateId: ""    # terraform output launch_template_id
+  launchTemplateId: "lt-03243d5c74802ddfd"    # terraform output launch_template_id (cledyu 504284203153)
   instanceType: "t3.medium"
-  maxActiveSessions: 0     # EC2 오버플로우 용량(0이면 비활성). 글로벌 상한 = 온프렘 + 이 값.
+  maxActiveSessions: 2     # EC2 오버플로우 용량(0이면 비활성). 글로벌 상한 = 온프렘 + 이 값.
   # AWS 액세스 키·Tailscale authkey 는 Vault(cledyu/aws/api)→ESO(cledyu-api-aws)에서 주입.
   secretName: "cledyu-api-aws"
