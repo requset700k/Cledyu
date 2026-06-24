@@ -55,9 +55,9 @@
 ## 5. 결과 (Consequences)
 
 - **긍정:** 운영자 SSO 무중단. 학습자/운영 권한 realm 격리. 소셜 로그인은 Keycloak IdP 브로커링으로 앱은 단일 OIDC provider 만 바라봄.
-- **부정 / 트레이드오프:** realm 2개 운영. 소셜 IdP 는 실 client 발급 전까지 `enable_social_idp=false` 로 비활성. 이메일 인증은 SMTP 설정 전까지 `learn_verify_email=false`.
+- **부정 / 트레이드오프:** realm 2개 운영. 소셜 IdP 는 실 client 발급 전까지 `enabled_social_idps=[]` 로 비활성(provider 별 단계 활성화). 이메일 인증은 SMTP 설정 전까지 `learn_verify_email=false`.
 - **후속 액션:**
-  - [ ] 구글/카카오/네이버 개발자 콘솔에서 OAuth client 발급 → Vault 등록 → `enable_social_idp=true`
+  - [ ] 구글/카카오/네이버 개발자 콘솔에서 OAuth client 발급 → secret 주입 → `enabled_social_idps` 에 alias 추가(구글부터). 공개 노출·절차는 RUNBOOK `learner-auth.md` §4.
   - [ ] 학습자 realm SMTP 설정 → `learn_verify_email=true`
   - [ ] `web` client secret 생성 → Vault `secret/oidc/cledyu-web:client_secret`
 

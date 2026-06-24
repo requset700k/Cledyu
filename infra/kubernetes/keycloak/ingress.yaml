@@ -9,9 +9,23 @@ spec:
   tls:
     - hosts:
         - keycloak.cledyu.local
+        # 공개 노출 경로(ALB→tailnet 프록시)가 Host: auth.cledyu.io 로 보내면
+        # Traefik 이 이 규칙으로 라우팅한다. 공개 TLS 는 ALB(ACM)가 종단하고,
+        # 프록시→Traefik hop 은 내부 CA 인증서(검증 생략)라 SAN 일치는 부가적.
+        - auth.cledyu.io
       secretName: keycloak-tls
   rules:
     - host: keycloak.cledyu.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: cledyu-keycloak-service
+                port:
+                  number: 8080
+    - host: auth.cledyu.io
       http:
         paths:
           - path: /
