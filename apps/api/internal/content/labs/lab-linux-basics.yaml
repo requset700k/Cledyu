@@ -127,6 +127,12 @@ steps:
       - type: command
         command: tar tzf /home/lab/work/backup/logs.tar.gz
         expect: logs/app1.log
+      - type: command
+        command: tar tzf /home/lab/work/backup/logs.tar.gz
+        expect: logs/app2.log
+      - type: command
+        command: tar tzf /home/lab/work/backup/logs.tar.gz
+        expect: logs/debug.txt
   - id: 6
     title: 심볼릭 링크
     description: >
