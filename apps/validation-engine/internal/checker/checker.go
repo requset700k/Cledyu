@@ -39,6 +39,8 @@ func Run(ctx context.Context, exe executor.VMExecutor, check model.Check) model.
 		return runDirExists(ctx, exe, check) // 디렉터리 존재 여부 확인
 	case model.CheckFileAbsent:
 		return runFileAbsent(ctx, exe, check) // 파일이 존재하지 않는지 확인
+	case model.CheckFileContentAbsent:
+		return runFileContentAbsent(ctx, exe, check) // 파일 내용에 특정 문자열이 없는지 확인
 	case model.CheckFileContent:
 		return runFileContent(ctx, exe, check) // 파일 내용에 특정 문자열 포함 여부 확인
 	case model.CheckProcessRunning:
@@ -176,6 +178,33 @@ func runFileContent(ctx context.Context, exe executor.VMExecutor, check model.Ch
 	}
 
 	return fail(check.Type, fmt.Sprintf("파일에 '%s' 없음", check.Expect))
+}
+
+// 파일 내용에 특정 문자열이 "없는지" 검사 (내용 부재 조건)
+func runFileContentAbsent(ctx context.Context, exe executor.VMExecutor, check model.Check) model.CheckResult {
+	if !safePathRe.MatchString(check.Path) {
+		return fail(check.Type, fmt.Sprintf("허용되지 않는 경로: %s", check.Path))
+	}
+
+	if check.Expect == "" {
+		return fail(check.Type, "expect가 비어있음")
+	}
+
+	// 'cat' 명령어로 파일 내용을 읽어온다
+	output, err := exe.Exec(ctx, "cat "+check.Path)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return requestError("VM 연결 timeout")
+		}
+		return fail(check.Type, fmt.Sprintf("파일 읽기 실패: %s", err))
+	}
+
+	// 기대값이 포함되어 "있으면" 실패(=있으면 안 되는 문자열이 있음)
+	if strings.Contains(output, check.Expect) {
+		return fail(check.Type, fmt.Sprintf("파일에 있으면 안 되는 '%s' 가 있음", check.Expect))
+	}
+
+	return pass(check.Type)
 }
 
 // 프로세스 실행 상태 검사

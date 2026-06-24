@@ -30,8 +30,12 @@ const (
 	CheckDirExists CheckType = "dir_exists"
 
 	// CheckFileAbsent: 파일이 존재하지 "않는지" 확인 (test ! -f)
-	// 예) ~/work/backup/debug.txt 가 복사되지 않았는지 같은 음수(부재) 조건
+	// 예) ~/work/backup/debug.txt 가 복사되지 않았는지 같은 부재 조건
 	CheckFileAbsent CheckType = "file_absent"
+
+	// CheckFileContentAbsent: 파일 내용에 특정 문자열이 "없는지" 확인
+	// 예) grep 으로 필터링한 결과에 nologin 행이 섞이지 않았는지 같은 내용 부재 조건
+	CheckFileContentAbsent CheckType = "file_content_absent"
 
 	// CheckFileContent: 파일 내용에 특정 문자열이 있는지 확인
 	// 예) /etc/hosts 에 "myapp" 라인이 있는지

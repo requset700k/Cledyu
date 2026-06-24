@@ -105,6 +105,9 @@ steps:
       - type: file_content
         path: /home/lab/work/bash-users.txt
         expect: /bin/bash
+      - type: file_content_absent
+        path: /home/lab/work/bash-users.txt
+        expect: nologin
   - id: 5
     title: tar 아카이브
     description: >
