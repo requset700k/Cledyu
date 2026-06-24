@@ -19,7 +19,17 @@ keycloak_foundation_db_service_name: keycloak-db-postgresql
 keycloak_foundation_db_secret_name: keycloak-db-credentials
 keycloak_foundation_service_name: "{{ keycloak_foundation_name }}-service"
 keycloak_foundation_service_account_name: cledyu-keycloak
+# Keycloak 서버 프론트엔드 hostname. 내부 전용일 때는 bare host(keycloak.cledyu.local).
+# 공개 노출(학습자 social 로그인) 시에는 공개 base URL(예 https://auth.cledyu.io)로 둔다 —
+# issuer·broker redirect·콜백 URL 이 이 값으로 생성된다. 자세한 전환 절차는
+# docs/RUNBOOK/learner-auth.md 의 '공개 노출' 절 참고.
 keycloak_foundation_hostname: keycloak.cledyu.local
+
+# hostname strict 모드. true 면 Keycloak 이 모든 URL 을 위 hostname 으로 강제한다
+# (X-Forwarded-Host 무시). 내부/공개 단일 도메인이면 true 유지가 안전하다.
+# 단일 Keycloak 으로 내부(keycloak.cledyu.local)와 공개(auth.cledyu.io)를 동시에
+# 서빙하려면 false 로 두어 요청 Host(proxy.headers=xforwarded)를 따르게 한다.
+keycloak_foundation_hostname_strict: true
 
 keycloak_foundation_tls_certificate_name: keycloak-tls
 keycloak_foundation_tls_secret_name: keycloak-tls

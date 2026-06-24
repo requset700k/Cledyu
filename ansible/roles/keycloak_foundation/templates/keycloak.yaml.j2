@@ -31,4 +31,4 @@ spec:
     headers: xforwarded
   hostname:
     hostname: "{{ keycloak_foundation_hostname }}"
-    strict: true
+    strict: {{ keycloak_foundation_hostname_strict | bool | lower }}
