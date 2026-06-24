@@ -163,6 +163,9 @@ resource "aws_launch_template" "lab_session" {
   network_interfaces {
     subnet_id       = local.subnet_id
     security_groups = [aws_security_group.lab_session.id]
+    # network_interfaces 명시 시 subnet 의 MapPublicIpOnLaunch 가 무시되므로 여기서 명시한다.
+    # 미설정이면 퍼블릭 IP 미할당 → 인터넷 egress 불가(tailscale·SSM·설치 실패).
+    associate_public_ip_address = var.assign_public_ip
   }
 
   # IMDSv2 강제(SSRF 완화).
