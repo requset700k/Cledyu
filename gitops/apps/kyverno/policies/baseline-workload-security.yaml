@@ -41,6 +41,7 @@ spec:
                 - loki
                 - cdi
                 - cert-manager
+                - falco
       skipBackgroundRequests: true
       validate:
         allowExistingViolations: true

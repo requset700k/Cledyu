@@ -1,0 +1,57 @@
+---
+# Falco needs kernel/runtime visibility. Keep the privileged namespace exception
+# scoped to falco, while using the least-privileged modern eBPF driver mode.
+driver:
+  kind: modern_ebpf
+  loader:
+    enabled: false
+  modernEbpf:
+    leastPrivileged: true
+
+falco:
+  json_output: true
+  stdout_output:
+    enabled: true
+  syslog_output:
+    enabled: false
+  http_output:
+    enabled: false
+  program_output:
+    enabled: false
+
+falcosidekick:
+  enabled: false
+
+falcoctl:
+  # Install the default Falco rules at pod startup, but avoid ongoing automatic
+  # artifact updates. Custom rules and alert routing will be managed by later PRs.
+  artifact:
+    follow:
+      enabled: false
+
+collectors:
+  containerEngine:
+    engines:
+      docker:
+        enabled: false
+      podman:
+        enabled: false
+      containerd:
+        enabled: false
+      cri:
+        enabled: true
+        sockets:
+          - /run/containerd/containerd.sock
+  kubernetes:
+    enabled: false
+
+serviceMonitor:
+  create: false
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1024Mi

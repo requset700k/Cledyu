@@ -1,0 +1,44 @@
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-falco
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://falcosecurity.github.io/charts
+      chart: falco
+      targetRevision: 9.1.0
+      helm:
+        releaseName: falco
+        valueFiles:
+          - $values/gitops/apps/falco/values.yaml
+    - repoURL: https://github.com/requset700k/Cledyu.git
+      targetRevision: main
+      ref: values
+    - repoURL: https://github.com/requset700k/Cledyu.git
+      targetRevision: main
+      path: gitops/apps/falco
+      directory:
+        include: namespace.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: falco
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
