@@ -29,11 +29,14 @@ write_files:
           header_up Host ${public_host}
           header_up X-Forwarded-Host ${public_host}
           header_up X-Forwarded-Proto https
-          # Traefik 은 내부 CA(cledyu-ca) 인증서를 제시한다 — tailnet(WireGuard)
-          # 암호화 hop 이라 여기서 TLS 검증은 생략한다. upstream 이 http 면 무시됨.
+%{ if upstream_tls ~}
+          # Traefik(내부 CA) HTTPS upstream 전용 — tailnet(WireGuard) 암호화 hop 이라
+          # 인증서 검증은 생략한다. tls_* 옵션은 upstream 스킴과 무관하게 TLS 를 켜므로
+          # http upstream 일 때는 이 블록을 렌더하지 않는다(평문 upstream 502 방지).
           transport http {
             tls_insecure_skip_verify
           }
+%{ endif ~}
         }
         # ALB 헬스체크(/realms/cledyu-learn)는 위 reverse_proxy 로 그대로 흘러간다.
       }
