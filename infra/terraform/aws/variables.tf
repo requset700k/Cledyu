@@ -16,6 +16,17 @@ variable "subnet_id" {
   default     = ""
 }
 
+variable "assign_public_ip" {
+  description = <<-EOT
+    세션 인스턴스에 퍼블릭 IP 를 할당할지. Launch Template 이 network_interfaces 를 명시하면
+    subnet 의 MapPublicIpOnLaunch 가 무시되어 기본 미할당이 되므로, default VPC(IGW) 환경에서는
+    true 여야 인스턴스가 인터넷(tailscale 가입·SSM·패키지 설치)에 도달한다.
+    private subnet + NAT 구성이면 false 로 둔다.
+  EOT
+  type        = bool
+  default     = true
+}
+
 variable "instance_type" {
   description = "세션 인스턴스 타입. Launch Template 기본값이며 api 가 런타임에 오버라이드할 수 있다."
   type        = string
