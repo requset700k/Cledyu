@@ -190,6 +190,16 @@ func runFileContentAbsent(ctx context.Context, exe executor.VMExecutor, check mo
 		return fail(check.Type, "expect가 비어있음")
 	}
 
+	// 파일이 아예 없으면 찾을 내용도 없으므로 '내용 부재' 조건은 공허하게 충족된다(vacuous pass).
+	// file_content_absent 를 단독으로 쓰는 랩에서 파일 미생성을 'cat 실패'라는 혼동되는
+	// 사유로 떨어뜨리지 않기 위해, cat 전에 존재 여부를 먼저 확인한다.
+	if _, err := exe.Exec(ctx, "test -e "+check.Path); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			return requestError("VM 연결 timeout")
+		}
+		return pass(check.Type)
+	}
+
 	// 'cat' 명령어로 파일 내용을 읽어온다
 	output, err := exe.Exec(ctx, "cat "+check.Path)
 	if err != nil {

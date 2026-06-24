@@ -274,6 +274,19 @@ func TestRunFileContentAbsent_Fail_Present(t *testing.T) {
 	}
 }
 
+func TestRunFileContentAbsent_Pass_FileMissing(t *testing.T) {
+	// 파일이 아예 없으면 찾을 내용도 없으므로 '내용 부재'는 공허하게 충족 → 통과(vacuous pass).
+	// 단독 사용 랩에서 파일 미생성을 '파일 읽기 실패'라는 혼동되는 사유로 떨어뜨리지 않기 위함.
+	result := Run(context.Background(), mockFail("test: no such file"), model.Check{
+		Type:   model.CheckFileContentAbsent,
+		Path:   "/home/lab/work/bash-users.txt",
+		Expect: "nologin",
+	})
+	if !result.Passed {
+		t.Errorf("파일이 없으면 vacuous pass 해야 함: %s", result.Detail)
+	}
+}
+
 func TestRunFileContentAbsent_Fail_EmptyExpect(t *testing.T) {
 	// expect 비어있으면 항상 "있음"으로 판정돼 통과 불가 → 실패
 	result := Run(context.Background(), mockOk("anything"), model.Check{
