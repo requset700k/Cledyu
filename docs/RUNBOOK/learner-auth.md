@@ -125,13 +125,14 @@ Traefik 경유 필수). 프록시 cloud-init 은 `tailscale up --accept-routes` 
 issuer 를 검증하므로, 단순히 `hostname=https://auth.cledyu.io` 로 고정하면 그들이 깨진다.
 두 가지 중 선택한다:
 
-- **옵션 A — 동적 hostname (권장, 영향 최소):** `hostname` 을 비워(키 생략) 요청
+- **옵션 A — 동적 hostname (기본값, 권장):** `hostname` 을 비워(키 생략) 요청
   Host/X-Forwarded-Host 로 URL 을 만들게 한다. 내부 요청(Host: keycloak.cledyu.local)은
   `.local` issuer, 공개 요청(프록시가 X-Forwarded-Host: auth.cledyu.io)은 auth issuer 로
-  realm 별·요청별로 올바르게 생성된다. `strict` 는 반드시 false.
+  realm 별·요청별로 올바르게 생성된다. **role 기본값이 이미 이 모드라 별도 조치 불필요**
+  (2026-06-24 라이브 적용 완료). 정적으로 되돌리지만 않으면 된다.
 
   ```yaml
-  # group_vars 등에서 오버라이드
+  # defaults/main.yml (기본값) — 오버라이드 불필요
   keycloak_foundation_hostname: ""          # 키 생략 → 동적(요청 Host 기반)
   keycloak_foundation_hostname_strict: false
   ```
@@ -146,9 +147,8 @@ issuer 를 검증하므로, 단순히 `hostname=https://auth.cledyu.io` 로 고�
   keycloak_foundation_hostname_strict: true
   ```
 
-> 기본값(`hostname=keycloak.cledyu.local`, strict=true)을 그대로 두면 학습자가
-> auth.cledyu.io 로 들어와도 broker redirect·콜백이 `.local` 로 생성돼 social 로그인이
-> 깨진다. 공개 전환 시 위 옵션 A/B 중 하나를 반드시 적용한다.
+> 주의: `hostname` 을 `keycloak.cledyu.local`(정적)로 되돌리면 학습자가 auth.cledyu.io 로
+> 들어와도 broker redirect·콜백이 `.local` 로 생성돼 social 로그인이 깨진다.
 
 ### 4.2 구글 연동 (먼저)
 
