@@ -23,3 +23,27 @@ spec:
               protocol: TCP
             - port: "6443"
               protocol: TCP
+    {{- if .Values.aws.enabled }}
+    # AWS SSM — 온프렘 cap 초과로 EC2 로 버스트된 세션은 SSM SendCommand/
+    # GetCommandInvocation 으로 채점한다. toFQDNs 가 IP 를 학습하려면 Cilium DNS
+    # 프록시가 ssm.* 응답을 봐야 하므로 kube-dns 로의 L7 DNS 가시성을 함께 연다.
+    - toEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: kube-system
+            k8s:k8s-app: kube-dns
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: UDP
+            - port: "53"
+              protocol: TCP
+          rules:
+            dns:
+              - matchPattern: "*"
+    - toFQDNs:
+        - matchName: "ssm.ap-northeast-2.amazonaws.com"
+      toPorts:
+        - ports:
+            - port: "443"
+              protocol: TCP
+    {{- end }}
