@@ -24,6 +24,11 @@ const (
 	// 예) /etc/nginx/nginx.conf 가 있는지
 	CheckFileExists CheckType = "file_exists"
 
+	// CheckDirExists: 디렉터리가 존재하는지 확인
+	// 예) /home/lab/work/scripts 디렉터리가 있는지
+	// file_exists(test -f)는 디렉터리를 인정하지 않으므로 디렉터리 검증은 이 타입을 쓴다.
+	CheckDirExists CheckType = "dir_exists"
+
 	// CheckFileContent: 파일 내용에 특정 문자열이 있는지 확인
 	// 예) /etc/hosts 에 "myapp" 라인이 있는지
 	CheckFileContent CheckType = "file_content"

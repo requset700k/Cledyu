@@ -32,7 +32,7 @@ steps:
       - "mkdir -p 는 중간 경로를 함께 만들고, ~/work/{logs,backup,scripts} 처럼 brace 확장을 쓰면 한 번에 됩니다. 빈 파일은 touch."
       - "mkdir -p ~/work/{logs,backup,scripts} 후 touch 로 logs 안에 app1.log, app2.log, debug.txt 세 파일을 만드세요."
     checks:
-      - type: file_exists
+      - type: dir_exists
         path: /home/lab/work/scripts
       - type: file_exists
         path: /home/lab/work/logs/app2.log

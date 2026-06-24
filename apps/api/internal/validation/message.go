@@ -22,6 +22,7 @@ type CheckType string
 const (
 	CheckCommand        CheckType = "command"
 	CheckFileExists     CheckType = "file_exists"
+	CheckDirExists      CheckType = "dir_exists"
 	CheckFileContent    CheckType = "file_content"
 	CheckProcessRunning CheckType = "process_running"
 	CheckHTTPResponse   CheckType = "http_response"

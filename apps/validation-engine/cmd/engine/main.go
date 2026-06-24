@@ -235,6 +235,10 @@ func validateCheck(c model.Check) error {
 		if c.Path == "" {
 			return fmt.Errorf("path가 비어있음")
 		}
+	case model.CheckDirExists:
+		if c.Path == "" {
+			return fmt.Errorf("path가 비어있음")
+		}
 	case model.CheckFileContent:
 		if c.Path == "" {
 			return fmt.Errorf("path가 비어있음")

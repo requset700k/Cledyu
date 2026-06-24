@@ -128,6 +128,48 @@ func TestRunFileExists_Fail_RelativePath(t *testing.T) {
 	}
 }
 
+// --- dir_exists ---
+
+func TestRunDirExists_Pass(t *testing.T) {
+	result := Run(context.Background(), mockOk(""), model.Check{
+		Type: model.CheckDirExists,
+		Path: "/home/lab/work/scripts",
+	})
+	if !result.Passed {
+		t.Errorf("디렉터리 존재 시 통과해야 함: %s", result.Detail)
+	}
+}
+
+func TestRunDirExists_Fail_NotFound(t *testing.T) {
+	result := Run(context.Background(), mockFail("exit 1"), model.Check{
+		Type: model.CheckDirExists,
+		Path: "/home/lab/work/scripts",
+	})
+	if result.Passed {
+		t.Error("디렉터리 없으면 실패해야 함")
+	}
+}
+
+func TestRunDirExists_Fail_Injection(t *testing.T) {
+	result := Run(context.Background(), mockOk(""), model.Check{
+		Type: model.CheckDirExists,
+		Path: "/home/lab/work/scripts; rm -rf /",
+	})
+	if result.Passed {
+		t.Error("인젝션 시도는 실패해야 함")
+	}
+}
+
+func TestRunDirExists_Fail_RelativePath(t *testing.T) {
+	result := Run(context.Background(), mockOk(""), model.Check{
+		Type: model.CheckDirExists,
+		Path: "home/lab/work/scripts",
+	})
+	if result.Passed {
+		t.Error("상대경로는 실패해야 함")
+	}
+}
+
 // --- file_content ---
 
 func TestRunFileContent_Pass(t *testing.T) {
