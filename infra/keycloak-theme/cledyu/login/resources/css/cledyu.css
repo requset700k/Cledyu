@@ -174,3 +174,81 @@ a:hover { color: #7dd3fc; text-shadow: 0 0 8px rgba(56, 189, 248, .6); }
 
 /* 체크박스/기억하기 */
 #kc-form-options, .checkbox label { color: var(--cledyu-muted); }
+
+/* ── PatternFly(KC26 classic) 정밀 오버라이드 ── */
+/* 기본 버튼: PF custom property 까지 덮어 brand 색 강제 */
+#kc-login,
+.pf-c-button.pf-m-primary,
+input.pf-c-button.pf-m-primary {
+  background-color: var(--cledyu-brand) !important;
+  --pf-c-button--m-primary--BackgroundColor: var(--cledyu-brand);
+  --pf-c-button--m-primary--hover--BackgroundColor: var(--cledyu-brand-hover);
+  --pf-c-button--m-primary--active--BackgroundColor: var(--cledyu-brand-hover);
+  --pf-c-button--m-primary--focus--BackgroundColor: var(--cledyu-brand-hover);
+  color: #fff !important;
+  border: 0 !important;
+  border-radius: 10px !important;
+  font-weight: 700 !important;
+}
+#kc-login:hover, .pf-c-button.pf-m-primary:hover {
+  background-color: var(--cledyu-brand-hover) !important;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px var(--cledyu-brand-glow) !important;
+}
+
+/* 입력 그룹 + 비밀번호 표시 토글(.pf-m-control, 소셜 버튼 제외) 다크 */
+.pf-c-input-group { background: transparent !important; }
+.pf-c-form-control-icon, .pf-c-input-group__text { color: var(--cledyu-muted) !important; }
+.pf-c-button.pf-m-control:not(.kc-social-item) {
+  background-color: var(--cledyu-input) !important;
+  --pf-c-button--m-control--BackgroundColor: var(--cledyu-input);
+  border: 1px solid var(--cledyu-input-border) !important;
+  border-left: 0 !important;
+  color: var(--cledyu-muted) !important;
+  box-shadow: none !important;
+}
+.pf-c-button.pf-m-control:not(.kc-social-item):hover { color: #fff !important; }
+
+/* 소셜 버튼(pf-m-control + kc-social-item)은 흰색 유지(토글 규칙보다 우선) */
+.pf-c-button.pf-m-control.kc-social-item, a.kc-social-item {
+  background-color: #fff !important;
+  --pf-c-button--m-control--BackgroundColor: #fff;
+  color: #1e293b !important;
+  border: 1px solid var(--cledyu-input-border) !important;
+}
+
+/* 회원가입 푸터: 흰 배경 제거, 카드와 동화. 실제 흰 래퍼는 #kc-info.login-pf-signup. */
+#kc-info,
+.login-pf-signup,
+#kc-info-wrapper,
+#kc-registration-container,
+#kc-registration,
+.pf-c-login__main-footer {
+  background: transparent !important;
+  background-color: transparent !important;
+  box-shadow: none !important;
+  border: 0 !important;
+  color: var(--cledyu-muted) !important;
+}
+#kc-info, .login-pf-signup {
+  border-top: 1px solid var(--cledyu-border) !important;
+  margin-top: 14px !important;
+  padding: 14px 0 0 !important;
+}
+#kc-info hr, .login-pf-signup hr { display: none !important; }
+#kc-registration a, #kc-registration-container a, #kc-info a { color: #38bdf8 !important; font-weight: 600; }
+
+/* 기본 버튼 brand 강제(명시 hex + 높은 specificity, var/cascade 폴백) */
+input#kc-login,
+input#kc-login[type="submit"],
+#kc-login.pf-c-button,
+.login-pf-page #kc-login {
+  background: #0ea5e9 !important;
+  background-color: #0ea5e9 !important;
+  background-image: none !important;
+  color: #fff !important;
+  border: 0 !important;
+}
+input#kc-login:hover, .login-pf-page #kc-login:hover {
+  background-color: #0284c7 !important;
+}
