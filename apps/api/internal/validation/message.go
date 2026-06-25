@@ -20,11 +20,14 @@ const (
 type CheckType string
 
 const (
-	CheckCommand        CheckType = "command"
-	CheckFileExists     CheckType = "file_exists"
-	CheckFileContent    CheckType = "file_content"
-	CheckProcessRunning CheckType = "process_running"
-	CheckHTTPResponse   CheckType = "http_response"
+	CheckCommand           CheckType = "command"
+	CheckFileExists        CheckType = "file_exists"
+	CheckDirExists         CheckType = "dir_exists"
+	CheckFileAbsent        CheckType = "file_absent"
+	CheckFileContent       CheckType = "file_content"
+	CheckFileContentAbsent CheckType = "file_content_absent"
+	CheckProcessRunning    CheckType = "process_running"
+	CheckHTTPResponse      CheckType = "http_response"
 )
 
 // VMSpec tells validation-engine which lab VM to inspect.

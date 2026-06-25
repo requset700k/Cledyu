@@ -16,6 +16,17 @@ variable "subnet_id" {
   default     = ""
 }
 
+variable "assign_public_ip" {
+  description = <<-EOT
+    세션 인스턴스에 퍼블릭 IP 를 할당할지. Launch Template 이 network_interfaces 를 명시하면
+    subnet 의 MapPublicIpOnLaunch 가 무시되어 기본 미할당이 되므로, default VPC(IGW) 환경에서는
+    true 여야 인스턴스가 인터넷(tailscale 가입·SSM·패키지 설치)에 도달한다.
+    private subnet + NAT 구성이면 false 로 둔다.
+  EOT
+  type        = bool
+  default     = true
+}
+
 variable "instance_type" {
   description = "세션 인스턴스 타입. Launch Template 기본값이며 api 가 런타임에 오버라이드할 수 있다."
   type        = string
@@ -58,11 +69,11 @@ variable "budget_notification_emails" {
 
 # ─────────────────────────────────────────────────────────────────────────
 # 공개 진입점(public ingress) — 학습자 social 로그인을 위해 Keycloak 을
-# auth.cledyu.io 로 공개 노출하는 Route53 + ACM + ALB + tailnet 리버스프록시 스택.
+# auth.cledyu.com 로 공개 노출하는 Route53 + ACM + ALB + tailnet 리버스프록시 스택.
 # 홈랩 클러스터가 NAT 뒤라 ALB 가 직접 Keycloak 을 타겟할 수 없으므로, VPC 안에
 # tailnet 가입 프록시 인스턴스를 두고 ALB → 프록시 → (tailnet) → Keycloak 으로 잇는다.
 # enable_public_ingress=false 면 이 스택은 생성되지 않는다(opt-in). 절차는
-# docs/RUNBOOK/learner-auth.md 의 '공개 노출(auth.cledyu.io)' 절 참고.
+# docs/RUNBOOK/learner-auth.md 의 '공개 노출(auth.cledyu.com)' 절 참고.
 # ─────────────────────────────────────────────────────────────────────────
 
 variable "enable_public_ingress" {
@@ -72,20 +83,20 @@ variable "enable_public_ingress" {
 }
 
 variable "public_domain" {
-  description = "공개 루트 도메인(Route53 hosted zone 으로 관리). 예 cledyu.io. NS 를 도메인 등록기관에 위임해야 한다."
+  description = "공개 루트 도메인(Route53 hosted zone 으로 관리). 예 cledyu.com. NS 를 도메인 등록기관에 위임해야 한다."
   type        = string
-  default     = "cledyu.io"
+  default     = "cledyu.com"
 }
 
 variable "public_keycloak_host" {
   description = "Keycloak 공개 FQDN. 구글 OAuth redirect URI 의 호스트가 된다(.../realms/cledyu-learn/broker/google/endpoint)."
   type        = string
-  default     = "auth.cledyu.io"
+  default     = "auth.cledyu.com"
 }
 
 variable "keycloak_upstream_url" {
   description = <<-EOT
-    프록시가 auth.cledyu.io 요청을 포워딩할 tailnet 상의 Keycloak 업스트림 URL.
+    프록시가 auth.cledyu.com 요청을 포워딩할 tailnet 상의 Keycloak 업스트림 URL.
     Cledyu 토폴로지에서는 하이퍼바이저 subnet router 가 10.10.0.0/24 를 tailnet 에
     광고하고 Traefik LB 가 10.10.0.101 이므로 "https://10.10.0.101" 를 쓴다(프록시는
     --accept-routes 로 이 라우트를 받고, Host=public_keycloak_host 로 보내 Traefik 이

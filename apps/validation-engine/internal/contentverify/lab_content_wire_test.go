@@ -127,10 +127,12 @@ func (f fakeExecutor) Close()                                       {}
 // satisfying 은 해당 체크를 "정답 상태"로 만드는 VM 출력을 돌려준다(체크 타입에서 파생).
 func satisfying(mc model.Check) fakeExecutor {
 	switch mc.Type {
-	case model.CheckFileExists, model.CheckProcessRunning:
-		return fakeExecutor{output: "ok"} // test -f / pgrep 성공(에러 없음)
+	case model.CheckFileExists, model.CheckDirExists, model.CheckFileAbsent, model.CheckProcessRunning:
+		return fakeExecutor{output: "ok"} // test -f / test -d / test ! -f / pgrep 성공(에러 없음)
 	case model.CheckFileContent, model.CheckCommand:
 		return fakeExecutor{output: "··· " + mc.Expect + " ···"} // 출력/내용에 Expect 포함
+	case model.CheckFileContentAbsent:
+		return fakeExecutor{output: "··· 무관한 내용 ···"} // 정답=Expect 가 내용에 없음
 	case model.CheckHTTPResponse:
 		return fakeExecutor{output: strconv.Itoa(mc.ExpectCode)}
 	default:
@@ -141,10 +143,12 @@ func satisfying(mc model.Check) fakeExecutor {
 // violating 은 해당 체크를 "오답 상태"로 만드는 VM 출력을 돌려준다.
 func violating(mc model.Check) fakeExecutor {
 	switch mc.Type {
-	case model.CheckFileExists, model.CheckProcessRunning:
-		return fakeExecutor{err: errors.New("exit status 1")} // 파일 없음 / 프로세스 없음
+	case model.CheckFileExists, model.CheckDirExists, model.CheckFileAbsent, model.CheckProcessRunning:
+		return fakeExecutor{err: errors.New("exit status 1")} // 파일 없음 / 디렉터리 없음 / (file_absent는)파일 있음 / 프로세스 없음
 	case model.CheckFileContent, model.CheckCommand:
 		return fakeExecutor{output: ""} // 빈 출력 — 비어있지 않은 Expect 를 절대 포함하지 않음
+	case model.CheckFileContentAbsent:
+		return fakeExecutor{output: "··· " + mc.Expect + " ···"} // 오답=있으면 안 되는 Expect 가 내용에 있음
 	case model.CheckHTTPResponse:
 		return fakeExecutor{output: strconv.Itoa(mc.ExpectCode + 1)} // 기대와 다른 코드
 	default:
@@ -170,11 +174,11 @@ func TestLabContent_WirePreservesFields(t *testing.T) {
 					if mc.Expect == "" {
 						t.Errorf("%s: expect 가 비어있음", where())
 					}
-				case model.CheckFileExists:
+				case model.CheckFileExists, model.CheckDirExists, model.CheckFileAbsent:
 					if mc.Path == "" {
 						t.Errorf("%s: path 가 비어있음", where())
 					}
-				case model.CheckFileContent:
+				case model.CheckFileContent, model.CheckFileContentAbsent:
 					if mc.Path == "" || mc.Expect == "" {
 						t.Errorf("%s: path/expect 가 비어있음", where())
 					}

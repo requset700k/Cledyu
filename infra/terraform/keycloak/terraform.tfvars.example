@@ -120,7 +120,7 @@ learn_oidc_client_secrets = {
 }
 
 # 소셜 IdP 단계적 게이트. 개발자 콘솔에서 client 발급된 provider 만 넣는다.
-# 구글 OAuth 발급 + auth.cledyu.io 공개 노출 완료 후 ["google"], 이후 카카오/네이버 추가.
+# 구글 OAuth 발급 + auth.cledyu.com 공개 노출 완료 후 ["google"], 이후 카카오/네이버 추가.
 # 빈 목록이면 IdP 미생성. (google/kakao/naver 만 허용)
 enabled_social_idps = []
 
@@ -135,7 +135,7 @@ learn_verify_email = true
 learn_smtp = {
   host          = "smtp-relay.brevo.com"
   port          = "587"
-  from          = "no-reply@cledyu.io"  # ← Brevo 에서 verify 한 발신 주소로 교체
+  from          = "no-reply@cledyu.com"  # ← Brevo 에서 verify 한 발신 주소로 교체
   auth_username = "REPLACE_WITH_BREVO_LOGIN_EMAIL"
   starttls      = true
   ssl           = false

@@ -1,13 +1,13 @@
-# Cledyu 공개 진입점(public ingress) — auth.cledyu.io.
+# Cledyu 공개 진입점(public ingress) — auth.cledyu.com.
 #
 # 학습자 social 로그인(구글)을 켜려면 Keycloak 이 공개+공개신뢰 TLS 로 도달 가능해야
-# 한다(브라우저가 구글로 갔다가 auth.cledyu.io/broker/.../endpoint 로 콜백). 홈랩
+# 한다(브라우저가 구글로 갔다가 auth.cledyu.com/broker/.../endpoint 로 콜백). 홈랩
 # 클러스터는 NAT 뒤라 ALB 가 in-cluster Keycloak 을 직접 타겟할 수 없으므로:
 #
-#   브라우저 → Route53(auth.cledyu.io) → ALB(443, ACM TLS 종단)
+#   브라우저 → Route53(auth.cledyu.com) → ALB(443, ACM TLS 종단)
 #            → tailnet 가입 프록시 EC2(:80) → (tailnet) → Keycloak
 #
-# 프록시는 Host=auth.cledyu.io 를 보존해 전달하고, Keycloak 은 proxy.headers=xforwarded
+# 프록시는 Host=auth.cledyu.com 를 보존해 전달하고, Keycloak 은 proxy.headers=xforwarded
 # + hostname strict=false 로 X-Forwarded-Host 를 신뢰해 공개 도메인 기준 URL 을 만든다.
 #
 # 이 스택 전체는 var.enable_public_ingress 로 게이트된다(기본 false → 미생성).
@@ -33,7 +33,7 @@ resource "aws_route53_zone" "public" {
   }
 }
 
-# ── ACM 인증서(auth.cledyu.io, DNS 검증) ──────────────────────────────────
+# ── ACM 인증서(auth.cledyu.com, DNS 검증) ──────────────────────────────────
 resource "aws_acm_certificate" "auth" {
   count             = local.pub
   domain_name       = var.public_keycloak_host

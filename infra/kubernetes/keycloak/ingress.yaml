@@ -38,7 +38,7 @@ metadata:
 spec:
   headers:
     customRequestHeaders:
-      X-Forwarded-Host: auth.cledyu.io
+      X-Forwarded-Host: auth.cledyu.com
       X-Forwarded-Proto: https
       X-Forwarded-Port: "443"
       X-Forwarded-Prefix: ""
@@ -69,8 +69,8 @@ spec:
                 port:
                   number: 8080
 ---
-# 공개 ingress (auth.cledyu.io) — 공개 노출 경로(ALB→tailnet 프록시)가 Host: auth.cledyu.io
-# 로 보내면 이 라우터로 매칭되고, XFH 를 auth.cledyu.io 로 강제한다. 공개 TLS 는 ALB(ACM)가
+# 공개 ingress (auth.cledyu.com) — 공개 노출 경로(ALB→tailnet 프록시)가 Host: auth.cledyu.com
+# 로 보내면 이 라우터로 매칭되고, XFH 를 auth.cledyu.com 로 강제한다. 공개 TLS 는 ALB(ACM)가
 # 종단하고 프록시→Traefik hop 은 내부 CA(검증 생략)다.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -83,10 +83,10 @@ spec:
   ingressClassName: traefik
   tls:
     - hosts:
-        - auth.cledyu.io
+        - auth.cledyu.com
       secretName: keycloak-tls
   rules:
-    - host: auth.cledyu.io
+    - host: auth.cledyu.com
       http:
         paths:
           - path: /

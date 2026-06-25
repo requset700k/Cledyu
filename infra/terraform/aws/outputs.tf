@@ -40,7 +40,7 @@ output "public_zone_name_servers" {
 }
 
 output "public_alb_dns_name" {
-  description = "공개 ALB 의 DNS 이름(auth.cledyu.io A ALIAS 타겟). 디버깅·검증용."
+  description = "공개 ALB 의 DNS 이름(auth.cledyu.com A ALIAS 타겟). 디버깅·검증용."
   value       = var.enable_public_ingress ? aws_lb.public[0].dns_name : ""
 }
 

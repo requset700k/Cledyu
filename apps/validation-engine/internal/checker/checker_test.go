@@ -128,6 +128,92 @@ func TestRunFileExists_Fail_RelativePath(t *testing.T) {
 	}
 }
 
+// --- dir_exists ---
+
+func TestRunDirExists_Pass(t *testing.T) {
+	result := Run(context.Background(), mockOk(""), model.Check{
+		Type: model.CheckDirExists,
+		Path: "/home/lab/work/scripts",
+	})
+	if !result.Passed {
+		t.Errorf("디렉터리 존재 시 통과해야 함: %s", result.Detail)
+	}
+}
+
+func TestRunDirExists_Fail_NotFound(t *testing.T) {
+	result := Run(context.Background(), mockFail("exit 1"), model.Check{
+		Type: model.CheckDirExists,
+		Path: "/home/lab/work/scripts",
+	})
+	if result.Passed {
+		t.Error("디렉터리 없으면 실패해야 함")
+	}
+}
+
+func TestRunDirExists_Fail_Injection(t *testing.T) {
+	result := Run(context.Background(), mockOk(""), model.Check{
+		Type: model.CheckDirExists,
+		Path: "/home/lab/work/scripts; rm -rf /",
+	})
+	if result.Passed {
+		t.Error("인젝션 시도는 실패해야 함")
+	}
+}
+
+func TestRunDirExists_Fail_RelativePath(t *testing.T) {
+	result := Run(context.Background(), mockOk(""), model.Check{
+		Type: model.CheckDirExists,
+		Path: "home/lab/work/scripts",
+	})
+	if result.Passed {
+		t.Error("상대경로는 실패해야 함")
+	}
+}
+
+// --- file_absent ---
+
+func TestRunFileAbsent_Pass(t *testing.T) {
+	// test ! -f 가 성공(파일 없음) → 통과
+	result := Run(context.Background(), mockOk(""), model.Check{
+		Type: model.CheckFileAbsent,
+		Path: "/home/lab/work/backup/debug.txt",
+	})
+	if !result.Passed {
+		t.Errorf("파일이 없으면 통과해야 함: %s", result.Detail)
+	}
+}
+
+func TestRunFileAbsent_Fail_Present(t *testing.T) {
+	// test ! -f 가 실패(파일 있음) → 실패
+	result := Run(context.Background(), mockFail("exit 1"), model.Check{
+		Type: model.CheckFileAbsent,
+		Path: "/home/lab/work/backup/debug.txt",
+	})
+	if result.Passed {
+		t.Error("존재하면 안 되는 파일이 있으면 실패해야 함")
+	}
+}
+
+func TestRunFileAbsent_Fail_Injection(t *testing.T) {
+	result := Run(context.Background(), mockOk(""), model.Check{
+		Type: model.CheckFileAbsent,
+		Path: "/home/lab/work/backup/debug.txt; rm -rf /",
+	})
+	if result.Passed {
+		t.Error("인젝션 시도는 실패해야 함")
+	}
+}
+
+func TestRunFileAbsent_Fail_RelativePath(t *testing.T) {
+	result := Run(context.Background(), mockOk(""), model.Check{
+		Type: model.CheckFileAbsent,
+		Path: "home/lab/work/backup/debug.txt",
+	})
+	if result.Passed {
+		t.Error("상대경로는 실패해야 함")
+	}
+}
+
 // --- file_content ---
 
 func TestRunFileContent_Pass(t *testing.T) {
@@ -156,6 +242,68 @@ func TestRunFileContent_Fail_Injection(t *testing.T) {
 	result := Run(context.Background(), mockOk(""), model.Check{
 		Type: model.CheckFileContent,
 		Path: "/etc/hosts && cat /etc/passwd",
+	})
+	if result.Passed {
+		t.Error("인젝션 시도는 실패해야 함")
+	}
+}
+
+// --- file_content_absent ---
+
+func TestRunFileContentAbsent_Pass(t *testing.T) {
+	// 기대 문자열이 파일에 없음 → 통과
+	result := Run(context.Background(), mockOk("root:/bin/bash\nlab:/bin/bash"), model.Check{
+		Type:   model.CheckFileContentAbsent,
+		Path:   "/home/lab/work/bash-users.txt",
+		Expect: "nologin",
+	})
+	if !result.Passed {
+		t.Errorf("기대 문자열이 없으면 통과해야 함: %s", result.Detail)
+	}
+}
+
+func TestRunFileContentAbsent_Fail_Present(t *testing.T) {
+	// 기대 문자열이 파일에 있음(필터링 안 함) → 실패
+	result := Run(context.Background(), mockOk("daemon:/usr/sbin/nologin\nlab:/bin/bash"), model.Check{
+		Type:   model.CheckFileContentAbsent,
+		Path:   "/home/lab/work/bash-users.txt",
+		Expect: "nologin",
+	})
+	if result.Passed {
+		t.Error("있으면 안 되는 문자열이 있으면 실패해야 함")
+	}
+}
+
+func TestRunFileContentAbsent_Pass_FileMissing(t *testing.T) {
+	// 파일이 아예 없으면 찾을 내용도 없으므로 '내용 부재'는 공허하게 충족 → 통과(vacuous pass).
+	// 단독 사용 랩에서 파일 미생성을 '파일 읽기 실패'라는 혼동되는 사유로 떨어뜨리지 않기 위함.
+	result := Run(context.Background(), mockFail("test: no such file"), model.Check{
+		Type:   model.CheckFileContentAbsent,
+		Path:   "/home/lab/work/bash-users.txt",
+		Expect: "nologin",
+	})
+	if !result.Passed {
+		t.Errorf("파일이 없으면 vacuous pass 해야 함: %s", result.Detail)
+	}
+}
+
+func TestRunFileContentAbsent_Fail_EmptyExpect(t *testing.T) {
+	// expect 비어있으면 항상 "있음"으로 판정돼 통과 불가 → 실패
+	result := Run(context.Background(), mockOk("anything"), model.Check{
+		Type:   model.CheckFileContentAbsent,
+		Path:   "/home/lab/work/bash-users.txt",
+		Expect: "",
+	})
+	if result.Passed {
+		t.Error("expect가 비어있으면 실패해야 함")
+	}
+}
+
+func TestRunFileContentAbsent_Fail_Injection(t *testing.T) {
+	result := Run(context.Background(), mockOk(""), model.Check{
+		Type:   model.CheckFileContentAbsent,
+		Path:   "/home/lab/work/bash-users.txt && cat /etc/passwd",
+		Expect: "nologin",
 	})
 	if result.Passed {
 		t.Error("인젝션 시도는 실패해야 함")
