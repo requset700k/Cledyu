@@ -1,0 +1,70 @@
+---
+apiVersion: sloth.slok.dev/v1
+kind: PrometheusServiceLevel
+metadata:
+  name: lab-slo
+  namespace: monitoring
+  labels:
+    app: lab-platform
+    team: platform
+spec:
+  service: lab
+  labels:
+    app: lab-platform
+    team: platform
+  slos:
+    # ───────────────────────────────────────────
+    # 시작 지연 SLO: 온프렘 95% < 60s
+    # lab_startup_duration_seconds histogram 기반
+    # 메트릭 수집 엔드포인트 구축 후 활성화
+    # ───────────────────────────────────────────
+    - name: lab-startup-duration-onprem
+      objective: 95.0
+      description: "온프렘 lab 환경 시작이 95% 이상 60초 이내여야 한다."
+      sli:
+        events:
+          errorQuery: |
+            sum(rate(lab_startup_duration_seconds_bucket{env="onprem", le="+Inf"}[{{ .window }}]))
+            -
+            sum(rate(lab_startup_duration_seconds_bucket{env="onprem", le="60"}[{{ .window }}]))
+          totalQuery: |
+            sum(rate(lab_startup_duration_seconds_bucket{env="onprem", le="+Inf"}[{{ .window }}])) or vector(1)
+      alerting:
+        name: LabStartupOnPremSLO
+        labels:
+          service: lab
+          slo: startup-duration-onprem
+        pageAlert:
+          labels:
+            severity: critical
+        ticketAlert:
+          labels:
+            severity: warning
+
+    # ───────────────────────────────────────────
+    # 시작 지연 SLO: EC2 오버플로우 90% < 90s
+    # lab_startup_duration_seconds histogram 기반
+    # 메트릭 수집 엔드포인트 구축 후 활성화
+    # ───────────────────────────────────────────
+    - name: lab-startup-duration-ec2
+      objective: 90.0
+      description: "EC2 오버플로우 lab 환경 시작이 90% 이상 90초 이내여야 한다."
+      sli:
+        events:
+          errorQuery: |
+            sum(rate(lab_startup_duration_seconds_bucket{env="ec2", le="+Inf"}[{{ .window }}]))
+            -
+            sum(rate(lab_startup_duration_seconds_bucket{env="ec2", le="90"}[{{ .window }}]))
+          totalQuery: |
+            sum(rate(lab_startup_duration_seconds_bucket{env="ec2", le="+Inf"}[{{ .window }}])) or vector(1)
+      alerting:
+        name: LabStartupEC2SLO
+        labels:
+          service: lab
+          slo: startup-duration-ec2
+        pageAlert:
+          labels:
+            severity: critical
+        ticketAlert:
+          labels:
+            severity: warning
