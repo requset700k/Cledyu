@@ -163,6 +163,28 @@ func TestRequestHint_PassesOrg(t *testing.T) {
 	}
 }
 
+// 학생 터미널 tail 은 BFF 요청의 terminal_tail 로 전달된다.
+func TestRequestHint_PassesTerminalTail(t *testing.T) {
+	var gotTail string
+	bff := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		var hr ai.HintRequest
+		_ = json.NewDecoder(req.Body).Decode(&hr)
+		gotTail = hr.TerminalTail
+		_ = json.NewEncoder(w).Encode(ai.HintResponse{Hint: "h", HintLevel: hr.HintLevel, Model: "m"})
+	}))
+	defer bff.Close()
+
+	h := hintTestHandler(t, bff.URL)
+	r := hintRouter(h)
+	tail := "touch ~/work/notes.txt\nNo such file or directory"
+	if w := postHint(r, "s1", map[string]any{"step_id": 1, "terminal_tail": tail}); w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if gotTail != tail {
+		t.Fatalf("expected terminal_tail forwarded, got %q", gotTail)
+	}
+}
+
 // BFF 503(ai_unavailable) 이면 정적 hint_levels 로 폴백한다.
 func TestRequestHint_AIUnavailable_FallsBackToStatic(t *testing.T) {
 	bff := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
