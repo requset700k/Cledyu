@@ -109,6 +109,7 @@ func (h *Handler) ec2Console(c *gin.Context, sessionID string) {
 	term, err := ec2.DialTerminal(c.Request.Context(), addr, ec2.TerminalConfig{
 		User:     h.cfg.AWS.LiveTerminalSSHUser,
 		Password: h.cfg.AWS.LiveTerminalSSHPassword,
+		Dial:     h.ec2Dial, // tsnet 다이얼러(미설정 시 nil → 기본 net.Dialer, 클러스터에선 도달 불가).
 	})
 	if err != nil {
 		h.log.Warn("ec2 ssh terminal connect failed", zap.String("addr", addr), zap.Error(err))
