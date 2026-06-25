@@ -50,9 +50,13 @@ runcmd:
   - curl -fsSL https://tailscale.com/install.sh | sh
   - tailscale up --authkey "${tailscale_auth_key}" --hostname "${hostname}" --accept-routes --ssh || true
   # Caddy 설치(공식 apt 저장소).
+  # write_files 가 패키지 설치 전에 /etc/caddy/Caddyfile 을 써두므로, 패키지의 conffile
+  # 과 충돌해 dpkg 가 대화형 프롬프트(keep/replace)를 띄운다. 비대화형 cloud-init 에선
+  # EOF→configure 실패→caddy user 미생성→서비스 사망(217/USER)으로 이어진다. 따라서
+  # --force-confold 로 우리 Caddyfile 을 유지하며 프롬프트 없이 configure 를 완주시킨다.
   - curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
   - curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
   - apt-get update -y
-  - apt-get install -y caddy
+  - DEBIAN_FRONTEND=noninteractive apt-get install -y -o Dpkg::Options::=--force-confold caddy
   - systemctl enable --now caddy
   - systemctl reload caddy || systemctl restart caddy
