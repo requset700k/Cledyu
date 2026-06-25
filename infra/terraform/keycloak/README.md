@@ -37,10 +37,15 @@ gcloud auth application-default login            # 워크스테이션
 export GOOGLE_OAUTH_ACCESS_TOKEN=$(gcloud auth print-access-token)  # 비대화형/CI
 
 terraform init
-# 시크릿은 Secret Manager 에서 소싱:
-TF_VAR_idp_client_secrets="{ google = \"$(gcloud secrets versions access latest --secret=cledyu-learn-idp-google-secret --project=cledyu-project)\", kakao = \"unused\", naver = \"unused\" }" \
-TF_VAR_learn_smtp_password="$(gcloud secrets versions access latest --secret=cledyu-learn-smtp-key --project=cledyu-project)" \
-terraform plan   # 확인 후 apply
+# 시크릿은 Secret Manager 에서 변수로 먼저 가져온다. set -e 로 조회 실패 시 즉시 중단해
+# 빈 secret 으로 apply 되는 것을 막는다(VAR=$(실패) terraform 형식은 terraform 을 막지 못함).
+# idp_client_secrets·learn_smtp_password 는 tfvars 에 두지 않는다 — tfvars 값이 TF_VAR 보다
+# 우선이라 placeholder 가 SM 값을 덮어쓴다(idp 는 Google invalid_client 유발).
+set -e
+SM_GOOGLE=$(gcloud secrets versions access latest --secret=cledyu-learn-idp-google-secret --project=cledyu-project)
+SM_SMTP=$(gcloud secrets versions access latest --secret=cledyu-learn-smtp-key --project=cledyu-project)
+TF_VAR_learn_smtp_password="$SM_SMTP" \
+  terraform plan -var "idp_client_secrets={google=\"$SM_GOOGLE\",kakao=\"unused\",naver=\"unused\"}"   # 확인 후 apply
 ```
 
 <!-- BEGIN_TF_DOCS -->
