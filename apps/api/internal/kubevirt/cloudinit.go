@@ -87,12 +87,44 @@ bootcmd:
       #!/usr/bin/env python3
       import json
       import os
+      import sys
 
       ROOT = "/home/lab"
       MAX_DEPTH = 4
       MAX_ENTRIES = 500
+      MAX_READ_BYTES = 131072
       items = []
       truncated = False
+
+      def fail(message, code=64):
+          sys.stderr.write(message + "\n")
+          raise SystemExit(code)
+
+      def normalize_relative(relative_path):
+          if not relative_path:
+              fail("path is required")
+          normalized = os.path.normpath(relative_path)
+          if (
+              normalized == "."
+              or os.path.isabs(normalized)
+              or normalized.startswith("../")
+              or normalized == ".."
+              or "\\" in normalized
+              or "\x00" in normalized
+          ):
+              fail("unsafe path")
+          for segment in normalized.split(os.sep):
+              if not segment or segment.startswith("."):
+                  fail("hidden or unsafe path")
+          return normalized
+
+      def resolve_under_root(relative_path):
+          normalized = normalize_relative(relative_path)
+          root_real = os.path.realpath(ROOT)
+          target = os.path.realpath(os.path.join(ROOT, normalized))
+          if target != root_real and not target.startswith(root_real + os.sep):
+              fail("path escapes root")
+          return normalized, target
 
       def walk(directory, relative, depth):
           global truncated
@@ -127,9 +159,35 @@ bootcmd:
                   if truncated:
                       return
 
-      walk(ROOT, "", 1)
-      json.dump({"root": ROOT, "items": items, "truncated": truncated}, os.sys.stdout)
-      os.sys.stdout.write("\n")
+      def list_files():
+          walk(ROOT, "", 1)
+          json.dump({"root": ROOT, "items": items, "truncated": truncated}, sys.stdout)
+          sys.stdout.write("\n")
+
+      def read_file(relative_path):
+          normalized, target = resolve_under_root(relative_path)
+          if os.path.islink(target) or not os.path.isfile(target):
+              fail("not a regular file", 66)
+          with open(target, "rb") as handle:
+              data = handle.read(MAX_READ_BYTES + 1)
+          truncated = len(data) > MAX_READ_BYTES
+          if truncated:
+              data = data[:MAX_READ_BYTES]
+          try:
+              content = data.decode("utf-8")
+          except UnicodeDecodeError:
+              fail("binary file preview is unavailable", 65)
+          json.dump({"path": normalized, "content": content, "truncated": truncated}, sys.stdout)
+          sys.stdout.write("\n")
+
+      command = os.environ.get("SSH_ORIGINAL_COMMAND", "").strip() or "list"
+      action, _, argument = command.partition(" ")
+      if action == "list" and not argument:
+          list_files()
+      elif action == "read" and argument:
+          read_file(argument.strip())
+      else:
+          fail("unsupported command")
 `)
 	}
 	b.WriteString(`  - path: /home/lab/.hushlogin

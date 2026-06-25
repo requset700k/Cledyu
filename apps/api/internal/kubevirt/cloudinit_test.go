@@ -253,8 +253,13 @@ func TestRenderCloudInitWithAccess_AddsRestrictedFileListKeyAndCommand(t *testin
 			`ROOT = "/home/lab"`,
 			"MAX_DEPTH = 4",
 			"MAX_ENTRIES = 500",
+			"MAX_READ_BYTES = 131072",
+			"SSH_ORIGINAL_COMMAND",
 			"entry.is_symlink()",
+			"os.path.realpath",
+			"def read_file(relative_path):",
 			`json.dump({"root": ROOT, "items": items, "truncated": truncated}`,
+			`json.dump({"path": normalized, "content": content, "truncated": truncated}`,
 		} {
 			if !strings.Contains(file.Content, want) {
 				t.Fatalf("expected %q in file-list command:\n%s", want, file.Content)
