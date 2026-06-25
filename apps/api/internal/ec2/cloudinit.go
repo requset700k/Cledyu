@@ -10,13 +10,16 @@ import (
 
 // renderCloudInit은 세션 EC2 인스턴스의 cloud-init user-data(#cloud-config)를 만든다.
 //
-// 베이스 AMI(W1 terraform/packer)에 SSM Agent·code-server·tailscale 바이너리가 이미 설치돼 있다고
-// 가정하고, 여기서는 세션별로만:
-//   - tailnet 가입: authkey 가 있으면 "<prefix>-<sessionID>" MagicDNS 호스트네임으로 tailscale up.
-//     이렇게 붙은 호스트네임으로 API/검증엔진이 인스턴스에 도달한다(라이브 터미널/IDE 프록시·SSH).
-//   - 랩별 초기화: BootInit 의 packages(apt) 설치와 runcmd 실행.
+// RunInstances 의 user-data 는 Launch Template 의 base user-data 를 병합 없이 대체하므로
+// (EC2 는 user-data 를 merge 하지 않는다), 플랫폼 도구(SSM Agent·tailscale·code-server)를
+// 여기서 직접 설치한다. 전부 best-effort(`|| true`)·멱등이라 packer 로 미리 구운 AMI 에서도 안전하다.
+//   - SSM Agent: 채점(SendCommand) 경로. authkey 유무와 무관하게 항상 설치한다.
+//   - tailnet 가입: authkey 가 있으면 tailscale 설치 후 "<prefix>-<sessionID>" MagicDNS 호스트네임으로
+//     tailscale up. 이 호스트네임으로 API/검증엔진이 인스턴스에 도달한다(라이브 터미널/IDE 프록시·SSH).
+//   - code-server: 브라우저 IDE. tailnet 경유로 프록시되므로 authkey 가 있을 때만, best-effort 로 설치한다.
+//   - 랩별 초기화: BootInit 의 packages(apt) 설치와 runcmd 실행(플랫폼 도구 설치 뒤에 온다).
 //
-// authkey 가 비면 tailscale 가입을 생략한다 — SSM 채점은 여전히 동작하지만 라이브 터미널/IDE 는 불가.
+// authkey 가 비면 tailscale·code-server 를 생략한다 — SSM 채점 전용으로 부팅한다.
 func renderCloudInit(sessionID string, cfg *config.AWSConfig, init session.BootInit) string {
 	var b strings.Builder
 	b.WriteString("#cloud-config\n")
@@ -45,11 +48,18 @@ chpasswd:
 	}
 
 	b.WriteString("runcmd:\n")
+	// SSM Agent — 채점(SendCommand) 경로. Canonical Ubuntu AMI 엔 보통 snap 으로 동봉되나 누락 대비 보장.
+	b.WriteString("  - snap install amazon-ssm-agent --classic || true\n")
+	b.WriteString("  - systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service || systemctl enable --now amazon-ssm-agent || true\n")
 	if cfg.TailscaleAuthKey != "" {
 		hostname := tailnetHostname(cfg, sessionID)
+		// tailscale 설치(베이스 AMI 가 packer 로 미리 굽지 않은 경우 대비) 후 가입. 가입은 설치 뒤에 와야 한다.
+		b.WriteString("  - curl -fsSL https://tailscale.com/install.sh | sh || true\n")
 		// --ssh: 검증엔진/사용자가 tailnet 경유 SSH 로 접속(virtctl 대체). --hostname: 결정적 MagicDNS 이름.
 		fmt.Fprintf(&b, "  - tailscale up --ssh --hostname=%s --authkey=%s\n",
 			yamlScalar(hostname), yamlScalar(cfg.TailscaleAuthKey))
+		// 브라우저 IDE(code-server) — best-effort, 느려서 마지막. tailnet 경유로 프록시되므로 authkey 가 있을 때만.
+		b.WriteString("  - curl -fsSL https://code-server.dev/install.sh | sh || true\n")
 	}
 	for _, cmd := range init.Runcmd {
 		// runcmd 의 각 항목은 셸로 실행되는 단일 문자열로 둔다(content DSL 과 동일 계약).
