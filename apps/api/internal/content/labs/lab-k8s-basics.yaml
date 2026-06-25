@@ -19,7 +19,10 @@ init:
     - curl
   runcmd:
     - curl -sfL https://get.k3s.io -o /tmp/k3s-install.sh
-    - INSTALL_K3S_EXEC="--write-kubeconfig-mode 644" sh /tmp/k3s-install.sh
+    # cluster/service CIDR 을 호스트(pod 10.42.0.0/16, svc 10.43.0.0/16)와 겹치지 않게 지정.
+    # 기본값이면 guest k3s 파드망(10.42.0.0/24)이 호스트 cp02 파드망과 충돌해, cp02 경유
+    # 검증 SSH 응답이 guest 내부로 mis-route 되어 검증이 ~50% 실패한다.
+    - INSTALL_K3S_EXEC="--write-kubeconfig-mode 644 --cluster-cidr=10.244.0.0/16 --service-cidr=10.245.0.0/16" sh /tmp/k3s-install.sh
     - echo KUBECONFIG=/etc/rancher/k3s/k3s.yaml >> /etc/environment
     - "printf 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml\\n' > /etc/profile.d/k3s-kubeconfig.sh"
 steps:
