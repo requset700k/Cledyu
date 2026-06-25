@@ -35,12 +35,14 @@ users:
 `, "session-"+sessionID)
 
 	var sshKeys []string
-	if key := strings.TrimSpace(labSSHPublicKey); key != "" {
-		sshKeys = append(sshKeys, key)
+	labKey := strings.TrimSpace(labSSHPublicKey)
+	fileListKey := strings.TrimSpace(fileListSSHPublicKey)
+	if labKey != "" && !sameSSHPublicKeyMaterial(labKey, fileListKey) {
+		sshKeys = append(sshKeys, labKey)
 	}
-	if key := strings.TrimSpace(fileListSSHPublicKey); key != "" {
+	if fileListKey != "" {
 		// Session API 파일 목록 key는 VM 안에서 범용 셸이 아니라 고정된 JSON 출력 명령만 실행한다.
-		sshKeys = append(sshKeys, `command="/usr/local/libexec/cledyu-list-files",restrict `+key)
+		sshKeys = append(sshKeys, `command="/usr/local/libexec/cledyu-list-files",restrict `+fileListKey)
 	}
 	if len(sshKeys) > 0 {
 		b.WriteString("    ssh_authorized_keys:\n")
@@ -227,4 +229,18 @@ runcmd:
   - systemctl restart serial-getty@ttyS0.service
 `)
 	return b.String()
+}
+
+func sameSSHPublicKeyMaterial(a, b string) bool {
+	aType, aBody, okA := sshPublicKeyMaterial(a)
+	bType, bBody, okB := sshPublicKeyMaterial(b)
+	return okA && okB && aType == bType && aBody == bBody
+}
+
+func sshPublicKeyMaterial(key string) (keyType, keyBody string, ok bool) {
+	fields := strings.Fields(strings.TrimSpace(key))
+	if len(fields) < 2 {
+		return "", "", false
+	}
+	return fields[0], fields[1], true
 }

@@ -270,6 +270,31 @@ func TestRenderCloudInitWithAccess_AddsRestrictedFileListKeyAndCommand(t *testin
 	t.Fatalf("file-list command not found in write_files:\n%s", out)
 }
 
+func TestRenderCloudInitWithAccess_DeduplicatesMatchingSSHKeyMaterial(t *testing.T) {
+	const sameKey = "ssh-ed25519 AAAA-duplicate-key shared@cledyu"
+	out := renderCloudInitWithAccess("abc123", sameKey, sameKey, BootInit{})
+
+	var parsed struct {
+		Users []struct {
+			SSHAuthorizedKeys []string `yaml:"ssh_authorized_keys"`
+		} `yaml:"users"`
+	}
+	if err := yaml.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatalf("rendered cloud-init is not valid YAML: %v\n%s", err, out)
+	}
+	if len(parsed.Users) != 1 {
+		t.Fatalf("users = %v, want one lab user", parsed.Users)
+	}
+	keys := parsed.Users[0].SSHAuthorizedKeys
+	if len(keys) != 1 {
+		t.Fatalf("ssh_authorized_keys = %v, want only the restricted file-list key", keys)
+	}
+	const restricted = `command="/usr/local/libexec/cledyu-list-files",restrict ssh-ed25519 AAAA-duplicate-key shared@cledyu`
+	if keys[0] != restricted {
+		t.Fatalf("ssh_authorized_keys[0] = %q, want %q", keys[0], restricted)
+	}
+}
+
 func TestRenderCloudInitWithAccess_OmitsFileListCommandWithoutKey(t *testing.T) {
 	out := renderCloudInitWithAccess("abc123", "", "", BootInit{})
 	if strings.Contains(out, "cledyu-list-files") {
