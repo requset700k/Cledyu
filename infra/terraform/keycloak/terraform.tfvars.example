@@ -140,8 +140,11 @@ learn_smtp = {
   starttls      = true
   ssl           = false
 }
-# Brevo 대시보드 → SMTP & API → SMTP 의 'SMTP key'(master password).
-learn_smtp_password = "REPLACE_WITH_BREVO_SMTP_KEY"
+# learn_smtp_password(Brevo SMTP key)도 여기 두지 말 것 — tfvars 값이 TF_VAR 보다
+# 우선이라 placeholder 가 SM 값을 덮어쓴다(idp_client_secrets 와 동일 함정). apply 시
+# GCP Secret Manager 에서 주입: TF_VAR_learn_smtp_password="$(gcloud secrets versions
+# access latest --secret=cledyu-learn-smtp-key --project=cledyu-project)"
+# (learn_smtp 블록을 비우면 SMTP 미설정 — 그땐 이 값도 불필요)
 
 idp_client_ids = {
   google = "REPLACE_WITH_GOOGLE_OAUTH_CLIENT_ID"

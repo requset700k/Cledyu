@@ -186,11 +186,13 @@ redirect URI 는 **공개 호스트** 기준이다.
 cd infra/terraform/keycloak
 
 # terraform.tfvars (gitignored): idp_client_ids.google=<CLIENT_ID>, enabled_social_idps=["google"]
-#   주의: idp_client_secrets 는 tfvars 에 두지 말 것 — tfvars > TF_VAR 우선순위라
-#   placeholder 가 실제 secret 을 덮어써 Google invalid_client 발생(실제 겪음). -var 로 준다.
-SM_GOOGLE=$(gcloud secrets versions access latest --secret=cledyu-learn-idp-google-secret --project=cledyu-project)
+#   주의: idp_client_secrets·learn_smtp_password 는 tfvars 에 두지 말 것 — tfvars > TF_VAR
+#   우선순위라 placeholder 가 SM 값을 덮어써 Google invalid_client 발생(실제 겪음). -var/SM 로 준다.
+set -e   # secret 조회 실패 시 즉시 중단(빈 secret 으로 apply 방지)
 export GOOGLE_OAUTH_ACCESS_TOKEN=$(gcloud auth print-access-token)   # GCS backend
-TF_VAR_learn_smtp_password="$(gcloud secrets versions access latest --secret=cledyu-learn-smtp-key --project=cledyu-project)" \
+SM_GOOGLE=$(gcloud secrets versions access latest --secret=cledyu-learn-idp-google-secret --project=cledyu-project)
+SM_SMTP=$(gcloud secrets versions access latest --secret=cledyu-learn-smtp-key --project=cledyu-project)
+TF_VAR_learn_smtp_password="$SM_SMTP" \
   terraform apply -var "idp_client_secrets={google=\"$SM_GOOGLE\",kakao=\"unused\",naver=\"unused\"}"
 terraform output social_idps_enabled   # ["google"] 확인
 ```
