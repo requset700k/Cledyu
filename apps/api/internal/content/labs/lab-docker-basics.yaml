@@ -36,9 +36,12 @@ steps:
       - "docker run 에 -d(백그라운드), --name(이름), -p <호스트포트>:<컨테이너포트> 를 조합합니다."
       - "docker run -d --name web -p 8080:80 nginx 실행 후 curl http://localhost:8080 에서 nginx 페이지가 나오면 성공입니다."
     checks:
+      # docker ps + web 부분일치는 web2/webserver 도 매칭돼 이름을 엄격 검증 못 했다.
+      # docker inspect 는 이름 정확 매칭(web ≠ web2) + State.Status 로 running 을 확인한다.
+      # (lowercase "running" 은 stopped 의 "Running":false 와 안 겹침 → 실행 중일 때만 통과)
       - type: command
-        command: docker ps
-        expect: web
+        command: docker inspect web
+        expect: running
       - type: http_response
         url: http://localhost:8080
         expect_code: 200
@@ -84,9 +87,24 @@ steps:
     checks:
       - type: file_exists
         path: /home/lab/app/Dockerfile
+      # Dockerfile 이 nginx 기반인지(내용) 확인 — file_exists 만으론 빈/엉뚱한 파일도 통과한다.
+      # "FROM nginx" 부분일치라 FROM nginx:alpine 같은 태그 변형도 수용한다.
+      - type: file_content
+        path: /home/lab/app/Dockerfile
+        expect: FROM nginx
+      # myweb:v1 까지 명시해 정확한 태그가 빌드됐는지 확인('docker images'+myweb 는 myweb:v2 등도 통과).
       - type: command
-        command: docker images
+        command: docker images myweb:v1
         expect: myweb
+      # COPY 가 제대로 됐는지 '빌드된 이미지 내용'으로 확인한다. Dockerfile 텍스트(COPY ./html
+      # 같은 유효 변형)를 검사하면 false fail 위험이 있어, 실제 이미지 웹루트 파일을 직접 본다.
+      # 이렇게 하면 step3 의 Dockerfile 오류를 step4 로 미루지 않고 step3 에서 잡는다.
+      # --pull=never: 미빌드 상태에서도 RunAll 이 이 체크까지 실행하는데, docker run 기본 pull
+      # policy(missing)면 로컬 전용 태그 myweb:v1 을 외부 레지스트리에서 pull 시도해 느려진다.
+      # 로컬 빌드 산출물만 검사하고 없으면 즉시 실패하도록 pull 을 막는다.
+      - type: command
+        command: docker run --rm --pull=never myweb:v1 cat /usr/share/nginx/html/index.html
+        expect: built with dockerfile
   - id: 4
     title: 빌드한 이미지 실행
     description: >
@@ -118,6 +136,9 @@ steps:
       - "docker logs <이름> / docker stop <이름> 을 사용합니다. docker ps 는 실행 중만, -a 를 붙이면 중지된 것까지 보입니다."
       - "docker stop web 후 docker ps -a 에서 web 이 Exited 상태로 보이면 완료입니다."
     checks:
+      # docker ps -a + Exited 는 '아무 컨테이너나 Exited면 통과'라 web 이 멈췄는지 특정 못 했다.
+      # docker inspect 는 이름을 정확 매칭(web ≠ web2)하므로 web 상태만 본다. 멈췄으면 State.Status
+      # 가 "exited" → 부분일치 통과, 실행 중이면 "running" → 실패. (commands 의 ps -a 교육은 유지)
       - type: command
-        command: docker ps -a
-        expect: Exited
+        command: docker inspect web
+        expect: exited
