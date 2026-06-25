@@ -72,16 +72,16 @@ spec:
       sli:
         events:
           errorQuery: |
-            sum(rate(vm_boot_success_rate_total{status="fail"}[{{.window}}])) or vector(0)
+            sum(rate(kubevirt_vmi_phase_transition_time_from_creation_seconds_count{phase="Failed"}[{{.window}}]))
           totalQuery: |
-            sum(rate(vm_boot_success_rate_total[{{.window}}])) or vector(1)
+            sum(rate(kubevirt_vmi_phase_transition_time_from_creation_seconds_count{phase=~"Running|Failed"}[{{.window}}]))
       alerting:
-        name: "VMBootSuccessCriticalAlert"
+        name: "VMBootSuccessRateSLO"
         labels:
           severity: "critical"
         pageAlert:
           labels:
-            pager: "ops-duty"
+            severity: "critical"
         ticketAlert:
           labels:
-            channel: "slack-cledyu-alerts"
+            severity: "warning"
