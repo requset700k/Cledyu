@@ -130,6 +130,9 @@ steps:
       - "docker logs <이름> / docker stop <이름> 을 사용합니다. docker ps 는 실행 중만, -a 를 붙이면 중지된 것까지 보입니다."
       - "docker stop web 후 docker ps -a 에서 web 이 Exited 상태로 보이면 완료입니다."
     checks:
+      # docker ps -a + Exited 는 '아무 컨테이너나 Exited면 통과'라 web 이 멈췄는지 특정 못 했다.
+      # docker inspect 는 이름을 정확 매칭(web ≠ web2)하므로 web 상태만 본다. 멈췄으면 State.Status
+      # 가 "exited" → 부분일치 통과, 실행 중이면 "running" → 실패. (commands 의 ps -a 교육은 유지)
       - type: command
-        command: docker ps -a
-        expect: Exited
+        command: docker inspect web
+        expect: exited
