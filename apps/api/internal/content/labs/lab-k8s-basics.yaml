@@ -26,8 +26,10 @@ init:
     - echo KUBECONFIG=/etc/rancher/k3s/k3s.yaml >> /etc/environment
     - "printf 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml\\n' > /etc/profile.d/k3s-kubeconfig.sh"
     # step6 롤링 업데이트 대상 이미지를 부팅 때 미리 받아둔다. 안 받아두면 step6 롤아웃이 첫
-    # pull 때문에 길어져 검증 체크의 --timeout(17s)을 넘길 수 있다. containerd 가 뜰 때까지 재시도.
-    - 'for i in $(seq 1 12); do k3s ctr images pull docker.io/library/nginx:1.27-alpine && break; sleep 5; done'
+    # pull 때문에 길어져 검증 체크의 --timeout(17s)을 넘길 수 있다.
+    # kubelet/CRI 는 containerd 의 k8s.io namespace 를 보므로, 'k3s ctr'(기본 default ns) 대신
+    # 'k3s crictl pull'(=CRI, k8s.io)로 받아야 Pod 가 재-pull 없이 캐시를 쓴다. CRI 뜰 때까지 재시도.
+    - 'for i in $(seq 1 12); do k3s crictl pull docker.io/library/nginx:1.27-alpine && break; sleep 5; done'
 steps:
   - id: 1
     title: 클러스터 상태 확인
