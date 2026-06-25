@@ -8,8 +8,13 @@ terraform {
     }
   }
 
-  # 상태는 온프렘(kvm/keycloak)과 분리해 관리한다. 로컬 backend 가 기본이며,
-  # 운영에서는 S3 backend(+DynamoDB lock)로 전환한다 — README 참고.
+  # 원격 암호화 state — GCS(cledyu-project, asia-northeast3, versioning, 기본 암호화).
+  # 프록시 tailscale authkey 등 민감값이 state 에 들어가므로 로컬 평문 파일 대신 원격
+  # backend 를 쓴다. keycloak 과 같은 버킷, prefix 로 분리.
+  backend "gcs" {
+    bucket = "cledyu-tf-state"
+    prefix = "aws"
+  }
 }
 
 provider "aws" {

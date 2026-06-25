@@ -28,7 +28,10 @@ db:
 # Keycloak OIDC (학습자 realm). client_secret 은 Vault→ESO(cledyu-web-oidc-externalsecret.yaml)
 # 가 만든 Secret cledyu-api-oidc 에서 주입. 운영자 SSO realm(cledyu)과 분리됨.
 keycloak:
-  url: "https://keycloak.cledyu.local"
+  # 공개 host. 학습자 브라우저가 auth.cledyu.com 을 거쳐야 Keycloak 이 broker
+  # redirect_uri 를 auth.cledyu.com 으로 생성→Google 등록값과 일치(.local 이면
+  # redirect_uri_mismatch). api 서버측 discovery/JWKS/token 도 이 host 사용(ALB hairpin).
+  url: "https://auth.cledyu.com"
   realm: "cledyu-learn"
   clientId: "web"
   redirectUri: "https://api.cledyu.local/api/v1/auth/callback"

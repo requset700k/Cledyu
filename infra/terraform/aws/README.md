@@ -68,8 +68,30 @@ user-data 를 **대체**하므로(병합 아님), 베이스 도구는 AMI 에 �
 
 ## 상태(state) 관리
 
-기본은 로컬 backend 다. 온프렘 state(`infra/terraform/kvm`, `keycloak`)와 분리돼 있다.
-팀 운영 시 S3 backend + DynamoDB lock 으로 전환한다(`versions.tf` 의 backend 블록 추가).
+원격 암호화 backend(GCS)를 쓴다 — `versions.tf` 의 `backend "gcs"`
+(bucket `cledyu-tf-state`, prefix `aws`). state 에 client secret·tailscale authkey 등
+민감값이 sensitive 로 들어가므로 로컬 평문 파일을 두지 않는다. `keycloak` 스택도 같은
+버킷(prefix `keycloak`)을 쓴다.
+
+**부트스트랩 / 신규 운영자:**
+
+```bash
+# 0) 버킷은 backend 구성 전에 이미 존재해야 한다(최초 1회, 생성 완료됨):
+#    gcloud storage buckets create gs://cledyu-tf-state --project=cledyu-project \
+#      --location=asia-northeast3 --uniform-bucket-level-access --public-access-prevention
+#    gcloud storage buckets update gs://cledyu-tf-state --versioning
+
+# 1) GCS 접근(택1): ADC 또는 액세스 토큰
+gcloud auth application-default login        # 워크스테이션
+# 또는 비대화형/CI:
+export GOOGLE_OAUTH_ACCESS_TOKEN=$(gcloud auth print-access-token)
+
+# 2) init (원격 backend 연결). 최초 로컬→원격 이전은 끝났으므로 신규 환경은 그냥 init.
+terraform init
+```
+
+> 로컬 backend 시절의 `terraform.tfstate` 는 GCS 로 `init -migrate-state` 후 제거됐다.
+> 신규 운영자는 위 토큰/ADC 없이 `terraform init` 하면 막힌다(GCS 인증 필요).
 
 ## 비용 주의
 

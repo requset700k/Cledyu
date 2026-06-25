@@ -154,6 +154,11 @@ resource "aws_launch_template" "lab_session" {
   image_id      = local.ami_id
   instance_type = var.instance_type
 
+  # api 는 RunInstances 에서 버전을 지정하지 않아 Launch Template 의 default 버전을 쓴다.
+  # 이 값이 없으면 신규 버전이 생겨도 default 가 안 올라가 변경이 api 에 반영되지 않는다
+  # (수동 modify-launch-template 필요). true 로 두어 최신 버전을 항상 default 로 승격한다.
+  update_default_version = true
+
   iam_instance_profile {
     arn = aws_iam_instance_profile.lab_instance.arn
   }
