@@ -15,7 +15,7 @@ spec:
         # ─────────────────────────────────────────────
         - alert: CiliumNetworkDropCritical
           expr: |
-            sum(rate(hubble_drop_total{reason!="UNSUPPORTED_L3_PROTOCOL"}[5m])) 
+            sum(rate(hubble_drop_total{reason!="UNSUPPORTED_L3_PROTOCOL"}[5m]))
             / 
             (sum(rate(hubble_flows_processed_total[5m])) > 0) > 0.01
           for: 2m
