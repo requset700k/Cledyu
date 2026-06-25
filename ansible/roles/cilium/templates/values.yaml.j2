@@ -44,7 +44,7 @@ hubble:
   metrics:
     enabled:
       - dns
-      - drop
+      - drop:labelsContext=source_namespace
       - tcp
       - flow
       - port-distribution
