@@ -12,25 +12,22 @@
 #
 # 이 스택 전체는 var.enable_public_ingress 로 게이트된다(기본 false → 미생성).
 #
-# [초안 주의] 이 모듈은 AWS apply 로만 검증 가능하다. 적용 전 런북
-# (docs/RUNBOOK/learner-auth.md '공개 노출')에서 다음을 채운다:
-#   - public_domain NS 를 도메인 등록기관에 위임(아니면 ACM DNS 검증이 멈춘다)
-#   - keycloak_upstream_url 을 환경 tailnet 토폴로지에 맞게 설정
+# 적용 전 런북(docs/RUNBOOK/learner-auth.md '공개 노출')에서 다음을 채운다:
+#   - public_domain 을 Route53 Registrar 로 등록(hosted zone·NS 자동 연결, 수동 위임 불필요)
+#   - keycloak_upstream_url 을 환경 tailnet 토폴로지에 맞게 설정(기본 https://10.10.0.101)
 #   - TF_VAR_tailscale_auth_key 주입(프록시 tailnet 가입용)
 
 locals {
   pub = var.enable_public_ingress ? 1 : 0
 }
 
-# ── Route53 공개 hosted zone ──────────────────────────────────────────────
-# 생성 후 출력된 NS 4개를 도메인 등록기관(또는 상위 zone)에 위임해야 공개 해석된다.
-resource "aws_route53_zone" "public" {
+# ── Route53 공개 hosted zone (기존 것 참조) ───────────────────────────────
+# public_domain 을 Route53 Registrar 로 등록하면 hosted zone 이 자동 생성되고 도메인
+# NS 도 거기로 자동 연결된다(수동 위임 불필요). 따라서 zone 을 새로 만들지 않고
+# 기존 zone 을 data 로 참조한다 — 새로 만들면 NS 가 달라 ACM 검증이 전파되지 않는다.
+data "aws_route53_zone" "public" {
   count = local.pub
-  name  = var.public_domain
-
-  tags = {
-    Name = "${var.name_prefix}-public"
-  }
+  name  = "${var.public_domain}."
 }
 
 # ── ACM 인증서(auth.cledyu.com, DNS 검증) ──────────────────────────────────
@@ -53,7 +50,7 @@ resource "aws_route53_record" "acm_validation" {
     }
   } : {}
 
-  zone_id         = aws_route53_zone.public[0].zone_id
+  zone_id         = data.aws_route53_zone.public[0].zone_id
   name            = each.value.name
   type            = each.value.type
   records         = [each.value.record]
@@ -61,7 +58,7 @@ resource "aws_route53_record" "acm_validation" {
   allow_overwrite = true
 }
 
-# NS 위임 전에는 검증이 완료되지 않아 apply 가 대기/타임아웃한다 — 런북의 위임 단계 선행 필수.
+# registrar=Route53 라 NS 가 hosted zone 에 자동 연결돼 DNS 검증이 바로 전파된다.
 resource "aws_acm_certificate_validation" "auth" {
   count                   = local.pub
   certificate_arn         = aws_acm_certificate.auth[0].arn
@@ -235,7 +232,7 @@ resource "aws_lb_target_group_attachment" "proxy" {
 # ── Route53 A(ALIAS) → ALB ────────────────────────────────────────────────
 resource "aws_route53_record" "auth" {
   count   = local.pub
-  zone_id = aws_route53_zone.public[0].zone_id
+  zone_id = data.aws_route53_zone.public[0].zone_id
   name    = var.public_keycloak_host
   type    = "A"
 
