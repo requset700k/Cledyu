@@ -109,6 +109,29 @@
     or "configured" in keycloak_foundation_service_account_apply.stdout
   become_user: ubuntu
 
+# X-Forwarded-* 하드닝 미들웨어가 든 ingress 를 Keycloak CR 보다 먼저 적용한다.
+# Keycloak 기본값이 동적 hostname(strict=false)이라, ingress(per-host XFH overwrite)가
+# 없는 상태로 Keycloak 이 뜨면 그 사이 X-Forwarded-Host 주입 윈도우가 생긴다(신규/DR
+# 부트스트랩). ingress 는 keycloak-tls(위에서 생성됨)만 의존하고 backend service 는
+# 나중에 생겨도 Traefik 이 reconcile 하므로 CR 보다 먼저 apply 해도 안전하다.
+- name: Copy keycloak ingress manifest to control plane host
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../infra/kubernetes/keycloak/ingress.yaml"
+    dest: "{{ keycloak_foundation_ingress_manifest_path }}"
+    owner: ubuntu
+    group: ubuntu
+    mode: "0600"
+
+- name: Apply keycloak ingress manifest
+  ansible.builtin.command: >-
+    kubectl --kubeconfig={{ keycloak_foundation_kubeconfig }}
+    apply -f {{ keycloak_foundation_ingress_manifest_path }}
+  register: keycloak_foundation_ingress_apply
+  changed_when: >-
+    "created" in keycloak_foundation_ingress_apply.stdout
+    or "configured" in keycloak_foundation_ingress_apply.stdout
+  become_user: ubuntu
+
 - name: Render keycloak foundation manifest
   ansible.builtin.template:
     src: keycloak.yaml.j2
@@ -146,24 +169,6 @@
   retries: 10
   delay: 6
   until: keycloak_service_ip.stdout | length > 0
-  become_user: ubuntu
-
-- name: Copy keycloak ingress manifest to control plane host
-  ansible.builtin.copy:
-    src: "{{ playbook_dir }}/../../infra/kubernetes/keycloak/ingress.yaml"
-    dest: "{{ keycloak_foundation_ingress_manifest_path }}"
-    owner: ubuntu
-    group: ubuntu
-    mode: "0600"
-
-- name: Apply keycloak ingress manifest
-  ansible.builtin.command: >-
-    kubectl --kubeconfig={{ keycloak_foundation_kubeconfig }}
-    apply -f {{ keycloak_foundation_ingress_manifest_path }}
-  register: keycloak_foundation_ingress_apply
-  changed_when: >-
-    "created" in keycloak_foundation_ingress_apply.stdout
-    or "configured" in keycloak_foundation_ingress_apply.stdout
   become_user: ubuntu
 
 - name: Wait until keycloak ingress receives address
