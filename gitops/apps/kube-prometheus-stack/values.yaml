@@ -177,6 +177,14 @@ alertmanager:
         target_matchers:
           - alertname =~ "KubevirtVMIHighCPU|KubevirtVMIMemorySwap"
 
+      # Cilium 네트워크 드롭 급증 시 같은 네트워크 레이어의 정책 위반 드롭 알림 억제
+      - source_matchers:
+          - alertname = "CiliumNetworkDropCritical"
+          - severity = "critical"
+        target_matchers:
+          - alertname = "CiliumPolicyDeniedSpike"
+          - severity = "warning"
+
 # ── Grafana ───────────────────────────────────────────────────
 grafana:
   deploymentStrategy:
