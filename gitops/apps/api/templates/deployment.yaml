@@ -106,6 +106,17 @@ spec:
                   name: {{ .Values.aws.secretName | quote }}
                   key: tailscale_authkey
                   optional: true
+            # api 파드 자신이 tsnet 으로 tailnet 에 가입할 때 쓰는 authkey(tag:cledyu-api). 세션 authkey 와
+            # 별개다. 미설정 시(optional) tsnet 미기동 — 라이브 터미널/IDE 만 비활성, 세션 API·SSM 채점 무관.
+            - name: CLEDYU_AWS_API_TAILSCALE_AUTH_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.aws.secretName | quote }}
+                  key: api_tailscale_authkey
+                  optional: true
+            # tsnet 상태 디렉터리 — 쓰기 가능한 emptyDir. 비root 컨테이너의 기본 경로 쓰기 실패를 피한다.
+            - name: CLEDYU_AWS_API_TAILNET_STATE_DIR
+              value: /var/lib/cledyu-tsnet
             {{- end }}
           volumeMounts:
             - name: kafka-certs
@@ -114,6 +125,10 @@ spec:
             - name: cledyu-ca
               mountPath: /etc/ssl/cledyu
               readOnly: true
+            {{- if .Values.aws.enabled }}
+            - name: tsnet-state
+              mountPath: /var/lib/cledyu-tsnet
+            {{- end }}
           resources:
             requests:
               cpu: {{ .Values.resources.requests.cpu }}
@@ -142,3 +157,7 @@ spec:
         - name: cledyu-ca
           configMap:
             name: cledyu-root-ca-bundle  # trust-manager 가 ns 라벨 기준으로 배포(키: ca.crt)
+        {{- if .Values.aws.enabled }}
+        - name: tsnet-state
+          emptyDir: {}
+        {{- end }}
