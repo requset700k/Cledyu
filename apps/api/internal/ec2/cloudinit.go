@@ -58,12 +58,15 @@ chpasswd:
 		// --ssh: 검증엔진/사용자가 tailnet 경유 SSH 로 접속(virtctl 대체). --hostname: 결정적 MagicDNS 이름.
 		fmt.Fprintf(&b, "  - tailscale up --ssh --hostname=%s --authkey=%s\n",
 			yamlScalar(hostname), yamlScalar(cfg.TailscaleAuthKey))
-		// 브라우저 IDE(code-server) — best-effort, 느려서 마지막. tailnet 경유로 프록시되므로 authkey 가 있을 때만.
-		b.WriteString("  - curl -fsSL https://code-server.dev/install.sh | sh || true\n")
 	}
 	for _, cmd := range init.Runcmd {
 		// runcmd 의 각 항목은 셸로 실행되는 단일 문자열로 둔다(content DSL 과 동일 계약).
 		fmt.Fprintf(&b, "  - %s\n", yamlScalar(cmd))
+	}
+	// 브라우저 IDE(code-server) — best-effort 라 맨 마지막에 둔다. 무거운 다운로드라 채점·터미널·
+	// 랩 초기화(init.Runcmd, 예: k3s 준비)를 막지 않도록 그 뒤에 설치한다. tailnet 경유 프록시라 authkey 필요.
+	if cfg.TailscaleAuthKey != "" {
+		b.WriteString("  - curl -fsSL https://code-server.dev/install.sh | sh || true\n")
 	}
 
 	return b.String()

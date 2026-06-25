@@ -65,3 +65,16 @@ func TestRenderCloudInit_LabRuncmdAfterPlatformInstalls(t *testing.T) {
 		t.Fatalf("랩 runcmd 가 플랫폼 설치보다 먼저거나 누락됨 (ssm=%d lab=%d):\n%s", ssm, lab, out)
 	}
 }
+
+// 무거운 code-server 설치는 랩 초기화(BootInit.Runcmd, 예: k3s 준비)를 막지 않도록
+// 반드시 랩 runcmd 뒤(맨 마지막)에 와야 한다.
+func TestRenderCloudInit_CodeServerAfterLabRuncmd(t *testing.T) {
+	cfg := &config.AWSConfig{TailscaleAuthKey: "tskey-test"}
+	out := renderCloudInit("sess1", cfg, session.BootInit{Runcmd: []string{"echo lab-content-marker"}})
+
+	lab := strings.Index(out, "lab-content-marker")
+	ide := strings.Index(out, "code-server.dev/install.sh")
+	if lab < 0 || ide < 0 || ide < lab {
+		t.Fatalf("code-server 가 랩 runcmd 보다 앞이거나 누락됨 (lab=%d ide=%d):\n%s", lab, ide, out)
+	}
+}
