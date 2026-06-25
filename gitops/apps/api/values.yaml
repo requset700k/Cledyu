@@ -12,6 +12,14 @@ ingress:
   host: api.cledyu.local
   tlsSecret: api-tls
 
+# RED 메트릭(/metrics) Prometheus 스크랩. SLO 담당자가 도메인 SLI 를 위에 정의한다.
+# serviceMonitor.enabled=false 면 SM 미생성(메트릭 엔드포인트 자체는 항상 노출).
+metrics:
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+
 env:
   CLEDYU_SERVER_MODE: "release"
   CLEDYU_REDIS_ADDR: "redis.redis.svc:6379"
