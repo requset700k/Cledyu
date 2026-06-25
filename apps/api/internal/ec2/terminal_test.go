@@ -131,16 +131,15 @@ func TestDialTerminal_UsesInjectedDial(t *testing.T) {
 	addr := startEchoSSHServer(t, "lab", "lab")
 	host, port, _ := net.SplitHostPort(addr)
 
-	var called bool
+	var called, hadDeadline bool
 	dial := func(ctx context.Context, network, address string) (net.Conn, error) {
 		called = true
+		_, hadDeadline = ctx.Deadline()
 		return (&net.Dialer{}).DialContext(ctx, network, address)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	term, err := DialTerminal(ctx, host, TerminalConfig{
+	// deadline 없는 ctx 를 넘겨, DialTerminal 이 Timeout 으로 직접 deadline 을 강제하는지 검증한다.
+	term, err := DialTerminal(context.Background(), host, TerminalConfig{
 		User: "lab", Password: "lab", Port: port, Timeout: 3 * time.Second, Dial: dial,
 	})
 	if err != nil {
@@ -150,6 +149,9 @@ func TestDialTerminal_UsesInjectedDial(t *testing.T) {
 
 	if !called {
 		t.Fatal("주입된 Dial 이 사용되지 않음")
+	}
+	if !hadDeadline {
+		t.Fatal("주입 Dial 의 ctx 에 deadline 이 없음 — Timeout 미적용")
 	}
 }
 

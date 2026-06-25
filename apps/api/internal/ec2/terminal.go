@@ -62,11 +62,16 @@ func DialTerminal(ctx context.Context, host string, tc TerminalConfig) (*Termina
 		Timeout:         timeout,
 	}
 
+	// dial timeout 은 ctx 로 강제한다 — 주입 다이얼러(tsnet)는 deadline 없는 요청 ctx 로 호출될 수
+	// 있어, net.Dialer.Timeout 만으로는 멈춘 연결에서 핸들러가 무한 대기할 수 있다.
+	dialCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	dial := tc.Dial
 	if dial == nil {
-		dial = (&net.Dialer{Timeout: timeout}).DialContext
+		dial = (&net.Dialer{}).DialContext
 	}
-	conn, err := dial(ctx, "tcp", addr)
+	conn, err := dial(dialCtx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", addr, err)
 	}
