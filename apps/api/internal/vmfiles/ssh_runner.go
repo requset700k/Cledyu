@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"path"
+	"strings"
+	"unicode"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -44,6 +47,37 @@ func NewSSHRunner(connector Connector, signer ssh.Signer, hostKeyCallback ssh.Ho
 }
 
 func (r *SSHRunner) Run(ctx context.Context, sessionID string) ([]byte, error) {
+	return r.runCommand(ctx, sessionID, fixedListCommand)
+}
+
+// Read는 RootPath 아래의 검증된 상대 경로 하나를 읽는 forced command만 실행한다.
+// 범용 셸 명령 조립 경로가 되지 않도록 상대 경로를 명령 문자열로 만들기 전에 재검증한다.
+func (r *SSHRunner) Read(ctx context.Context, sessionID, relativePath string) ([]byte, error) {
+	command, err := readCommand(relativePath)
+	if err != nil {
+		return nil, err
+	}
+	return r.runCommand(ctx, sessionID, command)
+}
+
+func readCommand(relativePath string) (string, error) {
+	trimmed := strings.TrimSpace(relativePath)
+	cleaned := path.Clean(trimmed)
+	if trimmed == "" || cleaned == "." || path.IsAbs(trimmed) || cleaned != trimmed {
+		return "", fmt.Errorf("unsafe VM file read path %q", relativePath)
+	}
+	if strings.ContainsRune(trimmed, '\x00') || strings.ContainsRune(trimmed, '\\') {
+		return "", fmt.Errorf("unsafe VM file read path %q", relativePath)
+	}
+	for _, segment := range strings.Split(cleaned, "/") {
+		if segment == "" || strings.HasPrefix(segment, ".") || strings.IndexFunc(segment, unicode.IsControl) >= 0 {
+			return "", fmt.Errorf("unsafe VM file read path %q", relativePath)
+		}
+	}
+	return "read " + cleaned, nil
+}
+
+func (r *SSHRunner) runCommand(ctx context.Context, sessionID, command string) ([]byte, error) {
 	if r == nil || r.connector == nil || r.signer == nil {
 		return nil, errors.New("VM file-list SSH runner is unavailable")
 	}
@@ -91,7 +125,7 @@ func (r *SSHRunner) Run(ctx context.Context, sessionID string) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open VM file-list output: %w", err)
 	}
-	if err := session.Start(fixedListCommand); err != nil {
+	if err := session.Start(command); err != nil {
 		return nil, fmt.Errorf("start VM file-list command: %w", err)
 	}
 
