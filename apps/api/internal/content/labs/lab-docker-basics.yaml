@@ -36,9 +36,12 @@ steps:
       - "docker run 에 -d(백그라운드), --name(이름), -p <호스트포트>:<컨테이너포트> 를 조합합니다."
       - "docker run -d --name web -p 8080:80 nginx 실행 후 curl http://localhost:8080 에서 nginx 페이지가 나오면 성공입니다."
     checks:
+      # docker ps + web 부분일치는 web2/webserver 도 매칭돼 이름을 엄격 검증 못 했다.
+      # docker inspect 는 이름 정확 매칭(web ≠ web2) + State.Status 로 running 을 확인한다.
+      # (lowercase "running" 은 stopped 의 "Running":false 와 안 겹침 → 실행 중일 때만 통과)
       - type: command
-        command: docker ps
-        expect: web
+        command: docker inspect web
+        expect: running
       - type: http_response
         url: http://localhost:8080
         expect_code: 200
