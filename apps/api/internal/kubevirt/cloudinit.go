@@ -58,7 +58,7 @@ users:
     lab:lab
 bootcmd:
   - "mkdir -p /etc/systemd/resolved.conf.d"
-  - "printf '%%s\\n' '[Resolve]' 'DNS=8.8.8.8 1.1.1.1' 'FallbackDNS=8.8.4.4 1.0.0.1' 'Domains=~.' > /etc/systemd/resolved.conf.d/cledyu-lab.conf"
+  - "printf '%s\\n' '[Resolve]' 'DNS=8.8.8.8 1.1.1.1' 'FallbackDNS=8.8.4.4 1.0.0.1' 'Domains=~.' > /etc/systemd/resolved.conf.d/cledyu-lab.conf"
   - "systemctl restart systemd-resolved || true"
   - "systemctl stop serial-getty@ttyS0.service || true"
 `)

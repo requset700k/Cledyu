@@ -165,6 +165,9 @@ func TestRenderCloudInit_ConfiguresDNSBeforePackages(t *testing.T) {
 		t.Fatalf("expected DNS bootcmd before packages/runcmd:\n%s", out)
 	}
 	joinedBootcmd := strings.Join(parsed.Bootcmd, "\n")
+	if strings.Contains(joinedBootcmd, "%%s") {
+		t.Fatalf("DNS bootcmd must render printf '%%s' as a single %%s formatter, got:\n%s", joinedBootcmd)
+	}
 	for _, want := range []string{"systemd-resolved", "DNS=8.8.8.8 1.1.1.1", "Domains=~."} {
 		if !strings.Contains(joinedBootcmd, want) {
 			t.Errorf("expected %q in DNS bootcmd, got %v", want, parsed.Bootcmd)
