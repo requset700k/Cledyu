@@ -19,6 +19,7 @@ import (
 	"github.com/requset700k/cledyu/api/internal/lock"
 	"github.com/requset700k/cledyu/api/internal/session"
 	"github.com/requset700k/cledyu/api/internal/store"
+	"github.com/requset700k/cledyu/api/internal/tailnet"
 	"github.com/requset700k/cledyu/api/internal/validation"
 	"go.uber.org/zap"
 )
@@ -141,6 +142,26 @@ func main() {
 	}
 
 	router, h := api.NewRouter(cfg, logger, sessions, validator, eventsPub, db, locker)
+
+	// EC2 오버플로우 라이브 터미널 — api 가 tsnet 으로 tailnet 에 가입해 세션 인스턴스(MagicDNS)에
+	// SSH PTY 를 붙인다. 클러스터 파드는 tailnet 에 직접 못 닿기 때문이다. authkey 미설정이면
+	// 미기동(라이브 터미널 비활성, SSM 채점은 무관). 기동 실패도 graceful — 세션 API 는 계속 동작.
+	if cfg.AWS.APITailscaleAuthKey != "" {
+		tnCtx, tnCancel := context.WithTimeout(ctx, 60*time.Second)
+		node, terr := tailnet.New(tnCtx, tailnet.Config{
+			Hostname: "cledyu-api",
+			AuthKey:  cfg.AWS.APITailscaleAuthKey,
+			StateDir: cfg.AWS.APITailnetStateDir,
+		}, logger)
+		tnCancel()
+		if terr != nil {
+			logger.Warn("tailnet 노드 기동 실패 — EC2 라이브 터미널 비활성", zap.Error(terr))
+		} else {
+			defer node.Close() //nolint:errcheck
+			h.SetEC2Dial(node.Dial)
+			logger.Info("tailnet 노드 가입 — EC2 라이브 터미널 활성")
+		}
+	}
 
 	// 검증 결과 소비 루프: 결과를 stepStore에 반영한다. ctx 취소(종료 신호) 시 graceful 종료.
 	if consumer != nil {
