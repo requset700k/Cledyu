@@ -1,0 +1,40 @@
+---
+apiVersion: sloth.slok.dev/v1
+kind: PrometheusServiceLevel
+metadata:
+  name: vmboot-slo
+  namespace: monitoring
+  labels:
+    app: kubevirt
+    team: platform
+spec:
+  service: vmboot
+  labels:
+    app: kubevirt
+    team: platform
+  slos:
+    # ───────────────────────────────────────────
+    # 부팅 성공률 SLO: VM 99.5% (30일 롤링)
+    # kubevirt_vmi_phase_transition_time_from_creation_seconds_count 기반
+    # phase="Failed" / phase=~"Running|Failed" 로 에러율 산출
+    # ───────────────────────────────────────────
+    - name: vm-boot-success-rate
+      objective: 99.5
+      description: "KubeVirt VM 부팅 성공률이 99.5% 이상이어야 한다."
+      sli:
+        events:
+          errorQuery: |
+            sum(rate(kubevirt_vmi_phase_transition_time_from_creation_seconds_count{phase="Failed"}[{{ .window }}])) or vector(0)
+          totalQuery: |
+            sum(rate(kubevirt_vmi_phase_transition_time_from_creation_seconds_count{phase=~"Running|Failed"}[{{ .window }}])) or vector(1)
+      alerting:
+        name: KubeVirtVMBootSuccessRateSLO
+        labels:
+          service: vmboot
+          slo: boot-success-rate
+        pageAlert:
+          labels:
+            severity: critical
+        ticketAlert:
+          labels:
+            severity: warning
