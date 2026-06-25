@@ -7,8 +7,8 @@
   --cledyu-bg-3: #172554;
   --cledyu-brand: #0ea5e9;
   --cledyu-brand-hover: #0284c7;
-  --cledyu-brand-glow: rgba(14, 165, 233, .45);
-  --cledyu-card: rgba(17, 28, 46, .92);
+  --cledyu-brand-glow: rgba(14, 165, 233, 0.45);
+  --cledyu-card: rgba(17, 28, 46, 0.92);
   --cledyu-border: #1e293b;
   --cledyu-input: #1e293b;
   --cledyu-input-border: #334155;
@@ -17,16 +17,26 @@
 }
 
 /* ── 배경 ── */
-html { height: 100%; }
+html {
+  height: 100%;
+}
 body.login-pf,
 .login-pf body,
 body {
-  background: linear-gradient(135deg, var(--cledyu-bg-1) 0%, var(--cledyu-bg-2) 45%, var(--cledyu-bg-3) 100%) !important;
+  background: linear-gradient(
+    135deg,
+    var(--cledyu-bg-1) 0%,
+    var(--cledyu-bg-2) 45%,
+    var(--cledyu-bg-3) 100%
+  ) !important;
   background-attachment: fixed !important;
   color: var(--cledyu-text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Pretendard, Roboto, "Apple SD Gothic Neo", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Pretendard, Roboto,
+    'Apple SD Gothic Neo', sans-serif;
 }
-.login-pf-page { padding-top: 6vh; }
+.login-pf-page {
+  padding-top: 6vh;
+}
 
 /* ── 헤더: realm 표시명(Cledyu)을 네온 워드마크로 ── */
 #kc-header,
@@ -41,13 +51,16 @@ body {
   text-transform: uppercase;
   text-indent: 8px;
   color: #dff3ff !important;
-  text-shadow: 0 0 6px rgba(56, 189, 248, .85), 0 0 18px rgba(14, 165, 233, .6), 0 0 34px rgba(14, 165, 233, .35);
+  text-shadow:
+    0 0 6px rgba(56, 189, 248, 0.85),
+    0 0 18px rgba(14, 165, 233, 0.6),
+    0 0 34px rgba(14, 165, 233, 0.35);
   white-space: nowrap;
   overflow: visible;
 }
 /* 태그라인(template.ftl 없이 CSS 로 주입) */
 #kc-header-wrapper::after {
-  content: "클라우드 엔지니어링 인터랙티브 실습 플랫폼";
+  content: '클라우드 엔지니어링 인터랙티브 실습 플랫폼';
   display: block;
   margin-top: 10px;
   font-weight: 400;
@@ -66,11 +79,13 @@ body {
   background: var(--cledyu-card) !important;
   border: 1px solid var(--cledyu-border) !important;
   border-radius: 18px !important;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, .45) !important;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45) !important;
   padding: 34px 30px !important;
   backdrop-filter: blur(4px);
 }
-#kc-content { color: var(--cledyu-text); }
+#kc-content {
+  color: var(--cledyu-text);
+}
 
 /* 제목/문구 */
 #kc-page-title,
@@ -80,31 +95,55 @@ h1#kc-page-title {
   font-weight: 700;
   font-size: 18px;
 }
-#kc-info-message, .instruction, p { color: var(--cledyu-muted); }
-label, .control-label, .pf-c-form__label { color: #cbd5e1 !important; font-size: 13px; }
+#kc-info-message,
+.instruction,
+p {
+  color: var(--cledyu-muted);
+}
+label,
+.control-label,
+.pf-c-form__label {
+  color: #cbd5e1 !important;
+  font-size: 13px;
+}
 
 /* ── 입력창 + 포커스 글로우(스타일 A) ── */
-input[type="text"], input[type="password"], input[type="email"], input[type="number"],
-.form-control, .pf-c-form-control, #kc-form-login input {
+input[type='text'],
+input[type='password'],
+input[type='email'],
+input[type='number'],
+.form-control,
+.pf-c-form-control,
+#kc-form-login input {
   background: var(--cledyu-input) !important;
   border: 1px solid var(--cledyu-input-border) !important;
   border-radius: 10px !important;
   color: var(--cledyu-text) !important;
   padding: 11px 13px !important;
   font-size: 14px;
-  transition: border-color .2s, box-shadow .2s;
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
   box-shadow: none !important;
 }
-input::placeholder { color: #64748b; }
-input[type="text"]:focus, input[type="password"]:focus, input[type="email"]:focus,
-.form-control:focus, .pf-c-form-control:focus {
+input::placeholder {
+  color: #64748b;
+}
+input[type='text']:focus,
+input[type='password']:focus,
+input[type='email']:focus,
+.form-control:focus,
+.pf-c-form-control:focus {
   border-color: var(--cledyu-brand) !important;
-  box-shadow: 0 0 0 3px rgba(14, 165, 233, .18) !important;
+  box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.18) !important;
   outline: none !important;
 }
 
 /* ── 기본 버튼(이메일 로그인 등) + hover 떠오름(스타일 A) ── */
-.btn-primary, #kc-login, input[type="submit"].btn-primary, .pf-c-button.pf-m-primary {
+.btn-primary,
+#kc-login,
+input[type='submit'].btn-primary,
+.pf-c-button.pf-m-primary {
   background: var(--cledyu-brand) !important;
   border: 0 !important;
   border-radius: 10px !important;
@@ -113,20 +152,40 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="email"]:focu
   font-size: 14px !important;
   padding: 12px !important;
   width: 100%;
-  transition: transform .15s, box-shadow .2s, background .2s;
+  transition:
+    transform 0.15s,
+    box-shadow 0.2s,
+    background 0.2s;
 }
-.btn-primary:hover, #kc-login:hover, .pf-c-button.pf-m-primary:hover {
+.btn-primary:hover,
+#kc-login:hover,
+.pf-c-button.pf-m-primary:hover {
   background: var(--cledyu-brand-hover) !important;
   transform: translateY(-2px);
   box-shadow: 0 10px 24px var(--cledyu-brand-glow) !important;
 }
-.btn-primary:active, #kc-login:active { transform: translateY(0); }
+.btn-primary:active,
+#kc-login:active {
+  transform: translateY(0);
+}
 
 /* ── 소셜 버튼(Google 등) ── */
-#kc-social-providers { margin-top: 18px; }
-#kc-social-providers h2, #kc-social-providers hr + * { color: var(--cledyu-muted); }
-#kc-social-providers ul { list-style: none; padding: 0; margin: 0; }
-.kc-social-item, #kc-social-providers li a, a.zocial, .pf-c-login__main-footer-links a {
+#kc-social-providers {
+  margin-top: 18px;
+}
+#kc-social-providers h2,
+#kc-social-providers hr + * {
+  color: var(--cledyu-muted);
+}
+#kc-social-providers ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.kc-social-item,
+#kc-social-providers li a,
+a.zocial,
+.pf-c-login__main-footer-links a {
   display: flex !important;
   align-items: center;
   justify-content: center;
@@ -140,40 +199,81 @@ input[type="text"]:focus, input[type="password"]:focus, input[type="email"]:focu
   font-weight: 600 !important;
   padding: 11px !important;
   margin-top: 10px !important;
-  transition: transform .15s, box-shadow .2s;
+  transition:
+    transform 0.15s,
+    box-shadow 0.2s;
 }
-.kc-social-item:hover, #kc-social-providers li a:hover, a.zocial:hover {
+.kc-social-item:hover,
+#kc-social-providers li a:hover,
+a.zocial:hover {
   transform: translateY(-2px);
-  box-shadow: 0 10px 24px rgba(0, 0, 0, .3) !important;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3) !important;
 }
 
 /* ── 구분선 "또는 소셜 계정으로" ── */
-#kc-social-providers hr, .kc-social-section hr { border-color: var(--cledyu-border); }
+#kc-social-providers hr,
+.kc-social-section hr {
+  border-color: var(--cledyu-border);
+}
 
 /* ── 링크(회원가입/비번재설정) ── */
-a { color: #38bdf8; transition: text-shadow .2s; }
-a:hover { color: #7dd3fc; text-shadow: 0 0 8px rgba(56, 189, 248, .6); }
-#kc-registration a, #kc-registration-container a { font-weight: 600; }
+a {
+  color: #38bdf8;
+  transition: text-shadow 0.2s;
+}
+a:hover {
+  color: #7dd3fc;
+  text-shadow: 0 0 8px rgba(56, 189, 248, 0.6);
+}
+#kc-registration a,
+#kc-registration-container a {
+  font-weight: 600;
+}
 
 /* ── 알림(에러/경고/성공/정보) ── */
-.alert, .pf-c-alert {
+.alert,
+.pf-c-alert {
   border-radius: 10px !important;
   border: 1px solid var(--cledyu-border) !important;
   background: #15203a !important;
   color: var(--cledyu-text) !important;
 }
-.alert-error, .pf-m-danger { border-left: 3px solid #ef4444 !important; }
-.alert-warning, .pf-m-warning { border-left: 3px solid #f59e0b !important; }
-.alert-success, .pf-m-success { border-left: 3px solid #22c55e !important; }
-.alert-info, .pf-m-info { border-left: 3px solid var(--cledyu-brand) !important; }
+.alert-error,
+.pf-m-danger {
+  border-left: 3px solid #ef4444 !important;
+}
+.alert-warning,
+.pf-m-warning {
+  border-left: 3px solid #f59e0b !important;
+}
+.alert-success,
+.pf-m-success {
+  border-left: 3px solid #22c55e !important;
+}
+.alert-info,
+.pf-m-info {
+  border-left: 3px solid var(--cledyu-brand) !important;
+}
 
 /* ── 언어 선택/푸터 정리 ── */
-#kc-locale ul { background: var(--cledyu-card); border: 1px solid var(--cledyu-border); border-radius: 8px; }
-#kc-locale a, #kc-locale-dropdown a { color: var(--cledyu-muted); }
-.login-pf-page .login-pf-signup a { color: #38bdf8; }
+#kc-locale ul {
+  background: var(--cledyu-card);
+  border: 1px solid var(--cledyu-border);
+  border-radius: 8px;
+}
+#kc-locale a,
+#kc-locale-dropdown a {
+  color: var(--cledyu-muted);
+}
+.login-pf-page .login-pf-signup a {
+  color: #38bdf8;
+}
 
 /* 체크박스/기억하기 */
-#kc-form-options, .checkbox label { color: var(--cledyu-muted); }
+#kc-form-options,
+.checkbox label {
+  color: var(--cledyu-muted);
+}
 
 /* ── PatternFly(KC26 classic) 정밀 오버라이드 ── */
 /* 기본 버튼: PF custom property 까지 덮어 brand 색 강제 */
@@ -190,15 +290,21 @@ input.pf-c-button.pf-m-primary {
   border-radius: 10px !important;
   font-weight: 700 !important;
 }
-#kc-login:hover, .pf-c-button.pf-m-primary:hover {
+#kc-login:hover,
+.pf-c-button.pf-m-primary:hover {
   background-color: var(--cledyu-brand-hover) !important;
   transform: translateY(-2px);
   box-shadow: 0 10px 24px var(--cledyu-brand-glow) !important;
 }
 
 /* 입력 그룹 + 비밀번호 표시 토글(.pf-m-control, 소셜 버튼 제외) 다크 */
-.pf-c-input-group { background: transparent !important; }
-.pf-c-form-control-icon, .pf-c-input-group__text { color: var(--cledyu-muted) !important; }
+.pf-c-input-group {
+  background: transparent !important;
+}
+.pf-c-form-control-icon,
+.pf-c-input-group__text {
+  color: var(--cledyu-muted) !important;
+}
 .pf-c-button.pf-m-control:not(.kc-social-item) {
   background-color: var(--cledyu-input) !important;
   --pf-c-button--m-control--BackgroundColor: var(--cledyu-input);
@@ -207,10 +313,13 @@ input.pf-c-button.pf-m-primary {
   color: var(--cledyu-muted) !important;
   box-shadow: none !important;
 }
-.pf-c-button.pf-m-control:not(.kc-social-item):hover { color: #fff !important; }
+.pf-c-button.pf-m-control:not(.kc-social-item):hover {
+  color: #fff !important;
+}
 
 /* 소셜 버튼(pf-m-control + kc-social-item)은 흰색 유지(토글 규칙보다 우선) */
-.pf-c-button.pf-m-control.kc-social-item, a.kc-social-item {
+.pf-c-button.pf-m-control.kc-social-item,
+a.kc-social-item {
   background-color: #fff !important;
   --pf-c-button--m-control--BackgroundColor: #fff;
   color: #1e293b !important;
@@ -230,17 +339,26 @@ input.pf-c-button.pf-m-primary {
   border: 0 !important;
   color: var(--cledyu-muted) !important;
 }
-#kc-info, .login-pf-signup {
+#kc-info,
+.login-pf-signup {
   border-top: 1px solid var(--cledyu-border) !important;
   margin-top: 14px !important;
   padding: 14px 0 0 !important;
 }
-#kc-info hr, .login-pf-signup hr { display: none !important; }
-#kc-registration a, #kc-registration-container a, #kc-info a { color: #38bdf8 !important; font-weight: 600; }
+#kc-info hr,
+.login-pf-signup hr {
+  display: none !important;
+}
+#kc-registration a,
+#kc-registration-container a,
+#kc-info a {
+  color: #38bdf8 !important;
+  font-weight: 600;
+}
 
 /* 기본 버튼 brand 강제(명시 hex + 높은 specificity, var/cascade 폴백) */
 input#kc-login,
-input#kc-login[type="submit"],
+input#kc-login[type='submit'],
 #kc-login.pf-c-button,
 .login-pf-page #kc-login {
   background: #0ea5e9 !important;
@@ -249,6 +367,7 @@ input#kc-login[type="submit"],
   color: #fff !important;
   border: 0 !important;
 }
-input#kc-login:hover, .login-pf-page #kc-login:hover {
+input#kc-login:hover,
+.login-pf-page #kc-login:hover {
   background-color: #0284c7 !important;
 }

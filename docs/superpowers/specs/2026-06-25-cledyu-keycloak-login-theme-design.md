@@ -48,8 +48,9 @@
   apply(시크릿 -var/SM 소싱).
 - 라이브 적용(2026-06-25): configmap+CR 패치+realm i18n 으로 적용·검증 완료(headless 캡처).
   커밋된 ansible/terraform 이 이를 재현·영구화한다.
-- **커스텀 이미지(향후)**: `infra/keycloak-theme/Dockerfile`(FROM keycloak:26.6.1 + 테마 COPY)
-  유지 — 테마가 바이너리 에셋(이미지/폰트)으로 커지면 CI 이미지 leg + CR spec.image 로 승격.
+- **커스텀 이미지(향후)**: 테마가 바이너리 에셋(이미지/폰트)으로 커져 ConfigMap(1MB) 한계에
+  닿으면 Dockerfile(FROM keycloak:26.6.1 + 테마 COPY) 추가 + CI 이미지 leg + CR spec.image 로
+  승격. 현 단계(CSS+properties)에선 불필요해 Dockerfile 미포함(base 이미지 CVE Trivy 게이트 회피).
 
 ### KC26 버전 결합 완화
 `parent=keycloak` 상속 + CSS·`template.ftl`·페이지별 최소 오버라이드만 → Keycloak 업그레이드
