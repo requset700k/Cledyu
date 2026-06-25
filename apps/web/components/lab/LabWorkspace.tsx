@@ -11,11 +11,13 @@ export function LabWorkspace({
   terminalPath,
   idePath,
   heightClass = 'h-[560px]',
+  onTerminalOutput,
 }: {
   sessionId: string;
   terminalPath: string;
   idePath: string;
   heightClass?: string;
+  onTerminalOutput?: (chunk: string) => void;
 }) {
   const [tab, setTab] = useState<'terminal' | 'ide'>('terminal');
 
@@ -30,7 +32,11 @@ export function LabWorkspace({
         </TabButton>
       </div>
       <div className={tab === 'terminal' ? '' : 'hidden'}>
-        <LabTerminal terminalPath={terminalPath} heightClass={heightClass} />
+        <LabTerminal
+          terminalPath={terminalPath}
+          heightClass={heightClass}
+          onOutput={onTerminalOutput}
+        />
       </div>
       <div className={tab === 'ide' ? '' : 'hidden'}>
         <IdePane sessionId={sessionId} idePath={idePath} heightClass={heightClass} />

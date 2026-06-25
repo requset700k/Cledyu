@@ -22,9 +22,11 @@ type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'error';
 export function LabTerminal({
   terminalPath,
   heightClass = 'h-80',
+  onOutput,
 }: {
   terminalPath: string;
   heightClass?: string;
+  onOutput?: (chunk: string) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
@@ -63,6 +65,7 @@ export function LabTerminal({
       term.loadAddon(fit);
       term.open(containerRef.current);
       fit.fit();
+      const decoder = new TextDecoder();
 
       // 재연결 가능한 종료를 영구 실패로 표시하지 않고 exponential backoff 후 다시 연결한다.
       // retryTimer guard가 error/close 중복 callback에 의한 동시 socket 생성을 방지한다.
@@ -119,7 +122,12 @@ export function LabTerminal({
           term.focus();
         };
         socket.onmessage = (event) => {
-          term.write(typeof event.data === 'string' ? event.data : new Uint8Array(event.data));
+          const data = typeof event.data === 'string' ? event.data : new Uint8Array(event.data);
+          term.write(data);
+          if (onOutput) {
+            const chunk = typeof data === 'string' ? data : decoder.decode(data, { stream: true });
+            if (chunk) onOutput(chunk);
+          }
         };
         socket.onerror = () => {
           // 브라우저는 error에 상세 원인을 노출하지 않는다. close callback에서 code를 받아 재연결한다.
@@ -164,7 +172,7 @@ export function LabTerminal({
       ws?.close(1000, 'component disposed');
       dispose?.();
     };
-  }, [terminalPath]);
+  }, [terminalPath, onOutput]);
 
   return (
     <div className="rounded-lg border border-slate-700 bg-slate-950 overflow-hidden">

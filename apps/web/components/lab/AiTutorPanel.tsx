@@ -10,12 +10,20 @@ const MAX_LEVEL = 3;
 // AI 학습 도우미 패널 — 소크라테스식 힌트를 레벨 1(개념)→2(방향)→3(구체) 순으로 제공.
 // 레벨 진행은 백엔드(stepStore)가 관리하므로 여기서는 누적 표시만 한다.
 // 부모가 key={stepId} 로 마운트를 갈아끼워 스텝 전환 시 힌트 목록이 초기화된다.
-export function AiTutorPanel({ sessionId, stepId }: { sessionId: string; stepId: number }) {
+export function AiTutorPanel({
+  sessionId,
+  stepId,
+  getTerminalTail,
+}: {
+  sessionId: string;
+  stepId: number;
+  getTerminalTail?: () => string;
+}) {
   const [hints, setHints] = useState<HintResponse[]>([]);
   const [limitMsg, setLimitMsg] = useState<string | null>(null);
 
   const fetchHint = useMutation({
-    mutationFn: () => api.sessions.hint(sessionId, stepId),
+    mutationFn: () => api.sessions.hint(sessionId, stepId, undefined, getTerminalTail?.() ?? ''),
     onSuccess: (h) => {
       setLimitMsg(null);
       setHints((prev) => [...prev, h]);

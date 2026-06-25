@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import type { Lab, Session, StepProgress, StepStatus } from '@/lib/types';
@@ -11,6 +11,7 @@ import { LabWorkspace } from './LabWorkspace';
 import { AiTutorPanel } from './AiTutorPanel';
 import { SessionTimer } from './SessionTimer';
 import { bootGraceViewState, shouldShowSessionBoot } from '@/lib/lab-session-boot.mjs';
+import { appendTerminalTail } from '@/lib/terminal-tail.mjs';
 
 // VM이 Running으로 보고된 이후에도 cloud-init final stage(랩 init + getty 재시작 + autologin 활성)
 // 까지 최대 1~2분이 더 필요할 수 있다. 그 사이 학생에게 login 프롬프트가 보이지 않도록
@@ -41,8 +42,16 @@ export function LabSession({
 
   // status=ready/active로 처음 전환된 시점을 기록 → 거기서 BOOT_GRACE_MS 추가 대기.
   const readyAtRef = useRef<number | null>(null);
+  const terminalTailRef = useRef('');
   const [bootGraceComplete, setBootGraceComplete] = useState(false);
   const [, forceTick] = useState(0);
+  useEffect(() => {
+    terminalTailRef.current = '';
+  }, [sessionId]);
+  const appendTerminalOutput = useCallback((chunk: string) => {
+    terminalTailRef.current = appendTerminalTail(terminalTailRef.current, chunk);
+  }, []);
+  const getTerminalTail = useCallback(() => terminalTailRef.current, []);
   useEffect(() => {
     const s = session?.status;
     if (skipBootGrace) return;
@@ -222,7 +231,12 @@ export function LabSession({
           </div>
 
           {/* AI 학습 도우미 — 정적 hint 표시를 대체. key=stepId 로 스텝 전환 시 힌트 초기화. */}
-          <AiTutorPanel key={currentStep.id} sessionId={sessionId} stepId={currentStep.id} />
+          <AiTutorPanel
+            key={currentStep.id}
+            sessionId={sessionId}
+            stepId={currentStep.id}
+            getTerminalTail={getTerminalTail}
+          />
         </div>
 
         {/* 우측 — 작업 영역(터미널/IDE). xl 미만에서는 문제 아래로 쌓인다. */}
@@ -234,11 +248,13 @@ export function LabSession({
                 terminalPath={terminalUrl}
                 idePath={session.ide_url}
                 heightClass="h-[60vh] xl:h-[calc(100vh-15rem)]"
+                onTerminalOutput={appendTerminalOutput}
               />
             ) : (
               <LabTerminal
                 terminalPath={terminalUrl}
                 heightClass="h-[60vh] xl:h-[calc(100vh-13rem)]"
+                onOutput={appendTerminalOutput}
               />
             )
           ) : (

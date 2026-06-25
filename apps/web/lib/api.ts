@@ -128,11 +128,15 @@ export const api = {
         body: JSON.stringify({ step_id: stepId }),
       }),
     // AI 학습 도우미 힌트. level 미지정 시 백엔드가 1→2→3 으로 자동 상승시킨다.
-    hint: (id: string, stepId: number, level?: number) =>
-      request<HintResponse>(`/api/v1/sessions/${id}/hint`, {
+    hint: (id: string, stepId: number, level?: number, terminalTail?: string) => {
+      const body: { step_id: number; level?: number; terminal_tail?: string } = { step_id: stepId };
+      if (level) body.level = level;
+      if (terminalTail) body.terminal_tail = terminalTail;
+      return request<HintResponse>(`/api/v1/sessions/${id}/hint`, {
         method: 'POST',
-        body: JSON.stringify({ step_id: stepId, ...(level ? { level } : {}) }),
-      }),
+        body: JSON.stringify(body),
+      });
+    },
   },
 
   auth: {
