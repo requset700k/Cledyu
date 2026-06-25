@@ -89,6 +89,7 @@ bootcmd:
       #!/usr/bin/env python3
       import json
       import os
+      import stat
       import sys
 
       ROOT = "/home/lab"
@@ -123,10 +124,16 @@ bootcmd:
       def resolve_under_root(relative_path):
           normalized = normalize_relative(relative_path)
           root_real = os.path.realpath(ROOT)
-          target = os.path.realpath(os.path.join(ROOT, normalized))
+          requested = os.path.join(ROOT, normalized)
+          cursor = ROOT
+          for segment in normalized.split(os.sep):
+              cursor = os.path.join(cursor, segment)
+              if os.path.islink(cursor):
+                  fail("not a regular file", 66)
+          target = os.path.realpath(requested)
           if target != root_real and not target.startswith(root_real + os.sep):
               fail("path escapes root")
-          return normalized, target
+          return normalized, requested, target
 
       def walk(directory, relative, depth):
           global truncated
@@ -167,11 +174,21 @@ bootcmd:
           sys.stdout.write("\n")
 
       def read_file(relative_path):
-          normalized, target = resolve_under_root(relative_path)
-          if os.path.islink(target) or not os.path.isfile(target):
+          normalized, requested, _ = resolve_under_root(relative_path)
+          flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+          try:
+              fd = os.open(requested, flags)
+          except OSError:
               fail("not a regular file", 66)
-          with open(target, "rb") as handle:
-              data = handle.read(MAX_READ_BYTES + 1)
+          try:
+              if not stat.S_ISREG(os.fstat(fd).st_mode):
+                  fail("not a regular file", 66)
+              with os.fdopen(fd, "rb") as handle:
+                  fd = None
+                  data = handle.read(MAX_READ_BYTES + 1)
+          finally:
+              if fd is not None:
+                  os.close(fd)
           truncated = len(data) > MAX_READ_BYTES
           if truncated:
               data = data[:MAX_READ_BYTES]

@@ -1,6 +1,10 @@
 package kubevirt
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -270,6 +274,30 @@ func TestRenderCloudInitWithAccess_AddsRestrictedFileListKeyAndCommand(t *testin
 	t.Fatalf("file-list command not found in write_files:\n%s", out)
 }
 
+func TestRenderCloudInitWithAccess_FileReadRejectsSymlink(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skipf("python3 is required to execute the VM file-list helper: %v", err)
+	}
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".env"), []byte("secret"), 0o600); err != nil {
+		t.Fatalf("write hidden target: %v", err)
+	}
+	if err := os.Symlink(".env", filepath.Join(root, "link")); err != nil {
+		t.Fatalf("create symlink: %v", err)
+	}
+
+	script := strings.Replace(fileListCommandContent(t), `ROOT = "/home/lab"`, fmt.Sprintf("ROOT = %q", root), 1)
+	cmd := exec.Command("python3", "-c", script)
+	cmd.Env = append(os.Environ(), "SSH_ORIGINAL_COMMAND=read link")
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected symlink read to be rejected, got output:\n%s", output)
+	}
+	if !strings.Contains(string(output), "not a regular file") {
+		t.Fatalf("expected regular-file rejection, got error %v and output:\n%s", err, output)
+	}
+}
+
 func TestRenderCloudInitWithAccess_DeduplicatesMatchingSSHKeyMaterial(t *testing.T) {
 	const sameKey = "ssh-ed25519 AAAA-duplicate-key shared@cledyu"
 	out := renderCloudInitWithAccess("abc123", sameKey, sameKey, BootInit{})
@@ -300,4 +328,30 @@ func TestRenderCloudInitWithAccess_OmitsFileListCommandWithoutKey(t *testing.T) 
 	if strings.Contains(out, "cledyu-list-files") {
 		t.Fatalf("file-list access must be omitted without a public key:\n%s", out)
 	}
+}
+
+func fileListCommandContent(t *testing.T) string {
+	t.Helper()
+	out := renderCloudInitWithAccess(
+		"abc123",
+		"ssh-ed25519 AAAA-validation validation@cledyu",
+		"ssh-ed25519 AAAA-file-list api-file-list@cledyu",
+		BootInit{},
+	)
+	var parsed struct {
+		WriteFiles []struct {
+			Path    string `yaml:"path"`
+			Content string `yaml:"content"`
+		} `yaml:"write_files"`
+	}
+	if err := yaml.Unmarshal([]byte(out), &parsed); err != nil {
+		t.Fatalf("rendered cloud-init is not valid YAML: %v\n%s", err, out)
+	}
+	for _, file := range parsed.WriteFiles {
+		if file.Path == "/usr/local/libexec/cledyu-list-files" {
+			return file.Content
+		}
+	}
+	t.Fatalf("file-list command not found in write_files:\n%s", out)
+	return ""
 }
