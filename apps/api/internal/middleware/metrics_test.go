@@ -67,3 +67,26 @@ func TestMetricsMiddlewareExposesRED(t *testing.T) {
 		t.Errorf("/metrics 엔드포인트가 자기 자신을 집계함 — 제외되어야 함")
 	}
 }
+
+// 프로덕션 미들웨어 순서(Recovery 바깥, Metrics 안쪽)를 그대로 재현한다.
+// 핸들러가 panic 하면 바깥 Recovery 가 500 을 쓰는데, Metrics 가 이 500 을
+// http_requests_total{status="500"} 과 duration 히스토그램에 기록해야 한다.
+// 기록하지 않으면 RED 오류율/지연 SLI 가 실제 장애를 낮게 본다.
+func TestMetricsRecordsPanicAs500(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(Metrics())
+	r.GET("/boom", func(_ *gin.Context) { panic("boom") })
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
+
+	// panic 핸들러 호출 — Recovery 가 500 으로 변환한다.
+	if got := doGet(r, "/boom").Code; got != http.StatusInternalServerError {
+		t.Fatalf("panic 경로 응답코드: got %d, want 500", got)
+	}
+
+	body := doGet(r, "/metrics").Body.String()
+	if !strings.Contains(body, `path="/boom"`) || !strings.Contains(body, `status="500"`) {
+		t.Errorf("panic→500 이 메트릭에 기록되지 않음 (RED 오류율 누락)\n--- body ---\n%s", body)
+	}
+}
