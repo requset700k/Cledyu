@@ -47,7 +47,7 @@ spec:
         # ─────────────────────────────────────────────
         - alert: HubbleEventLossHigh
           expr: |
-            rate(hubble_lost_events_total{source="perf-ring-buffer"}[5m]) > 100
+            rate(hubble_lost_events_total{source=~"perf_event_ring_buffer|observer_events_queue|hubble_ring_buffer"}[5m]) > 100
           for: 5m
           labels:
             severity: warning
