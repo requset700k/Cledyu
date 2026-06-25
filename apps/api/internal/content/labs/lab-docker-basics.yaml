@@ -99,8 +99,11 @@ steps:
       # COPY 가 제대로 됐는지 '빌드된 이미지 내용'으로 확인한다. Dockerfile 텍스트(COPY ./html
       # 같은 유효 변형)를 검사하면 false fail 위험이 있어, 실제 이미지 웹루트 파일을 직접 본다.
       # 이렇게 하면 step3 의 Dockerfile 오류를 step4 로 미루지 않고 step3 에서 잡는다.
+      # --pull=never: 미빌드 상태에서도 RunAll 이 이 체크까지 실행하는데, docker run 기본 pull
+      # policy(missing)면 로컬 전용 태그 myweb:v1 을 외부 레지스트리에서 pull 시도해 느려진다.
+      # 로컬 빌드 산출물만 검사하고 없으면 즉시 실패하도록 pull 을 막는다.
       - type: command
-        command: docker run --rm myweb:v1 cat /usr/share/nginx/html/index.html
+        command: docker run --rm --pull=never myweb:v1 cat /usr/share/nginx/html/index.html
         expect: built with dockerfile
   - id: 4
     title: 빌드한 이미지 실행
