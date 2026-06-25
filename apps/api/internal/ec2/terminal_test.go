@@ -126,6 +126,35 @@ func TestDialTerminal_AuthFailure(t *testing.T) {
 	}
 }
 
+// 주입된 Dial 이 실제 연결에 사용되는지 검증한다(tsnet 다이얼러 주입 경로의 seam).
+func TestDialTerminal_UsesInjectedDial(t *testing.T) {
+	addr := startEchoSSHServer(t, "lab", "lab")
+	host, port, _ := net.SplitHostPort(addr)
+
+	var called, hadDeadline bool
+	dial := func(ctx context.Context, network, address string) (net.Conn, error) {
+		called = true
+		_, hadDeadline = ctx.Deadline()
+		return (&net.Dialer{}).DialContext(ctx, network, address)
+	}
+
+	// deadline 없는 ctx 를 넘겨, DialTerminal 이 Timeout 으로 직접 deadline 을 강제하는지 검증한다.
+	term, err := DialTerminal(context.Background(), host, TerminalConfig{
+		User: "lab", Password: "lab", Port: port, Timeout: 3 * time.Second, Dial: dial,
+	})
+	if err != nil {
+		t.Fatalf("DialTerminal: %v", err)
+	}
+	defer term.Close()
+
+	if !called {
+		t.Fatal("주입된 Dial 이 사용되지 않음")
+	}
+	if !hadDeadline {
+		t.Fatal("주입 Dial 의 ctx 에 deadline 이 없음 — Timeout 미적용")
+	}
+}
+
 // readWithDeadline은 want 가 보일 때까지(또는 짧은 타임아웃까지) 읽어 누적 문자열을 반환한다.
 func readWithDeadline(t *testing.T, r io.Reader, want string) string {
 	t.Helper()
