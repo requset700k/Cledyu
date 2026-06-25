@@ -111,6 +111,15 @@
 
 # cledyu 로그인 테마 — 테마 파일을 ConfigMap 으로 만들어 CR 볼륨으로 마운트(커스텀 이미지 불필요).
 # CR 가 이 ConfigMap 을 참조하므로 CR apply 보다 먼저 생성한다.
+- name: Ensure cledyu theme staging directory exists
+  ansible.builtin.file:
+    path: /home/ubuntu/cledyu-theme
+    state: directory
+    owner: ubuntu
+    group: ubuntu
+    mode: "0755"
+  when: keycloak_foundation_theme_configmap | length > 0
+
 - name: Copy cledyu theme files to control plane host
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/../../infra/keycloak-theme/cledyu/login/{{ item.src }}"
