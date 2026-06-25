@@ -11,6 +11,16 @@ resource "keycloak_realm" "cledyu_learn" {
 
   display_name = var.learn_realm_display_name
 
+  # cledyu 브랜드 로그인 테마(네온 워드마크 + 다크). 테마 리소스는 keycloak 파드의
+  # /opt/keycloak/themes/cledyu 에 마운트됨(ansible keycloak_foundation 의 configmap 볼륨).
+  login_theme = "cledyu"
+
+  # 한국어 우선(테마 messages_ko 라벨 적용). i18n 미설정 시 영어 폴백으로 라벨이 영문 노출됨.
+  internationalization {
+    supported_locales = ["ko", "en"]
+    default_locale    = "ko"
+  }
+
   # 핵심: 자가가입 허용 + 이메일 로그인 + 비번 재설정.
   registration_allowed           = true
   registration_email_as_username = true

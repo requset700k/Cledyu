@@ -37,15 +37,19 @@
 - `messages/messages_ko.properties`: 태그라인·커스텀 라벨.
 - `resources/img/`: favicon(네온 마크).
 
-### 빌드·배포
-- `infra/keycloak-theme/Dockerfile`: `FROM quay.io/keycloak/keycloak:26.6.1`, 테마 COPY 후
-  `kc.sh build`(optimized 이미지).
-- CI: build-apps 매트릭스에 `keycloak` leg 추가 → `ghcr.io/requset700k/keycloak:sha-*`
-  (Trivy HIGH 게이트, 기존 앱과 동일 패턴).
-- Keycloak operator CR(`ansible/roles/keycloak_foundation`): `keycloak_foundation_image`
-  변수 추가, `spec.image`에 커스텀 이미지 지정 → 롤아웃.
-- realm: terraform `realm-learn.tf` 의 cledyu-learn 에 `login_theme = "cledyu"` 설정 후 apply
-  (시크릿은 -var/SM 소싱 규칙 유지).
+### 배포 (구현: ConfigMap 마운트 — 커스텀 이미지 대신)
+테마가 CSS+properties뿐(바이너리 에셋 없음)이라 커스텀 이미지/CI 없이 ConfigMap 으로
+마운트한다 — 로컬 Docker 없이 즉시 배포, CSS 반복도 configmap 갱신+롤로 빠름.
+- ansible `keycloak_foundation`: 테마 파일을 ConfigMap(`cledyu-keycloak-theme`)으로 생성하는
+  태스크 + CR `unsupported.podTemplate` 에 볼륨/마운트(`/opt/keycloak/themes/cledyu`).
+  `keycloak_foundation_theme_configmap` 변수(기본값=configmap 이름)로 게이트.
+- realm: terraform `realm-learn.tf` cledyu-learn 에 `login_theme="cledyu"` +
+  `internationalization{ supported_locales=[ko,en], default_locale=ko }`(테마 한국어 라벨)
+  apply(시크릿 -var/SM 소싱).
+- 라이브 적용(2026-06-25): configmap+CR 패치+realm i18n 으로 적용·검증 완료(headless 캡처).
+  커밋된 ansible/terraform 이 이를 재현·영구화한다.
+- **커스텀 이미지(향후)**: `infra/keycloak-theme/Dockerfile`(FROM keycloak:26.6.1 + 테마 COPY)
+  유지 — 테마가 바이너리 에셋(이미지/폰트)으로 커지면 CI 이미지 leg + CR spec.image 로 승격.
 
 ### KC26 버전 결합 완화
 `parent=keycloak` 상속 + CSS·`template.ftl`·페이지별 최소 오버라이드만 → Keycloak 업그레이드

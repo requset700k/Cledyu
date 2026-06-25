@@ -109,6 +109,41 @@
     or "configured" in keycloak_foundation_service_account_apply.stdout
   become_user: ubuntu
 
+# cledyu 로그인 테마 — 테마 파일을 ConfigMap 으로 만들어 CR 볼륨으로 마운트(커스텀 이미지 불필요).
+# CR 가 이 ConfigMap 을 참조하므로 CR apply 보다 먼저 생성한다.
+- name: Copy cledyu theme files to control plane host
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/../../infra/keycloak-theme/cledyu/login/{{ item.src }}"
+    dest: "/home/ubuntu/cledyu-theme/{{ item.dest }}"
+    owner: ubuntu
+    group: ubuntu
+    mode: "0644"
+  loop:
+    - { src: "theme.properties", dest: "theme.properties" }
+    - { src: "resources/css/cledyu.css", dest: "cledyu.css" }
+    - { src: "messages/messages_ko.properties", dest: "messages_ko.properties" }
+  when: keycloak_foundation_theme_configmap | length > 0
+
+- name: Create or update cledyu theme ConfigMap
+  ansible.builtin.shell: >-
+    set -o pipefail &&
+    kubectl --kubeconfig={{ keycloak_foundation_kubeconfig }}
+    -n {{ keycloak_foundation_namespace }}
+    create configmap {{ keycloak_foundation_theme_configmap }}
+    --from-file=theme.properties=/home/ubuntu/cledyu-theme/theme.properties
+    --from-file=cledyu.css=/home/ubuntu/cledyu-theme/cledyu.css
+    --from-file=messages_ko.properties=/home/ubuntu/cledyu-theme/messages_ko.properties
+    --dry-run=client -o yaml
+    | kubectl --kubeconfig={{ keycloak_foundation_kubeconfig }} apply -f -
+  args:
+    executable: /bin/bash
+  register: keycloak_foundation_theme_cm
+  changed_when: >-
+    "created" in keycloak_foundation_theme_cm.stdout
+    or "configured" in keycloak_foundation_theme_cm.stdout
+  become_user: ubuntu
+  when: keycloak_foundation_theme_configmap | length > 0
+
 # X-Forwarded-* 하드닝 미들웨어가 든 ingress 를 Keycloak CR 보다 먼저 적용한다.
 # Keycloak 기본값이 동적 hostname(strict=false)이라, ingress(per-host XFH overwrite)가
 # 없는 상태로 Keycloak 이 뜨면 그 사이 X-Forwarded-Host 주입 윈도우가 생긴다(신규/DR
