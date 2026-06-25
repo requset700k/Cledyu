@@ -81,27 +81,23 @@ alias 목록, 예 `["google"]`)와 web `CLEDYU_SOCIAL_LOGIN_PROVIDERS`(노출할
 terraform 은 `infra/terraform/aws`(profile `cledyu`, region `ap-northeast-2`)에 게이트된
 초안으로 들어있다(`public-ingress.tf`, `enable_public_ingress=false` 기본).
 
+# 전제: public_domain 을 Route53 Registrar 로 등록(hosted zone·NS 자동 연결, 수동 위임 불필요).
+#       모듈은 기존 zone 을 data 로 조회하므로 별도 zone 생성 단계가 없다.
 ```bash
 cd infra/terraform/aws
 export AWS_PROFILE=cledyu
 
-# 1) Route53 공개 zone 먼저 만들고 NS 위임 (ACM DNS 검증이 위임에 의존하므로 선행)
-#    terraform.tfvars (gitignored) 에:
+# 1) terraform.tfvars (gitignored) 에:
 #      enable_public_ingress = true
 #      public_domain         = "cledyu.com"
 #      public_keycloak_host  = "auth.cledyu.com"
-#      keycloak_upstream_url = "http://<tailnet 도달 Keycloak>:8080"  # ← 환경 토폴로지
+#      keycloak_upstream_url = "https://10.10.0.101"   # 기본값(Traefik LB, 실측 완료)
 #      proxy_instance_type   = "t3.nano"
 #    프록시 tailnet 가입 키(state 평문 회피 위해 env 로만):
 export TF_VAR_tailscale_auth_key='<tailscale reusable/ephemeral authkey>'
 
-#    먼저 zone 만 만들어 NS 를 받는다(전체 apply 는 검증에서 멈출 수 있음):
-terraform apply -target=aws_route53_zone.public
-terraform output public_zone_name_servers   # NS 4개
-
-# 2) 도메인 등록기관(cledyu.com)에서 위 NS 4개로 네임서버 위임. 전파(수분~수시간) 후 진행.
-
-# 3) 나머지 스택 apply (ACM DNS 검증 → ALB → 프록시 → A ALIAS)
+# 2) 한 번에 apply (ACM DNS 검증은 registrar=Route53 라 자동 전파 → ALB → 프록시 → A ALIAS).
+#    NS 위임·zone 생성 단계 불필요.
 terraform apply
 terraform output public_alb_dns_name        # 디버깅용
 ```
