@@ -35,8 +35,8 @@ output "region" {
 
 # ── 공개 진입점(enable_public_ingress=true 일 때만 값이 채워진다) ──────────
 output "public_zone_name_servers" {
-  description = "public_domain hosted zone 의 NS 4개. 도메인 등록기관에 이 값으로 위임해야 공개 해석된다."
-  value       = var.enable_public_ingress ? aws_route53_zone.public[0].name_servers : []
+  description = "public_domain hosted zone 의 NS(참고용). registrar=Route53 면 자동 연결돼 수동 위임 불필요."
+  value       = var.enable_public_ingress ? data.aws_route53_zone.public[0].name_servers : []
 }
 
 output "public_alb_dns_name" {
