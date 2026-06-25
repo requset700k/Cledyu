@@ -19,12 +19,18 @@ const (
 	ptyRows = 40
 )
 
+// DialFunc는 host:port 로의 TCP 연결을 여는 다이얼러다. net.Dialer.DialContext 와 시그니처가 같다.
+type DialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
+
 // TerminalConfig는 EC2 세션 라이브 터미널 SSH 접속 설정이다.
 type TerminalConfig struct {
 	User     string
 	Password string        // 일반 sshd 폴백용. Tailscale SSH(accept) 면 none 인증이 먼저 통과한다.
 	Port     string        // 기본 "22". 테스트에서 오버라이드.
 	Timeout  time.Duration // dial+handshake 상한. 0이면 10s.
+	// Dial: nil 이면 기본 net.Dialer. EC2 세션은 tailnet MagicDNS 로만 도달하므로 main 이
+	// tsnet 다이얼러를 주입한다(클러스터 파드는 tailnet 에 직접 못 붙기 때문).
+	Dial DialFunc
 }
 
 // Terminal은 PTY 가 붙은 SSH 셸 세션을 io.ReadWriteCloser 로 노출한다.
@@ -56,7 +62,11 @@ func DialTerminal(ctx context.Context, host string, tc TerminalConfig) (*Termina
 		Timeout:         timeout,
 	}
 
-	conn, err := (&net.Dialer{Timeout: timeout}).DialContext(ctx, "tcp", addr)
+	dial := tc.Dial
+	if dial == nil {
+		dial = (&net.Dialer{Timeout: timeout}).DialContext
+	}
+	conn, err := dial(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("dial %s: %w", addr, err)
 	}
