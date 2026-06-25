@@ -20,18 +20,27 @@ Cledyu Keycloak의 realm, OIDC client, realm role, group, 팀원 초기 계정�
 
 실제 `terraform.tfvars`, `oidc_client_secrets`,
 `team_member_initial_passwords` 값은 커밋하지 않음.
-1Password 또는 승인된 보안 채널로만 공유하고, 운영과 유사한 환경에 적용하기 전
-Terraform state는 보안 backend에 보관함.
+사람 break-glass 시크릿은 **GCP Secret Manager**(asia-northeast3)에 보관하고
+(예: `cledyu-learn-idp-google-secret`, `cledyu-learn-smtp-key`), apply 시
+`$(gcloud secrets versions access)` 로 `TF_VAR_*` 에 주입한다(채팅·셸 히스토리 회피).
+Terraform state 는 원격 암호화 backend(GCS `cledyu-tf-state`, prefix `keycloak`)에 보관.
 
 ## 사용 방법
 
 ```bash
 cd infra/terraform/keycloak
-cp terraform.tfvars.example terraform.tfvars
+cp terraform.tfvars.example terraform.tfvars   # 최초 1회, 보안값 채움
 $EDITOR terraform.tfvars
+
+# GCS backend 접근(택1): ADC 또는 액세스 토큰
+gcloud auth application-default login            # 워크스테이션
+export GOOGLE_OAUTH_ACCESS_TOKEN=$(gcloud auth print-access-token)  # 비대화형/CI
+
 terraform init
-terraform plan
-terraform apply
+# 시크릿은 Secret Manager 에서 소싱:
+TF_VAR_idp_client_secrets="{ google = \"$(gcloud secrets versions access latest --secret=cledyu-learn-idp-google-secret --project=cledyu-project)\", kakao = \"unused\", naver = \"unused\" }" \
+TF_VAR_learn_smtp_password="$(gcloud secrets versions access latest --secret=cledyu-learn-smtp-key --project=cledyu-project)" \
+terraform plan   # 확인 후 apply
 ```
 
 <!-- BEGIN_TF_DOCS -->
