@@ -98,9 +98,9 @@ func TestGetMyDashboard_PostgresOnly(t *testing.T) {
 	if body.Summary.Score != 10 || body.Summary.Rank != 1 || body.Summary.LabsCompleted != 1 {
 		t.Fatalf("summary mismatch: %+v", body.Summary)
 	}
-	// 실제 임베드 카탈로그는 5개 랩.
-	if body.Summary.TotalLabs != 5 {
-		t.Fatalf("total_labs want 5, got %d", body.Summary.TotalLabs)
+	// 실제 임베드 카탈로그는 6개 랩(lab-helm-advanced 포함).
+	if body.Summary.TotalLabs != 6 {
+		t.Fatalf("total_labs want 6, got %d", body.Summary.TotalLabs)
 	}
 	statusByLab := map[string]string{}
 	for _, l := range body.Labs {
