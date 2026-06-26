@@ -1,0 +1,35 @@
+---
+# external-snapshotter(VolumeSnapshot CRD + snapshot-controller). Longhorn CSI 스냅샷의 전제로,
+# CDI 가 세션 디스크 클론을 host-assisted copy(느림) 대신 스냅샷 기반(빠름)으로 하도록 한다.
+# 클러스터 전역 컴포넌트라 kubevirt 앱과 분리한다(컨트롤러는 kube-system).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-snapshot-controller
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/requset700k/cledyu.git
+    targetRevision: main
+    path: gitops/apps/snapshot-controller
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      # 큰 CRD(volumesnapshotcontents)가 client-side apply 의 annotation 크기 한도를 넘으므로 SSA 사용.
+      - ServerSideApply=true
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
