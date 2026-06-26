@@ -55,7 +55,11 @@ func buildDashboard(labs map[string]content.LabContent, completions []store.Comp
 	}
 	sort.Strings(ids)
 
-	byDiff := map[string]difficultyProgress{}
+	byDiff := map[string]difficultyProgress{
+		"beginner":     {},
+		"intermediate": {},
+		"advanced":     {},
+	}
 	rows := make([]dashboardLab, 0, len(ids))
 	for _, id := range ids {
 		lc := labs[id]
