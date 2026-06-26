@@ -22,6 +22,9 @@ const (
 	MaxEntries = 500
 	// MaxPayloadBytes는 VM 내부 도우미가 변경되거나 침해된 경우에도 적용되는 2차 한도다.
 	MaxPayloadBytes = 256 * 1024
+	// MaxReadPayloadBytes는 read preview JSON의 전송 한도다. VM helper는 raw 128KB를
+	// json.dump 기본값(ensure_ascii=true)으로 인코딩하므로 비ASCII 텍스트는 최대 6배 팽창할 수 있다.
+	MaxReadPayloadBytes = 1024 * 1024
 )
 
 // Entry는 RootPath 아래에서 표시할 일반 파일 또는 디렉터리 하나다.
@@ -94,23 +97,31 @@ func validateEntry(entry Entry) error {
 	if entry.Type != "file" && entry.Type != "directory" {
 		return fmt.Errorf("unsupported type %q", entry.Type)
 	}
-	if entry.Path == "" || path.IsAbs(entry.Path) || path.Clean(entry.Path) != entry.Path {
-		return fmt.Errorf("unsafe relative path %q", entry.Path)
+	segments, err := validateRelativePath(entry.Path)
+	if err != nil {
+		return err
 	}
-	if strings.ContainsRune(entry.Path, '\x00') || strings.ContainsRune(entry.Path, '\\') {
-		return fmt.Errorf("unsafe relative path %q", entry.Path)
-	}
-	segments := strings.Split(entry.Path, "/")
 	if len(segments) > MaxDepth || entry.Depth != len(segments) {
 		return fmt.Errorf("depth %d does not match bounded path %q", entry.Depth, entry.Path)
-	}
-	for _, segment := range segments {
-		if segment == "" || strings.HasPrefix(segment, ".") || strings.IndexFunc(segment, unicode.IsControl) >= 0 {
-			return fmt.Errorf("hidden or unsafe path segment %q", segment)
-		}
 	}
 	if entry.Name != path.Base(entry.Path) {
 		return fmt.Errorf("name %q does not match path %q", entry.Name, entry.Path)
 	}
 	return nil
+}
+
+func validateRelativePath(relativePath string) ([]string, error) {
+	if relativePath == "" || path.IsAbs(relativePath) || path.Clean(relativePath) != relativePath {
+		return nil, fmt.Errorf("unsafe relative path %q", relativePath)
+	}
+	if strings.ContainsRune(relativePath, '\\') {
+		return nil, fmt.Errorf("unsafe relative path %q", relativePath)
+	}
+	segments := strings.Split(relativePath, "/")
+	for _, segment := range segments {
+		if segment == "" || strings.HasPrefix(segment, ".") || strings.IndexFunc(segment, unicode.IsControl) >= 0 {
+			return nil, fmt.Errorf("hidden or unsafe path segment %q", segment)
+		}
+	}
+	return segments, nil
 }
