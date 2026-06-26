@@ -74,6 +74,7 @@ kubevirt:
     privateKey: "private_key"
     publicKey: "public_key"
     mountPath: "/etc/vm-file-ssh"
+    publicKeyPath: "/etc/vm-file-ssh/public_key"
     privateKeyPath: "/etc/vm-file-ssh/id_ed25519"
 
 # AWS EC2 오버플로우 — 온프렘 KubeVirt 풀이 가득 차면 세션을 EC2로 버스트한다(Phase 13).

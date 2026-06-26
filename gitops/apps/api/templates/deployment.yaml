@@ -47,13 +47,10 @@ spec:
             # 세션 VM cloud-init이 lab authorized_keys로 넣는 검증엔진 공개키(공개값이라 평문 OK).
             - name: CLEDYU_KUBEVIRT_LAB_SSH_PUBLIC_KEY
               value: {{ .Values.kubevirt.labSshPublicKey | quote }}
-            # 파일 목록 전용 public key. Vault key 미등록 시 빈 값으로 남아 기능만 비활성화된다.
-            - name: CLEDYU_KUBEVIRT_FILE_LIST_SSH_PUBLIC_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.kubevirt.fileListSSH.secretName | quote }}
-                  key: {{ .Values.kubevirt.fileListSSH.publicKey | quote }}
-                  optional: true
+            # 파일 목록 전용 public key는 Secret volume 파일에서 읽는다.
+            # Secret 기반 env는 Pod 기동 후 갱신되지 않아 Vault key 사후 등록을 반영할 수 없다.
+            - name: CLEDYU_KUBEVIRT_FILE_LIST_SSH_PUBLIC_KEY_PATH
+              value: {{ .Values.kubevirt.fileListSSH.publicKeyPath | quote }}
             - name: CLEDYU_KUBEVIRT_FILE_LIST_SSH_PRIVATE_KEY_PATH
               value: {{ .Values.kubevirt.fileListSSH.privateKeyPath | quote }}
             # Keycloak OIDC (학습자 realm cledyu-learn). client_secret 은 Vault→ESO Secret 에서.
@@ -163,5 +160,7 @@ spec:
             optional: true
             defaultMode: 288 # 0o440 — root와 fsGroup(65532)만 읽기 가능
             items:
+              - key: {{ .Values.kubevirt.fileListSSH.publicKey | quote }}
+                path: public_key
               - key: {{ .Values.kubevirt.fileListSSH.privateKey | quote }}
                 path: id_ed25519

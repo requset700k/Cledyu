@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -53,6 +55,23 @@ func TestLoadReadsVMFileListSSHSettings(t *testing.T) {
 	}
 	if got, want := cfg.KubeVirt.FileListSSHPrivateKeyPath, "/tmp/file-list-key"; got != want {
 		t.Fatalf("FileListSSHPrivateKeyPath = %q, want %q", got, want)
+	}
+}
+
+func TestLoadReadsVMFileListPublicKeyFromMountedFile(t *testing.T) {
+	keyPath := filepath.Join(t.TempDir(), "public_key")
+	if err := os.WriteFile(keyPath, []byte(testEd25519PublicKey+" api@cledyu\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	t.Setenv("CLEDYU_KUBEVIRT_FILE_LIST_SSH_PUBLIC_KEY", "")
+	t.Setenv("CLEDYU_KUBEVIRT_FILE_LIST_SSH_PUBLIC_KEY_PATH", keyPath)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got, want := cfg.KubeVirt.FileListSSHPublicKey, testEd25519PublicKey+" api@cledyu"; got != want {
+		t.Fatalf("FileListSSHPublicKey = %q, want %q", got, want)
 	}
 }
 
