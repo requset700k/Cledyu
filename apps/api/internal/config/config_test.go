@@ -41,14 +41,14 @@ func TestLoadDefaultsProvisionTimeoutToTenMinutes(t *testing.T) {
 }
 
 func TestLoadReadsVMFileListSSHSettings(t *testing.T) {
-	t.Setenv("CLEDYU_KUBEVIRT_FILE_LIST_SSH_PUBLIC_KEY", "ssh-ed25519 AAAA-file-list api@cledyu")
+	t.Setenv("CLEDYU_KUBEVIRT_FILE_LIST_SSH_PUBLIC_KEY", testEd25519PublicKey+" api@cledyu")
 	t.Setenv("CLEDYU_KUBEVIRT_FILE_LIST_SSH_PRIVATE_KEY_PATH", "/tmp/file-list-key")
 
 	cfg, err := Load()
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if got, want := cfg.KubeVirt.FileListSSHPublicKey, "ssh-ed25519 AAAA-file-list api@cledyu"; got != want {
+	if got, want := cfg.KubeVirt.FileListSSHPublicKey, testEd25519PublicKey+" api@cledyu"; got != want {
 		t.Fatalf("FileListSSHPublicKey = %q, want %q", got, want)
 	}
 	if got, want := cfg.KubeVirt.FileListSSHPrivateKeyPath, "/tmp/file-list-key"; got != want {
@@ -57,8 +57,8 @@ func TestLoadReadsVMFileListSSHSettings(t *testing.T) {
 }
 
 func TestLoadRejectsSharedLabAndFileListSSHKeyMaterial(t *testing.T) {
-	t.Setenv("CLEDYU_KUBEVIRT_LAB_SSH_PUBLIC_KEY", "ssh-ed25519 AAAA-shared-key validation-engine@cledyu")
-	t.Setenv("CLEDYU_KUBEVIRT_FILE_LIST_SSH_PUBLIC_KEY", "ssh-ed25519 AAAA-shared-key api-file-list@cledyu")
+	t.Setenv("CLEDYU_KUBEVIRT_LAB_SSH_PUBLIC_KEY", testEd25519PublicKey+" validation-engine@cledyu")
+	t.Setenv("CLEDYU_KUBEVIRT_FILE_LIST_SSH_PUBLIC_KEY", testEd25519PublicKey+" api-file-list@cledyu")
 
 	_, err := Load()
 	if err == nil {
@@ -68,3 +68,29 @@ func TestLoadRejectsSharedLabAndFileListSSHKeyMaterial(t *testing.T) {
 		t.Fatalf("Load() error = %v, want distinct key material error", err)
 	}
 }
+
+func TestLoadRejectsMalformedFileListSSHKey(t *testing.T) {
+	t.Setenv("CLEDYU_KUBEVIRT_FILE_LIST_SSH_PUBLIC_KEY", "ssh-ed25519 not-a-valid-key api-file-list@cledyu")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want malformed file-list SSH public key error")
+	}
+	if !strings.Contains(err.Error(), "file-list SSH public key") {
+		t.Fatalf("Load() error = %v, want file-list SSH public key error", err)
+	}
+}
+
+func TestLoadRejectsFileListSSHKeyWithAuthorizedKeysOptions(t *testing.T) {
+	t.Setenv("CLEDYU_KUBEVIRT_FILE_LIST_SSH_PUBLIC_KEY", `command="/bin/true" `+testEd25519PublicKey+" api-file-list@cledyu")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want file-list SSH public key options error")
+	}
+	if !strings.Contains(err.Error(), "must not include authorized_keys options") {
+		t.Fatalf("Load() error = %v, want authorized_keys options error", err)
+	}
+}
+
+const testEd25519PublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGIZUWVKVjoJzh6dirTVWAtLYewp+SXW54f3uiS8tCFj"

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/viper"
+	"golang.org/x/crypto/ssh"
 )
 
 type Config struct {
@@ -219,22 +220,34 @@ func validate(cfg *Config) error {
 	}
 	labKey := strings.TrimSpace(cfg.KubeVirt.LabSSHPublicKey)
 	fileListKey := strings.TrimSpace(cfg.KubeVirt.FileListSSHPublicKey)
-	if sameSSHPublicKeyMaterial(labKey, fileListKey) {
+	labMaterial, _, err := sshPublicKeyMaterial(labKey)
+	if err != nil {
+		return fmt.Errorf("kubevirt lab SSH public key: %w", err)
+	}
+	fileListMaterial, _, err := sshPublicKeyMaterial(fileListKey)
+	if err != nil {
+		return fmt.Errorf("kubevirt file-list SSH public key: %w", err)
+	}
+	if labMaterial != "" && labMaterial == fileListMaterial {
 		return errors.New("kubevirt lab SSH public key and file-list SSH public key must use distinct key material")
 	}
 	return nil
 }
 
-func sameSSHPublicKeyMaterial(a, b string) bool {
-	aType, aBody, okA := sshPublicKeyMaterial(a)
-	bType, bBody, okB := sshPublicKeyMaterial(b)
-	return okA && okB && aType == bType && aBody == bBody
-}
-
-func sshPublicKeyMaterial(key string) (keyType, keyBody string, ok bool) {
-	fields := strings.Fields(strings.TrimSpace(key))
-	if len(fields) < 2 {
-		return "", "", false
+func sshPublicKeyMaterial(key string) (material string, configured bool, err error) {
+	trimmed := strings.TrimSpace(key)
+	if trimmed == "" {
+		return "", false, nil
 	}
-	return fields[0], fields[1], true
+	publicKey, _, options, rest, err := ssh.ParseAuthorizedKey([]byte(trimmed))
+	if err != nil {
+		return "", true, err
+	}
+	if len(options) > 0 {
+		return "", true, errors.New("must not include authorized_keys options")
+	}
+	if strings.TrimSpace(string(rest)) != "" {
+		return "", true, errors.New("must contain exactly one SSH public key")
+	}
+	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(publicKey))), true, nil
 }
