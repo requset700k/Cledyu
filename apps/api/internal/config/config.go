@@ -69,6 +69,9 @@ type KubeVirtConfig struct {
 	// FileListSSHPublicKey: Session API 파일 목록 전용 제한 공개키.
 	// 비면 cloud-init에 파일 목록 forced command와 key를 넣지 않아 기능이 비활성화된다.
 	FileListSSHPublicKey string `mapstructure:"file_list_ssh_public_key"`
+	// FileListSSHPublicKeyPath: 위 공개키를 Secret volume 파일에서 읽는 optional 경로.
+	// env 주입은 Secret 생성 이후 running 프로세스에 반영되지 않으므로 k8s 배포에서는 파일 경로를 쓴다.
+	FileListSSHPublicKeyPath string `mapstructure:"file_list_ssh_public_key_path"`
 	// FileListSSHPrivateKeyPath: 위 공개키와 짝인 private key의 optional Secret mount 경로.
 	FileListSSHPrivateKeyPath string `mapstructure:"file_list_ssh_private_key_path"`
 	// ProvisionTimeoutMinutes: 세션 VM이 이 시간 내 VMI Running 이 안 되면 Get은 failed로 표시하고 reaper가 세션을 회수(삭제)한다.
@@ -167,6 +170,7 @@ func Load() (*Config, error) {
 	v.SetDefault("kubevirt.base_image_name", "ubuntu-2204-base")
 	v.SetDefault("kubevirt.lab_ssh_public_key", "") // 빈 기본값 — env CLEDYU_KUBEVIRT_LAB_SSH_PUBLIC_KEY로 주입
 	v.SetDefault("kubevirt.file_list_ssh_public_key", "")
+	v.SetDefault("kubevirt.file_list_ssh_public_key_path", "/etc/vm-file-ssh/public_key")
 	v.SetDefault("kubevirt.file_list_ssh_private_key_path", "/etc/vm-file-ssh/id_ed25519")
 	v.SetDefault("kubevirt.storage_class", "longhorn-r2")
 	v.SetDefault("kubevirt.session_ttl_hours", 3)
@@ -208,10 +212,31 @@ func Load() (*Config, error) {
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
+	if err := loadMountedFileListPublicKey(&cfg); err != nil {
+		return nil, err
+	}
 	if err := validate(&cfg); err != nil {
 		return nil, err
 	}
 	return &cfg, nil
+}
+
+func loadMountedFileListPublicKey(cfg *Config) error {
+	path := strings.TrimSpace(cfg.KubeVirt.FileListSSHPublicKeyPath)
+	if path == "" {
+		return nil
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("read kubevirt file-list SSH public key file: %w", err)
+	}
+	if key := strings.TrimSpace(string(content)); key != "" {
+		cfg.KubeVirt.FileListSSHPublicKey = key
+	}
+	return nil
 }
 
 func validate(cfg *Config) error {

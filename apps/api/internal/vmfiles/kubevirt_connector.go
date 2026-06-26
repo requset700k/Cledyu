@@ -53,6 +53,9 @@ func (c *KubeVirtConnector) Connect(ctx context.Context, sessionID string) (net.
 	if sessionID == "" {
 		return nil, errors.New("session ID is required")
 	}
+	if !isValidKubeVirtSessionID(sessionID) {
+		return nil, fmt.Errorf("invalid session ID %q", sessionID)
+	}
 
 	// 세션 VM 이름은 Session API가 생성하는 KubeVirt 매니페스트 계약이다.
 	// namespace: lab-{sessionID}, VMI: session-vm, SSH: guest 22/tcp.
@@ -135,6 +138,21 @@ func portForwardURL(host, sessionID string) (string, error) {
 		"tcp",
 	)
 	return u.String(), nil
+}
+
+// isValidKubeVirtSessionID는 Session API가 생성하는 4바이트 random hex ID만 허용한다.
+// 이 값은 KubeVirt API URL path와 namespace 이름에 들어가므로 사용자 입력이 섞이는 후속
+// HTTP 경로에서도 slash/dot 정규화가 발생하기 전에 차단한다.
+func isValidKubeVirtSessionID(sessionID string) bool {
+	if len(sessionID) != 8 {
+		return false
+	}
+	for _, r := range sessionID {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // websocketDialRoundTripper는 rest.HTTPWrappersForConfig가 인증 헤더를 붙인 요청을 실제
