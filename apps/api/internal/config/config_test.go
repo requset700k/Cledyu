@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestLoadUsesKubeconfigEnvFallback(t *testing.T) {
 	t.Setenv("KUBECONFIG", "/tmp/cledyu-test-kubeconfig.yaml")
@@ -50,5 +53,18 @@ func TestLoadReadsVMFileListSSHSettings(t *testing.T) {
 	}
 	if got, want := cfg.KubeVirt.FileListSSHPrivateKeyPath, "/tmp/file-list-key"; got != want {
 		t.Fatalf("FileListSSHPrivateKeyPath = %q, want %q", got, want)
+	}
+}
+
+func TestLoadRejectsSharedLabAndFileListSSHKeyMaterial(t *testing.T) {
+	t.Setenv("CLEDYU_KUBEVIRT_LAB_SSH_PUBLIC_KEY", "ssh-ed25519 AAAA-shared-key validation-engine@cledyu")
+	t.Setenv("CLEDYU_KUBEVIRT_FILE_LIST_SSH_PUBLIC_KEY", "ssh-ed25519 AAAA-shared-key api-file-list@cledyu")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want duplicate SSH key material error")
+	}
+	if !strings.Contains(err.Error(), "must use distinct key material") {
+		t.Fatalf("Load() error = %v, want distinct key material error", err)
 	}
 }

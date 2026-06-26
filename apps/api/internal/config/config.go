@@ -199,5 +199,34 @@ func Load() (*Config, error) {
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
+	if err := validate(&cfg); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
+}
+
+func validate(cfg *Config) error {
+	if cfg == nil {
+		return errors.New("config is nil")
+	}
+	labKey := strings.TrimSpace(cfg.KubeVirt.LabSSHPublicKey)
+	fileListKey := strings.TrimSpace(cfg.KubeVirt.FileListSSHPublicKey)
+	if sameSSHPublicKeyMaterial(labKey, fileListKey) {
+		return errors.New("kubevirt lab SSH public key and file-list SSH public key must use distinct key material")
+	}
+	return nil
+}
+
+func sameSSHPublicKeyMaterial(a, b string) bool {
+	aType, aBody, okA := sshPublicKeyMaterial(a)
+	bType, bBody, okB := sshPublicKeyMaterial(b)
+	return okA && okB && aType == bType && aBody == bBody
+}
+
+func sshPublicKeyMaterial(key string) (keyType, keyBody string, ok bool) {
+	fields := strings.Fields(strings.TrimSpace(key))
+	if len(fields) < 2 {
+		return "", "", false
+	}
+	return fields[0], fields[1], true
 }
