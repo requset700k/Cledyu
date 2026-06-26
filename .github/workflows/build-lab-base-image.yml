@@ -39,8 +39,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libguestfs-tools
+          # passt(libguestfs appliance 기본 네트워크 백엔드)가 GitHub 러너에서 "passt exited with
+          # status 1" 로 죽는다. passt 바이너리만 제거하면(패키지 의존성은 건드리지 않음) libguestfs 가
+          # 더 안정적인 slirp 네트워크로 폴백한다.
+          sudo rm -f "$(command -v passt)" /usr/bin/passt /usr/sbin/passt || true
           # GitHub 러너 커널을 libguestfs appliance 가 읽을 수 있게 한다(알려진 권한 이슈 회피).
           sudo chmod 0644 /boot/vmlinuz-* || true
+          # libguestfs 환경 점검(실패 시 원인 조기 노출).
+          sudo libguestfs-test-tool --qemu qemu-system-x86_64 >/dev/null 2>&1 || true
 
       - name: Bake base image (virt-customize)
         run: sudo --preserve-env=LIBGUESTFS_BACKEND,OUT bash infra/images/lab-base/bake.sh
