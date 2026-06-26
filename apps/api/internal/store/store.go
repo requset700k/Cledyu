@@ -299,8 +299,15 @@ func (s *Store) LeaderboardRows(ctx context.Context, since *time.Time) ([]Leader
 
 // SetLeaderboardHidden은 유저의 리더보드 노출 여부를 갱신한다(옵트아웃 토글).
 func (s *Store) SetLeaderboardHidden(ctx context.Context, userID string, hidden bool) error {
-	if _, err := s.pool.Exec(ctx,
-		`UPDATE users SET leaderboard_hidden = $2 WHERE id = $1`, userID, hidden); err != nil {
+	// upsert로 행을 보장한다 — 로그인 직후 UpsertUser(비동기)가 아직 미러 행을 만들기 전이라도
+	// 옵트아웃이 유실되지 않도록. UPDATE 만 쓰면 0행 갱신 후 200 을 반환하고, 뒤늦은 upsert 가
+	// 기본값 leaderboard_hidden=false 로 행을 만들어 숨김이 풀린다(이름 공개 노출).
+	// UpsertUser 의 ON CONFLICT 는 leaderboard_hidden 을 건드리지 않으므로 순서와 무관하게 보존된다.
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO users (id, leaderboard_hidden)
+		VALUES ($1, $2)
+		ON CONFLICT (id) DO UPDATE SET leaderboard_hidden = EXCLUDED.leaderboard_hidden`,
+		userID, hidden); err != nil {
 		return fmt.Errorf("set leaderboard hidden: %w", err)
 	}
 	return nil
