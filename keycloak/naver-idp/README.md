@@ -32,9 +32,10 @@ org.keycloak.broker.provider.IdentityBrokerException: No token from server.
 mvn clean package           # -> target/naver-idp.jar
 cp target/naver-idp.jar dist/naver-idp.jar
 
-# 또는 Docker (로컬 툴체인 없이)
-docker build -t naver-idp-build .
-docker create --name x naver-idp-build && docker cp x:/build/target/naver-idp.jar dist/naver-idp.jar && docker rm x
+# 또는 Docker (로컬 툴체인 없이) — 빌드 전용, 별도 Dockerfile 커밋하지 않는다.
+docker run --rm -v "$PWD":/build -w /build maven:3.9-eclipse-temurin-21 \
+  mvn -q -B clean package
+cp target/naver-idp.jar dist/naver-idp.jar
 ```
 
 빌드 타깃 Keycloak 버전은 `pom.xml` 의 `keycloak.version`(현재 26.6.1)이며 운영 이미지
