@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,7 +21,7 @@ func TestKubeVirtConnectorDialsSessionVMPortForward(t *testing.T) {
 		CheckOrigin:  func(*http.Request) bool { return true },
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		const wantPath = "/apis/subresources.kubevirt.io/v1/namespaces/lab-abc123/virtualmachineinstances/session-vm/portforward/22/tcp"
+		const wantPath = "/apis/subresources.kubevirt.io/v1/namespaces/lab-abc123de/virtualmachineinstances/session-vm/portforward/22/tcp"
 		if r.URL.Path != wantPath {
 			t.Errorf("request path = %q, want %q", r.URL.Path, wantPath)
 		}
@@ -55,7 +56,7 @@ func TestKubeVirtConnectorDialsSessionVMPortForward(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewKubeVirtConnector() error = %v", err)
 	}
-	conn, err := connector.Connect(context.Background(), "abc123")
+	conn, err := connector.Connect(context.Background(), "abc123de")
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
@@ -86,8 +87,41 @@ func TestKubeVirtConnectorCancelsHandshakeWithContext(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 
-	_, err = connector.Connect(ctx, "abc123")
+	_, err = connector.Connect(ctx, "abc123de")
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Connect() error = %v, want context deadline exceeded", err)
+	}
+}
+
+func TestKubeVirtConnectorRejectsUnsafeSessionID(t *testing.T) {
+	for _, sessionID := range []string{
+		"../default",
+		"abc/123",
+		"abc123",
+		"abc..123",
+		"ABC123",
+		"abc_123",
+	} {
+		t.Run(sessionID, func(t *testing.T) {
+			var requests int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				atomic.AddInt32(&requests, 1)
+				http.Error(w, "should not be called", http.StatusTeapot)
+			}))
+			defer server.Close()
+
+			connector, err := NewKubeVirtConnector(&rest.Config{Host: server.URL})
+			if err != nil {
+				t.Fatalf("NewKubeVirtConnector() error = %v", err)
+			}
+
+			_, err = connector.Connect(context.Background(), sessionID)
+			if err == nil {
+				t.Fatal("Connect() error = nil, want invalid session ID error")
+			}
+			if got := atomic.LoadInt32(&requests); got != 0 {
+				t.Fatalf("Connect() sent %d KubeVirt requests for invalid session ID", got)
+			}
+		})
 	}
 }
