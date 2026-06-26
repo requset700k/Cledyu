@@ -4,7 +4,7 @@
 CREATE OR REPLACE VIEW `cledyu_analytics.v_dedup_events` AS
 SELECT * EXCEPT (rn) FROM (
   SELECT *, ROW_NUMBER() OVER (
-    PARTITION BY user_id, session_id, event_type, step_id, ts
+    PARTITION BY user_id, session_id, event_type, lab_id, step_id, hint_level, hint_source, ts
     ORDER BY _ingested_at
   ) AS rn
   FROM `cledyu_analytics.lab_events`

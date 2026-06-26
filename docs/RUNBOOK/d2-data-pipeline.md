@@ -47,3 +47,5 @@ rm user.crt user.key ca.crt
 ```
 bq query --use_legacy_sql=false 'SELECT event_type, COUNT(*) FROM cledyu_analytics.lab_events GROUP BY 1'
 ```
+
+- `refresh_views` 태스크는 4개의 CREATE OR REPLACE VIEW 문을 단일 BigQuery 멀티스테이트먼트 스크립트로 실행한다. 멀티스테이트먼트 오류 시 수동 폴백: `bq query --use_legacy_sql=false < apps/airflow/dags/sql/d3_views.sql`

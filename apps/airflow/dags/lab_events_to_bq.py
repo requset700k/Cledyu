@@ -6,7 +6,7 @@
 """
 
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 
 from airflow import DAG
 from airflow.operators.python import PythonOperator
@@ -57,7 +57,7 @@ def consume_to_gcs(**context):
         return ""  # 소비 0건 — 다운스트림 스킵
 
     run_id = context["run_id"].replace(":", "-")
-    blob_path = f"lab-events/dt={datetime.utcnow():%Y-%m-%d}/run={run_id}.ndjson"
+    blob_path = f"lab-events/dt={datetime.now(timezone.utc):%Y-%m-%d}/run={run_id}.ndjson"  # noqa: UP017
     storage.Client().bucket(BUCKET).blob(blob_path).upload_from_string(
         rows_to_ndjson(rows), content_type="application/x-ndjson"
     )
@@ -76,6 +76,7 @@ with DAG(
     start_date=datetime(2026, 6, 1),
     catchup=False,
     tags=["analytics", "lab-events"],
+    template_searchpath=os.path.dirname(os.path.abspath(__file__)),
 ) as dag:
     from airflow.operators.empty import EmptyOperator
     from airflow.operators.python import BranchPythonOperator
