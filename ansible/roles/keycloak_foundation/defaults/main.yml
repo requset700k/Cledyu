@@ -38,3 +38,9 @@ keycloak_foundation_hostname_strict: false
 keycloak_foundation_tls_certificate_name: keycloak-tls
 keycloak_foundation_tls_secret_name: keycloak-tls
 keycloak_foundation_ingress_name: keycloak
+
+# cledyu 커스텀 로그인 테마. 테마 파일(infra/keycloak-theme/cledyu/login)을 ConfigMap 으로
+# 만들어 keycloak 파드 /opt/keycloak/themes/cledyu 에 마운트한다(커스텀 이미지 불필요).
+# 빈 값이면 테마 미마운트(기본 테마). realm login_theme=cledyu 는 terraform 에서 설정.
+keycloak_foundation_theme_configmap: cledyu-keycloak-theme
+keycloak_foundation_theme_manifest_path: /home/ubuntu/keycloak-theme-configmap.yaml

@@ -72,3 +72,6 @@ KT_Tech_Up_Labs_*.docx
 
 # 로컬 env (예시 파일은 추적 유지)
 apps/web/.env*.local
+
+# brainstorming visual companion artifacts
+.superpowers/

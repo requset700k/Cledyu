@@ -98,6 +98,12 @@ type AWSConfig struct {
 	// TailscaleAuthKey: 세션 인스턴스 cloud-init 이 tailnet 에 가입할 때 쓰는 ephemeral authkey.
 	// Vault→ESO 로 주입. 비면 cloud-init 이 tailscale 가입을 생략(라이브 터미널/IDE 불가, SSM 채점만).
 	TailscaleAuthKey string `mapstructure:"tailscale_auth_key"`
+	// APITailscaleAuthKey: api 파드 자신이 tsnet 으로 tailnet 에 가입할 때 쓰는 authkey(tag:cledyu-api).
+	// 세션 authkey(TailscaleAuthKey)와 별개다 — api 가 EC2 세션에 라이브 터미널 SSH 를 붙이려면 자신이
+	// tailnet 노드로 붙어야 한다(클러스터 파드는 tailnet/MagicDNS 에 직접 못 닿음). 비면 tsnet 미기동.
+	APITailscaleAuthKey string `mapstructure:"api_tailscale_auth_key"`
+	// APITailnetStateDir: tsnet 상태 디렉터리(쓰기 가능해야 함). 비면 tsnet 기본 경로. k8s 는 emptyDir 권장.
+	APITailnetStateDir string `mapstructure:"api_tailnet_state_dir"`
 	// LiveTerminalSSHUser/Password: api 가 EC2 세션에 라이브 터미널(SSH PTY)을 붙일 때 쓰는 계정.
 	// cloud-init 이 만드는 lab 계정(기본 lab/lab)과 일치한다. tailnet 경유로만 도달 가능하며,
 	// Tailscale SSH(accept) 면 none 인증이 먼저 통과하고, 일반 sshd 면 이 비밀번호로 폴백한다.
@@ -173,7 +179,9 @@ func Load() (*Config, error) {
 	v.SetDefault("aws.provision_timeout_minutes", 10)
 	v.SetDefault("aws.max_active_sessions", 0) // 0 = EC2 오버플로우 비활성(현행 KubeVirt 전용 동작 보존)
 	v.SetDefault("aws.tailnet_hostname_prefix", "lab")
-	v.SetDefault("aws.tailscale_auth_key", "") // env CLEDYU_AWS_TAILSCALE_AUTH_KEY(Secret)로 주입
+	v.SetDefault("aws.tailscale_auth_key", "")     // env CLEDYU_AWS_TAILSCALE_AUTH_KEY(Secret)로 주입
+	v.SetDefault("aws.api_tailscale_auth_key", "") // env CLEDYU_AWS_API_TAILSCALE_AUTH_KEY(Secret)로 주입
+	v.SetDefault("aws.api_tailnet_state_dir", "")  // 비면 tsnet 기본; k8s 는 emptyDir 경로 주입
 	v.SetDefault("aws.live_terminal_ssh_user", "lab")
 	v.SetDefault("aws.live_terminal_ssh_password", "lab")
 	v.SetDefault("kafka.brokers", "cledyu-kafka-kafka-bootstrap.kafka.svc:9093")

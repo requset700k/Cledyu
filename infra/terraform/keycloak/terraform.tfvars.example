@@ -140,8 +140,11 @@ learn_smtp = {
   starttls      = true
   ssl           = false
 }
-# Brevo 대시보드 → SMTP & API → SMTP 의 'SMTP key'(master password).
-learn_smtp_password = "REPLACE_WITH_BREVO_SMTP_KEY"
+# learn_smtp_password(Brevo SMTP key)도 여기 두지 말 것 — tfvars 값이 TF_VAR 보다
+# 우선이라 placeholder 가 SM 값을 덮어쓴다(idp_client_secrets 와 동일 함정). apply 시
+# GCP Secret Manager 에서 주입: TF_VAR_learn_smtp_password="$(gcloud secrets versions
+# access latest --secret=cledyu-learn-smtp-key --project=cledyu-project)"
+# (learn_smtp 블록을 비우면 SMTP 미설정 — 그땐 이 값도 불필요)
 
 idp_client_ids = {
   google = "REPLACE_WITH_GOOGLE_OAUTH_CLIENT_ID"
@@ -149,11 +152,11 @@ idp_client_ids = {
   naver  = "REPLACE_WITH_NAVER_CLIENT_ID"
 }
 
-idp_client_secrets = {
-  google = "REPLACE_WITH_GOOGLE_OAUTH_CLIENT_SECRET"
-  kakao  = "REPLACE_WITH_KAKAO_CLIENT_SECRET"
-  naver  = "REPLACE_WITH_NAVER_CLIENT_SECRET"
-}
+# idp_client_secrets 는 여기 두지 말 것(중요). tfvars 값은 -var/TF_VAR 보다 우선이라,
+# placeholder 를 두면 SM 에서 주입한 실제 secret 을 덮어써 Google 이 invalid_client 로
+# 거부한다(실제 발생함). apply 시 GCP Secret Manager 에서 -var 로 주입:
+#   SM=$(gcloud secrets versions access latest --secret=cledyu-learn-idp-google-secret --project=cledyu-project)
+#   terraform apply -var "idp_client_secrets={google=\"$SM\",kakao=\"unused\",naver=\"unused\"}"
 
 team_members = {
   kylekim = {

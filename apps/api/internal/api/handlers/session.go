@@ -145,11 +145,13 @@ func (h *Handler) sessionResponse(s *session.Session) gin.H {
 	})
 	// 라이브 터미널 랩이 실제 사용 가능한 상태(ready)일 때만 WS 경로를 제공한다. KubeVirt 는
 	// serial console, EC2 는 tailnet SSH PTY 로 동일 /ws 경로가 프로바이더에 맞게 접속한다.
-	// 단 EC2 는 tailnet 가입(authkey 설정) 시에만 도달 가능하다 — 미설정(SSM 채점 전용 구성)이면
-	// VMIAddress 가 ErrNotFound 라 /ws·/ide 가 항상 503 이므로, 깨진 터미널/IDE 탭을 띄우지
-	// 않도록 URL 을 광고하지 않는다(프론트는 placeholder 를 유지).
+	// 단 EC2 는 (1) 세션 인스턴스가 tailnet 에 가입하고(authkey 설정) (2) api 자신도 tsnet 으로
+	// tailnet 에 붙어 있어야(ec2Dial 주입) 도달 가능하다. 둘 중 하나라도 없으면 /ws 접속이 깨지므로
+	// (nil ec2Dial 은 기본 net.Dialer 라 클러스터에서 MagicDNS 에 못 닿음) URL 을 광고하지 않는다
+	// — 프론트는 placeholder 를 유지한다.
 	if lc, ok := h.labs[s.LabID]; ok && lc.HasLiveTerminal() && s.Status == "ready" {
-		reachable := s.Provider != session.ProviderEC2 || h.cfg.AWS.TailscaleAuthKey != ""
+		reachable := s.Provider != session.ProviderEC2 ||
+			(h.cfg.AWS.TailscaleAuthKey != "" && h.ec2Dial != nil)
 		if reachable {
 			out["terminal_url"] = "/api/v1/sessions/" + s.ID + "/ws"
 			// IDE 랩(code-server)은 브라우저 VS Code 프록시 경로도 함께 제공.

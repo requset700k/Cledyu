@@ -19,9 +19,17 @@ init:
     - curl
   runcmd:
     - curl -sfL https://get.k3s.io -o /tmp/k3s-install.sh
-    - INSTALL_K3S_EXEC="--write-kubeconfig-mode 644" sh /tmp/k3s-install.sh
+    # cluster/service CIDR 을 호스트(pod 10.42.0.0/16, svc 10.43.0.0/16)와 겹치지 않게 지정.
+    # 기본값이면 guest k3s 파드망(10.42.0.0/24)이 호스트 cp02 파드망과 충돌해, cp02 경유
+    # 검증 SSH 응답이 guest 내부로 mis-route 되어 검증이 ~50% 실패한다.
+    - INSTALL_K3S_EXEC="--write-kubeconfig-mode 644 --cluster-cidr=10.244.0.0/16 --service-cidr=10.245.0.0/16" sh /tmp/k3s-install.sh
     - echo KUBECONFIG=/etc/rancher/k3s/k3s.yaml >> /etc/environment
     - "printf 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml\\n' > /etc/profile.d/k3s-kubeconfig.sh"
+    # step6 롤링 업데이트 대상 이미지를 부팅 때 미리 받아둔다. 안 받아두면 step6 롤아웃이 첫
+    # pull 때문에 길어져 검증 체크의 --timeout(17s)을 넘길 수 있다.
+    # kubelet/CRI 는 containerd 의 k8s.io namespace 를 보므로, 'k3s ctr'(기본 default ns) 대신
+    # 'k3s crictl pull'(=CRI, k8s.io)로 받아야 Pod 가 재-pull 없이 캐시를 쓴다. CRI 뜰 때까지 재시도.
+    - 'for i in $(seq 1 12); do k3s crictl pull docker.io/library/nginx:1.27-alpine && break; sleep 5; done'
 steps:
   - id: 1
     title: 클러스터 상태 확인
@@ -121,6 +129,13 @@ steps:
       - "kubectl set image deployment/<이름> <컨테이너>=<이미지> 로 교체하고 kubectl rollout status 로 완료를 확인합니다. 컨테이너 이름은 kubectl describe 로 찾을 수 있습니다(여기서는 nginx)."
       - "kubectl set image deployment/web nginx=nginx:1.27-alpine 후 kubectl rollout status deployment web 이 successfully rolled out 을 출력하면 완료입니다."
     checks:
+     # rollout status 만으론 false pass: step4 의 안정된 deployment 도 'successfully rolled out' 을 즉시 출력하므로 set image(과제) 를 안 해도 통과하므로 이미지 교체부터 검증
       - type: command
-        command: kubectl rollout status deployment web --timeout=60s
+        command: kubectl get deployment web -o wide
+        expect: nginx:1.27-alpine
+      # 롤아웃 완료 확인. --timeout 17s 는 엔진 체크 상한(execTimeout 20s) 안쪽이라, 느린
+      # 롤아웃이어도 엔진이 virtctl 을 죽이기(signal: killed) 전에 kubectl 이 스스로 timed out
+      # 으로 깔끔히 실패한다. 이미지는 init 에서 pre-pull 하므로 보통 ~2-3s 안에 끝난다.
+      - type: command
+        command: kubectl rollout status deployment web --timeout=17s
         expect: successfully rolled out

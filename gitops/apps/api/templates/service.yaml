@@ -3,9 +3,13 @@ kind: Service
 metadata:
   name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
+  labels:
+    app: {{ .Release.Name }}
 spec:
   selector:
     app: {{ .Release.Name }}
   ports:
-    - port: 80
+    # name 은 ServiceMonitor(endpoints[].port)가 포트를 이름으로 참조하기 위해 필요.
+    - name: http
+      port: 80
       targetPort: 8080

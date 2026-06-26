@@ -10,6 +10,7 @@ import (
 	"github.com/requset700k/cledyu/api/internal/auth"
 	"github.com/requset700k/cledyu/api/internal/config"
 	"github.com/requset700k/cledyu/api/internal/content"
+	"github.com/requset700k/cledyu/api/internal/ec2"
 	"github.com/requset700k/cledyu/api/internal/events"
 	"github.com/requset700k/cledyu/api/internal/kube"
 	"github.com/requset700k/cledyu/api/internal/lock"
@@ -35,7 +36,12 @@ type Handler struct {
 	db        persistence                   // PostgreSQL 영속 계층. nil 허용 — in-memory 전용(로컬/CI).
 	kcAdmin   roleAssigner                  // Keycloak Admin(역할 승격). nil 허용 — 미설정 시 역할 승격 API 501.
 	locks     lock.Locker                   // 유저별 세션 생성 직렬화 — Redis 분산 락 또는 in-memory(MemLocker).
+	ec2Dial   ec2.DialFunc                  // EC2 세션 라이브 터미널용 tailnet 다이얼러(tsnet). nil이면 기본 net.Dialer(클러스터에선 도달 불가).
 }
+
+// SetEC2Dial는 EC2 세션(tailnet MagicDNS)에 닿는 다이얼러를 주입한다. main이 tsnet 노드를
+// 기동했을 때만 설정한다 — tsnet 수명관리(Close)가 main에 있어 생성자 대신 setter로 둔다.
+func (h *Handler) SetEC2Dial(d ec2.DialFunc) { h.ec2Dial = d }
 
 // roleAssigner는 Keycloak 역할 승격 의존성이다(*auth.AdminClient 가 구현).
 type roleAssigner interface {

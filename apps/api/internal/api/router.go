@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/requset700k/cledyu/api/internal/api/handlers"
 	"github.com/requset700k/cledyu/api/internal/auth"
 	"github.com/requset700k/cledyu/api/internal/config"
@@ -40,6 +41,8 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions session.Provider, v
 	r := gin.New()
 	r.Use(gin.Recovery())
 	r.Use(middleware.Logger(log))
+	// RED 메트릭 기록 — Prometheus 스크랩용. SLO 담당자가 도메인 SLI 를 위에 얹는다.
+	r.Use(middleware.Metrics())
 	r.Use(cors.New(cors.Config{
 		// Next.js dev server(3000) 및 클러스터 프론트엔드에서의 요청 허용.
 		// 프로덕션에서는 Traefik이 CORS를 처리하므로 이 설정은 로컬 개발 전용.
@@ -53,6 +56,10 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions session.Provider, v
 
 	r.GET("/health", h.Health)
 	r.GET("/ready", h.Ready)
+
+	// Prometheus 스크랩 엔드포인트. 인증 불필요 — 노출 범위는 ServiceMonitor(클러스터
+	// 내부 스크랩)로 제한하며, 공개 ingress 노출 차단은 SLO 담당자 후속 작업.
+	r.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	// 인증 불필요 — OIDC authorization code(PKCE) 흐름.
 	r.GET("/api/v1/auth/login", h.Login)
