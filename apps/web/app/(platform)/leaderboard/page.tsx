@@ -5,7 +5,7 @@ import { api } from '@/lib/api';
 import { mergeMyRank } from '@/lib/leaderboard.mjs';
 import type { LeaderboardItem } from '@/lib/types';
 
-function RankTable({ rows }: { rows: (LeaderboardItem & { isMe?: boolean })[] }) {
+function RankTable({ rows, rankHeader = '#' }: { rows: (LeaderboardItem & { isMe?: boolean })[]; rankHeader?: string }) {
   if (rows.length === 0) {
     return <p className="text-slate-500 text-sm">아직 기록이 없습니다.</p>;
   }
@@ -13,7 +13,7 @@ function RankTable({ rows }: { rows: (LeaderboardItem & { isMe?: boolean })[] })
     <table className="w-full text-sm">
       <thead>
         <tr className="text-slate-400 text-left">
-          <th className="py-2 w-12">#</th>
+          <th className="py-2 w-12">{rankHeader}</th>
           <th className="py-2">이름</th>
           <th className="py-2 text-right">점수</th>
           <th className="py-2 text-right">완료</th>
@@ -42,16 +42,10 @@ export default function LeaderboardPage() {
     queryKey: ['leaderboard'],
     queryFn: () => api.leaderboard.get(),
   });
-  const { data: progress } = useQuery({
-    queryKey: ['my-progress'],
-    queryFn: () => api.me.progress(),
-  });
-
   const toggleHidden = useMutation({
     mutationFn: (hidden: boolean) => api.me.setPreferences(hidden),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['leaderboard'] });
-      queryClient.invalidateQueries({ queryKey: ['my-progress'] });
     },
   });
 
@@ -73,7 +67,7 @@ export default function LeaderboardPage() {
         <div className="flex gap-6 text-sm">
           <div>
             <div className="text-slate-400">점수</div>
-            <div className="text-white text-xl font-bold">{progress?.score ?? data.me.score}</div>
+            <div className="text-white text-xl font-bold">{data.me.score}</div>
           </div>
           <div>
             <div className="text-slate-400">순위</div>
@@ -104,7 +98,7 @@ export default function LeaderboardPage() {
 
       <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-5">
         <h2 className="text-white font-semibold mb-3">최근 7일 급상승</h2>
-        <RankTable rows={data.recent_risers} />
+        <RankTable rows={data.recent_risers} rankHeader="7일 순위" />
       </section>
     </div>
   );
