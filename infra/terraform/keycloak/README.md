@@ -70,8 +70,6 @@ No modules.
 
 | Name | Type |
 | ---- | ---- |
-| [keycloak_attribute_importer_identity_provider_mapper.naver_email](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/attribute_importer_identity_provider_mapper) | resource |
-| [keycloak_attribute_importer_identity_provider_mapper.naver_name](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/attribute_importer_identity_provider_mapper) | resource |
 | [keycloak_default_groups.learn_default](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/default_groups) | resource |
 | [keycloak_group.groups](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/group) | resource |
 | [keycloak_group.learn_admins](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/group) | resource |
@@ -101,7 +99,6 @@ No modules.
 | [keycloak_user.team_members](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/user) | resource |
 | [keycloak_user_groups.team_members](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/user_groups) | resource |
 | [keycloak_user_roles.master_super_admins](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/user_roles) | resource |
-| [keycloak_user_template_importer_identity_provider_mapper.naver_username](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/user_template_importer_identity_provider_mapper) | resource |
 | [keycloak_realm.master](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/data-sources/realm) | data source |
 | [keycloak_role.master_admin](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/data-sources/role) | data source |
 | [keycloak_role.master_default_roles](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/data-sources/role) | data source |

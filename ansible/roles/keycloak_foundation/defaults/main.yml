@@ -44,3 +44,11 @@ keycloak_foundation_ingress_name: keycloak
 # 빈 값이면 테마 미마운트(기본 테마). realm login_theme=cledyu 는 terraform 에서 설정.
 keycloak_foundation_theme_configmap: cledyu-keycloak-theme
 keycloak_foundation_theme_manifest_path: /home/ubuntu/keycloak-theme-configmap.yaml
+
+# 네이버 소셜 로그인 SPI(keycloak/naver-idp). 네이버는 OIDC id_token 을 발급하지 않아
+# 빌트인 oidc 프로바이더로 동작하지 않으므로, 커스텀 provider("naver") JAR 을 ConfigMap
+# (binaryData)으로 만들어 /opt/keycloak/providers 에 마운트한다(테마와 동일 패턴, 커스텀
+# 이미지 불필요). operator 가 비-optimized 로 기동→매 시작 시 augmentation 이 provider 등록.
+# 빈 값이면 SPI 미마운트. JAR 은 dist/ 에 prebuilt 로 커밋(rebuild: README 참고).
+keycloak_foundation_naver_spi_configmap: cledyu-keycloak-naver-spi
+keycloak_foundation_naver_spi_jar_src: "{{ playbook_dir }}/../../keycloak/naver-idp/dist/naver-idp.jar"
