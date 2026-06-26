@@ -5,7 +5,13 @@ import { api } from '@/lib/api';
 import { mergeMyRank } from '@/lib/leaderboard.mjs';
 import type { LeaderboardItem } from '@/lib/types';
 
-function RankTable({ rows, rankHeader = '#' }: { rows: (LeaderboardItem & { isMe?: boolean })[]; rankHeader?: string }) {
+function RankTable({
+  rows,
+  rankHeader = '#',
+}: {
+  rows: (LeaderboardItem & { isMe?: boolean })[];
+  rankHeader?: string;
+}) {
   if (rows.length === 0) {
     return <p className="text-slate-500 text-sm">아직 기록이 없습니다.</p>;
   }

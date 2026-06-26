@@ -6,5 +6,8 @@ export function mergeMyRank(hallOfFame, me) {
   const rows = hallOfFame.map((r) => ({ ...r, isMe: me.rank !== 0 && r.rank === me.rank }));
   if (me.rank === 0) return rows;
   if (rows.some((r) => r.isMe)) return rows;
-  return [...rows, { rank: me.rank, name: '나', score: me.score, labs_completed: me.labs_completed, isMe: true }];
+  return [
+    ...rows,
+    { rank: me.rank, name: '나', score: me.score, labs_completed: me.labs_completed, isMe: true },
+  ];
 }
