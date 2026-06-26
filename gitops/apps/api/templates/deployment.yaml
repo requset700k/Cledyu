@@ -17,6 +17,9 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
+        # tsnet 상태 emptyDir(/var/lib/cledyu-tsnet)를 비root(65532)가 쓸 수 있게 그룹 소유권 부여.
+        # 없으면 tsnet.Server.Dir 쓰기 실패로 tailnet 가입이 깨져 EC2 라이브 터미널이 비활성된다.
+        fsGroup: 65532
       containers:
         - name: api
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
