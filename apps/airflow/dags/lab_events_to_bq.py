@@ -48,20 +48,20 @@ def consume_to_gcs(**context):
             if msg.error():
                 continue
             rows.append(event_to_row(msg.value()))
-        if rows:
-            consumer.commit(asynchronous=False)
+
+        if not rows:
+            return ""  # 소비 0건 — 다운스트림 스킵
+
+        run_id = context["run_id"].replace(":", "-")
+        blob_path = f"lab-events/dt={datetime.now(timezone.utc):%Y-%m-%d}/run={run_id}.ndjson"  # noqa: UP017
+        storage.Client().bucket(BUCKET).blob(blob_path).upload_from_string(
+            rows_to_ndjson(rows), content_type="application/x-ndjson"
+        )
+        # GCS 랜딩이 성공한 뒤에만 offset 커밋 — 업로드 실패 시 재시도가 같은 배치를 재소비한다.
+        consumer.commit(asynchronous=False)
+        return f"gs://{BUCKET}/{blob_path}"
     finally:
         consumer.close()
-
-    if not rows:
-        return ""  # 소비 0건 — 다운스트림 스킵
-
-    run_id = context["run_id"].replace(":", "-")
-    blob_path = f"lab-events/dt={datetime.now(timezone.utc):%Y-%m-%d}/run={run_id}.ndjson"  # noqa: UP017
-    storage.Client().bucket(BUCKET).blob(blob_path).upload_from_string(
-        rows_to_ndjson(rows), content_type="application/x-ndjson"
-    )
-    return f"gs://{BUCKET}/{blob_path}"
 
 
 def _branch_has_data(**context):

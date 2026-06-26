@@ -42,10 +42,10 @@ resource "google_service_account" "airflow_analytics" {
   display_name = "Airflow lab-events analytics pipeline"
 }
 
-resource "google_project_iam_member" "bq_data_editor" {
-  project = var.project_id
-  role    = "roles/bigquery.dataEditor"
-  member  = "serviceAccount:${google_service_account.airflow_analytics.email}"
+resource "google_bigquery_dataset_iam_member" "bq_data_editor" {
+  dataset_id = google_bigquery_dataset.analytics.dataset_id
+  role       = "roles/bigquery.dataEditor"
+  member     = "serviceAccount:${google_service_account.airflow_analytics.email}"
 }
 
 resource "google_project_iam_member" "bq_job_user" {

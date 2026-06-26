@@ -137,9 +137,11 @@ scheduler:
     - name: airflow-gcp-sa
       secret:
         secretName: airflow-gcp-sa
+        optional: true
     - name: airflow-kafka-cert
       secret:
         secretName: airflow-kafka-cert
+        optional: true
   extraVolumeMounts:
     - name: airflow-gcp-sa
       mountPath: /etc/airflow-gcp-sa
