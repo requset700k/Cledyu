@@ -2,6 +2,7 @@ package kubevirt
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -13,13 +14,15 @@ import (
 // init.Runcmd 는 공통 runcmd(getty 재시작) 앞에 붙어, 도구 설치가 끝난 뒤
 // 학생 터미널 autologin 이 열리는 순서를 보장한다.
 func renderCloudInit(sessionID, labSSHPublicKey string, init BootInit) string {
-	// 검증엔진(virtctl ssh)이 키로 접속할 수 있도록 lab 사용자에 엔진 공개키를 넣는다.
-	// 공개키 미설정 시 비번/시리얼 콘솔만 유지(키 블록 생략).
-	sshKeyBlock := ""
-	if labSSHPublicKey != "" {
-		sshKeyBlock = "\n    ssh_authorized_keys:\n      - " + labSSHPublicKey
-	}
+	return renderCloudInitWithAccess(sessionID, labSSHPublicKey, "", init)
+}
 
+// renderCloudInitWithAccess는 검증엔진 key와 파일 목록 전용 제한 key를 함께 렌더링한다.
+// 파일 목록 public key가 비어 있으면 관련 key와 강제 명령을 모두 생략한다.
+func renderCloudInitWithAccess(
+	sessionID, labSSHPublicKey, fileListSSHPublicKey string,
+	init BootInit,
+) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, `#cloud-config
 hostname: %s
@@ -28,17 +31,37 @@ users:
   - name: lab
     lock_passwd: false
     shell: /bin/bash
-    sudo: ALL=(ALL) NOPASSWD:ALL%s
-chpasswd:
+    sudo: ALL=(ALL) NOPASSWD:ALL
+`, "session-"+sessionID)
+
+	var sshKeys []string
+	labKey := strings.TrimSpace(labSSHPublicKey)
+	fileListKey := strings.TrimSpace(fileListSSHPublicKey)
+	if labKey != "" && !sameSSHPublicKeyMaterial(labKey, fileListKey) {
+		sshKeys = append(sshKeys, labKey)
+	}
+	if fileListKey != "" {
+		// Session API 파일 목록 key는 VM 안에서 범용 셸이 아니라 고정된 JSON 출력 명령만 실행한다.
+		sshKeys = append(sshKeys, `command="/usr/local/libexec/cledyu-list-files",restrict `+fileListKey)
+	}
+	if len(sshKeys) > 0 {
+		b.WriteString("    ssh_authorized_keys:\n")
+		for _, key := range sshKeys {
+			// strconv.Quote의 double-quoted scalar는 key 옵션 내부 따옴표도 YAML-safe하게 보존한다.
+			fmt.Fprintf(&b, "      - %s\n", strconv.Quote(key))
+		}
+	}
+
+	b.WriteString(`chpasswd:
   expire: false
   list: |
     lab:lab
 bootcmd:
   - "mkdir -p /etc/systemd/resolved.conf.d"
-  - "printf '%%s\\n' '[Resolve]' 'DNS=8.8.8.8 1.1.1.1' 'FallbackDNS=8.8.4.4 1.0.0.1' 'Domains=~.' > /etc/systemd/resolved.conf.d/cledyu-lab.conf"
+  - "printf '%s\\n' '[Resolve]' 'DNS=8.8.8.8 1.1.1.1' 'FallbackDNS=8.8.4.4 1.0.0.1' 'Domains=~.' > /etc/systemd/resolved.conf.d/cledyu-lab.conf"
   - "systemctl restart systemd-resolved || true"
   - "systemctl stop serial-getty@ttyS0.service || true"
-`, "session-"+sessionID, sshKeyBlock)
+`)
 
 	if len(init.Packages) > 0 {
 		b.WriteString("packages:\n")
@@ -57,7 +80,136 @@ bootcmd:
       [Service]
       ExecStart=
       ExecStart=-/sbin/agetty --autologin lab --noclear --keep-baud 115200,38400,9600 ttyS0 xterm-256color
-  - path: /home/lab/.hushlogin
+`)
+	if strings.TrimSpace(fileListSSHPublicKey) != "" {
+		b.WriteString(`  - path: /usr/local/libexec/cledyu-list-files
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env python3
+      import json
+      import os
+      import stat
+      import sys
+
+      ROOT = "/home/lab"
+      MAX_DEPTH = 4
+      MAX_ENTRIES = 500
+      MAX_READ_BYTES = 131072
+      items = []
+      truncated = False
+
+      def fail(message, code=64):
+          sys.stderr.write(message + "\n")
+          raise SystemExit(code)
+
+      def normalize_relative(relative_path):
+          if not relative_path:
+              fail("path is required")
+          normalized = os.path.normpath(relative_path)
+          if (
+              normalized == "."
+              or os.path.isabs(normalized)
+              or normalized.startswith("../")
+              or normalized == ".."
+              or "\\" in normalized
+              or "\x00" in normalized
+          ):
+              fail("unsafe path")
+          for segment in normalized.split(os.sep):
+              if not segment or segment.startswith("."):
+                  fail("hidden or unsafe path")
+          return normalized
+
+      def resolve_under_root(relative_path):
+          normalized = normalize_relative(relative_path)
+          root_real = os.path.realpath(ROOT)
+          requested = os.path.join(ROOT, normalized)
+          cursor = ROOT
+          for segment in normalized.split(os.sep):
+              cursor = os.path.join(cursor, segment)
+              if os.path.islink(cursor):
+                  fail("not a regular file", 66)
+          target = os.path.realpath(requested)
+          if target != root_real and not target.startswith(root_real + os.sep):
+              fail("path escapes root")
+          return normalized, requested, target
+
+      def walk(directory, relative, depth):
+          global truncated
+          try:
+              entries = sorted(os.scandir(directory), key=lambda entry: entry.name)
+          except OSError:
+              return
+          for entry in entries:
+              if entry.name.startswith(".") or entry.is_symlink():
+                  continue
+              child_relative = f"{relative}/{entry.name}" if relative else entry.name
+              try:
+                  if entry.is_dir(follow_symlinks=False):
+                      entry_type = "directory"
+                  elif entry.is_file(follow_symlinks=False):
+                      entry_type = "file"
+                  else:
+                      continue
+              except OSError:
+                  continue
+              if len(items) >= MAX_ENTRIES:
+                  truncated = True
+                  return
+              items.append({
+                  "path": child_relative,
+                  "name": entry.name,
+                  "type": entry_type,
+                  "depth": depth,
+              })
+              if entry_type == "directory" and depth < MAX_DEPTH:
+                  walk(entry.path, child_relative, depth + 1)
+                  if truncated:
+                      return
+
+      def list_files():
+          walk(ROOT, "", 1)
+          json.dump({"root": ROOT, "items": items, "truncated": truncated}, sys.stdout)
+          sys.stdout.write("\n")
+
+      def read_file(relative_path):
+          normalized, requested, _ = resolve_under_root(relative_path)
+          flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+          try:
+              fd = os.open(requested, flags)
+          except OSError:
+              fail("not a regular file", 66)
+          try:
+              if not stat.S_ISREG(os.fstat(fd).st_mode):
+                  fail("not a regular file", 66)
+              with os.fdopen(fd, "rb") as handle:
+                  fd = None
+                  data = handle.read(MAX_READ_BYTES + 1)
+          finally:
+              if fd is not None:
+                  os.close(fd)
+          truncated = len(data) > MAX_READ_BYTES
+          if truncated:
+              data = data[:MAX_READ_BYTES]
+          try:
+              content = data.decode("utf-8")
+          except UnicodeDecodeError:
+              fail("binary file preview is unavailable", 65)
+          json.dump({"path": normalized, "content": content, "truncated": truncated}, sys.stdout)
+          sys.stdout.write("\n")
+
+      command = os.environ.get("SSH_ORIGINAL_COMMAND", "").strip() or "list"
+      action, _, argument = command.partition(" ")
+      if action == "list" and not argument:
+          list_files()
+      elif action == "read" and argument:
+          read_file(argument.strip())
+      else:
+          fail("unsupported command")
+`)
+	}
+	b.WriteString(`  - path: /home/lab/.hushlogin
     owner: lab:lab
     permissions: "0644"
     defer: true
@@ -94,4 +246,18 @@ runcmd:
   - systemctl restart serial-getty@ttyS0.service
 `)
 	return b.String()
+}
+
+func sameSSHPublicKeyMaterial(a, b string) bool {
+	aType, aBody, okA := sshPublicKeyMaterial(a)
+	bType, bBody, okB := sshPublicKeyMaterial(b)
+	return okA && okB && aType == bType && aBody == bBody
+}
+
+func sshPublicKeyMaterial(key string) (keyType, keyBody string, ok bool) {
+	fields := strings.Fields(strings.TrimSpace(key))
+	if len(fields) < 2 {
+		return "", "", false
+	}
+	return fields[0], fields[1], true
 }

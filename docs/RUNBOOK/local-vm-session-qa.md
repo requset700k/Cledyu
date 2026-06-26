@@ -53,7 +53,18 @@ brew install int128/kubelogin/kubelogin
 
 다른 위치의 kubeconfig를 쓰는 경우에는 본인 파일 경로로 바꾼다. 개인별 절대경로는 커밋하지 않는다.
 
-### 2. API 서버 실행
+### 2. 로컬 QA 모드 선택
+
+세션 생성과 VM 프로비저닝만 빠르게 확인할 때는 인증을 끄고 `localhost`로 실행한다.
+Keycloak 로그인, 쿠키 도메인, callback URL까지 함께 검증할 때는 Caddy 로컬 HTTPS 프록시를
+사용한다.
+
+| 모드 | 목적 | Web URL | 인증 |
+|---|---|---|---|
+| 빠른 VM QA | API/VM/터미널 경로 확인 | `http://localhost:3000` | `AUTH_ENABLED=false` |
+| 로그인 포함 QA | Keycloak redirect/cookie/WebSocket 확인 | `https://app.cledyu.local` | `AUTH_ENABLED=true` |
+
+### 3. API 서버 실행 — 빠른 VM QA
 
 ```bash
 cd apps/api
@@ -71,7 +82,7 @@ listening
 
 `CLEDYU_KEYCLOAK_URL`은 로컬 QA에서 Keycloak discovery를 일부러 실패시켜 debug fallback 신원(`dev-user`)으로 보호 API를 호출하기 위한 값이다.
 
-### 3. Web 서버 실행
+### 4. Web 서버 실행 — 빠른 VM QA
 
 새 터미널에서 실행한다.
 
@@ -90,7 +101,76 @@ pnpm dev
 Local: http://localhost:3000
 ```
 
-### 4. API 기본 확인
+### 5. 로그인 포함 QA — Caddy 로컬 HTTPS 프록시
+
+Keycloak 로그인과 `*.cledyu.local` 쿠키 흐름까지 확인할 때만 이 단계를 사용한다.
+`app.cledyu.local`과 `api.cledyu.local`은 로컬 Caddy로 보내고, `keycloak.cledyu.local`은
+실제 클러스터 Keycloak에 닿도록 hosts를 설정한다.
+
+```bash
+sudo sh -c 'cat >> /etc/hosts <<EOF
+127.0.0.1 app.cledyu.local api.cledyu.local
+# 아래 IP는 현재 클러스터 ingress/LB 주소로 바꾼다.
+10.10.0.101 keycloak.cledyu.local
+EOF'
+```
+
+임시 Caddyfile을 만든다.
+
+```bash
+mkdir -p /tmp/cledyu-local-proxy
+cat >/tmp/cledyu-local-proxy/Caddyfile <<'EOF'
+{
+  local_certs
+}
+
+app.cledyu.local {
+  reverse_proxy 127.0.0.1:3000
+}
+
+api.cledyu.local {
+  reverse_proxy 127.0.0.1:8080
+}
+EOF
+```
+
+Caddy를 실행한다.
+
+```bash
+sudo caddy run --config /tmp/cledyu-local-proxy/Caddyfile
+```
+
+API 서버는 Keycloak과 cookie domain을 실제 로그인 흐름에 맞춰 실행한다.
+
+```bash
+cd apps/api
+
+KUBECONFIG="$PWD/../../infra/kubernetes/kubeconfig/cledyu-oidc.yaml" \
+CLEDYU_SERVER_MODE=debug \
+CLEDYU_KEYCLOAK_URL=https://keycloak.cledyu.local \
+CLEDYU_KEYCLOAK_REALM=cledyu-learn \
+CLEDYU_KEYCLOAK_CLIENT_ID=web \
+CLEDYU_KEYCLOAK_REDIRECT_URI=https://api.cledyu.local/api/v1/auth/callback \
+CLEDYU_KEYCLOAK_COOKIE_DOMAIN=.cledyu.local \
+CLEDYU_FRONTEND_URL=https://app.cledyu.local \
+go run ./cmd/server
+```
+
+Web 서버는 API와 WebSocket을 각각 로컬 HTTP/API HTTPS 도메인으로 연결한다.
+
+```bash
+cd apps/web
+
+CLEDYU_BACKEND_URL=http://localhost:8080 \
+NEXT_PUBLIC_WS_URL=wss://api.cledyu.local \
+AUTH_ENABLED=true \
+pnpm dev
+```
+
+브라우저에서 `https://app.cledyu.local`로 접속해 로그인, Lab 진입, VM 터미널 연결을 확인한다.
+QA가 끝나면 `/etc/hosts`에 추가한 임시 항목과 `/tmp/cledyu-local-proxy`를 정리한다.
+
+### 6. API 기본 확인
 
 새 터미널에서 실행한다.
 
@@ -112,7 +192,7 @@ curl -s http://localhost:8080/api/v1/labs | jq
 Lab 목록 응답에는 `lab-linux-basics`가 포함되어야 한다.
 `/ready` 응답의 `checks.kubevirt.detail`이 `configured`이면 API가 KubeVirt manager를 초기화한 상태다.
 
-### 5. 세션 생성 확인
+### 7. 세션 생성 확인
 
 터미널 연결만 확인할 때는 `lab-linux-basics`를 우선 사용한다.
 
@@ -135,7 +215,7 @@ curl -i \
 }
 ```
 
-### 6. KubeVirt 리소스 확인
+### 8. KubeVirt 리소스 확인
 
 ```bash
 kubectl get vm,vmi,pod -n lab-<session_id>
@@ -151,7 +231,7 @@ NAME                                 AGE   PHASE     IP
 virtualmachineinstance/session-vm    ...   Running   ...
 ```
 
-### 7. Web에서 터미널 확인
+### 9. Web에서 터미널 확인
 
 브라우저에서 접속한다.
 
@@ -171,7 +251,34 @@ password: lab
 `Cledyu ~ ➜` 형태로 보여야 한다. 기존에 이미 생성된 VM에는 cloud-init 변경이
 소급 적용되지 않으므로 프롬프트 변경을 검증할 때는 새 세션을 생성한다.
 
-### 8. 배포 환경의 VM 콘솔 RBAC 확인
+### 10. VM 파일 조회 forced command 사전조건 확인
+
+읽기 전용 파일 탐색기 기반은 세션 VM 내부의 cloud-init forced command
+`/usr/local/libexec/cledyu-list-files`를 `python3`로 실행한다. `ubuntu-2204-base` 이미지를
+갱신하거나 교체한 뒤에는 새 세션 VM에서 다음을 확인한다.
+
+```bash
+command -v python3
+python3 --version
+```
+
+현재 `ubuntu-2204-base` 기반 새 세션 VM 확인 결과:
+
+```bash
+Cledyu ~ ➜ command -v python3
+/usr/bin/python3
+
+Cledyu ~ ➜ python3 --version
+Python 3.10.12
+```
+
+`python3`가 없으면 파일 목록/미리보기 forced command가 실행되지 않는다. 이 경우 base image에
+`python3`를 포함시키거나 파일 조회 helper를 POSIX shell 기반으로 다시 설계한다.
+
+EC2 오버플로우 세션(`internal/ec2/cloudinit.go`)은 Tailscale SSH 기반의 별도 경로를 사용하므로,
+이 KubeVirt 세션 VM 파일 조회 helper와 별도 후속 작업으로 다룬다.
+
+### 11. 배포 환경의 VM 콘솔 RBAC 확인
 
 ArgoCD 동기화 후 API ServiceAccount가 세션 네임스페이스의 KubeVirt serial
 console에 접근할 수 있는지 확인한다.

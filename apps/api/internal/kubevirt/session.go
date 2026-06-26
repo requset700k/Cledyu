@@ -102,7 +102,12 @@ func (m *Manager) Create(ctx context.Context, sessionID, labID, userID string, i
 			Namespace: ns,
 		},
 		StringData: map[string]string{
-			"userdata": renderCloudInit(sessionID, m.cfg.LabSSHPublicKey, init),
+			"userdata": renderCloudInitWithAccess(
+				sessionID,
+				m.cfg.LabSSHPublicKey,
+				m.cfg.FileListSSHPublicKey,
+				init,
+			),
 		},
 	}, metav1.CreateOptions{})
 	if err != nil {

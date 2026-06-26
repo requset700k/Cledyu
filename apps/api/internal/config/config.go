@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/spf13/viper"
+	"golang.org/x/crypto/ssh"
 )
 
 type Config struct {
@@ -65,6 +66,11 @@ type KubeVirtConfig struct {
 	// LabSSHPublicKey: 세션 VM cloud-init이 user "lab"의 authorized_keys로 넣는 공개키.
 	// 검증엔진이 이 키의 private 짝으로 virtctl ssh 접속한다. 비면 키를 넣지 않는다(비번/시리얼만).
 	LabSSHPublicKey string `mapstructure:"lab_ssh_public_key"`
+	// FileListSSHPublicKey: Session API 파일 목록 전용 제한 공개키.
+	// 비면 cloud-init에 파일 목록 forced command와 key를 넣지 않아 기능이 비활성화된다.
+	FileListSSHPublicKey string `mapstructure:"file_list_ssh_public_key"`
+	// FileListSSHPrivateKeyPath: 위 공개키와 짝인 private key의 optional Secret mount 경로.
+	FileListSSHPrivateKeyPath string `mapstructure:"file_list_ssh_private_key_path"`
 	// ProvisionTimeoutMinutes: 세션 VM이 이 시간 내 VMI Running 이 안 되면 Get은 failed로 표시하고 reaper가 세션을 회수(삭제)한다.
 	// stuck provisioning이 CDI 클론 재시도 thrash로 번지는 것을 차단. 0이면 비활성.
 	ProvisionTimeoutMinutes int `mapstructure:"provision_timeout_minutes"`
@@ -160,6 +166,8 @@ func Load() (*Config, error) {
 	v.SetDefault("kubevirt.base_image_ns", "kubevirt")
 	v.SetDefault("kubevirt.base_image_name", "ubuntu-2204-base")
 	v.SetDefault("kubevirt.lab_ssh_public_key", "") // 빈 기본값 — env CLEDYU_KUBEVIRT_LAB_SSH_PUBLIC_KEY로 주입
+	v.SetDefault("kubevirt.file_list_ssh_public_key", "")
+	v.SetDefault("kubevirt.file_list_ssh_private_key_path", "/etc/vm-file-ssh/id_ed25519")
 	v.SetDefault("kubevirt.storage_class", "longhorn-r2")
 	v.SetDefault("kubevirt.session_ttl_hours", 3)
 	v.SetDefault("kubevirt.provision_timeout_minutes", 10)
@@ -200,5 +208,46 @@ func Load() (*Config, error) {
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
+	if err := validate(&cfg); err != nil {
+		return nil, err
+	}
 	return &cfg, nil
+}
+
+func validate(cfg *Config) error {
+	if cfg == nil {
+		return errors.New("config is nil")
+	}
+	labKey := strings.TrimSpace(cfg.KubeVirt.LabSSHPublicKey)
+	fileListKey := strings.TrimSpace(cfg.KubeVirt.FileListSSHPublicKey)
+	labMaterial, _, err := sshPublicKeyMaterial(labKey)
+	if err != nil {
+		return fmt.Errorf("kubevirt lab SSH public key: %w", err)
+	}
+	fileListMaterial, _, err := sshPublicKeyMaterial(fileListKey)
+	if err != nil {
+		return fmt.Errorf("kubevirt file-list SSH public key: %w", err)
+	}
+	if labMaterial != "" && labMaterial == fileListMaterial {
+		return errors.New("kubevirt lab SSH public key and file-list SSH public key must use distinct key material")
+	}
+	return nil
+}
+
+func sshPublicKeyMaterial(key string) (material string, configured bool, err error) {
+	trimmed := strings.TrimSpace(key)
+	if trimmed == "" {
+		return "", false, nil
+	}
+	publicKey, _, options, rest, err := ssh.ParseAuthorizedKey([]byte(trimmed))
+	if err != nil {
+		return "", true, err
+	}
+	if len(options) > 0 {
+		return "", true, errors.New("must not include authorized_keys options")
+	}
+	if strings.TrimSpace(string(rest)) != "" {
+		return "", true, errors.New("must contain exactly one SSH public key")
+	}
+	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(publicKey))), true, nil
 }
