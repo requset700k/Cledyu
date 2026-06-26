@@ -111,7 +111,20 @@ webserver:
         }
     ]
 
+# ── DAG 런타임 Python 의존성(D2 파이프라인) ──────────────────────────────────
+# LocalExecutor 라 스케줄러에 설치된다. 데모용 _PIP_ADDITIONAL_REQUIREMENTS.
+extraEnv: |
+  - name: _PIP_ADDITIONAL_REQUIREMENTS
+    value: "apache-airflow-providers-google==10.* confluent-kafka==2.*"
+  - name: GOOGLE_APPLICATION_CREDENTIALS
+    value: /etc/airflow-gcp-sa/key.json
+  - name: GCP_PROJECT
+    value: cledyu-project
+  - name: LAB_EVENTS_BUCKET
+    value: cledyu-lab-events-analytics
+
 # ── Scheduler ────────────────────────────────────────────────────────────────
+# GCP SA 키와 Kafka 인증서 Secret 을 스케줄러에 마운트.
 scheduler:
   resources:
     requests:
@@ -120,6 +133,20 @@ scheduler:
     limits:
       cpu: "1"
       memory: 1Gi
+  extraVolumes:
+    - name: airflow-gcp-sa
+      secret:
+        secretName: airflow-gcp-sa
+    - name: airflow-kafka-cert
+      secret:
+        secretName: airflow-kafka-cert
+  extraVolumeMounts:
+    - name: airflow-gcp-sa
+      mountPath: /etc/airflow-gcp-sa
+      readOnly: true
+    - name: airflow-kafka-cert
+      mountPath: /etc/airflow-kafka-cert
+      readOnly: true
 
 # ── Ingress ──────────────────────────────────────────────────────────────────
 # kafka-ui와 동일하게 Helm 내장 Ingress + Traefik ingressClassName 사용
