@@ -1,0 +1,4 @@
+target/
+# 루트 .gitignore 의 `dist/` 규칙을 이 모듈에 한해 재포함한다.
+# prebuilt JAR(dist/naver-idp.jar)을 ansible 이 ConfigMap 으로 쓰므로 추적해야 한다.
+!dist/

@@ -14,15 +14,26 @@ spec:
           runAsNonRoot: true
           seccompProfile:
             type: RuntimeDefault
-{% if keycloak_foundation_theme_configmap %}
-        # cledyu 테마를 ConfigMap 으로 /opt/keycloak/themes/cledyu 에 마운트(커스텀 이미지 불필요).
+{% if keycloak_foundation_theme_configmap or keycloak_foundation_naver_spi_configmap %}
+        # ConfigMap 마운트(커스텀 이미지 불필요):
+        # - cledyu 테마 → /opt/keycloak/themes/cledyu
+        # - 네이버 SPI JAR → /opt/keycloak/providers/naver-idp.jar (subPath, 기존 provider 보존)
         containers:
           - name: keycloak
             volumeMounts:
+{% if keycloak_foundation_theme_configmap %}
               - name: cledyu-theme
                 mountPath: /opt/keycloak/themes/cledyu
                 readOnly: true
+{% endif %}
+{% if keycloak_foundation_naver_spi_configmap %}
+              - name: naver-spi
+                mountPath: /opt/keycloak/providers/naver-idp.jar
+                subPath: naver-idp.jar
+                readOnly: true
+{% endif %}
         volumes:
+{% if keycloak_foundation_theme_configmap %}
           - name: cledyu-theme
             configMap:
               name: "{{ keycloak_foundation_theme_configmap }}"
@@ -33,6 +44,12 @@ spec:
                   path: login/resources/css/cledyu.css
                 - key: messages_ko.properties
                   path: login/messages/messages_ko.properties
+{% endif %}
+{% if keycloak_foundation_naver_spi_configmap %}
+          - name: naver-spi
+            configMap:
+              name: "{{ keycloak_foundation_naver_spi_configmap }}"
+{% endif %}
 {% endif %}
   db:
     vendor: postgres
