@@ -19,6 +19,7 @@ export LIBGUESTFS_BACKEND="${LIBGUESTFS_BACKEND:-direct}"
 
 echo ">> bake: apt update + 공통 패키지 + qemu-guest-agent"
 virt-customize -a "$OUT" \
+  --run-command 'rm -f /etc/resolv.conf; printf "nameserver 10.0.2.3\n" > /etc/resolv.conf' \
   --update \
   --install qemu-guest-agent,curl,jq,unzip,ca-certificates,gnupg,apt-transport-https \
   --run-command 'systemctl enable qemu-guest-agent' \
