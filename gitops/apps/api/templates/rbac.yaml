@@ -68,6 +68,7 @@ rules:
     verbs: ["get"]
   # 읽기 전용 파일 목록은 세션 VM의 22/tcp로 KubeVirt port-forward를 열고,
   # VM 내부 authorized_keys forced command로 범용 셸 실행을 차단한다.
+  # API connector는 KubeVirt subresource에 GET WebSocket upgrade만 수행하므로 get만 허용한다.
   - apiGroups: ["subresources.kubevirt.io"]
     resources: ["virtualmachineinstances/portforward"]
-    verbs: ["get", "update"]
+    verbs: ["get"]
