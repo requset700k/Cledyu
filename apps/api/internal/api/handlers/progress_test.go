@@ -14,14 +14,15 @@ import (
 
 // fakePersistence는 persistence 의 in-memory 테스트 더블이다.
 type fakePersistence struct {
-	mu          sync.Mutex
-	progress    map[string]store.SessionProgress
-	users       map[string]string // id → role
-	completions map[string]string // user|lab → session
-	saves       int
-	leaderboard []store.LeaderboardRow // LeaderboardRows 가 돌려줄 행
-	hidden      map[string]bool        // SetLeaderboardHidden 이 기록
-	inProgress  map[string][]string    // user_id → lab_ids (진행기록 있는 랩)
+	mu           sync.Mutex
+	progress     map[string]store.SessionProgress
+	users        map[string]string // id → role
+	completions  map[string]string // user|lab → session
+	completionAt map[string]string // "user|lab" → RFC3339, 비면 zero time
+	saves        int
+	leaderboard  []store.LeaderboardRow // LeaderboardRows 가 돌려줄 행
+	hidden       map[string]bool        // SetLeaderboardHidden 이 기록
+	inProgress   map[string][]string    // user_id → lab_ids (진행기록 있는 랩)
 }
 
 func newFakePersistence() *fakePersistence {
@@ -85,7 +86,15 @@ func (f *fakePersistence) ListCompletionsByUser(_ context.Context, userID string
 	out := make([]store.Completion, 0)
 	for key, sess := range f.completions {
 		if strings.HasPrefix(key, userID+"|") {
-			out = append(out, store.Completion{LabID: strings.TrimPrefix(key, userID+"|"), SessionID: sess})
+			comp := store.Completion{LabID: strings.TrimPrefix(key, userID+"|"), SessionID: sess}
+			if f.completionAt != nil {
+				if ts, ok := f.completionAt[key]; ok {
+					if parsed, perr := time.Parse(time.RFC3339, ts); perr == nil {
+						comp.CompletedAt = parsed
+					}
+				}
+			}
+			out = append(out, comp)
 		}
 	}
 	return out, nil
