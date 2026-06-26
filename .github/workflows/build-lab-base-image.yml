@@ -5,6 +5,10 @@
 name: build lab base image
 
 on:
+  pull_request:
+    paths:
+      - infra/images/lab-base/**
+      - .github/workflows/build-lab-base-image.yml
   push:
     branches: [main]
     paths:
