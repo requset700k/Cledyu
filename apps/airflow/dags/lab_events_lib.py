@@ -5,7 +5,7 @@ DAG(lab_events_to_bq.py)에서 import 한다. airflow/kafka/gcp 에 의존하지
 """
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 # BQ raw 테이블 lab_events 의 컬럼(스키마와 1:1). omitempty 로 빠진 필드는 None.
 _FIELDS = (
@@ -27,7 +27,7 @@ def event_to_row(msg_value):
         msg_value = msg_value.decode("utf-8")
     event = json.loads(msg_value)
     row = {field: event.get(field) for field in _FIELDS}
-    row["_ingested_at"] = datetime.now(UTC).isoformat()
+    row["_ingested_at"] = datetime.now(timezone.utc).isoformat()  # noqa: UP017
     return row
 
 
