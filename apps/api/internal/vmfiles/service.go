@@ -10,6 +10,7 @@ import (
 )
 
 var ErrBusy = errors.New("VM file listing is busy")
+var ErrFileNotListed = errors.New("VM file is not listed")
 
 // Lister는 HTTP 핸들러가 의존하는 최소 파일 목록 인터페이스다.
 type Lister interface {
@@ -20,6 +21,11 @@ type Lister interface {
 // 범용 실행 경로가 되지 않도록 command나 path 인자를 의도적으로 제공하지 않는다.
 type Runner interface {
 	Run(context.Context, string) ([]byte, error)
+}
+
+// Reader는 목록에 포함된 단일 파일만 읽는 VM forced command 실행 경로다.
+type Reader interface {
+	Read(context.Context, string, string) ([]byte, error)
 }
 
 // Service는 Runner에 중복 요청 병합, 전역 동시성 제한, timeout 경계를 적용한다.
@@ -42,6 +48,42 @@ func NewService(runner Runner, timeout time.Duration, maxConcurrent int) *Servic
 		timeout: timeout,
 		limit:   make(chan struct{}, maxConcurrent),
 	}
+}
+
+// Read는 먼저 현재 VM snapshot을 조회해 relativePath가 목록에 포함된 일반 파일인지 확인한 뒤
+// preview forced command를 실행한다. 사용자가 추측한 숨김/깊이초과/미목록 경로는 VM으로 보내지 않는다.
+func (s *Service) Read(ctx context.Context, sessionID, relativePath string) ([]byte, error) {
+	if s == nil || s.runner == nil {
+		return nil, errors.New("VM file reading is unavailable")
+	}
+	reader, ok := s.runner.(Reader)
+	if !ok {
+		return nil, errors.New("VM file reading is unavailable")
+	}
+	snapshot, err := s.List(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if !snapshotContainsFile(snapshot, relativePath) {
+		return nil, ErrFileNotListed
+	}
+
+	runCtx, cancel := context.WithTimeout(ctx, s.timeout)
+	defer cancel()
+	output, err := reader.Read(runCtx, sessionID, relativePath)
+	if err != nil {
+		return nil, fmt.Errorf("read VM file: %w", err)
+	}
+	return output, nil
+}
+
+func snapshotContainsFile(snapshot Snapshot, relativePath string) bool {
+	for _, item := range snapshot.Items {
+		if item.Path == relativePath && item.Type == "file" {
+			return true
+		}
+	}
+	return false
 }
 
 // List는 sessionID의 검증된 파일 목록을 반환한다. 같은 세션의 동시 요청은 하나의

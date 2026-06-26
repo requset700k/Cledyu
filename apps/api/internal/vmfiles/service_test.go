@@ -15,6 +15,27 @@ func (f runnerFunc) Run(ctx context.Context, sessionID string) ([]byte, error) {
 }
 
 var emptySnapshot = []byte(`{"root":"/home/lab","items":[],"truncated":false}`)
+var snapshotWithFile = []byte(`{"root":"/home/lab","items":[{"path":"work","name":"work","type":"directory","depth":1},{"path":"work/app.log","name":"app.log","type":"file","depth":2}],"truncated":false}`)
+
+type runnerWithRead struct {
+	list      []byte
+	readCalls atomic.Int32
+}
+
+func (r *runnerWithRead) Run(context.Context, string) ([]byte, error) {
+	return r.list, nil
+}
+
+func (r *runnerWithRead) Read(_ context.Context, sessionID, relativePath string) ([]byte, error) {
+	r.readCalls.Add(1)
+	if sessionID != "abc123" {
+		return nil, errors.New("unexpected session")
+	}
+	if relativePath != "work/app.log" {
+		return nil, errors.New("unexpected path")
+	}
+	return []byte(`{"path":"work/app.log","content":"hello\n","truncated":false}` + "\n"), nil
+}
 
 func TestServiceCoalescesConcurrentRequestsForSameSession(t *testing.T) {
 	started := make(chan struct{})
@@ -117,5 +138,45 @@ func TestServiceDoesNotStartRunnerForAlreadyCancelledContext(t *testing.T) {
 	case <-called:
 		t.Fatal("runner was called for an already cancelled context")
 	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestServiceReadAllowsOnlyListedFiles(t *testing.T) {
+	runner := &runnerWithRead{list: snapshotWithFile}
+	service := NewService(runner, time.Second, 1)
+
+	got, err := service.Read(context.Background(), "abc123", "work/app.log")
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if string(got) != `{"path":"work/app.log","content":"hello\n","truncated":false}`+"\n" {
+		t.Fatalf("Read() output = %q", got)
+	}
+	if got := runner.readCalls.Load(); got != 1 {
+		t.Fatalf("read calls = %d, want 1", got)
+	}
+}
+
+func TestServiceReadRejectsUnlistedPathBeforeRunnerRead(t *testing.T) {
+	runner := &runnerWithRead{list: snapshotWithFile}
+	service := NewService(runner, time.Second, 1)
+
+	if _, err := service.Read(context.Background(), "abc123", "work/missing.log"); err == nil {
+		t.Fatal("Read() error = nil, want unlisted path error")
+	}
+	if got := runner.readCalls.Load(); got != 0 {
+		t.Fatalf("read calls = %d, want 0", got)
+	}
+}
+
+func TestServiceReadRejectsListedDirectoryBeforeRunnerRead(t *testing.T) {
+	runner := &runnerWithRead{list: snapshotWithFile}
+	service := NewService(runner, time.Second, 1)
+
+	if _, err := service.Read(context.Background(), "abc123", "work"); err == nil {
+		t.Fatal("Read() error = nil, want directory rejection")
+	}
+	if got := runner.readCalls.Load(); got != 0 {
+		t.Fatalf("read calls = %d, want 0", got)
 	}
 }
