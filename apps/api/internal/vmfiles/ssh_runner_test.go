@@ -1,6 +1,7 @@
 package vmfiles
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -62,6 +63,36 @@ func TestSSHRunnerReadsSpecificFileWithBoundedCommand(t *testing.T) {
 	}
 	if string(got) != wantOutput {
 		t.Fatalf("Read() output = %q, want %q", got, wantOutput)
+	}
+	if err := <-serverErr; err != nil {
+		t.Fatalf("SSH server error = %v", err)
+	}
+}
+
+func TestSSHRunnerReadAllowsEscapedUnicodePreviewPayload(t *testing.T) {
+	clientSigner := testSigner(t)
+	serverSigner := testSigner(t)
+	serverErr := make(chan error, 1)
+	payload := bytes.Repeat([]byte(`\uac00`), 45_000)
+	wantOutput := append([]byte(`{"path":"work/korean.txt","content":"`), payload...)
+	wantOutput = append(wantOutput, []byte(`","truncated":true}`+"\n")...)
+	if len(wantOutput) <= MaxPayloadBytes {
+		t.Fatalf("test output length = %d, want larger than MaxPayloadBytes=%d", len(wantOutput), MaxPayloadBytes)
+	}
+	connector := testSSHConnector(t, serverSigner, clientSigner.PublicKey(), "read work/korean.txt", wantOutput, serverErr)
+	runner, err := NewSSHRunner(connector, clientSigner, ssh.FixedHostKey(serverSigner.PublicKey()))
+	if err != nil {
+		t.Fatalf("NewSSHRunner() error = %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	got, err := runner.Read(ctx, "abc123", "work/korean.txt")
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if !bytes.Equal(got, wantOutput) {
+		t.Fatalf("Read() output length = %d, want %d", len(got), len(wantOutput))
 	}
 	if err := <-serverErr; err != nil {
 		t.Fatalf("SSH server error = %v", err)
