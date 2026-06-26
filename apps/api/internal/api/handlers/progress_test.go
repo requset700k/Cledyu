@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/requset700k/cledyu/api/internal/store"
 	"github.com/requset700k/cledyu/api/internal/validation"
@@ -18,6 +19,8 @@ type fakePersistence struct {
 	users       map[string]string // id → role
 	completions map[string]string // user|lab → session
 	saves       int
+	leaderboard []store.LeaderboardRow // LeaderboardRows 가 돌려줄 행
+	hidden      map[string]bool        // SetLeaderboardHidden 이 기록
 }
 
 func newFakePersistence() *fakePersistence {
@@ -25,6 +28,7 @@ func newFakePersistence() *fakePersistence {
 		progress:    map[string]store.SessionProgress{},
 		users:       map[string]string{},
 		completions: map[string]string{},
+		hidden:      map[string]bool{},
 	}
 }
 
@@ -101,6 +105,26 @@ func (f *fakePersistence) RecordCompletion(_ context.Context, userID, labID, ses
 	if _, exists := f.completions[key]; !exists {
 		f.completions[key] = sessionID
 	}
+	return nil
+}
+
+func (f *fakePersistence) LeaderboardRows(_ context.Context, since *time.Time) ([]store.LeaderboardRow, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]store.LeaderboardRow, 0, len(f.leaderboard))
+	for _, r := range f.leaderboard {
+		if since != nil && r.CompletedAt.Before(*since) {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+func (f *fakePersistence) SetLeaderboardHidden(_ context.Context, userID string, hidden bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.hidden[userID] = hidden
 	return nil
 }
 
