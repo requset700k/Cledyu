@@ -4,7 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/requset700k/cledyu/api/internal/content"
 	"github.com/requset700k/cledyu/api/internal/store"
+	"go.uber.org/zap"
 )
 
 func TestRankEntries_SortsByScoreThenRecency(t *testing.T) {
@@ -38,5 +40,24 @@ func TestRankEntries_SortsByScoreThenRecency(t *testing.T) {
 func TestDifficultyWeight_Values(t *testing.T) {
 	if difficultyWeight["beginner"] != 10 || difficultyWeight["intermediate"] != 25 || difficultyWeight["advanced"] != 50 {
 		t.Fatalf("weight map changed unexpectedly: %+v", difficultyWeight)
+	}
+}
+
+func TestWeightForLab_Fallbacks(t *testing.T) {
+	h := &Handler{
+		log: zap.NewNop(),
+		labs: map[string]content.LabContent{
+			"lab-known": {ID: "lab-known", Difficulty: "intermediate"},
+			"lab-weird": {ID: "lab-weird", Difficulty: "expert"},
+		},
+	}
+	if got := h.weightForLab("lab-missing"); got != 0 {
+		t.Fatalf("unknown lab_id: want 0, got %d", got)
+	}
+	if got := h.weightForLab("lab-weird"); got != 10 {
+		t.Fatalf("unknown difficulty fallback: want 10, got %d", got)
+	}
+	if got := h.weightForLab("lab-known"); got != 25 {
+		t.Fatalf("known difficulty: want 25, got %d", got)
 	}
 }
