@@ -141,3 +141,38 @@ export interface MyProgress {
   by_difficulty: Record<Difficulty, number>;
   recent_completions: { lab_id: string; session_id: string; completed_at: string }[];
 }
+
+/** 랩별 수료 상태 — GET /api/v1/me/dashboard */
+export type LabStatus = 'completed' | 'in_progress' | 'not_started';
+
+/** 난이도별 완료/전체 */
+export interface DifficultyProgress {
+  done: number;
+  total: number;
+}
+
+/** 대시보드 상단 요약 */
+export interface DashboardSummary {
+  score: number;
+  rank: number;
+  labs_completed: number;
+  total_labs: number;
+  completion_pct: number;
+  by_difficulty: Record<Difficulty, DifficultyProgress>;
+}
+
+/** 랩별 상태 1건 */
+export interface DashboardLab {
+  lab_id: string;
+  title: string;
+  difficulty: Difficulty;
+  status: LabStatus;
+  completed_at: string | null;
+}
+
+/** GET /api/v1/me/dashboard 응답 */
+export interface DashboardResponse {
+  summary: DashboardSummary;
+  labs: DashboardLab[];
+  recent_completions: { lab_id: string; session_id: string; completed_at: string }[];
+}

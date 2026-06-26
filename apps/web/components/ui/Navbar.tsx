@@ -7,6 +7,7 @@ import { api } from '@/lib/api';
 
 const NAV_LINKS = [
   { href: '/labs', label: 'Labs' },
+  { href: '/dashboard', label: '내 학습' },
   { href: '/leaderboard', label: '리더보드' },
   { href: '/instructor', label: '강사 모드' },
 ];

@@ -1,0 +1,141 @@
+# Helm 고급 — k3s-in-VM 에서 Helm 차트 작성·패키징·릴리스 수명주기 실습.
+# init 이 부팅 시 k3s(단일 노드) + Helm v3 를 설치한다. kubeconfig 는 lab 사용자가 읽을 수
+# 있게 mode 644 + KUBECONFIG 환경변수(/etc/environment: ssh·검증엔진용, profile.d: 로그인 셸용).
+# 검증 command 는 엔진 화이트리스트(영숫자/공백/ /._-=:@%"') 안에서만 작성 — 파이프/글롭 금지.
+# 체크는 Pod 기동이 아니라 Helm 릴리스 메타데이터(deployed/revision/values)를 보므로
+# 이미지 풀/스케줄링 지연에 영향받지 않는다(릴리스 상태는 install/upgrade 즉시 기록된다).
+id: lab-helm-advanced
+title: Helm 고급
+description: Helm chart 작성, 패키징, 배포 자동화
+difficulty: advanced
+duration_min: 90
+vm_type: lab-small
+environment: ubuntu
+tags:
+  - helm
+  - kubernetes
+  - gitops
+init:
+  packages:
+    - curl
+  runcmd:
+    - curl -sfL https://get.k3s.io -o /tmp/k3s-install.sh
+    # cluster/service CIDR 을 호스트 파드망과 겹치지 않게 지정(lab-k8s-basics 와 동일한 이유).
+    - INSTALL_K3S_EXEC="--write-kubeconfig-mode 644 --cluster-cidr=10.244.0.0/16 --service-cidr=10.245.0.0/16" sh /tmp/k3s-install.sh
+    - echo KUBECONFIG=/etc/rancher/k3s/k3s.yaml >> /etc/environment
+    - "printf 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml\\n' > /etc/profile.d/k3s-kubeconfig.sh"
+    - curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 -o /tmp/get-helm-3.sh
+    - bash /tmp/get-helm-3.sh
+    # helm create 기본 차트가 배포하는 nginx 이미지를 미리 받아둔다(릴리스 검증엔 불필요하나
+    # 학습자가 Pod 까지 확인할 때 빠르게 뜨도록). CRI(k8s.io) 네임스페이스로 받아야 Pod 가 캐시 사용.
+    - 'for i in $(seq 1 12); do k3s crictl pull docker.io/library/nginx:1.27-alpine && break; sleep 5; done'
+steps:
+  - id: 1
+    title: Helm 설치 확인과 저장소 추가
+    description: >
+      이 VM 에는 k3s 클러스터와 Helm v3 가 설치되어 있습니다. helm version 으로 버전을
+      확인하고, 공개 차트 저장소(bitnami)를 추가한 뒤 인덱스를 갱신하세요.
+    commands:
+      - helm version
+      - helm repo add bitnami https://charts.bitnami.com/bitnami
+      - helm repo update
+    hint_levels:
+      - "설치된 도구의 버전을 확인하는 helm 하위 명령과, 외부 차트 저장소를 등록하는 명령을 떠올려 보세요."
+      - "helm version 으로 v3 를 확인하고, helm repo add <이름> <URL> 로 저장소를 추가한 뒤 helm repo update 로 인덱스를 받습니다."
+      - "helm repo add bitnami https://charts.bitnami.com/bitnami 후 helm repo update 를 실행하면 helm repo list 에 bitnami 가 보입니다."
+    checks:
+      - type: command
+        command: helm version
+        expect: v3.
+      - type: command
+        command: helm repo list
+        expect: bitnami
+  - id: 2
+    title: 차트 생성
+    description: >
+      helm create 로 mychart 라는 이름의 스타터 차트를 홈 디렉터리에 생성하세요. 생성된
+      차트에는 Chart.yaml, values.yaml, templates/ 가 포함됩니다.
+    commands:
+      - helm create mychart
+      - ls mychart
+    hint_levels:
+      - "Helm 은 새 차트의 표준 골격을 한 번에 만들어주는 명령을 제공합니다."
+      - "helm create <이름> 을 실행하면 해당 이름의 디렉터리에 Chart.yaml 과 templates/ 가 만들어집니다."
+      - "helm create mychart 실행 후 ~/mychart/Chart.yaml 이 존재하면 성공입니다."
+    checks:
+      - type: file_exists
+        path: /home/lab/mychart/Chart.yaml
+      - type: file_exists
+        path: /home/lab/mychart/values.yaml
+  - id: 3
+    title: 차트 검증과 패키징
+    description: >
+      helm lint 로 mychart 의 문법·스키마 오류를 점검하고, helm package 로 배포용 .tgz
+      아카이브로 패키징하세요. 기본 버전은 Chart.yaml 의 version(0.1.0)을 따릅니다.
+    commands:
+      - helm lint mychart
+      - helm package mychart
+    hint_levels:
+      - "차트를 배포하기 전에 정적 점검을 하는 명령과, 차트를 배포 가능한 단일 아카이브로 묶는 명령이 있습니다."
+      - "helm lint <차트경로> 로 점검하고 helm package <차트경로> 로 .tgz 를 만듭니다. 버전은 Chart.yaml 의 version 을 따릅니다."
+      - "helm lint mychart 가 0 chart(s) failed 를 출력하고, helm package mychart 후 ~/mychart-0.1.0.tgz 가 생기면 성공입니다."
+    checks:
+      - type: command
+        command: helm lint mychart
+        expect: 0 chart(s) failed
+      - type: file_exists
+        path: /home/lab/mychart-0.1.0.tgz
+  - id: 4
+    title: 릴리스 설치
+    description: >
+      mychart 를 web 이라는 릴리스 이름으로 클러스터에 설치하세요. helm 은 차트를 렌더링해
+      Deployment·Service 를 생성하고 릴리스 상태를 deployed 로 기록합니다.
+    commands:
+      - helm install web mychart
+      - helm status web
+    hint_levels:
+      - "차트를 클러스터에 적용해 하나의 릴리스로 만드는 helm 하위 명령이 있습니다. 릴리스 이름을 함께 지정합니다."
+      - "helm install <릴리스이름> <차트> 형태입니다. 설치 후 helm status <릴리스> 로 상태를 확인합니다."
+      - "helm install web mychart 후 helm status web 이 STATUS: deployed 를 보이면 성공입니다."
+    checks:
+      - type: command
+        command: helm status web
+        expect: deployed
+      - type: command
+        command: helm list
+        expect: web
+  - id: 5
+    title: 값 오버라이드 업그레이드
+    description: >
+      --set 으로 replicaCount 를 2 로 올려 web 릴리스를 업그레이드하세요. helm 은 새 리비전을
+      만들고(revision 2), 직전 리비전은 superseded 로 기록합니다.
+    commands:
+      - helm upgrade web mychart --set replicaCount=2
+      - helm get values web
+    hint_levels:
+      - "이미 설치된 릴리스의 값을 바꿔 다시 적용하는 명령이 있습니다. 단일 값은 플래그로 즉석 지정할 수 있습니다."
+      - "helm upgrade <릴리스> <차트> --set <키>=<값> 형태입니다. 적용된 사용자 값은 helm get values 로 확인합니다."
+      - "helm upgrade web mychart --set replicaCount=2 후 helm get values web 에 replicaCount: 2 가 보이면 성공입니다."
+    checks:
+      - type: command
+        command: helm get values web
+        expect: replicaCount
+      - type: command
+        command: helm history web
+        expect: superseded
+  - id: 6
+    title: 롤백
+    description: >
+      업그레이드를 되돌린다고 가정하고 web 릴리스를 revision 1 로 롤백하세요. helm 은 과거
+      리비전의 값을 복원해 새 리비전(revision 3)으로 기록하며, 설명에 Rollback to 1 을 남깁니다.
+    commands:
+      - helm rollback web 1
+      - helm history web
+    hint_levels:
+      - "릴리스를 과거의 특정 리비전 상태로 되돌리는 helm 하위 명령이 있습니다."
+      - "helm rollback <릴리스> <리비전번호> 형태입니다. helm history 로 롤백 리비전이 추가됐는지 확인합니다."
+      - "helm rollback web 1 후 helm history web 에 Rollback to 1 설명의 리비전이 보이면 성공입니다."
+    checks:
+      - type: command
+        command: helm history web
+        expect: Rollback to 1

@@ -21,6 +21,7 @@ type persistence interface {
 	RecordCompletion(ctx context.Context, userID, labID, sessionID string) error
 	LeaderboardRows(ctx context.Context, since *time.Time) ([]store.LeaderboardRow, error)
 	SetLeaderboardHidden(ctx context.Context, userID string, hidden bool) error
+	ListInProgressLabIDsByUser(ctx context.Context, userID string) ([]string, error)
 }
 
 // dbTimeout은 요청 경로에서 허용하는 DB 왕복 상한이다.

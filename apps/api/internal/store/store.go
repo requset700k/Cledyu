@@ -262,6 +262,28 @@ func (s *Store) ListCompletionsByUser(ctx context.Context, userID string) ([]Com
 	return out, rows.Err()
 }
 
+// ListInProgressLabIDsByUser는 유저가 진행기록(session_progress)을 가진 lab_id 목록을 반환한다.
+// 완료된 랩도 진행기록이 남아 있을 수 있으므로, 호출부는 완료 여부를 먼저 판정한 뒤
+// 이 목록을 'in_progress' 후보로 사용한다.
+func (s *Store) ListInProgressLabIDsByUser(ctx context.Context, userID string) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT DISTINCT lab_id FROM session_progress WHERE user_id = $1`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list in-progress labs: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]string, 0)
+	for rows.Next() {
+		var labID string
+		if err := rows.Scan(&labID); err != nil {
+			return nil, fmt.Errorf("scan in-progress lab: %w", err)
+		}
+		out = append(out, labID)
+	}
+	return out, rows.Err()
+}
+
 // LeaderboardRow는 리더보드 집계용 완료 1건이다(유저 표시명 포함).
 type LeaderboardRow struct {
 	UserID      string    `json:"user_id"`
