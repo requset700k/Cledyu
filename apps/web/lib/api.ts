@@ -3,6 +3,7 @@
 // WebSocket은 rewrite 대상이 아니므로 Terminal 컴포넌트에서 NEXT_PUBLIC_WS_URL로 직접 연결.
 
 import type {
+  DashboardResponse,
   HintResponse,
   Lab,
   LeaderboardResponse,
@@ -153,6 +154,7 @@ export const api = {
 
   me: {
     progress: () => request<MyProgress>('/api/v1/me/progress'),
+    dashboard: () => request<DashboardResponse>('/api/v1/me/dashboard'),
     setPreferences: (leaderboardHidden: boolean) =>
       request<{ leaderboard_hidden: boolean }>('/api/v1/me/preferences', {
         method: 'PATCH',
