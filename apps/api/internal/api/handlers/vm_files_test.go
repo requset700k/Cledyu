@@ -52,9 +52,13 @@ func (p *vmFileSessionProvider) Capacity() int { return 0 }
 
 type vmFileServiceStub struct {
 	snapshot vmfiles.Snapshot
+	preview  []byte
 	err      error
+	readErr  error
 
 	listCalls int
+	readCalls int
+	readPath  string
 }
 
 func (s *vmFileServiceStub) List(context.Context, string) (vmfiles.Snapshot, error) {
@@ -62,7 +66,14 @@ func (s *vmFileServiceStub) List(context.Context, string) (vmfiles.Snapshot, err
 	return s.snapshot, s.err
 }
 
-func (s *vmFileServiceStub) Read(context.Context, string, string) ([]byte, error) { return nil, nil }
+func (s *vmFileServiceStub) Read(_ context.Context, _ string, relativePath string) ([]byte, error) {
+	s.readCalls++
+	s.readPath = relativePath
+	if s.readErr != nil {
+		return nil, s.readErr
+	}
+	return s.preview, nil
+}
 
 func vmFileRouter(h *Handler, uid string) *gin.Engine {
 	gin.SetMode(gin.TestMode)
@@ -74,6 +85,7 @@ func vmFileRouter(h *Handler, uid string) *gin.Engine {
 		c.Next()
 	}
 	r.GET("/sessions/:id/files", identify, h.ListSessionFiles)
+	r.GET("/sessions/:id/files/preview", identify, h.PreviewSessionFile)
 	return r
 }
 
@@ -192,5 +204,63 @@ func TestListSessionFilesMapsBusyToTooManyRequests(t *testing.T) {
 
 	if w.Code != http.StatusTooManyRequests {
 		t.Fatalf("expected 429, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestPreviewSessionFileRequiresPath(t *testing.T) {
+	service := &vmFileServiceStub{}
+	h := vmFileHandler("ready", service)
+	r := vmFileRouter(h, "alice")
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sessions/s1/files/preview", nil))
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+	if service.readCalls != 0 {
+		t.Fatalf("Read calls = %d, want 0 without path", service.readCalls)
+	}
+}
+
+func TestPreviewSessionFileReturnsPreview(t *testing.T) {
+	service := &vmFileServiceStub{
+		preview: []byte(`{"path":"work/app.log","content":"hello\n","truncated":false}` + "\n"),
+	}
+	h := vmFileHandler("active", service)
+	r := vmFileRouter(h, "alice")
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sessions/s1/files/preview?path=work/app.log", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if service.readPath != "work/app.log" {
+		t.Fatalf("Read path = %q, want work/app.log", service.readPath)
+	}
+	var got struct {
+		Path      string `json:"path"`
+		Content   string `json:"content"`
+		Truncated bool   `json:"truncated"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if got.Path != "work/app.log" || got.Content != "hello\n" || got.Truncated {
+		t.Fatalf("unexpected preview: %+v", got)
+	}
+}
+
+func TestPreviewSessionFileMapsUnlistedFileToNotFound(t *testing.T) {
+	service := &vmFileServiceStub{readErr: vmfiles.ErrFileNotListed}
+	h := vmFileHandler("ready", service)
+	r := vmFileRouter(h, "alice")
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sessions/s1/files/preview?path=secret.txt", nil))
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
 	}
 }
