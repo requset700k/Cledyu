@@ -21,6 +21,7 @@ type fakePersistence struct {
 	saves       int
 	leaderboard []store.LeaderboardRow // LeaderboardRows 가 돌려줄 행
 	hidden      map[string]bool        // SetLeaderboardHidden 이 기록
+	inProgress  map[string][]string    // user_id → lab_ids (진행기록 있는 랩)
 }
 
 func newFakePersistence() *fakePersistence {
@@ -29,6 +30,7 @@ func newFakePersistence() *fakePersistence {
 		users:       map[string]string{},
 		completions: map[string]string{},
 		hidden:      map[string]bool{},
+		inProgress:  map[string][]string{},
 	}
 }
 
@@ -126,6 +128,12 @@ func (f *fakePersistence) SetLeaderboardHidden(_ context.Context, userID string,
 	defer f.mu.Unlock()
 	f.hidden[userID] = hidden
 	return nil
+}
+
+func (f *fakePersistence) ListInProgressLabIDsByUser(_ context.Context, userID string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.inProgress[userID], nil
 }
 
 func twoStepSeed() *sessionSteps {
