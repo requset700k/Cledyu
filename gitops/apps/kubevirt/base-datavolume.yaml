@@ -8,10 +8,11 @@ metadata:
   namespace: kubevirt
   annotations:
     argocd.argoproj.io/sync-wave: "30"
-    # DataVolume spec(특히 storageClassName/source)은 immutable이라 ArgoCD가 apply로 변경 못 한다.
-    # Replace=true 로 두면 spec 변경 시 delete+recreate 해 ArgoCD sync가 immutable 필드 충돌로
-    # 영구 OutOfSync/health-wait에 빠지지 않는다(과거 11일간 sync hung 사고의 메커니즘).
-    argocd.argoproj.io/sync-options: Replace=true
+    # DataVolume spec(source/storageClassName 등)은 immutable이라 CDI webhook이 update를 거부한다.
+    # Replace=true 만으론 ArgoCD가 kubectl replace(PUT)를 시도해 동일하게 거부당하므로(과거 sync hung),
+    # Force=true 를 함께 둬 spec 변경(재베이크 시 이미지 태그 bump) 시 delete+recreate 하게 한다.
+    # DataVolume 은 평소 in-sync 라 Force 는 git 변경 시에만 트리거된다(재import 는 의도된 동작).
+    argocd.argoproj.io/sync-options: Replace=true,Force=true
 spec:
   source:
     # stock Ubuntu cloud 이미지 대신, 공통 패키지·qemu-guest-agent 를 미리 구운 베이킹 이미지를
