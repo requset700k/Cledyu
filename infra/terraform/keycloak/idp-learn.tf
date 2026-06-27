@@ -52,7 +52,9 @@ resource "keycloak_oidc_identity_provider" "kakao" {
   jwks_url          = "https://kauth.kakao.com/.well-known/jwks.json"
   issuer            = "https://kauth.kakao.com"
 
-  default_scopes     = "openid account_email profile_nickname"
+  # 이메일(account_email)은 카카오 비즈니스 앱 전환+검수가 있어야 동의항목에 추가 가능하다.
+  # 개인 앱 단계에선 잠겨 있어 요청 시 KOE006(invalid scope)로 실패하므로 닉네임만 요청한다.
+  default_scopes     = "openid profile_nickname"
   validate_signature = true
   trust_email        = true
   store_token        = false
