@@ -9,8 +9,17 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libguestfs-tools qemu-uti
 
 echo ">> verify"
 for t in virt-customize qemu-img docker; do
-  printf '   %s: ' "$t"; command -v "$t" || { echo "MISSING"; exit 1; }
+  printf '   %s: ' "$t"
+  command -v "$t" || {
+    echo "MISSING"
+    exit 1
+  }
 done
-[ -e /dev/kvm ] && echo "   /dev/kvm: present" || { echo "   /dev/kvm: MISSING (KVM 필요)"; exit 1; }
+if [ -e /dev/kvm ]; then
+  echo "   /dev/kvm: present"
+else
+  echo "   /dev/kvm: MISSING (KVM 필요)"
+  exit 1
+fi
 
 echo ">> done. ghcr 푸시는 별도 인증 필요: docker login ghcr.io -u <user> -p <write:packages PAT>"

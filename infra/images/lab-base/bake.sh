@@ -23,7 +23,8 @@ echo ">> download base cloud image: $SRC_URL"
 curl -fsSL -o "$OUT" "$SRC_URL"
 
 echo ">> resolve + download .deb closure via docker (host network): $PKGS"
-rm -rf "$DEBS"; mkdir -p "$DEBS"
+rm -rf "$DEBS"
+mkdir -p "$DEBS"
 # jammy 컨테이너에서 클로저를 받는다. cloud 이미지는 minimal 컨테이너보다 패키지가 많으므로,
 # minimal 에서 받은 deb 집합은 cloud 이미지에 필요한 의존성의 상위집합이라 offline dpkg 로 충족된다.
 docker run --rm -v "$(cd "$DEBS" && pwd):/debs" ubuntu:22.04 bash -c "
