@@ -1,0 +1,25 @@
+---
+# Airflow 분석 파이프라인 소비자 — lab-events 읽기 전용 + 컨슈머 그룹.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaUser
+metadata:
+  name: airflow-analytics
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: cledyu-kafka
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource:
+          type: topic
+          name: lab-events
+          patternType: literal
+        operations: [Read, Describe]
+      - resource:
+          type: group
+          name: airflow-analytics
+          patternType: literal
+        operations: [Read, Describe]

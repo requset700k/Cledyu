@@ -24,6 +24,13 @@ resource "keycloak_oidc_google_identity_provider" "google" {
   default_scopes                          = "openid email profile"
   hide_on_login_page                      = false
   accepts_prompt_none_forward_from_client = false
+
+  # 로그아웃 후 재로그인 시 구글 계정 선택 화면을 띄운다(멀티프로바이더 SaaS 표준 — 비밀번호
+  # 재입력 없이 계정 확인·전환 가능). 앱은 IdP 세션을 끊을 수 없어(구글 세션 잔존) silent 자동
+  # 재로그인 대신 select_account 로 보완한다. 네이버는 OAuth2 라 prompt 미지원 → 현행(silent) 유지.
+  extra_config = {
+    prompt = "select_account"
+  }
 }
 
 # ── Kakao (OIDC 지원) ────────────────────────────────────────────────────
@@ -45,79 +52,42 @@ resource "keycloak_oidc_identity_provider" "kakao" {
   jwks_url          = "https://kauth.kakao.com/.well-known/jwks.json"
   issuer            = "https://kauth.kakao.com"
 
-  default_scopes     = "openid account_email profile_nickname"
+  # 이메일(account_email)은 카카오 비즈니스 앱 전환+검수가 있어야 동의항목에 추가 가능하다.
+  # 개인 앱 단계에선 잠겨 있어 요청 시 KOE006(invalid scope)로 실패하므로 닉네임만 요청한다.
+  default_scopes     = "openid profile_nickname"
   validate_signature = true
   trust_email        = true
   store_token        = false
   sync_mode          = "IMPORT"
 }
 
-# ── Naver (OAuth2 — 완전한 OIDC 아님) ────────────────────────────────────
-# Naver 는 ID 토큰을 발급하지 않으므로 서명검증을 끄고(user_info 기반) 매핑한다.
-# userinfo 응답이 { "response": { id, email, name, ... } } 형태로 중첩되어 있어
-# 아래 attribute importer 매퍼로 평탄화한다.
+# ── Naver (커스텀 OAuth2 SPI) ────────────────────────────────────────────
+# Naver 는 OIDC id_token 을 발급하지 않아 빌트인 provider_id="oidc" 로는 동작하지 않는다
+# (토큰 응답에서 id_token 강제 추출 → "No token from server" 실패). 그래서
+# keycloak/naver-idp 커스텀 SPI(provider_id="naver", AbstractOAuth2IdentityProvider 상속)를
+# 배포해 access_token + userinfo(https://openapi.naver.com/v1/nid/me) 로 브로커링한다.
+# SPI 가 userinfo 의 중첩 response.{id,email,name} 를 네이티브로 매핑하므로 별도 매퍼 불필요.
+#
+# 전제: keycloak 파드에 SPI JAR 이 /opt/keycloak/providers/ 로 마운트되어 "naver" provider
+# 가 등록돼 있어야 한다(ansible keycloak_foundation, ConfigMap 마운트). 미등록 상태에서
+# apply 하면 unknown provider 로 실패한다.
 resource "keycloak_oidc_identity_provider" "naver" {
   count = contains(var.enabled_social_idps, "naver") ? 1 : 0
 
   realm        = keycloak_realm.cledyu_learn.id
   alias        = "naver"
   display_name = "Naver"
-  provider_id  = "oidc"
+  provider_id  = "naver"
   enabled      = true
 
   client_id     = var.idp_client_ids["naver"]
   client_secret = var.idp_client_secrets["naver"]
 
+  # SPI 가 엔드포인트를 하드코딩하지만 mrparkers 리소스가 두 URL 을 필수로 요구한다(SPI 가 덮어씀).
   authorization_url = "https://nid.naver.com/oauth2.0/authorize"
   token_url         = "https://nid.naver.com/oauth2.0/token"
-  user_info_url     = "https://openapi.naver.com/v1/nid/me"
 
-  validate_signature = false
-  trust_email        = true
-  store_token        = false
-  sync_mode          = "IMPORT"
-}
-
-# Naver username: response.id 를 고유 키로.
-resource "keycloak_user_template_importer_identity_provider_mapper" "naver_username" {
-  count = contains(var.enabled_social_idps, "naver") ? 1 : 0
-
-  realm                   = keycloak_realm.cledyu_learn.id
-  name                    = "naver-username"
-  identity_provider_alias = keycloak_oidc_identity_provider.naver[0].alias
-  template                = "$${CLAIM.response.id}"
-
-  extra_config = {
-    syncMode = "INHERIT"
-  }
-}
-
-# Naver email → user.email
-resource "keycloak_attribute_importer_identity_provider_mapper" "naver_email" {
-  count = contains(var.enabled_social_idps, "naver") ? 1 : 0
-
-  realm                   = keycloak_realm.cledyu_learn.id
-  name                    = "naver-email"
-  identity_provider_alias = keycloak_oidc_identity_provider.naver[0].alias
-  claim_name              = "response.email"
-  user_attribute          = "email"
-
-  extra_config = {
-    syncMode = "INHERIT"
-  }
-}
-
-# Naver name → user.firstName
-resource "keycloak_attribute_importer_identity_provider_mapper" "naver_name" {
-  count = contains(var.enabled_social_idps, "naver") ? 1 : 0
-
-  realm                   = keycloak_realm.cledyu_learn.id
-  name                    = "naver-name"
-  identity_provider_alias = keycloak_oidc_identity_provider.naver[0].alias
-  claim_name              = "response.name"
-  user_attribute          = "firstName"
-
-  extra_config = {
-    syncMode = "INHERIT"
-  }
+  trust_email = true
+  store_token = false
+  sync_mode   = "IMPORT"
 }

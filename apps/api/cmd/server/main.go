@@ -15,13 +15,20 @@ import (
 	"github.com/requset700k/cledyu/api/internal/config"
 	"github.com/requset700k/cledyu/api/internal/ec2"
 	"github.com/requset700k/cledyu/api/internal/events"
+	"github.com/requset700k/cledyu/api/internal/kube"
 	"github.com/requset700k/cledyu/api/internal/kubevirt"
 	"github.com/requset700k/cledyu/api/internal/lock"
 	"github.com/requset700k/cledyu/api/internal/session"
 	"github.com/requset700k/cledyu/api/internal/store"
 	"github.com/requset700k/cledyu/api/internal/tailnet"
 	"github.com/requset700k/cledyu/api/internal/validation"
+	"github.com/requset700k/cledyu/api/internal/vmfiles"
 	"go.uber.org/zap"
+)
+
+const (
+	vmFileAccessTimeout       = 5 * time.Second
+	vmFileAccessMaxConcurrent = 4
 )
 
 func main() {
@@ -142,6 +149,19 @@ func main() {
 	}
 
 	router, h := api.NewRouter(cfg, logger, sessions, validator, eventsPub, db, locker)
+
+	// 세션 VM 파일 탐색 — 수동 새로고침 기반의 read-only 경로다. Secret/RBAC 미설정이면
+	// 기능만 비활성화하고 API 서버는 계속 기동한다(파일 endpoint는 503).
+	if cfg.KubeVirt.FileListSSHPrivateKeyPath == "" {
+		logger.Warn("VM 파일 탐색 비활성 — CLEDYU_KUBEVIRT_FILE_LIST_SSH_PRIVATE_KEY_PATH 미설정")
+	} else if restCfg, restErr := kube.NewRESTConfig(); restErr != nil {
+		logger.Warn("VM 파일 탐색 비활성 — kube config 로드 실패", zap.Error(restErr))
+	} else if runner, runnerErr := vmfiles.NewKubeVirtFileListRunner(restCfg, cfg.KubeVirt.FileListSSHPrivateKeyPath); runnerErr != nil {
+		logger.Warn("VM 파일 탐색 비활성 — file-list SSH runner 생성 실패", zap.Error(runnerErr))
+	} else {
+		h.SetVMFiles(vmfiles.NewService(runner, vmFileAccessTimeout, vmFileAccessMaxConcurrent))
+		logger.Info("VM 파일 탐색 활성", zap.Duration("timeout", vmFileAccessTimeout), zap.Int("max_concurrent", vmFileAccessMaxConcurrent))
+	}
 
 	// EC2 오버플로우 라이브 터미널 — api 가 tsnet 으로 tailnet 에 가입해 세션 인스턴스(MagicDNS)에
 	// SSH PTY 를 붙인다. 클러스터 파드는 tailnet 에 직접 못 닿기 때문이다. authkey 미설정이면

@@ -1,0 +1,12 @@
+[
+  { "name": "event_type", "type": "STRING", "mode": "NULLABLE" },
+  { "name": "user_id", "type": "STRING", "mode": "NULLABLE" },
+  { "name": "session_id", "type": "STRING", "mode": "NULLABLE" },
+  { "name": "lab_id", "type": "STRING", "mode": "NULLABLE" },
+  { "name": "step_id", "type": "INTEGER", "mode": "NULLABLE" },
+  { "name": "hint_level", "type": "INTEGER", "mode": "NULLABLE" },
+  { "name": "hint_source", "type": "STRING", "mode": "NULLABLE" },
+  { "name": "vm_provisioned_source", "type": "STRING", "mode": "NULLABLE" },
+  { "name": "ts", "type": "TIMESTAMP", "mode": "NULLABLE" },
+  { "name": "_ingested_at", "type": "TIMESTAMP", "mode": "NULLABLE" }
+]

@@ -122,6 +122,15 @@ alertmanager:
           repeat_interval: 24h
           receiver: "discord"
 
+        # CiliumNetworkDropCritical 시 다른 네트워크 알림 억제
+        # (CiliumPolicyDeniedSpike는 보안 신호라 억제 제외)
+        - source_matchers:
+            - alertname = "CiliumNetworkDropCritical"
+            - severity = "critical"
+          target_matchers:
+            - alertname = "HubbleEventLossHigh"
+            - severity = "warning"
+
     receivers:
       - name: "null"
       - name: "discord"
