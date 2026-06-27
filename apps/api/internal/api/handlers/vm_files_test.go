@@ -100,6 +100,7 @@ func vmFileHandlerWithProvider(status string, provider string, service *vmFileSe
 }
 
 func TestListSessionFilesAllowsOwner(t *testing.T) {
+	// 정상 경로: 세션 소유자이면서 KubeVirt ready 세션이면 vmfiles.Service.List 결과를 그대로 반환한다.
 	service := &vmFileServiceStub{snapshot: vmfiles.Snapshot{
 		Root: "/home/lab",
 		Items: []vmfiles.Entry{
@@ -129,6 +130,7 @@ func TestListSessionFilesAllowsOwner(t *testing.T) {
 }
 
 func TestListSessionFilesHidesOtherUsersSession(t *testing.T) {
+	// 교차 테넌트 방어: 타인 세션은 존재 여부를 노출하지 않도록 404로 숨기고 VM 조회를 시작하지 않는다.
 	service := &vmFileServiceStub{}
 	h := vmFileHandler("ready", service)
 	r := vmFileRouter(h, "bob")
@@ -145,6 +147,8 @@ func TestListSessionFilesHidesOtherUsersSession(t *testing.T) {
 }
 
 func TestListSessionFilesRejectsProvisioningSession(t *testing.T) {
+	// guest 준비 전 방어: provisioning 세션은 forced command/SSH key가 준비되지 않았을 수 있으므로
+	// KubeVirt port-forward까지 내려가지 않는다.
 	service := &vmFileServiceStub{}
 	h := vmFileHandler("provisioning", service)
 	r := vmFileRouter(h, "alice")
@@ -161,6 +165,7 @@ func TestListSessionFilesRejectsProvisioningSession(t *testing.T) {
 }
 
 func TestListSessionFilesRejectsEC2Session(t *testing.T) {
+	// provider 경계: 현재 runner는 KubeVirt session-vm 전용이므로 EC2 overflow 세션은 조회 전에 차단한다.
 	service := &vmFileServiceStub{}
 	h := vmFileHandlerWithProvider("ready", session.ProviderEC2, service)
 	r := vmFileRouter(h, "alice")
@@ -177,6 +182,7 @@ func TestListSessionFilesRejectsEC2Session(t *testing.T) {
 }
 
 func TestListSessionFilesMapsBusyToTooManyRequests(t *testing.T) {
+	// 사용자가 파일 새로고침을 반복해 동시성 제한에 걸리면 서버 오류가 아니라 재시도 가능한 429를 반환한다.
 	service := &vmFileServiceStub{err: vmfiles.ErrBusy}
 	h := vmFileHandler("ready", service)
 	r := vmFileRouter(h, "alice")
