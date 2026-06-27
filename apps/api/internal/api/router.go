@@ -118,5 +118,12 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions session.Provider, v
 		admin.DELETE("/users/:uid/session", h.TerminateUserSession) // 활성 세션 강제 종료
 	}
 
+	// 강사 전용 — instructor 이상(admin 포함) 접근. 강사 분석 대시보드 백엔드.
+	instructor := v1.Group("/instructor")
+	instructor.Use(middleware.RequireMinRole("instructor"))
+	{
+		instructor.GET("/analytics", h.GetInstructorAnalytics)
+	}
+
 	return r, h
 }
