@@ -37,6 +37,29 @@ func (r *runnerWithRead) Read(_ context.Context, sessionID, relativePath string)
 	return []byte(`{"path":"work/app.log","content":"hello\n","truncated":false}` + "\n"), nil
 }
 
+type blockingReadRunner struct {
+	list        []byte
+	readStarted chan struct{}
+	releaseRead chan struct{}
+	startedOnce atomic.Bool
+}
+
+func (r *blockingReadRunner) Run(context.Context, string) ([]byte, error) {
+	return r.list, nil
+}
+
+func (r *blockingReadRunner) Read(ctx context.Context, _, _ string) ([]byte, error) {
+	if r.startedOnce.CompareAndSwap(false, true) {
+		close(r.readStarted)
+	}
+	select {
+	case <-r.releaseRead:
+		return []byte(`{"path":"work/app.log","content":"hello\n","truncated":false}` + "\n"), nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func TestServiceCoalescesConcurrentRequestsForSameSession(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
@@ -178,5 +201,31 @@ func TestServiceReadRejectsListedDirectoryBeforeRunnerRead(t *testing.T) {
 	}
 	if got := runner.readCalls.Load(); got != 0 {
 		t.Fatalf("read calls = %d, want 0", got)
+	}
+}
+
+func TestServiceReadRejectsConcurrentPreviewWhenLimitIsFull(t *testing.T) {
+	readStarted := make(chan struct{})
+	releaseRead := make(chan struct{})
+	runner := &blockingReadRunner{
+		list:        snapshotWithFile,
+		readStarted: readStarted,
+		releaseRead: releaseRead,
+	}
+	service := NewService(runner, time.Second, 1)
+
+	first := make(chan error, 1)
+	go func() {
+		_, err := service.Read(context.Background(), "abc123", "work/app.log")
+		first <- err
+	}()
+	<-readStarted
+
+	if _, err := service.Read(context.Background(), "abc123", "work/app.log"); !errors.Is(err, ErrBusy) {
+		t.Fatalf("second Read() error = %v, want ErrBusy", err)
+	}
+	close(releaseRead)
+	if err := <-first; err != nil {
+		t.Fatalf("first Read() error = %v", err)
 	}
 }
