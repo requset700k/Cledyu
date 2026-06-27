@@ -208,6 +208,7 @@ func TestListSessionFilesMapsBusyToTooManyRequests(t *testing.T) {
 }
 
 func TestPreviewSessionFileRequiresPath(t *testing.T) {
+	// 빈 path는 snapshot 검증이나 VM read 명령까지 내려가지 않고 HTTP 계층에서 바로 거부한다.
 	service := &vmFileServiceStub{}
 	h := vmFileHandler("ready", service)
 	r := vmFileRouter(h, "alice")
@@ -224,6 +225,7 @@ func TestPreviewSessionFileRequiresPath(t *testing.T) {
 }
 
 func TestPreviewSessionFileReturnsPreview(t *testing.T) {
+	// 정상 경로: active KubeVirt 세션의 목록 포함 파일이면 preview JSON을 Web 응답 형태로 전달한다.
 	service := &vmFileServiceStub{
 		preview: []byte(`{"path":"work/app.log","content":"hello\n","truncated":false}` + "\n"),
 	}
@@ -253,6 +255,7 @@ func TestPreviewSessionFileReturnsPreview(t *testing.T) {
 }
 
 func TestPreviewSessionFileMapsUnlistedFileToNotFound(t *testing.T) {
+	// 추측 경로 방어: Service.Read가 snapshot에 없는 파일을 거부하면 존재 여부를 노출하지 않게 404로 매핑한다.
 	service := &vmFileServiceStub{readErr: vmfiles.ErrFileNotListed}
 	h := vmFileHandler("ready", service)
 	r := vmFileRouter(h, "alice")
