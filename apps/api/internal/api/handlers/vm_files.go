@@ -48,6 +48,10 @@ func (h *Handler) readyFileSession(c *gin.Context) (*session.Session, bool) {
 	if h.denyIfNotSessionOwner(c, sess) {
 		return nil, false
 	}
+	if sess.Provider != "" && sess.Provider != session.ProviderKubeVirt {
+		h.err(c, http.StatusConflict, "VM file access is only available for KubeVirt sessions")
+		return nil, false
+	}
 	if sess.Status != "ready" && sess.Status != "active" {
 		h.err(c, http.StatusConflict, "session is not ready")
 		return nil, false

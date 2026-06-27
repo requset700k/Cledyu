@@ -78,6 +78,10 @@ func vmFileRouter(h *Handler, uid string) *gin.Engine {
 }
 
 func vmFileHandler(status string, service *vmFileServiceStub) *Handler {
+	return vmFileHandlerWithProvider(status, session.ProviderKubeVirt, service)
+}
+
+func vmFileHandlerWithProvider(status string, provider string, service *vmFileServiceStub) *Handler {
 	return &Handler{
 		log: zap.NewNop(),
 		sessions: &vmFileSessionProvider{sessions: map[string]*session.Session{
@@ -88,7 +92,7 @@ func vmFileHandler(status string, service *vmFileServiceStub) *Handler {
 				Status:    status,
 				StartedAt: time.Now(),
 				ExpiresAt: time.Now().Add(time.Hour),
-				Provider:  session.ProviderKubeVirt,
+				Provider:  provider,
 			},
 		}},
 		vmFiles: service,
@@ -153,6 +157,22 @@ func TestListSessionFilesRejectsProvisioningSession(t *testing.T) {
 	}
 	if service.listCalls != 0 {
 		t.Fatalf("List calls = %d, want 0 before ready", service.listCalls)
+	}
+}
+
+func TestListSessionFilesRejectsEC2Session(t *testing.T) {
+	service := &vmFileServiceStub{}
+	h := vmFileHandlerWithProvider("ready", session.ProviderEC2, service)
+	r := vmFileRouter(h, "alice")
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/sessions/s1/files", nil))
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if service.listCalls != 0 {
+		t.Fatalf("List calls = %d, want 0 for non-KubeVirt session", service.listCalls)
 	}
 }
 
