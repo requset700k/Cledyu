@@ -66,6 +66,7 @@ export default function LoginPage() {
                     aria-label="카카오 계정으로 계속"
                     className="flex items-center justify-center gap-2 w-full bg-[#FEE500] hover:brightness-95 text-[#191600] font-medium py-3 px-4 rounded-xl transition-all duration-150"
                   >
+                    <KakaoIcon />
                     Kakao 로 계속
                   </a>
                 )}
@@ -117,6 +118,15 @@ function Feature({ icon, text }: { icon: React.ReactNode; text: string }) {
       <span className="text-brand-400 mt-0.5 flex-shrink-0">{icon}</span>
       <span className="text-slate-400 text-sm">{text}</span>
     </div>
+  );
+}
+
+// 카카오톡 말풍선 시그니처 — 노란 버튼 위 갈색/검정(#191600) 단색.
+function KakaoIcon() {
+  return (
+    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M12 3C6.477 3 2 6.477 2 10.5c0 2.57 1.7 4.83 4.27 6.16-.19.66-.68 2.43-.78 2.81-.12.47.17.46.36.34.15-.1 2.37-1.6 3.33-2.26.59.08 1.2.13 1.82.13C17.523 18 22 14.523 22 10.5S17.523 3 12 3z" />
+    </svg>
   );
 }
 
