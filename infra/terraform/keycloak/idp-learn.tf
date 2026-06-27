@@ -24,6 +24,13 @@ resource "keycloak_oidc_google_identity_provider" "google" {
   default_scopes                          = "openid email profile"
   hide_on_login_page                      = false
   accepts_prompt_none_forward_from_client = false
+
+  # 로그아웃 후 재로그인 시 구글 계정 선택 화면을 띄운다(멀티프로바이더 SaaS 표준 — 비밀번호
+  # 재입력 없이 계정 확인·전환 가능). 앱은 IdP 세션을 끊을 수 없어(구글 세션 잔존) silent 자동
+  # 재로그인 대신 select_account 로 보완한다. 네이버는 OAuth2 라 prompt 미지원 → 현행(silent) 유지.
+  extra_config = {
+    prompt = "select_account"
+  }
 }
 
 # ── Kakao (OIDC 지원) ────────────────────────────────────────────────────
