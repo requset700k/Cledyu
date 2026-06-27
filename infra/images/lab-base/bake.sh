@@ -43,7 +43,8 @@ virt-customize -a "$OUT" \
   --run-command 'rm -rf /tmp/debs' \
   --run-command 'cloud-init clean --logs --seed || true' \
   --delete '/etc/ssh/ssh_host_*' \
-  --truncate '/etc/machine-id'
+  --truncate '/etc/machine-id' \
+  --firstboot-command 'rm -f /etc/machine-id /var/lib/dbus/machine-id; systemd-machine-id-setup'
 
 rm -rf "$DEBS"
 echo ">> baked: $OUT ($(du -h "$OUT" | cut -f1))"
