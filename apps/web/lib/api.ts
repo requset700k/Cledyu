@@ -5,6 +5,7 @@
 import type {
   DashboardResponse,
   HintResponse,
+  InstructorAnalytics,
   Lab,
   LeaderboardResponse,
   MyProgress,
@@ -160,6 +161,10 @@ export const api = {
         method: 'PATCH',
         body: JSON.stringify({ leaderboard_hidden: leaderboardHidden }),
       }),
+  },
+
+  instructor: {
+    analytics: () => request<InstructorAnalytics>('/api/v1/instructor/analytics'),
   },
 
   auth: {
