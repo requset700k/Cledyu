@@ -63,8 +63,8 @@ func (h *Handler) readyFileSession(c *gin.Context) (*session.Session, bool) {
 		return nil, false
 	}
 	// provisioning 단계에서는 VM guest의 forced command/SSH key가 아직 준비되지 않았을 수 있다.
-	// runner를 호출하기 전에 ready/active 세션으로 제한해 불필요한 retry와 502를 줄인다.
-	if sess.Status != "ready" && sess.Status != "active" {
+	// 세션 상태 모델은 provisioning/ready/failed만 가지므로 VM 파일 접근은 ready 세션으로 제한한다.
+	if sess.Status != "ready" {
 		h.err(c, http.StatusConflict, "session is not ready")
 		return nil, false
 	}
