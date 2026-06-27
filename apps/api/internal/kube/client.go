@@ -10,10 +10,10 @@ import (
 	"kubevirt.io/client-go/kubecli"
 )
 
-// NewKubevirtClient는 KubeVirt 클라이언트를 생성한다.
+// NewRESTConfig는 클러스터 접근용 REST config를 생성한다.
 // 우선 in-cluster 설정을 시도하고(파드 내 ServiceAccount), 실패하면 로컬 kubeconfig
 // (KUBECONFIG 또는 ~/.kube/config)로 폴백한다 — 로컬 개발 시 사용.
-func NewKubevirtClient() (kubecli.KubevirtClient, error) {
+func NewRESTConfig() (*rest.Config, error) {
 	cfg, err := rest.InClusterConfig()
 	if err != nil {
 		loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
@@ -22,6 +22,15 @@ func NewKubevirtClient() (kubecli.KubevirtClient, error) {
 		if err != nil {
 			return nil, fmt.Errorf("load kube config (in-cluster and kubeconfig both failed): %w", err)
 		}
+	}
+	return cfg, nil
+}
+
+// NewKubevirtClient는 KubeVirt 클라이언트를 생성한다.
+func NewKubevirtClient() (kubecli.KubevirtClient, error) {
+	cfg, err := NewRESTConfig()
+	if err != nil {
+		return nil, err
 	}
 	return kubecli.GetKubevirtClientFromRESTConfig(cfg)
 }

@@ -1,6 +1,7 @@
 package vmfiles
 
 import (
+	"bytes"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -22,25 +23,7 @@ func TestSSHRunnerUsesFixedCommandAndReturnsBoundedOutput(t *testing.T) {
 	clientSigner := testSigner(t)
 	serverSigner := testSigner(t)
 	serverErr := make(chan error, 1)
-	connector := connectorFunc(func(_ context.Context, sessionID string) (net.Conn, error) {
-		if sessionID != "abc123" {
-			return nil, fmt.Errorf("sessionID = %q, want abc123", sessionID)
-		}
-		listener, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			return nil, err
-		}
-		go func() {
-			defer listener.Close() //nolint:errcheck
-			serverConn, err := listener.Accept()
-			if err != nil {
-				serverErr <- err
-				return
-			}
-			serveTestSSH(serverConn, serverSigner, clientSigner.PublicKey(), serverErr)
-		}()
-		return net.Dial("tcp", listener.Addr().String())
-	})
+	connector := testSSHConnector(t, serverSigner, clientSigner.PublicKey(), fixedListCommand, emptySnapshot, serverErr)
 	runner, err := NewSSHRunner(connector, clientSigner, ssh.FixedHostKey(serverSigner.PublicKey()))
 	if err != nil {
 		t.Fatalf("NewSSHRunner() error = %v", err)
@@ -58,6 +41,108 @@ func TestSSHRunnerUsesFixedCommandAndReturnsBoundedOutput(t *testing.T) {
 	if err := <-serverErr; err != nil {
 		t.Fatalf("SSH server error = %v", err)
 	}
+}
+
+func TestSSHRunnerReadsSpecificFileWithBoundedCommand(t *testing.T) {
+	clientSigner := testSigner(t)
+	serverSigner := testSigner(t)
+	serverErr := make(chan error, 1)
+	const wantCommand = "read work/app.log"
+	const wantOutput = `{"path":"work/app.log","content":"hello\n","truncated":false}` + "\n"
+	connector := testSSHConnector(t, serverSigner, clientSigner.PublicKey(), wantCommand, []byte(wantOutput), serverErr)
+	runner, err := NewSSHRunner(connector, clientSigner, ssh.FixedHostKey(serverSigner.PublicKey()))
+	if err != nil {
+		t.Fatalf("NewSSHRunner() error = %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	got, err := runner.Read(ctx, "abc123", "work/app.log")
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if string(got) != wantOutput {
+		t.Fatalf("Read() output = %q, want %q", got, wantOutput)
+	}
+	if err := <-serverErr; err != nil {
+		t.Fatalf("SSH server error = %v", err)
+	}
+}
+
+func TestSSHRunnerReadAllowsEscapedUnicodePreviewPayload(t *testing.T) {
+	clientSigner := testSigner(t)
+	serverSigner := testSigner(t)
+	serverErr := make(chan error, 1)
+	payload := bytes.Repeat([]byte(`\uac00`), 45_000)
+	wantOutput := append([]byte(`{"path":"work/korean.txt","content":"`), payload...)
+	wantOutput = append(wantOutput, []byte(`","truncated":true}`+"\n")...)
+	if len(wantOutput) <= MaxPayloadBytes {
+		t.Fatalf("test output length = %d, want larger than MaxPayloadBytes=%d", len(wantOutput), MaxPayloadBytes)
+	}
+	connector := testSSHConnector(t, serverSigner, clientSigner.PublicKey(), "read work/korean.txt", wantOutput, serverErr)
+	runner, err := NewSSHRunner(connector, clientSigner, ssh.FixedHostKey(serverSigner.PublicKey()))
+	if err != nil {
+		t.Fatalf("NewSSHRunner() error = %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	got, err := runner.Read(ctx, "abc123", "work/korean.txt")
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	if !bytes.Equal(got, wantOutput) {
+		t.Fatalf("Read() output length = %d, want %d", len(got), len(wantOutput))
+	}
+	if err := <-serverErr; err != nil {
+		t.Fatalf("SSH server error = %v", err)
+	}
+}
+
+func TestSSHRunnerRejectsUnsafeReadPath(t *testing.T) {
+	runner, err := NewSSHRunner(connectorFunc(func(context.Context, string) (net.Conn, error) {
+		t.Fatal("connector must not be called for unsafe read path")
+		return nil, fmt.Errorf("unexpected connector call")
+	}), testSigner(t), ssh.InsecureIgnoreHostKey())
+	if err != nil {
+		t.Fatalf("NewSSHRunner() error = %v", err)
+	}
+	for _, path := range []string{"", "/etc/passwd", "../secret", "work/../secret", ".ssh/id_rsa", "work/.env", "work\\app.log"} {
+		if _, err := runner.Read(context.Background(), "abc123", path); err == nil {
+			t.Fatalf("Read(%q) error = nil, want unsafe path error", path)
+		}
+	}
+}
+
+func testSSHConnector(
+	t *testing.T,
+	serverSigner ssh.Signer,
+	allowedKey ssh.PublicKey,
+	expectedCommand string,
+	output []byte,
+	serverErr chan<- error,
+) Connector {
+	t.Helper()
+	connector := connectorFunc(func(_ context.Context, sessionID string) (net.Conn, error) {
+		if sessionID != "abc123" {
+			return nil, fmt.Errorf("sessionID = %q, want abc123", sessionID)
+		}
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			return nil, err
+		}
+		go func() {
+			defer listener.Close() //nolint:errcheck
+			serverConn, err := listener.Accept()
+			if err != nil {
+				serverErr <- err
+				return
+			}
+			serveTestSSH(serverConn, serverSigner, allowedKey, expectedCommand, output, serverErr)
+		}()
+		return net.Dial("tcp", listener.Addr().String())
+	})
+	return connector
 }
 
 func TestSSHRunnerAppliesContextToPortForwardConnection(t *testing.T) {
@@ -105,7 +190,14 @@ func testSigner(t *testing.T) ssh.Signer {
 	return signer
 }
 
-func serveTestSSH(conn net.Conn, hostSigner ssh.Signer, allowedKey ssh.PublicKey, result chan<- error) {
+func serveTestSSH(
+	conn net.Conn,
+	hostSigner ssh.Signer,
+	allowedKey ssh.PublicKey,
+	expectedCommand string,
+	output []byte,
+	result chan<- error,
+) {
 	defer conn.Close() //nolint:errcheck
 	config := &ssh.ServerConfig{
 		PublicKeyCallback: func(_ ssh.ConnMetadata, key ssh.PublicKey) (*ssh.Permissions, error) {
@@ -135,13 +227,13 @@ func serveTestSSH(conn net.Conn, hostSigner ssh.Signer, allowedKey ssh.PublicKey
 		}
 		for request := range channelRequests {
 			var payload struct{ Command string }
-			if request.Type != "exec" || ssh.Unmarshal(request.Payload, &payload) != nil || payload.Command != fixedListCommand {
+			if request.Type != "exec" || ssh.Unmarshal(request.Payload, &payload) != nil || payload.Command != expectedCommand {
 				_ = request.Reply(false, nil)
 				result <- fmt.Errorf("unexpected SSH request type=%q command=%q", request.Type, payload.Command)
 				return
 			}
 			_ = request.Reply(true, nil)
-			_, _ = channel.Write(emptySnapshot)
+			_, _ = channel.Write(output)
 			_, _ = channel.SendRequest("exit-status", false, ssh.Marshal(struct{ Status uint32 }{0}))
 			_ = channel.Close()
 			result <- nil

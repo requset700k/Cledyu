@@ -78,6 +78,10 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions session.Provider, v
 	v1.Use(middleware.JWT(authProvider, log, devFallback))
 	{
 		v1.GET("/me", h.GetMe)
+		v1.GET("/me/progress", h.GetMyProgress)
+		v1.GET("/me/dashboard", h.GetMyDashboard)
+		v1.PATCH("/me/preferences", h.SetMyPreferences)
+		v1.GET("/leaderboard", h.GetLeaderboard)
 		v1.GET("/labs", h.ListLabs)
 		v1.GET("/labs/:id", h.GetLab)
 
@@ -95,6 +99,9 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions session.Provider, v
 
 		// 실시간 터미널 — VM serial console을 WebSocket으로 프록시(JWT가 ?token= 처리).
 		v1.GET("/sessions/:id/ws", h.Console)
+
+		// 세션 VM 파일 탐색 — /home/lab 아래 read-only 목록.
+		v1.GET("/sessions/:id/files", h.ListSessionFiles)
 
 		// 브라우저 IDE(code-server) — IDE 랩(lab DSL ide: true)만. 세션 소유자 전용 프록시.
 		v1.Any("/sessions/:id/ide/*idepath", h.IDE)

@@ -262,6 +262,79 @@ func (s *Store) ListCompletionsByUser(ctx context.Context, userID string) ([]Com
 	return out, rows.Err()
 }
 
+// ListInProgressLabIDsByUser는 유저가 진행기록(session_progress)을 가진 lab_id 목록을 반환한다.
+// 완료된 랩도 진행기록이 남아 있을 수 있으므로, 호출부는 완료 여부를 먼저 판정한 뒤
+// 이 목록을 'in_progress' 후보로 사용한다.
+func (s *Store) ListInProgressLabIDsByUser(ctx context.Context, userID string) ([]string, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT DISTINCT lab_id FROM session_progress WHERE user_id = $1`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("list in-progress labs: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]string, 0)
+	for rows.Next() {
+		var labID string
+		if err := rows.Scan(&labID); err != nil {
+			return nil, fmt.Errorf("scan in-progress lab: %w", err)
+		}
+		out = append(out, labID)
+	}
+	return out, rows.Err()
+}
+
+// LeaderboardRow는 리더보드 집계용 완료 1건이다(유저 표시명 포함).
+type LeaderboardRow struct {
+	UserID      string    `json:"user_id"`
+	Name        string    `json:"name"`
+	LabID       string    `json:"lab_id"`
+	CompletedAt time.Time `json:"completed_at"`
+}
+
+// LeaderboardRows는 옵트아웃하지 않은 유저의 랩 완료 행을 반환한다.
+// since 가 nil 이 아니면 completed_at >= *since 만 포함한다(최근 급상승 윈도우).
+// 난이도 가중은 호출부(핸들러)가 in-memory 콘텐츠로 수행하므로 여기선 raw 행만 돌려준다.
+// users 와 INNER JOIN — 완료 기록은 로그인(미러 생성)을 전제로 한다.
+func (s *Store) LeaderboardRows(ctx context.Context, since *time.Time) ([]LeaderboardRow, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT c.user_id, u.name, c.lab_id, c.completed_at
+		FROM lab_completions c
+		JOIN users u ON u.id = c.user_id
+		WHERE u.leaderboard_hidden = false
+		  AND ($1::timestamptz IS NULL OR c.completed_at >= $1)`, since)
+	if err != nil {
+		return nil, fmt.Errorf("leaderboard rows: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]LeaderboardRow, 0)
+	for rows.Next() {
+		var r LeaderboardRow
+		if err := rows.Scan(&r.UserID, &r.Name, &r.LabID, &r.CompletedAt); err != nil {
+			return nil, fmt.Errorf("scan leaderboard row: %w", err)
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// SetLeaderboardHidden은 유저의 리더보드 노출 여부를 갱신한다(옵트아웃 토글).
+func (s *Store) SetLeaderboardHidden(ctx context.Context, userID string, hidden bool) error {
+	// upsert로 행을 보장한다 — 로그인 직후 UpsertUser(비동기)가 아직 미러 행을 만들기 전이라도
+	// 옵트아웃이 유실되지 않도록. UPDATE 만 쓰면 0행 갱신 후 200 을 반환하고, 뒤늦은 upsert 가
+	// 기본값 leaderboard_hidden=false 로 행을 만들어 숨김이 풀린다(이름 공개 노출).
+	// UpsertUser 의 ON CONFLICT 는 leaderboard_hidden 을 건드리지 않으므로 순서와 무관하게 보존된다.
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO users (id, leaderboard_hidden)
+		VALUES ($1, $2)
+		ON CONFLICT (id) DO UPDATE SET leaderboard_hidden = EXCLUDED.leaderboard_hidden`,
+		userID, hidden); err != nil {
+		return fmt.Errorf("set leaderboard hidden: %w", err)
+	}
+	return nil
+}
+
 // SetUserRole은 users 미러의 역할 스냅샷을 갱신한다(Keycloak 역할 변경 직후 즉시 반영용).
 // 해당 유저가 아직 미러에 없으면(로그인 전) 영향 없음 — 다음 로그인 시 upsert 된다.
 func (s *Store) SetUserRole(ctx context.Context, userID, role string) error {

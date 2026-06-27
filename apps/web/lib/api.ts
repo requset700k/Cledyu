@@ -2,7 +2,16 @@
 // 모든 HTTP 요청은 Next.js route handler를 통해 /api/* → BACKEND_URL/api/*로 프록시됨.
 // WebSocket은 rewrite 대상이 아니므로 Terminal 컴포넌트에서 NEXT_PUBLIC_WS_URL로 직접 연결.
 
-import type { HintResponse, Lab, Session, StepProgress, User } from './types';
+import type {
+  DashboardResponse,
+  HintResponse,
+  Lab,
+  LeaderboardResponse,
+  MyProgress,
+  Session,
+  StepProgress,
+  User,
+} from './types';
 import { refreshSession } from './auth-session.mjs';
 
 interface Paginated<T> {
@@ -137,6 +146,20 @@ export const api = {
         body: JSON.stringify(body),
       });
     },
+  },
+
+  leaderboard: {
+    get: () => request<LeaderboardResponse>('/api/v1/leaderboard'),
+  },
+
+  me: {
+    progress: () => request<MyProgress>('/api/v1/me/progress'),
+    dashboard: () => request<DashboardResponse>('/api/v1/me/dashboard'),
+    setPreferences: (leaderboardHidden: boolean) =>
+      request<{ leaderboard_hidden: boolean }>('/api/v1/me/preferences', {
+        method: 'PATCH',
+        body: JSON.stringify({ leaderboard_hidden: leaderboardHidden }),
+      }),
   },
 
   auth: {

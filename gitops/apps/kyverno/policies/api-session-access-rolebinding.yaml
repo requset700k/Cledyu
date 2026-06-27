@@ -1,5 +1,5 @@
 ---
-# lab-{sessionID} namespace가 생성되면 Session API가 해당 세션 VM의 console에만
+# lab-{sessionID} namespace가 생성되면 Session API가 해당 세션 VM의 console/portforward에만
 # 접근할 수 있도록 namespace-scoped RoleBinding을 자동 생성한다.
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
@@ -12,7 +12,7 @@ metadata:
     policies.kyverno.io/severity: medium
     policies.kyverno.io/description: >-
       lab-* 세션 네임스페이스마다 api-session-access ClusterRole을 바인딩해
-      Session API의 console 접근을 해당 세션으로 제한한다.
+      Session API의 console/portforward 접근을 해당 세션으로 제한한다.
 spec:
   admission: true
   background: true
