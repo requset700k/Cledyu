@@ -229,7 +229,7 @@ func TestPreviewSessionFileReturnsPreview(t *testing.T) {
 	service := &vmFileServiceStub{
 		preview: []byte(`{"path":"work/app.log","content":"hello\n","truncated":false}` + "\n"),
 	}
-	h := vmFileHandler("active", service)
+	h := vmFileHandler("ready", service)
 	r := vmFileRouter(h, "alice")
 
 	w := httptest.NewRecorder()
