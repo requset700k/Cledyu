@@ -48,6 +48,12 @@ chpasswd:
 	}
 
 	b.WriteString("runcmd:\n")
+	// 공통 CLI(curl·unzip) 보장 — on-prem 은 lab-base 이미지에 이를 미리 굽지만, EC2 overflow 는
+	// 베이킹되지 않은 AMI(stock Canonical·이전 커스텀)로 부팅될 수 있다. 랩 콘텐츠가 베이크 전제로
+	// init.packages 에서 이들을 빼므로, EC2 에선 누락 시에만 설치해 보강한다. 아래 tailscale 설치와
+	// 랩 runcmd(예: curl -sfL get.k3s.io)가 curl 에 의존하므로 가장 먼저 실행한다. 이미 있으면 즉시
+	// no-op 이라 베이크/stock AMI 의 부팅 속도엔 영향이 없다(멱등·best-effort).
+	b.WriteString("  - sh -c 'miss=; for c in curl unzip; do command -v $c >/dev/null 2>&1 || miss=\"$miss $c\"; done; [ -n \"$miss\" ] && { apt-get update; DEBIAN_FRONTEND=noninteractive apt-get install -y $miss; }; true'\n")
 	// SSM Agent — 채점(SendCommand) 경로. Canonical Ubuntu AMI 엔 보통 snap 으로 동봉되나 누락 대비 보장.
 	b.WriteString("  - snap install amazon-ssm-agent --classic || true\n")
 	b.WriteString("  - systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service || systemctl enable --now amazon-ssm-agent || true\n")
