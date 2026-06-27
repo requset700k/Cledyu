@@ -54,6 +54,26 @@ func TestRenderCloudInit_WithAuthKey_InstallsCodeServer(t *testing.T) {
 	}
 }
 
+// 랩 콘텐츠는 베이크된 lab-base 전제로 init.packages 에서 curl·unzip 을 뺐다. EC2 는 비베이크 AMI 일
+// 수 있으므로 누락 시 보강하는 가드가 있어야 하고, curl 에 의존하는 tailscale 설치·랩 runcmd 보다
+// 먼저 와야 한다.
+func TestRenderCloudInit_EnsuresCurlBeforeDependents(t *testing.T) {
+	cfg := &config.AWSConfig{TailscaleAuthKey: "tskey-test", TailnetHostnamePrefix: "lab"}
+	out := renderCloudInit("sess1", cfg, session.BootInit{Runcmd: []string{"curl -sfL https://get.k3s.io | sh"}})
+
+	guard := strings.Index(out, "command -v $c")
+	tsInstall := strings.Index(out, "tailscale.com/install.sh")
+	labCurl := strings.Index(out, "get.k3s.io")
+	switch {
+	case guard < 0:
+		t.Fatalf("curl·unzip 보강 가드가 누락됨:\n%s", out)
+	case tsInstall < 0 || guard > tsInstall:
+		t.Fatalf("curl 가드가 tailscale 설치보다 뒤이거나 누락됨 (guard=%d ts=%d):\n%s", guard, tsInstall, out)
+	case labCurl < 0 || guard > labCurl:
+		t.Fatalf("curl 가드가 랩 runcmd 보다 뒤이거나 누락됨 (guard=%d lab=%d):\n%s", guard, labCurl, out)
+	}
+}
+
 // 랩 콘텐츠(BootInit.Runcmd)는 플랫폼 도구 설치가 끝난 뒤에 실행돼야 한다.
 func TestRenderCloudInit_LabRuncmdAfterPlatformInstalls(t *testing.T) {
 	cfg := &config.AWSConfig{TailscaleAuthKey: "tskey-test"}
