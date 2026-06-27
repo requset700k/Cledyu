@@ -15,8 +15,8 @@ tags:
   - deployment
   - service
 init:
-  packages:
-    - curl
+  # curl 은 베이스 이미지(lab-base)에 미리 구워져 있어 packages(apt) 단계를 생략한다.
+  # cloud-init 이 apt-get update/install 을 건너뛰어 세션 부팅이 빨라진다.
   runcmd:
     - curl -sfL https://get.k3s.io -o /tmp/k3s-install.sh
     # cluster/service CIDR 을 호스트(pod 10.42.0.0/16, svc 10.43.0.0/16)와 겹치지 않게 지정.

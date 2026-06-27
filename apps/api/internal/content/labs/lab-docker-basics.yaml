@@ -15,8 +15,9 @@ tags:
   - dockerfile
 init:
   packages:
+    # docker.io 는 무거워 베이스에 굽지 않고 세션마다 설치한다(apt 단계 유지).
+    # curl 은 베이스 이미지(lab-base)에 구워져 있어 여기서 선언하지 않는다.
     - docker.io
-    - curl
   runcmd:
     - usermod -aG docker lab
     - chmod 666 /var/run/docker.sock

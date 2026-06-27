@@ -16,9 +16,8 @@ tags:
   - iac
   - ide
 init:
-  packages:
-    - unzip
-    - curl
+  # curl·unzip 은 베이스 이미지(lab-base)에 미리 구워져 있어 packages(apt) 단계를 생략한다.
+  # cloud-init 이 apt-get update/install 을 건너뛰어 세션 부팅이 빨라진다.
   runcmd:
     # terraform 설치 (releases.hashicorp.com zip → /usr/local/bin)
     - curl -fsSL -o /tmp/terraform.zip https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip
