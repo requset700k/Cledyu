@@ -1,0 +1,58 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: hubble-network-alerts
+  namespace: monitoring
+  labels:
+    app: kube-prometheus-stack
+    release: kps
+spec:
+  groups:
+    - name: hubble-network
+      rules:
+        # ─────────────────────────────────────────────
+        # 네트워크 드롭률 급증
+        # ─────────────────────────────────────────────
+        - alert: CiliumNetworkDropCritical
+          expr: |
+            sum(rate(hubble_drop_total{reason!="UNSUPPORTED_L3_PROTOCOL"}[5m]))
+            /
+            (sum(rate(hubble_flows_processed_total[5m])) > 0) > 0.01
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Cilium 네트워크 드롭률 1% 초과"
+            description: "전체 트래픽 대비 드롭률이 {{ $value | humanizePercentage }} 입니다. (Lab VM 파생 알림은 Alertmanager에서 억제됨)"
+            runbook: "https://wiki.cledyu.internal/runbooks/cilium-network-drop"
+
+        # ─────────────────────────────────────────────
+        # 정책 위반 드롭 급증
+        # ─────────────────────────────────────────────
+        - alert: CiliumPolicyDeniedSpike
+          expr: |
+            sum by (source_namespace) (rate(hubble_drop_total{reason="POLICY_DENIED"}[5m])) > 10
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Cilium 정책 위반 드롭 급증 ({{ $labels.source_namespace }})"
+            description: 'Namespace ''{{ $labels.source_namespace }}''에서 Policy Denied 드롭이 초당 {{ $value | printf "%.2f" }}건 발생 중. 정책 오류 또는 비인가 접근 시도 의심.'
+            runbook: "https://wiki.cledyu.internal/runbooks/cilium-policy-denied"
+
+        # ─────────────────────────────────────────────
+        # Hubble 이벤트 유실 — 관측 사각지대 경고
+        # ─────────────────────────────────────────────
+        - alert: HubbleEventLossHigh
+          expr: |
+            rate(hubble_lost_events_total{source=~"perf_event_ring_buffer|observer_events_queue|hubble_ring_buffer"}[5m]) > 100
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Hubble 이벤트 유실률 높음 ({{ $labels.instance }})"
+            description: '인스턴스 {{ $labels.instance }}의 Hubble ring buffer 유실이 초당 {{ $value | printf "%.2f" }}건. 네트워크 관측 데이터 누락 가능성.'
+            runbook: "https://wiki.cledyu.internal/runbooks/hubble-event-loss"
