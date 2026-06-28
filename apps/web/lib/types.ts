@@ -176,3 +176,10 @@ export interface DashboardResponse {
   labs: DashboardLab[];
   recent_completions: { lab_id: string; session_id: string; completed_at: string }[];
 }
+
+/** GET /api/v1/instructor/analytics 응답 (강사 분석) */
+export interface InstructorAnalytics {
+  lab_completion: { lab_id: string; started: number; completed: number; completion_rate: number }[];
+  step_funnel: { lab_id: string; step_id: number; validation_failures: number }[];
+  hint_usage: { lab_id: string; step_id: number; hint_source: string; hint_count: number }[];
+}

@@ -59,3 +59,21 @@ resource "google_storage_bucket_iam_member" "bucket_object_admin" {
   role   = "roles/storage.objectAdmin"
   member = "serviceAccount:${google_service_account.airflow_analytics.email}"
 }
+
+# ── API 읽기전용 분석 SA (D3) ─────────────────────────────────────────────────
+resource "google_service_account" "api_analytics_reader" {
+  account_id   = "api-analytics-reader"
+  display_name = "Session API instructor analytics reader (read-only)"
+}
+
+resource "google_bigquery_dataset_iam_member" "api_reader_data_viewer" {
+  dataset_id = google_bigquery_dataset.analytics.dataset_id
+  role       = "roles/bigquery.dataViewer"
+  member     = "serviceAccount:${google_service_account.api_analytics_reader.email}"
+}
+
+resource "google_project_iam_member" "api_reader_job_user" {
+  project = var.project_id
+  role    = "roles/bigquery.jobUser"
+  member  = "serviceAccount:${google_service_account.api_analytics_reader.email}"
+}

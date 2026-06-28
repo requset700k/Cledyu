@@ -39,11 +39,15 @@ type Handler struct {
 	locks     lock.Locker                   // 유저별 세션 생성 직렬화 — Redis 분산 락 또는 in-memory(MemLocker).
 	ec2Dial   ec2.DialFunc                  // EC2 세션 라이브 터미널용 tailnet 다이얼러(tsnet). nil이면 기본 net.Dialer(클러스터에선 도달 불가).
 	vmFiles   vmFileService                 // 세션 VM 파일 목록·미리보기 서비스. 미설정이면 endpoint만 503.
+	bq        bqAnalytics                   // D3 강사 분석 BigQuery 조회. nil 허용 — 미설정 시 503.
 }
 
 // SetEC2Dial는 EC2 세션(tailnet MagicDNS)에 닿는 다이얼러를 주입한다. main이 tsnet 노드를
 // 기동했을 때만 설정한다 — tsnet 수명관리(Close)가 main에 있어 생성자 대신 setter로 둔다.
 func (h *Handler) SetEC2Dial(d ec2.DialFunc) { h.ec2Dial = d }
+
+// SetBQAnalytics는 강사 분석용 BigQuery 조회기를 주입한다(main 이 설정 시에만).
+func (h *Handler) SetBQAnalytics(b bqAnalytics) { h.bq = b }
 
 type vmFileService interface {
 	List(context.Context, string) (vmfiles.Snapshot, error)

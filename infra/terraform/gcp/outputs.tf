@@ -9,3 +9,7 @@ output "dataset_id" {
 output "sa_email" {
   value = google_service_account.airflow_analytics.email
 }
+
+output "api_reader_sa_email" {
+  value = google_service_account.api_analytics_reader.email
+}
