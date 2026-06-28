@@ -43,7 +43,7 @@ source "qemu" "lab_base" {
       password: ubuntu
       chpasswd: { expire: false }
       ssh_pwauth: true
-    EOF
+      EOF
     "meta-data" = ""
   }
   shutdown_command = "sudo cloud-init clean --logs --seed && sudo shutdown -P now"
