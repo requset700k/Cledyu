@@ -17,31 +17,25 @@ rm reader-key.json
 `api_reader_sa_email` 출력값은 Terraform state에서 참조한다. key 파일은 Vault 저장 후
 즉시 삭제하여 로컬에 남기지 않는다.
 
-## 2. api 파드에 SA 키 마운트 + env 주입
+## 2. api 차트에서 분석 기능 활성화
 
-ExternalSecret `api-bq-reader`(gitops/apps/api/externalsecret-bq-reader.yaml)는 이미
-`cledyu/gcp/api-analytics-reader` 경로를 참조하도록 작성되어 있다. ArgoCD sync 시
-`api` namespace에 Secret `api-bq-reader` 가 생성된다.
-
-`gitops/apps/api/values.yaml`의 `env` 블록과 `extraVolumes`/`extraVolumeMounts`에
-아래 항목을 추가한다. 정확한 차트 키는 `helm show values gitops/apps/api` 로 대조한다.
+분석 기능은 `gitops/apps/api/values.yaml`의 `analytics` 블록으로 게이트된다(기본
+`enabled: false` — env/Secret 미주입, 핸들러는 503). ExternalSecret `api-bq-reader`,
+SA 키 볼륨 마운트, `GOOGLE_APPLICATION_CREDENTIALS`·`CLEDYU_ANALYTICS_*` env 는 모두
+`analytics.enabled: true` 일 때만 차트 템플릿에서 렌더된다. `projectId` 만 채우면 된다.
 
 ```yaml
-env:
-  GOOGLE_APPLICATION_CREDENTIALS: /etc/api-bq-reader/key.json
-  CLEDYU_ANALYTICS_PROJECT_ID: cledyu-project
-  CLEDYU_ANALYTICS_DATASET: cledyu_analytics
-
-extraVolumes:
-  - name: bq-reader
-    secret:
-      secretName: api-bq-reader
-
-extraVolumeMounts:
-  - name: bq-reader
-    mountPath: /etc/api-bq-reader
-    readOnly: true
+analytics:
+  enabled: true
+  projectId: "cledyu-project"   # CLEDYU_ANALYTICS_PROJECT_ID
+  # dataset / secretName / secretKey / credentialsMountPath 는 기본값 사용(차트 values 참고)
 ```
+
+적용하면 ArgoCD sync 시 `api` namespace 에 ExternalSecret 이 생성되어 Secret
+`api-bq-reader` 가 채워지고, 파드에 `/etc/gcp/api-bq-reader/key.json` 으로 마운트되며
+`GOOGLE_APPLICATION_CREDENTIALS` 가 해당 경로를 가리킨다. 렌더 결과는
+`helm template api gitops/apps/api --set analytics.enabled=true --set analytics.projectId=cledyu-project`
+로 사전 확인할 수 있다.
 
 적용 후 ArgoCD sync:
 
