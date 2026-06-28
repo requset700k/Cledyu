@@ -438,13 +438,9 @@ variable "github_repo" {
   type        = string
   default     = "requset700k/cledyu"
 }
-
-variable "baker_metal_instance_type" {
-  description = "이미지 베이커 metal 인스턴스 타입(중첩가상화 필요 → .metal). 빌드 중 spot 금지."
-  type        = string
-  default     = "m5.metal"
-}
 ```
+
+metal 인스턴스 타입은 terraform 이 아니라 워크플로의 `METAL_TYPE` env 가 단일 제어한다(metal launch 는 terraform 이 아닌 GitHub Action 의 `aws ec2 run-instances` 가 수행하므로 terraform 변수로 두면 미사용 선언이 된다 — tflint).
 
 - [ ] **Step 2: image-baker.tf 작성(OIDC provider + role)**
 

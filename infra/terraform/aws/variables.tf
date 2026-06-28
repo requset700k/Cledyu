@@ -131,9 +131,3 @@ variable "github_repo" {
   type        = string
   default     = "requset700k/cledyu"
 }
-
-variable "baker_metal_instance_type" {
-  description = "이미지 베이커 metal 인스턴스 타입(중첩가상화 필요 → .metal). 빌드 중 spot 금지."
-  type        = string
-  default     = "m5.metal"
-}
