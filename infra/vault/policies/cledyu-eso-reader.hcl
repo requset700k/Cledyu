@@ -55,3 +55,13 @@ path "cledyu/data/aws/*" {
 path "cledyu/metadata/aws/*" {
   capabilities = ["read"]
 }
+
+# 학습자 데이터 영속화(PostgreSQL) — postgres StatefulSet 비밀번호와 api 접속 DSN.
+# postgres-credentials / cledyu-api-db ExternalSecret 이 읽는다(런북 learner-data.md §2).
+path "cledyu/data/db/*" {
+  capabilities = ["read"]
+}
+
+path "cledyu/metadata/db/*" {
+  capabilities = ["read"]
+}
