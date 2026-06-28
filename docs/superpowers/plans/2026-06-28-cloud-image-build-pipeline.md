@@ -33,6 +33,7 @@
 - Create `infra/images/lab-base/provisioners/40-terraform.sh` — terraform 바이너리.
 - Create `infra/images/lab-base/provisioners/50-ansible-helm.sh` — ansible-core + helm.
 - Create `infra/images/lab-base/provisioners/99-smoke.sh` — in-image smoke test.
+- Create `infra/images/lab-base/provisioners/99-cleanup.sh` — 캡처 전 ubuntu 잠금 + machine-id/host key 리셋.
 - Modify `infra/images/lab-base/build-and-push.sh` — packer 산출 qcow2 소비.
 - Delete `infra/images/lab-base/bake.sh`, `infra/images/lab-base/setup-host.sh`.
 
@@ -266,6 +267,33 @@ git add infra/images/lab-base/provisioners/99-smoke.sh
 git commit -m "build(infra): add in-image smoke test provisioner"
 ```
 
+- [ ] **Step 3: 99-cleanup.sh 작성 (최종 정리 프로비저너)**
+
+캡처 전 ubuntu 계정 잠금 + machine-id/SSH host key 제거. smoke 이후 마지막으로 실행해야 하므로 scripts 배열 끝에 위치한다.
+
+```bash
+#!/usr/bin/env bash
+# 이미지 캡처 전 정리. 베이스가 모든 세션 VM(KubeVirt)·EC2 AMI 로 복제되므로:
+# (1) packer 접속용 ubuntu 계정을 잠가 sudo 가능한 ubuntu:ubuntu 가 남지 않게 한다.
+# (2) machine-id 와 SSH host key 를 비워 클론마다 새로 생성되게 한다(공유 금지).
+set -euo pipefail
+
+# (1) ubuntu 비밀번호 잠금. ubuntu 엔 authorized_keys 가 없으니 이로써 로그인 불가가 된다.
+passwd -l ubuntu
+
+# (2) 머신 식별자·호스트키 제거 → 클론 첫 부팅에 systemd/ssh 가 새로 생성.
+truncate -s 0 /etc/machine-id
+rm -f /var/lib/dbus/machine-id
+rm -f /etc/ssh/ssh_host_*
+```
+
+Run: `shellcheck infra/images/lab-base/provisioners/99-cleanup.sh && shfmt -i 2 -ci -sr -d infra/images/lab-base/provisioners/99-cleanup.sh`
+Expected: 통과(출력 없음).
+
+```bash
+chmod +x infra/images/lab-base/provisioners/99-cleanup.sh
+```
+
 ### Task A5: packer qemu 템플릿
 
 **Files:**
@@ -342,6 +370,7 @@ build {
       "provisioners/40-terraform.sh",
       "provisioners/50-ansible-helm.sh",
       "provisioners/99-smoke.sh",
+      "provisioners/99-cleanup.sh",
     ]
   }
 }
