@@ -3,6 +3,11 @@
 Cledyu is a Korean-language hands-on lab platform (Kubernetes/Linux/Terraform practice
 in browser VMs). These are its real shipped React components. UI text is Korean.
 
+**Auth screens.** `LoginPage` (group `login`) is the real login launcher. `KeycloakLogin`
+and `KeycloakRegister` (group `mockups`) are design mockups of the Keycloak-served
+login/register forms — the actual auth pages are Keycloak FTL + CSS, not React, so these
+exist only for design iteration; do not treat them as shippable components.
+
 ### Setup & wrapping
 - **Dark theme is mandatory.** Every component is designed for a dark page. Wrap your
   screens in a dark surface or text is unreadable: `<div className="bg-slate-950 min-h-screen">…</div>`.

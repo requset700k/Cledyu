@@ -17,7 +17,15 @@
     "LabTerminal": { "cardMode": "single" },
     "LabCard": { "cardMode": "column" },
     "StepList": { "cardMode": "column" },
-    "TerminalPlaceholder": { "cardMode": "column" }
+    "TerminalPlaceholder": { "cardMode": "column" },
+    "LoginPage": { "cardMode": "single", "viewport": "480x860" },
+    "KeycloakLogin": { "cardMode": "single", "viewport": "480x820" },
+    "KeycloakRegister": { "cardMode": "single", "viewport": "480x720" }
+  },
+  "docsMap": {
+    "LoginPage": "../../.design-sync/docs/LoginPage.md",
+    "KeycloakLogin": "../../.design-sync/docs/KeycloakLogin.md",
+    "KeycloakRegister": "../../.design-sync/docs/KeycloakRegister.md"
   },
   "componentSrcMap": {
     "Navbar": "components/ui/Navbar.tsx",
@@ -28,7 +36,10 @@
     "AiTutorPanel": "components/lab/AiTutorPanel.tsx",
     "LabTerminal": "components/lab/LabTerminal.tsx",
     "LabWorkspace": "components/lab/LabWorkspace.tsx",
-    "LabSession": "components/lab/LabSession.tsx"
+    "LabSession": "components/lab/LabSession.tsx",
+    "LoginPage": "app/(auth)/login/page.tsx",
+    "KeycloakLogin": "../../.design-sync/mockups/KeycloakLogin.tsx",
+    "KeycloakRegister": "../../.design-sync/mockups/KeycloakRegister.tsx"
   },
   "dtsPropsFor": {
     "Navbar": "  /** Navbar takes no props. Renders the sticky top nav (Labs / 내 학습 / 리더보드 / 강사 모드), a logout button, and a mobile hamburger menu. */\n  children?: never;",
@@ -39,6 +50,9 @@
     "AiTutorPanel": "  sessionId: string;\n  stepId: number;\n  /** Supplies the recent terminal output appended to the hint request. */\n  getTerminalTail?: () => string;",
     "LabTerminal": "  /** Session-scoped WebSocket path for the lab VM serial console. */\n  terminalPath: string;\n  /** Tailwind height class for the terminal viewport. */\n  heightClass?: string;\n  onOutput?: (chunk: string) => void;",
     "LabWorkspace": "  sessionId: string;\n  terminalPath: string;\n  /** code-server proxy path for the IDE (VS Code) tab. */\n  idePath: string;\n  heightClass?: string;\n  onTerminalOutput?: (chunk: string) => void;",
-    "LabSession": "  sessionId: string;\n  lab: {\n    id: string;\n    title: string;\n    difficulty: 'beginner' | 'intermediate' | 'advanced';\n    steps?: { id: number; title: string; description: string; commands?: string[] }[];\n    environment?: string;\n    ide?: boolean;\n    [key: string]: unknown;\n  };\n  /** Skip the post-ready boot grace period (resume of an already-ready session). */\n  skipBootGrace?: boolean;"
+    "LabSession": "  sessionId: string;\n  lab: {\n    id: string;\n    title: string;\n    difficulty: 'beginner' | 'intermediate' | 'advanced';\n    steps?: { id: number; title: string; description: string; commands?: string[] }[];\n    environment?: string;\n    ide?: boolean;\n    [key: string]: unknown;\n  };\n  /** Skip the post-ready boot grace period (resume of an already-ready session). */\n  skipBootGrace?: boolean;",
+    "LoginPage": "  /** Real platform login launcher. No props — reads CLEDYU_SOCIAL_LOGIN_PROVIDERS at render to gate social buttons. */\n  children?: never;",
+    "KeycloakLogin": "  /** Design mockup of the Keycloak-served login form (not shipped code). No props. */\n  children?: never;",
+    "KeycloakRegister": "  /** Design mockup of the Keycloak-served registration form (not shipped code). No props. */\n  children?: never;"
   }
 }

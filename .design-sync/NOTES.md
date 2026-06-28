@@ -5,18 +5,36 @@ the `apps/web` **Next.js 15 + Tailwind app** synced as the `package` shape — t
 packaged component library, no Storybook, no `dist/`. Everything is wired through config +
 shims so the components bundle and render standalone.
 
+## Components (12)
+- 9 lab/platform components (group `lab` + `general`).
+- `LoginPage` (group `login`) — the REAL login launcher, re-exported from
+  `app/(auth)/login/page.tsx` (default export → named in `.ds-entry.mjs`). Reads
+  `CLEDYU_SOCIAL_LOGIN_PROVIDERS` env at render; previews set it per story.
+- `KeycloakLogin`, `KeycloakRegister` (group `mockups`) — DESIGN MOCKUPS in
+  `.design-sync/mockups/`, NOT shipped code. The real auth pages are Keycloak FTL + the
+  `cledyu.css` theme (`infra/keycloak-theme/cledyu/login/`), which Claude Design (React-only)
+  can't import. These React components reproduce that skin for design iteration.
+
 ## How the build is wired (read before re-syncing)
 - **Synth entry**: `apps/web/.ds-entry.mjs` (generated, gitignored) re-exports the 9
-  components + `Providers`. `cfg.entry` points at it. It lives *inside* `apps/web` so
-  `PKG_DIR` resolves to the app (its package.json name is `cledyu-web`). Component list is
+  components + `Providers`, plus `LoginPage` (default re-export from the app page) and the two
+  mockups (from `.design-sync/mockups/`). `cfg.entry` points at it. It lives *inside* `apps/web`
+  so `PKG_DIR` resolves to the app (package.json name `cledyu-web`). Component list is
   pinned explicitly via `cfg.componentSrcMap` (synth mode finds no `.d.ts` exports).
+- **WORKTREE BUILDS**: when building from a `git worktree` (e.g. to avoid disturbing another
+  branch), symlink `node_modules` INTO the worktree (`ln -sfn <main>/apps/web/node_modules
+  <wt>/apps/web/node_modules`) and pass `--node-modules <wt>/apps/web/node_modules`. If you
+  point `--node-modules` at the main checkout instead, the workspace-containment root becomes
+  the main repo and every worktree-relative cfg path (tsconfig shim, process polyfill, docsMap,
+  readmeHeader) is silently rejected as "outside workspace" → next/* leaks back in, polyfill
+  drops, docs/groups break. Also regenerate `.ds-entry.mjs` + `.ds-tailwind.css` (gitignored).
 - **Tailwind CSS must be regenerated before every build.** This is a Tailwind app, so the
   utility classes are compiled into `apps/web/.ds-tailwind.css` (gitignored) and shipped via
   `cfg.cssEntry`. Regenerate with:
   ```sh
   cd apps/web && ./node_modules/.bin/tailwindcss -c tailwind.config.ts -i app/globals.css \
     -o .ds-tailwind.css \
-    --content "./app/**/*.{ts,tsx},./components/**/*.{ts,tsx},../../.design-sync/previews/**/*.{ts,tsx}" --minify
+    --content "./app/**/*.{ts,tsx},./components/**/*.{ts,tsx},../../.design-sync/previews/**/*.{ts,tsx},../../.design-sync/mockups/**/*.{ts,tsx}" --minify
   ```
   The shipped stylesheet is therefore a **compiled subset** — only classes used by the app +
   the authored previews are present (the conventions header tells the design agent this).
@@ -62,6 +80,12 @@ node .ds-sync/resync.mjs --config .design-sync/config.json --node-modules apps/w
   their multi-story wide cards).
 
 ## Re-sync risks (what can silently go stale)
+- **Keycloak mockups drift**: `KeycloakLogin`/`KeycloakRegister` are hand-built React
+  reproductions of the Keycloak `cledyu.css` theme. They are NOT linked to the real theme — if
+  `infra/keycloak-theme/cledyu/login/resources/css/cledyu.css` or the Keycloak templates
+  change, the mockups must be updated by hand. They will not auto-track.
+- **LoginPage env**: `LoginPage` reads `CLEDYU_SOCIAL_LOGIN_PROVIDERS`; the process polyfill
+  makes it default to empty (no social). Previews set the env per story to show variants.
 - **`.ds-tailwind.css` is generated, not committed.** If a future run forgets to regenerate
   it (or `apps/web/tailwind.config.ts` changes), the shipped CSS drifts from the components.
   Always regenerate before building. If you add a NEW class in a preview, regenerate or it
