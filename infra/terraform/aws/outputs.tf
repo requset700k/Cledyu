@@ -48,3 +48,18 @@ output "keycloak_proxy_instance_id" {
   description = "tailnet Keycloak 프록시 인스턴스 ID(tailnet 가입·로그 확인용)."
   value       = var.enable_public_ingress ? aws_instance.proxy[0].id : ""
 }
+
+output "gha_baker_role_arn" {
+  description = "GitHub Action 이 assume 할 베이커 role ARN."
+  value       = aws_iam_role.gha_baker.arn
+}
+
+output "baker_bucket" {
+  description = "이미지 베이커 S3 버킷명."
+  value       = aws_s3_bucket.baker.bucket
+}
+
+output "baker_instance_profile" {
+  description = "metal 베이커 인스턴스 프로파일명."
+  value       = aws_iam_instance_profile.baker_instance.name
+}
