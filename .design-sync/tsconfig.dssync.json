@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "baseUrl": "../apps/web",
+    "paths": {
+      "@/*": ["./*"],
+      "next/link": ["../../.design-sync/shims/next-link"],
+      "next/navigation": ["../../.design-sync/shims/next-navigation"]
+    }
+  }
+}
