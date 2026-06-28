@@ -6,6 +6,7 @@ package bq
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"cloud.google.com/go/bigquery"
@@ -69,7 +70,7 @@ func (c *Client) LabCompletion(ctx context.Context) ([]LabCompletionRow, error) 
 			CompletionRate bigquery.NullFloat64
 		}
 		err := it.Next(&raw)
-		if err == iterator.Done {
+		if errors.Is(err, iterator.Done) {
 			break
 		}
 		if err != nil {
@@ -101,7 +102,7 @@ func (c *Client) StepFunnel(ctx context.Context) ([]StepFunnelRow, error) {
 			ValidationFailures bigquery.NullInt64
 		}
 		err := it.Next(&raw)
-		if err == iterator.Done {
+		if errors.Is(err, iterator.Done) {
 			break
 		}
 		if err != nil {
@@ -133,7 +134,7 @@ func (c *Client) HintUsage(ctx context.Context) ([]HintUsageRow, error) {
 			HintCount  bigquery.NullInt64
 		}
 		err := it.Next(&raw)
-		if err == iterator.Done {
+		if errors.Is(err, iterator.Done) {
 			break
 		}
 		if err != nil {
