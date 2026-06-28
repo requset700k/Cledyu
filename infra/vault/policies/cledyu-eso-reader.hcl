@@ -84,3 +84,22 @@ path "cledyu/data/api/file-list-ssh" {
 path "cledyu/metadata/api/file-list-ssh" {
   capabilities = ["read"]
 }
+
+# Kafka→BigQuery 분석 파이프라인(#195) — airflow analytics DAG 가 쓰는 자격증명.
+# airflow-gcp-sa 는 BigQuery 적재용 GCP 서비스계정 key.json, airflow-kafka-cert 는
+# Strimzi mTLS user(user.crt/user.key/ca.crt)를 읽는다. 최소권한: 실제 읽는 키만 명시.
+path "cledyu/data/gcp/airflow-analytics-sa" {
+  capabilities = ["read"]
+}
+
+path "cledyu/metadata/gcp/airflow-analytics-sa" {
+  capabilities = ["read"]
+}
+
+path "cledyu/data/kafka/airflow-analytics" {
+  capabilities = ["read"]
+}
+
+path "cledyu/metadata/kafka/airflow-analytics" {
+  capabilities = ["read"]
+}
