@@ -21,6 +21,11 @@ api (Session API)
 
 ## 2. 최초 활성화 절차
 
+> 선행 1회: `cledyu-eso-reader` 정책에 `cledyu/data/db/*`·`cledyu/metadata/db/*` read 가
+> 있어야 ESO 가 아래 KV 를 읽는다(`infra/vault/policies/cledyu-eso-reader.hcl`). 없으면 ESO 가
+> `403 permission denied` 로 동기화 실패하고 Secret 이 생성되지 않는다 — 정책 갱신 후
+> `vault policy write cledyu-eso-reader <파일>` 적용.
+
 ```bash
 # 1) DB 비밀번호 생성 → Vault (postgres StatefulSet 이 ESO 로 주입받음)
 vault kv put cledyu/db/postgres password=$(openssl rand -hex 24)
