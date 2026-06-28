@@ -15,6 +15,10 @@ on:
         description: "EC2 AMI 도 함께 import"
         type: boolean
         default: true
+      poll_timeout_min:
+        description: "sentinel 폴링 최대 대기 시간(분)"
+        required: false
+        default: "90"
 
 permissions:
   id-token: write
@@ -26,7 +30,7 @@ env:
   BAKER_INSTANCE_PROFILE: cledyu-lab-baker-instance
   BAKER_ROLE_ARN: arn:aws:iam::504284203153:role/cledyu-lab-gha-baker
   METAL_TYPE: m5.metal
-  UBUNTU_AL2023_SSM: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+  METAL_AMI_SSM: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
 
 concurrency:
   group: build-lab-base-image
@@ -50,7 +54,7 @@ jobs:
       - name: Resolve metal AMI (Amazon Linux 2023)
         id: ami
         run: |
-          AMI=$(aws ssm get-parameter --name "$UBUNTU_AL2023_SSM" \
+          AMI=$(aws ssm get-parameter --name "$METAL_AMI_SSM" \
             --query Parameter.Value --output text)
           echo "ami=$AMI" >> "$GITHUB_OUTPUT"
 
@@ -78,7 +82,8 @@ jobs:
       - name: Poll for completion sentinel
         run: |
           TAG="${{ steps.t.outputs.tag }}"
-          for i in $(seq 1 50); do
+          MAX=$(( ${{ inputs.poll_timeout_min }} * 2 ))
+          for _i in $(seq 1 "$MAX"); do
             if aws s3 cp "s3://$BAKER_BUCKET/builds/$TAG/done.json" /tmp/done.json 2>/dev/null; then
               cat /tmp/done.json >> "$GITHUB_STEP_SUMMARY"
               grep -q '"status":"ok"' /tmp/done.json && exit 0

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # metal user-data 가 실행하는 전체 베이크 오케스트레이션. 실패해도 마지막에 sentinel 과
 # self-terminate 를 보장한다(orphan metal 방지). 산출물: ghcr 태그 + (옵션)AMI.
-set -uo pipefail
+set -euo pipefail
 
 REGION="${REGION:-ap-northeast-2}"
 IMAGE="${IMAGE:-ghcr.io/requset700k/cledyu-lab-base}"
@@ -19,9 +19,9 @@ finish() {
   printf '{"status":"%s","tag":"%s","ami":"%s"}\n' "$STATUS" "$TAG" "$AMI_ID" > /tmp/done.json
   aws s3 cp /tmp/done.json "s3://$BAKER_BUCKET/builds/$TAG/done.json" --region "$REGION" || true
   TOKEN=$(curl -sX PUT "http://169.254.169.254/latest/api/token" \
-    -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
+    -H "X-aws-ec2-metadata-token-ttl-seconds: 60") || true
   IID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
-    http://169.254.169.254/latest/meta-data/instance-id)
+    http://169.254.169.254/latest/meta-data/instance-id) || true
   aws ec2 terminate-instances --instance-ids "$IID" --region "$REGION" || true
 }
 trap finish EXIT
@@ -57,6 +57,7 @@ JSON
   TASK=$(aws ec2 import-image --disk-containers file:///tmp/containers.json \
     --region "$REGION" --query ImportTaskId --output text)
   log "import task $TASK"
+  ST=""
   for _i in $(seq 1 60); do
     ST=$(aws ec2 describe-import-image-tasks --import-task-ids "$TASK" \
       --region "$REGION" --query 'ImportImageTasks[0].Status' --output text)
@@ -69,6 +70,10 @@ JSON
     fi
     sleep 30
   done
+  if [ "$ST" != "completed" ]; then
+    log "AMI import timed out after 60 polls"
+    exit 1
+  fi
   AMI_ID=$(aws ec2 describe-import-image-tasks --import-task-ids "$TASK" \
     --region "$REGION" --query 'ImportImageTasks[0].ImageId' --output text)
   aws ec2 create-tags --resources "$AMI_ID" --region "$REGION" \

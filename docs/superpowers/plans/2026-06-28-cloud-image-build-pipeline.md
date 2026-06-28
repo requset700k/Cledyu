@@ -686,7 +686,7 @@ git commit -m "feat(terraform): add baker instance profile s3 bucket and vmimpor
 #!/usr/bin/env bash
 # metal user-data 가 실행하는 전체 베이크 오케스트레이션. 실패해도 마지막에 sentinel 과
 # self-terminate 를 보장한다(orphan metal 방지). 산출물: ghcr 태그 + (옵션)AMI.
-set -uo pipefail
+set -euo pipefail
 
 REGION="${REGION:-ap-northeast-2}"
 IMAGE="${IMAGE:-ghcr.io/requset700k/cledyu-lab-base}"
@@ -704,9 +704,9 @@ finish() {
   printf '{"status":"%s","tag":"%s","ami":"%s"}\n' "$STATUS" "$TAG" "$AMI_ID" >/tmp/done.json
   aws s3 cp /tmp/done.json "s3://$BAKER_BUCKET/builds/$TAG/done.json" --region "$REGION" || true
   TOKEN=$(curl -sX PUT "http://169.254.169.254/latest/api/token" \
-    -H "X-aws-ec2-metadata-token-ttl-seconds: 60")
+    -H "X-aws-ec2-metadata-token-ttl-seconds: 60") || true
   IID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
-    http://169.254.169.254/latest/meta-data/instance-id)
+    http://169.254.169.254/latest/meta-data/instance-id) || true
   aws ec2 terminate-instances --instance-ids "$IID" --region "$REGION" || true
 }
 trap finish EXIT
@@ -740,13 +740,23 @@ JSON
   TASK=$(aws ec2 import-image --disk-containers file:///tmp/containers.json \
     --region "$REGION" --query ImportTaskId --output text)
   log "import task $TASK"
-  for i in $(seq 1 60); do
+  ST=""
+  for _i in $(seq 1 60); do
     ST=$(aws ec2 describe-import-image-tasks --import-task-ids "$TASK" \
       --region "$REGION" --query 'ImportImageTasks[0].Status' --output text)
-    [ "$ST" = "completed" ] && break
-    [ "$ST" = "deleted" ] && { log "import failed"; exit 1; }
+    if [ "$ST" = "completed" ]; then
+      break
+    fi
+    if [ "$ST" = "deleted" ]; then
+      log "import failed"
+      exit 1
+    fi
     sleep 30
   done
+  if [ "$ST" != "completed" ]; then
+    log "AMI import timed out after 60 polls"
+    exit 1
+  fi
   AMI_ID=$(aws ec2 describe-import-image-tasks --import-task-ids "$TASK" \
     --region "$REGION" --query 'ImportImageTasks[0].ImageId' --output text)
   aws ec2 create-tags --resources "$AMI_ID" --region "$REGION" \
@@ -799,6 +809,10 @@ on:
         description: "EC2 AMI 도 함께 import"
         type: boolean
         default: true
+      poll_timeout_min:
+        description: "sentinel 폴링 최대 대기 시간(분)"
+        required: false
+        default: "90"
 
 permissions:
   id-token: write
@@ -810,7 +824,7 @@ env:
   BAKER_INSTANCE_PROFILE: cledyu-lab-baker-instance
   BAKER_ROLE_ARN: arn:aws:iam::504284203153:role/cledyu-lab-gha-baker
   METAL_TYPE: m5.metal
-  UBUNTU_AL2023_SSM: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+  METAL_AMI_SSM: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
 
 concurrency:
   group: build-lab-base-image
@@ -834,7 +848,7 @@ jobs:
       - name: Resolve metal AMI (Amazon Linux 2023)
         id: ami
         run: |
-          AMI=$(aws ssm get-parameter --name "$UBUNTU_AL2023_SSM" \
+          AMI=$(aws ssm get-parameter --name "$METAL_AMI_SSM" \
             --query Parameter.Value --output text)
           echo "ami=$AMI" >> "$GITHUB_OUTPUT"
 
@@ -862,7 +876,8 @@ jobs:
       - name: Poll for completion sentinel
         run: |
           TAG="${{ steps.t.outputs.tag }}"
-          for i in $(seq 1 50); do
+          MAX=$(( ${{ inputs.poll_timeout_min }} * 2 ))
+          for _i in $(seq 1 "$MAX"); do
             if aws s3 cp "s3://$BAKER_BUCKET/builds/$TAG/done.json" /tmp/done.json 2>/dev/null; then
               cat /tmp/done.json >> "$GITHUB_STEP_SUMMARY"
               grep -q '"status":"ok"' /tmp/done.json && exit 0
