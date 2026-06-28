@@ -585,7 +585,7 @@ data "aws_iam_policy_document" "baker_instance" {
   }
   statement {
     actions   = ["ssm:GetParameter"]
-    resources = ["arn:aws:ssm:${var.region}:*:parameter/cledyu/baker/*"]
+    resources = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/cledyu/baker/*"]
   }
 }
 

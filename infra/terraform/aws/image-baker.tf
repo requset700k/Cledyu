@@ -1,3 +1,5 @@
+data "aws_caller_identity" "current" {}
+
 # GitHub Actions OIDC provider — 장기 키 없이 hosted runner 가 role 을 assume 한다.
 resource "aws_iam_openid_connect_provider" "github" {
   url             = "https://token.actions.githubusercontent.com"
@@ -109,7 +111,7 @@ data "aws_iam_policy_document" "baker_instance" {
   }
   statement {
     actions   = ["ssm:GetParameter"]
-    resources = ["arn:aws:ssm:${var.region}:*:parameter/cledyu/baker/*"]
+    resources = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/cledyu/baker/*"]
   }
 }
 
