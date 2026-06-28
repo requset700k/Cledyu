@@ -806,9 +806,9 @@ permissions:
 
 env:
   AWS_REGION: ap-northeast-2
-  BAKER_BUCKET: request700k-image-baker
-  BAKER_INSTANCE_PROFILE: request700k-baker-instance
-  BAKER_ROLE_ARN: arn:aws:iam::504284203153:role/request700k-gha-baker
+  BAKER_BUCKET: cledyu-lab-image-baker
+  BAKER_INSTANCE_PROFILE: cledyu-lab-baker-instance
+  BAKER_ROLE_ARN: arn:aws:iam::504284203153:role/cledyu-lab-gha-baker
   METAL_TYPE: m5.metal
   UBUNTU_AL2023_SSM: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
 

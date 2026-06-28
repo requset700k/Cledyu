@@ -1,48 +1,91 @@
 ---
-# 세션 VM 베이스 이미지 베이킹 — Ubuntu 클라우드 이미지에 공통 패키지·qemu-guest-agent 를
-# virt-customize 로 미리 굽고 containerDisk(OCI)로 ghcr 에 푸시한다. CDI 가 이 이미지를
-# Longhorn base PVC(ubuntu-2204-base)로 import 한다(base-datavolume.yaml).
-#
-# 실행 환경: KVM 보유 self-hosted runner. GitHub 호스티드 러너는 libguestfs appliance 네트워크
-# (passt/slirp)가 불안정해 베이크가 실패하므로 쓰지 않는다(infra/images/lab-base/bake.sh 주석 참고).
-#
-# 보안: public 레포라 fork PR 코드가 온프렘 self-hosted runner 에서 실행되면 RCE 위험이 있다.
-# 따라서 트리거를 workflow_dispatch(메인테이너 수동)만으로 둔다. self-hosted runner 를 등록하기
-# 전까지는 이 워크플로가 실행되지 않으며, 베이킹은 호스트에서 스크립트로 수동 수행한다
-# (setup-host.sh → docker login ghcr → build-and-push.sh). 러너 등록 후 push 트리거를 검토한다.
+# 세션 VM 베이스 이미지 베이킹 — hosted runner 가 AWS OIDC 로 인증해 일회성 EC2 *.metal 을
+# 띄우고, metal 이 packer-qemu 로 qcow2 를 구워 ghcr push + (옵션)AMI import 후 self-terminate.
+# self-hosted KVM 러너 불필요. workflow_dispatch 전용(public repo fork-PR RCE 방지).
 name: build lab base image
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "이미지 태그(미입력 시 날짜)"
+        required: false
+        default: ""
+      import_ami:
+        description: "EC2 AMI 도 함께 import"
+        type: boolean
+        default: true
 
 permissions:
+  id-token: write
   contents: read
-  packages: write
+
+env:
+  AWS_REGION: ap-northeast-2
+  BAKER_BUCKET: cledyu-lab-image-baker
+  BAKER_INSTANCE_PROFILE: cledyu-lab-baker-instance
+  BAKER_ROLE_ARN: arn:aws:iam::504284203153:role/cledyu-lab-gha-baker
+  METAL_TYPE: m5.metal
+  UBUNTU_AL2023_SSM: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
 
 concurrency:
-  group: build-lab-base-image-${{ github.ref }}
+  group: build-lab-base-image
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: bake + push lab base
-    runs-on: [self-hosted, kvm]
+  bake:
+    name: launch metal baker
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Resolve tag
+        id: t
+        run: echo "tag=${{ inputs.tag != '' && inputs.tag || format('{0}', github.run_id) }}" >> "$GITHUB_OUTPUT"
 
-      - name: Host setup (idempotent)
-        run: bash infra/images/lab-base/setup-host.sh
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          role-to-assume: ${{ env.BAKER_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
 
-      - name: Bake + build + push containerDisk
-        run: bash infra/images/lab-base/build-and-push.sh
-        env:
-          IMAGE: ghcr.io/${{ github.repository_owner }}/cledyu-lab-base
-          TAG: sha-${{ github.sha }}
+      - name: Resolve metal AMI (Amazon Linux 2023)
+        id: ami
+        run: |
+          AMI=$(aws ssm get-parameter --name "$UBUNTU_AL2023_SSM" \
+            --query Parameter.Value --output text)
+          echo "ami=$AMI" >> "$GITHUB_OUTPUT"
+
+      - name: Launch metal baker
+        id: launch
+        run: |
+          TAG="${{ steps.t.outputs.tag }}"
+          USERDATA=$(cat <<EOF
+          #!/usr/bin/env bash
+          export REGION=$AWS_REGION TAG=$TAG BAKER_BUCKET=$BAKER_BUCKET IMPORT_AMI=${{ inputs.import_ami }}
+          curl -fsSL https://raw.githubusercontent.com/requset700k/cledyu/main/infra/images/lab-base/baker-bootstrap.sh -o /tmp/b.sh
+          bash /tmp/b.sh
+          EOF
+          )
+          IID=$(aws ec2 run-instances --image-id "${{ steps.ami.outputs.ami }}" \
+            --instance-type "$METAL_TYPE" \
+            --iam-instance-profile "Name=$BAKER_INSTANCE_PROFILE" \
+            --user-data "$USERDATA" \
+            --tag-specifications 'ResourceType=instance,Tags=[{Key=cledyu-role,Value=image-baker}]' \
+            --instance-initiated-shutdown-behavior terminate \
+            --query 'Instances[0].InstanceId' --output text)
+          echo "iid=$IID" >> "$GITHUB_OUTPUT"
+          echo "launched $IID"
+
+      - name: Poll for completion sentinel
+        run: |
+          TAG="${{ steps.t.outputs.tag }}"
+          for i in $(seq 1 50); do
+            if aws s3 cp "s3://$BAKER_BUCKET/builds/$TAG/done.json" /tmp/done.json 2>/dev/null; then
+              cat /tmp/done.json >> "$GITHUB_STEP_SUMMARY"
+              grep -q '"status":"ok"' /tmp/done.json && exit 0
+              echo "baker reported failure" && exit 1
+            fi
+            sleep 30
+          done
+          echo "timeout waiting for baker" >&2
+          aws ec2 terminate-instances --instance-ids "${{ steps.launch.outputs.iid }}" || true
+          exit 1
