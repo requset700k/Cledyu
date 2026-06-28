@@ -125,3 +125,15 @@ variable "public_ingress_allowed_cidrs" {
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }
+
+variable "github_repo" {
+  description = "베이커 워크플로를 실행하는 GitHub 레포(owner/name). OIDC sub 제한에 사용."
+  type        = string
+  default     = "requset700k/cledyu"
+}
+
+variable "baker_metal_instance_type" {
+  description = "이미지 베이커 metal 인스턴스 타입(중첩가상화 필요 → .metal). 빌드 중 spot 금지."
+  type        = string
+  default     = "m5.metal"
+}
