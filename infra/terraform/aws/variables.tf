@@ -125,3 +125,9 @@ variable "public_ingress_allowed_cidrs" {
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }
+
+variable "github_repo" {
+  description = "베이커 워크플로를 실행하는 GitHub 레포(owner/name). OIDC sub 제한에 사용."
+  type        = string
+  default     = "requset700k/cledyu"
+}
