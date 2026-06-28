@@ -113,6 +113,10 @@ data "aws_iam_policy_document" "baker_instance" {
     actions   = ["ssm:GetParameter"]
     resources = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/cledyu/baker/*"]
   }
+  statement {
+    actions   = ["iam:PassRole"]
+    resources = [aws_iam_role.vmimport.arn]
+  }
 }
 
 resource "aws_iam_role_policy" "baker_instance" {

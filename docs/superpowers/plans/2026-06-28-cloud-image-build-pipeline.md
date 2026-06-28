@@ -583,6 +583,10 @@ data "aws_iam_policy_document" "baker_instance" {
     actions   = ["ssm:GetParameter"]
     resources = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/cledyu/baker/*"]
   }
+  statement {
+    actions   = ["iam:PassRole"]
+    resources = [aws_iam_role.vmimport.arn]
+  }
 }
 
 resource "aws_iam_role_policy" "baker_instance" {
@@ -690,6 +694,7 @@ TAG="${TAG:?TAG required}"
 BAKER_BUCKET="${BAKER_BUCKET:?BAKER_BUCKET required}"
 IMPORT_AMI="${IMPORT_AMI:-true}"
 GHCR_USER="${GHCR_USER:-ykgoesdumb}"
+REF="${REF:-main}"
 
 STATUS="failed"
 AMI_ID=""
@@ -714,7 +719,8 @@ curl -fsSL -o /tmp/packer.zip \
   https://releases.hashicorp.com/packer/1.11.2/packer_1.11.2_linux_amd64.zip
 unzip -o /tmp/packer.zip -d /usr/local/bin
 
-git clone --depth 1 https://github.com/requset700k/cledyu.git "$WORK"
+git clone https://github.com/requset700k/cledyu.git "$WORK"
+git -C "$WORK" checkout "$REF"
 cd "$WORK/infra/images/lab-base"
 
 # ghcr 로그인(PAT 는 SSM SecureString).
@@ -854,14 +860,15 @@ jobs:
           TAG="${{ steps.t.outputs.tag }}"
           USERDATA=$(cat <<EOF
           #!/usr/bin/env bash
-          export REGION=$AWS_REGION TAG=$TAG BAKER_BUCKET=$BAKER_BUCKET IMPORT_AMI=${{ inputs.import_ami }}
-          curl -fsSL https://raw.githubusercontent.com/requset700k/cledyu/main/infra/images/lab-base/baker-bootstrap.sh -o /tmp/b.sh
+          export REGION=$AWS_REGION TAG=$TAG BAKER_BUCKET=$BAKER_BUCKET IMPORT_AMI=${{ inputs.import_ami }} REF=${{ github.sha }}
+          curl -fsSL https://raw.githubusercontent.com/requset700k/cledyu/${{ github.sha }}/infra/images/lab-base/baker-bootstrap.sh -o /tmp/b.sh
           bash /tmp/b.sh
           EOF
           )
           IID=$(aws ec2 run-instances --image-id "${{ steps.ami.outputs.ami }}" \
             --instance-type "$METAL_TYPE" \
             --iam-instance-profile "Name=$BAKER_INSTANCE_PROFILE" \
+            --block-device-mappings 'DeviceName=/dev/xvda,Ebs={VolumeSize=120,VolumeType=gp3,DeleteOnTermination=true}' \
             --user-data "$USERDATA" \
             --tag-specifications 'ResourceType=instance,Tags=[{Key=cledyu-role,Value=image-baker}]' \
             --instance-initiated-shutdown-behavior terminate \

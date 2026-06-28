@@ -9,6 +9,7 @@ TAG="${TAG:?TAG required}"
 BAKER_BUCKET="${BAKER_BUCKET:?BAKER_BUCKET required}"
 IMPORT_AMI="${IMPORT_AMI:-true}"
 GHCR_USER="${GHCR_USER:-ykgoesdumb}"
+REF="${REF:-main}"
 
 STATUS="failed"
 AMI_ID=""
@@ -35,7 +36,8 @@ curl -fsSL -o /tmp/packer.zip \
   https://releases.hashicorp.com/packer/1.11.2/packer_1.11.2_linux_amd64.zip
 unzip -o /tmp/packer.zip -d /usr/local/bin
 
-git clone --depth 1 https://github.com/requset700k/cledyu.git "$WORK"
+git clone https://github.com/requset700k/cledyu.git "$WORK"
+git -C "$WORK" checkout "$REF"
 cd "$WORK/infra/images/lab-base" || exit 1
 
 # ghcr 로그인(PAT 는 SSM SecureString).
