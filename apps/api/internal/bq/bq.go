@@ -64,10 +64,10 @@ func (c *Client) LabCompletion(ctx context.Context) ([]LabCompletionRow, error) 
 	out := make([]LabCompletionRow, 0)
 	for {
 		var raw struct {
-			LabID          bigquery.NullString
-			Started        bigquery.NullInt64
-			Completed      bigquery.NullInt64
-			CompletionRate bigquery.NullFloat64
+			LabID          bigquery.NullString  `bigquery:"lab_id"`
+			Started        bigquery.NullInt64   `bigquery:"started"`
+			Completed      bigquery.NullInt64   `bigquery:"completed"`
+			CompletionRate bigquery.NullFloat64 `bigquery:"completion_rate"`
 		}
 		err := it.Next(&raw)
 		if errors.Is(err, iterator.Done) {
@@ -97,9 +97,9 @@ func (c *Client) StepFunnel(ctx context.Context) ([]StepFunnelRow, error) {
 	out := make([]StepFunnelRow, 0)
 	for {
 		var raw struct {
-			LabID              bigquery.NullString
-			StepID             bigquery.NullInt64
-			ValidationFailures bigquery.NullInt64
+			LabID              bigquery.NullString `bigquery:"lab_id"`
+			StepID             bigquery.NullInt64  `bigquery:"step_id"`
+			ValidationFailures bigquery.NullInt64  `bigquery:"validation_failures"`
 		}
 		err := it.Next(&raw)
 		if errors.Is(err, iterator.Done) {
@@ -128,10 +128,10 @@ func (c *Client) HintUsage(ctx context.Context) ([]HintUsageRow, error) {
 	out := make([]HintUsageRow, 0)
 	for {
 		var raw struct {
-			LabID      bigquery.NullString
-			StepID     bigquery.NullInt64
-			HintSource bigquery.NullString
-			HintCount  bigquery.NullInt64
+			LabID      bigquery.NullString `bigquery:"lab_id"`
+			StepID     bigquery.NullInt64  `bigquery:"step_id"`
+			HintSource bigquery.NullString `bigquery:"hint_source"`
+			HintCount  bigquery.NullInt64  `bigquery:"hint_count"`
 		}
 		err := it.Next(&raw)
 		if errors.Is(err, iterator.Done) {
