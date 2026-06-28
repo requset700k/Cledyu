@@ -124,8 +124,16 @@ No modules.
 | [aws_acm_certificate.auth](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/acm_certificate) | resource |
 | [aws_acm_certificate_validation.auth](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/acm_certificate_validation) | resource |
 | [aws_budgets_budget.lab_ec2](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/budgets_budget) | resource |
+| [aws_iam_instance_profile.baker_instance](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_instance_profile) | resource |
 | [aws_iam_instance_profile.lab_instance](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_instance_profile) | resource |
+| [aws_iam_openid_connect_provider.github](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_openid_connect_provider) | resource |
+| [aws_iam_role.baker_instance](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role.gha_baker](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role.lab_instance](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role.vmimport](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role_policy.baker_instance](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
+| [aws_iam_role_policy.gha_baker](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
+| [aws_iam_role_policy.vmimport](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
 | [aws_iam_role_policy_attachment.ssm_core](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_user.api](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_user) | resource |
 | [aws_iam_user.engine](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_user) | resource |
@@ -140,13 +148,21 @@ No modules.
 | [aws_lb_target_group_attachment.proxy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/lb_target_group_attachment) | resource |
 | [aws_route53_record.acm_validation](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
 | [aws_route53_record.auth](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/route53_record) | resource |
+| [aws_s3_bucket.baker](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket) | resource |
 | [aws_security_group.alb](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group.lab_session](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group.proxy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_ami.ubuntu](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ami) | data source |
+| [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
 | [aws_iam_policy_document.api_ec2](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.baker_assume](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.baker_instance](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.ec2_assume](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.engine_ssm](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.gha_baker](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.gha_baker_assume](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.vmimport](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.vmimport_assume](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_route53_zone.public](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/route53_zone) | data source |
 | [aws_subnets.selected](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/subnets) | data source |
 | [aws_vpc.selected](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/vpc) | data source |
@@ -157,9 +173,11 @@ No modules.
 | ---- | ----------- | ---- | ------- | :------: |
 | <a name="input_ami_id"></a> [ami\_id](#input\_ami\_id) | 세션 인스턴스 AMI. 빈 값이면 Canonical Ubuntu 22.04(amd64) 최신 AMI 를 자동 조회한다.<br/>운영에서는 SSM Agent·tailscale·code-server 를 미리 구운 커스텀 AMI(packer) ID 를 넣는 것을 권장한다<br/>(런타임 설치 시간 단축). README 의 'AMI 전략' 참고. | `string` | `""` | no |
 | <a name="input_assign_public_ip"></a> [assign\_public\_ip](#input\_assign\_public\_ip) | 세션 인스턴스에 퍼블릭 IP 를 할당할지. Launch Template 이 network\_interfaces 를 명시하면<br/>subnet 의 MapPublicIpOnLaunch 가 무시되어 기본 미할당이 되므로, default VPC(IGW) 환경에서는<br/>true 여야 인스턴스가 인터넷(tailscale 가입·SSM·패키지 설치)에 도달한다.<br/>private subnet + NAT 구성이면 false 로 둔다. | `bool` | `true` | no |
+| <a name="input_baker_metal_instance_type"></a> [baker\_metal\_instance\_type](#input\_baker\_metal\_instance\_type) | 이미지 베이커 metal 인스턴스 타입(중첩가상화 필요 → .metal). 빌드 중 spot 금지. | `string` | `"m5.metal"` | no |
 | <a name="input_budget_limit_usd"></a> [budget\_limit\_usd](#input\_budget\_limit\_usd) | EC2 오버플로우 월 예산(USD). 0이면 예산 알람을 만들지 않는다. | `number` | `0` | no |
 | <a name="input_budget_notification_emails"></a> [budget\_notification\_emails](#input\_budget\_notification\_emails) | 예산 임계 도달 시 알림 받을 이메일 목록(budget\_limit\_usd>0 일 때 사용). | `list(string)` | `[]` | no |
 | <a name="input_enable_public_ingress"></a> [enable\_public\_ingress](#input\_enable\_public\_ingress) | 공개 진입점 스택(Route53/ACM/ALB/프록시) 생성 여부. 도메인 위임·tailscale authkey 준비 후 true. | `bool` | `false` | no |
+| <a name="input_github_repo"></a> [github\_repo](#input\_github\_repo) | 베이커 워크플로를 실행하는 GitHub 레포(owner/name). OIDC sub 제한에 사용. | `string` | `"requset700k/cledyu"` | no |
 | <a name="input_instance_type"></a> [instance\_type](#input\_instance\_type) | 세션 인스턴스 타입. Launch Template 기본값이며 api 가 런타임에 오버라이드할 수 있다. | `string` | `"t3.medium"` | no |
 | <a name="input_keycloak_upstream_url"></a> [keycloak\_upstream\_url](#input\_keycloak\_upstream\_url) | 프록시가 auth.cledyu.com 요청을 포워딩할 tailnet 상의 Keycloak 업스트림 URL.<br/>Cledyu 토폴로지에서는 하이퍼바이저 subnet router 가 10.10.0.0/24 를 tailnet 에<br/>광고하고 Traefik LB 가 10.10.0.101 이므로 "https://10.10.0.101" 를 쓴다(프록시는<br/>--accept-routes 로 이 라우트를 받고, Host=public\_keycloak\_host 로 보내 Traefik 이<br/>keycloak ingress 로 라우팅). pod/service ClusterIP 는 라우팅 불가하므로 Traefik LB<br/>경유 필수. Traefik 내부 CA 인증서는 프록시가 검증 생략(tailnet WireGuard 암호화). | `string` | `"https://10.10.0.101"` | no |
 | <a name="input_name_prefix"></a> [name\_prefix](#input\_name\_prefix) | 생성 리소스 이름 prefix. 레거시 hackathon 류 금지(레포 네이밍 규칙). | `string` | `"cledyu-lab"` | no |
@@ -178,6 +196,9 @@ No modules.
 | Name | Description |
 | ---- | ----------- |
 | <a name="output_api_iam_user"></a> [api\_iam\_user](#output\_api\_iam\_user) | apps/api 용 IAM 사용자명 — 이 사용자의 액세스 키를 발급해 Vault 에 보관한다. |
+| <a name="output_baker_bucket"></a> [baker\_bucket](#output\_baker\_bucket) | 이미지 베이커 S3 버킷명. |
+| <a name="output_baker_instance_profile"></a> [baker\_instance\_profile](#output\_baker\_instance\_profile) | metal 베이커 인스턴스 프로파일명. |
+| <a name="output_gha_baker_role_arn"></a> [gha\_baker\_role\_arn](#output\_gha\_baker\_role\_arn) | GitHub Action 이 assume 할 베이커 role ARN. |
 | <a name="output_instance_profile_arn"></a> [instance\_profile\_arn](#output\_instance\_profile\_arn) | 세션 인스턴스 IAM 인스턴스 프로파일 ARN(SSM Core). |
 | <a name="output_keycloak_proxy_instance_id"></a> [keycloak\_proxy\_instance\_id](#output\_keycloak\_proxy\_instance\_id) | tailnet Keycloak 프록시 인스턴스 ID(tailnet 가입·로그 확인용). |
 | <a name="output_launch_template_id"></a> [launch\_template\_id](#output\_launch\_template\_id) | apps/api 의 CLEDYU\_AWS\_LAUNCH\_TEMPLATE\_ID 로 주입할 Launch Template ID. |
