@@ -68,6 +68,15 @@ func (s *Service) Read(ctx context.Context, sessionID, relativePath string) ([]b
 		return nil, ErrFileNotListed
 	}
 
+	// List()의 슬롯은 snapshot 확인이 끝나면 해제된다. preview는 그 뒤 별도 SSH read를
+	// 열기 때문에, 파일을 빠르게 여러 개 클릭해도 port-forward/SSH 연결 수가 폭증하지
+	// 않도록 read 실행에도 같은 전역 한도를 적용한다.
+	release, err := s.acquireLimit()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+
 	runCtx, cancel := context.WithTimeout(ctx, s.timeout)
 	defer cancel()
 	output, err := reader.Read(runCtx, sessionID, relativePath)
@@ -101,12 +110,11 @@ func (s *Service) List(ctx context.Context, sessionID string) (Snapshot, error) 
 	}
 
 	result := s.group.DoChan(sessionID, func() (any, error) {
-		select {
-		case s.limit <- struct{}{}:
-			defer func() { <-s.limit }()
-		default:
-			return Snapshot{}, ErrBusy
+		release, err := s.acquireLimit()
+		if err != nil {
+			return Snapshot{}, err
 		}
+		defer release()
 
 		// 첫 요청자가 연결을 끊더라도 공유 작업까지 취소하지 않는다. 작업 자체의 짧은
 		// timeout은 유지하므로 남아 있는 다른 요청자에게 같은 결과를 제공할 수 있다.
@@ -131,5 +139,17 @@ func (s *Service) List(ctx context.Context, sessionID string) (Snapshot, error) 
 			return Snapshot{}, errors.New("unexpected VM file listing result")
 		}
 		return snapshot, nil
+	}
+}
+
+// acquireLimit은 VM으로 내려가는 실제 작업 수를 전역으로 제한한다.
+// 사용자가 새로고침/파일 클릭을 반복해 한도가 꽉 차면 대기열을 만들지 않고 ErrBusy로 돌려
+// HTTP 계층이 429/backoff 가능한 응답을 낼 수 있게 한다.
+func (s *Service) acquireLimit() (func(), error) {
+	select {
+	case s.limit <- struct{}{}:
+		return func() { <-s.limit }, nil
+	default:
+		return nil, ErrBusy
 	}
 }

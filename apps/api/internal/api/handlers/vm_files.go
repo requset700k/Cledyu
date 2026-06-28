@@ -1,7 +1,11 @@
 package handlers
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -9,6 +13,13 @@ import (
 	"github.com/requset700k/cledyu/api/internal/vmfiles"
 	"go.uber.org/zap"
 )
+
+// FilePreview는 Web 파일 미리보기 패널에 반환하는 읽기 전용 텍스트 응답이다.
+type FilePreview struct {
+	Path      string `json:"path"`
+	Content   string `json:"content"`
+	Truncated bool   `json:"truncated"`
+}
 
 // GET /api/v1/sessions/:id/files
 func (h *Handler) ListSessionFiles(c *gin.Context) {
@@ -26,6 +37,35 @@ func (h *Handler) ListSessionFiles(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, snapshot)
+}
+
+// GET /api/v1/sessions/:id/files/preview?path=work/app.log
+func (h *Handler) PreviewSessionFile(c *gin.Context) {
+	// 미리보기 역시 목록 조회와 같은 세션 gate를 통과해야 한다.
+	// path 검증은 vmfiles.Service.Read()가 snapshot 포함 여부로 다시 수행하지만,
+	// 빈 path는 여기서 바로 거부해 VM runner까지 내려가지 않게 한다.
+	sess, ok := h.readyFileSession(c)
+	if !ok {
+		return
+	}
+	relativePath := c.Query("path")
+	if relativePath == "" {
+		h.err(c, http.StatusBadRequest, "file path is required")
+		return
+	}
+
+	raw, err := h.vmFiles.Read(c.Request.Context(), sess.ID, relativePath)
+	if err != nil {
+		h.handleVMFileError(c, err, "preview VM session file")
+		return
+	}
+	preview, err := parseFilePreview(raw, relativePath)
+	if err != nil {
+		h.log.Warn("invalid VM file preview response", zap.String("session_id", sess.ID), zap.Error(err))
+		h.err(c, http.StatusBadGateway, "preview VM session file failed")
+		return
+	}
+	c.JSON(http.StatusOK, preview)
 }
 
 // readyFileSession은 VM 파일 API가 공통으로 통과해야 하는 HTTP 계층 gate다.
@@ -83,4 +123,23 @@ func (h *Handler) handleVMFileError(c *gin.Context, err error, logMsg string) {
 		h.log.Warn(logMsg, zap.Error(err))
 		h.err(c, http.StatusBadGateway, "VM file access failed")
 	}
+}
+
+func parseFilePreview(raw []byte, requestedPath string) (FilePreview, error) {
+	var preview FilePreview
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&preview); err != nil {
+		return FilePreview{}, fmt.Errorf("decode file preview: %w", err)
+	}
+	var extra any
+	if err := dec.Decode(&extra); err == nil {
+		return FilePreview{}, errors.New("decode file preview: multiple JSON values")
+	} else if !errors.Is(err, io.EOF) {
+		return FilePreview{}, fmt.Errorf("decode file preview trailer: %w", err)
+	}
+	if preview.Path == "" || preview.Path != requestedPath {
+		return FilePreview{}, fmt.Errorf("preview path %q does not match requested path %q", preview.Path, requestedPath)
+	}
+	return preview, nil
 }
