@@ -15,21 +15,13 @@ tags:
   - deployment
   - service
 init:
-  # curl 은 베이스 이미지(lab-base)에 미리 구워져 있어 packages(apt) 단계를 생략한다.
-  # cloud-init 이 apt-get update/install 을 건너뛰어 세션 부팅이 빨라진다.
+  # k3s 는 베이스 이미지(lab-base)에 이미 설치돼 있다(INSTALL_K3S_SKIP_ENABLE 로 서비스만 꺼둠).
+  # 설치 시 cluster/service CIDR(10.244/10.245)도 베이크돼 있고 nginx:1.27-alpine 도 캐시돼 있어,
+  # 여기서는 서비스 기동과 KUBECONFIG 노출만 한다(다운로드 0 → 세션 부팅 단축).
   runcmd:
-    - curl -sfL https://get.k3s.io -o /tmp/k3s-install.sh
-    # cluster/service CIDR 을 호스트(pod 10.42.0.0/16, svc 10.43.0.0/16)와 겹치지 않게 지정.
-    # 기본값이면 guest k3s 파드망(10.42.0.0/24)이 호스트 cp02 파드망과 충돌해, cp02 경유
-    # 검증 SSH 응답이 guest 내부로 mis-route 되어 검증이 ~50% 실패한다.
-    - INSTALL_K3S_EXEC="--write-kubeconfig-mode 644 --cluster-cidr=10.244.0.0/16 --service-cidr=10.245.0.0/16" sh /tmp/k3s-install.sh
+    - systemctl enable --now k3s
     - echo KUBECONFIG=/etc/rancher/k3s/k3s.yaml >> /etc/environment
     - "printf 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml\\n' > /etc/profile.d/k3s-kubeconfig.sh"
-    # step6 롤링 업데이트 대상 이미지를 부팅 때 미리 받아둔다. 안 받아두면 step6 롤아웃이 첫
-    # pull 때문에 길어져 검증 체크의 --timeout(17s)을 넘길 수 있다.
-    # kubelet/CRI 는 containerd 의 k8s.io namespace 를 보므로, 'k3s ctr'(기본 default ns) 대신
-    # 'k3s crictl pull'(=CRI, k8s.io)로 받아야 Pod 가 재-pull 없이 캐시를 쓴다. CRI 뜰 때까지 재시도.
-    - 'for i in $(seq 1 12); do k3s crictl pull docker.io/library/nginx:1.27-alpine && break; sleep 5; done'
 steps:
   - id: 1
     title: 클러스터 상태 확인

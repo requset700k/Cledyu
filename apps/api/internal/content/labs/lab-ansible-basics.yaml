@@ -1,7 +1,7 @@
 # Ansible 기초 — 단일 VM 경량 구성.
 # 별도 관리 대상 노드 없이 localhost(ansible_connection=local)를 제어해
-# 인벤토리·플레이북·멱등성 개념을 그대로 학습한다. init 은 apt 의 ansible-core
-# 하나만 설치한다(추가 VM/컨테이너 없음 — 부팅 영향 최소화).
+# 인벤토리·플레이북·멱등성 개념을 그대로 학습한다. ansible-core 는 베이스 이미지
+# (lab-base)에 베이킹돼 있어 별도 init 설치가 없다(추가 VM/컨테이너 없음).
 id: lab-ansible-basics
 title: Ansible 기초
 description: 인벤토리와 플레이북을 작성하고 멱등성(idempotency)까지 확인하는 구성관리 입문 실습
@@ -13,9 +13,6 @@ tags:
   - ansible
   - automation
   - configuration-management
-init:
-  packages:
-    - ansible-core
 steps:
   - id: 1
     title: 인벤토리 작성
