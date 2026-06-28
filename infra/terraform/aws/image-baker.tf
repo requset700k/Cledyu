@@ -39,10 +39,6 @@ data "aws_iam_policy_document" "gha_baker" {
     resources = ["*"]
   }
   statement {
-    actions   = ["ec2:DescribeInstances", "ec2:DescribeImages"]
-    resources = ["*"]
-  }
-  statement {
     actions   = ["ec2:TerminateInstances"]
     resources = ["*"]
     condition {
@@ -58,6 +54,10 @@ data "aws_iam_policy_document" "gha_baker" {
   statement {
     actions   = ["s3:GetObject", "s3:ListBucket"]
     resources = [aws_s3_bucket.baker.arn, "${aws_s3_bucket.baker.arn}/*"]
+  }
+  statement {
+    actions   = ["ssm:GetParameter"]
+    resources = ["arn:aws:ssm:${var.region}::parameter/aws/service/ami-amazon-linux-latest/*"]
   }
 }
 
@@ -96,7 +96,7 @@ data "aws_iam_policy_document" "baker_instance" {
   statement {
     actions = [
       "ec2:ImportImage", "ec2:DescribeImportImageTasks",
-      "ec2:RegisterImage", "ec2:DescribeImages", "ec2:CreateTags",
+      "ec2:CreateTags",
     ]
     resources = ["*"]
   }
