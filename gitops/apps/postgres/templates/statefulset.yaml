@@ -66,11 +66,17 @@ spec:
             capabilities:
               drop:
                 - ALL
+  # 데이터 볼륨 보존 — DB 라 삭제/scale-down 시에도 PVC 를 남긴다(API server 기본값과 동일하지만
+  # GitOps 가 계속 검증하도록 명시: 누가 live 를 Delete 로 바꾸면 ArgoCD 가 OutOfSync 로 잡는다).
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
   volumeClaimTemplates:
     - metadata:
         name: data
       spec:
         accessModes: ["ReadWriteOnce"]
+        volumeMode: Filesystem
         storageClassName: {{ .Values.storage.className }}
         resources:
           requests:
