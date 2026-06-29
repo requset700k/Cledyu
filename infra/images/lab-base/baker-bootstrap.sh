@@ -11,6 +11,10 @@ IMPORT_AMI="${IMPORT_AMI:-true}"
 GHCR_USER="${GHCR_USER:-ykgoesdumb}"
 REF="${REF:-main}"
 
+# cloud-init user-data 는 root 로 실행되지만 HOME 이 비어 있을 수 있다. packer 는 설정 디렉터리
+# 결정에 HOME 을 요구하므로(없으면 "No $HOME environment variable found") 명시한다.
+export HOME=/root
+
 # 전체 출력을 로그로 캡처한다. metal 은 실패 시 self-terminate 되어 사후 콘솔 접근이 안 되므로,
 # finish() 가 이 로그를 sentinel 과 함께 S3 에 올려 원인을 진단할 수 있게 한다. set -x 로 명령 추적.
 exec > >(tee -a /var/log/cledyu-baker.log) 2>&1
@@ -52,10 +56,13 @@ git clone https://github.com/requset700k/cledyu.git "$WORK"
 git -C "$WORK" checkout "$REF"
 cd "$WORK/infra/images/lab-base" || exit 1
 
-# ghcr 로그인(PAT 는 SSM SecureString).
+# ghcr 로그인(PAT 는 SSM SecureString). set -x 로그에 PAT 가 평문으로 찍히지 않게 이 구간만 추적 끔.
+set +x
 GHCR_PAT=$(aws ssm get-parameter --name /cledyu/baker/ghcr_pat --with-decryption \
   --region "$REGION" --query Parameter.Value --output text)
 echo "$GHCR_PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+unset GHCR_PAT
+set -x
 
 # 빌드 + ghcr push(온프렘 레그).
 IMAGE="$IMAGE" TAG="$TAG" bash build-and-push.sh
