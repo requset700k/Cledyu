@@ -90,7 +90,11 @@ export function LabTerminal({
         if (text.charCodeAt(0) !== 0x7b /* '{' */) return false;
         try {
           const msg = JSON.parse(text);
-          if (msg?.type === 'resize' && typeof msg.cols === 'number' && typeof msg.rows === 'number') {
+          if (
+            msg?.type === 'resize' &&
+            typeof msg.cols === 'number' &&
+            typeof msg.rows === 'number'
+          ) {
             serverPinnedSize = true;
             term.resize(Math.max(1, msg.cols), Math.max(1, msg.rows));
             return true;
