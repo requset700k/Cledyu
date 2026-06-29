@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/requset700k/cledyu/validation-engine/internal/consumer"
 	"github.com/requset700k/cledyu/validation-engine/internal/executor"
@@ -35,6 +36,8 @@ type mockExecutor struct {
 	output string
 	err    error
 }
+
+func (m *mockExecutor) DefaultTimeout() time.Duration { return 20 * time.Second }
 
 func (m *mockExecutor) Exec(_ context.Context, _ string) (string, error) {
 	return m.output, m.err

@@ -23,6 +23,7 @@ import (
 	"runtime"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/requset700k/cledyu/validation-engine/internal/checker"
 	"github.com/requset700k/cledyu/validation-engine/internal/model"
@@ -125,6 +126,7 @@ type fakeExecutor struct {
 }
 
 func (f fakeExecutor) Exec(context.Context, string) (string, error) { return f.output, f.err }
+func (f fakeExecutor) DefaultTimeout() time.Duration                { return 20 * time.Second }
 func (f fakeExecutor) Close()                                       {}
 
 // satisfying 은 해당 체크를 "정답 상태"로 만드는 VM 출력을 돌려준다(체크 타입에서 파생).
