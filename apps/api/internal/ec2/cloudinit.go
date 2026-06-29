@@ -55,8 +55,9 @@ chpasswd:
 	// no-op 이라 베이크/stock AMI 의 부팅 속도엔 영향이 없다(멱등·best-effort).
 	b.WriteString("  - sh -c 'miss=; for c in curl unzip; do command -v $c >/dev/null 2>&1 || miss=\"$miss $c\"; done; [ -n \"$miss\" ] && { apt-get update; DEBIAN_FRONTEND=noninteractive apt-get install -y $miss; }; true'\n")
 	// SSM Agent — 채점(SendCommand) 경로. lab-base 에 deb 로 베이크돼 있으면 기동만 하면 돼 빠르다.
-	// 베이크되지 않은 AMI 대비 snap 설치 폴백을 둔다(베이크된 경우 첫 명령이 성공해 폴백은 안 탄다).
-	b.WriteString("  - systemctl enable --now amazon-ssm-agent || { snap install amazon-ssm-agent --classic && systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service; } || true\n")
+	// 베이크되지 않은 AMI 대비 snap 폴백을 둔다. 폴백에선 서비스 기동을 snap install 성공에 묶지
+	// 않는다(Canonical AMI 처럼 snap 이 이미 깔린 경우 install 이 비정상 종료해도 서비스는 켜지게).
+	b.WriteString("  - if systemctl enable --now amazon-ssm-agent 2>/dev/null; then :; else snap install amazon-ssm-agent --classic 2>/dev/null || true; systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service 2>/dev/null || true; fi\n")
 	if cfg.TailscaleAuthKey != "" {
 		hostname := tailnetHostname(cfg, sessionID)
 		// tailscale 설치(베이스 AMI 가 packer 로 미리 굽지 않은 경우 대비) 후 가입. 가입은 설치 뒤에 와야 한다.
