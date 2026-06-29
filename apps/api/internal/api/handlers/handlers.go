@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/requset700k/cledyu/api/internal/ai"
 	"github.com/requset700k/cledyu/api/internal/auth"
 	"github.com/requset700k/cledyu/api/internal/config"
@@ -21,12 +22,11 @@ import (
 	"github.com/requset700k/cledyu/api/internal/vmfiles"
 	"go.uber.org/zap"
 	"kubevirt.io/client-go/kubecli"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 var (
-    defaultHandlerMetrics     *handlerMetrics
-    defaultHandlerMetricsOnce sync.Once
+	defaultHandlerMetrics     *handlerMetrics
+	defaultHandlerMetricsOnce sync.Once
 )
 
 // Handler는 모든 HTTP 핸들러의 공유 의존성을 보관한다.

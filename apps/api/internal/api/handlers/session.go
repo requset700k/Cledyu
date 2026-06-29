@@ -538,20 +538,20 @@ func (h *Handler) markStepValidating(sessionID string, idx int) {
 // 않아(current 유지) 사용자가 다시 시도할 수 있게 한다. 모르는 세션/스텝은 무시한다(지연 결과 등).
 func (h *Handler) ApplyValidationResult(r validation.ValidationResult) {
 	// 검증 지연 기록
-    if h.met != nil && r.TraceID != "" {
-        h.met.validationMu.Lock()
-        start, ok := h.met.validationStartTimes[r.TraceID]
-        delete(h.met.validationStartTimes, r.TraceID)
-        h.met.validationMu.Unlock()
-        if ok {
-            result := "failed"
-            if r.Passed {
-                result = "passed"
-            }
-            h.met.validationDuration.WithLabelValues(result).Observe(time.Since(start).Seconds())
-        }
-    }
-	
+	if h.met != nil && r.TraceID != "" {
+		h.met.validationMu.Lock()
+		start, ok := h.met.validationStartTimes[r.TraceID]
+		delete(h.met.validationStartTimes, r.TraceID)
+		h.met.validationMu.Unlock()
+		if ok {
+			result := "failed"
+			if r.Passed {
+				result = "passed"
+			}
+			h.met.validationDuration.WithLabelValues(result).Observe(time.Since(start).Seconds())
+		}
+	}
+
 	var completedUser, completedLab string
 	found := h.steps.withSession(r.SessionID, func(ss *sessionSteps) bool {
 		idx := -1

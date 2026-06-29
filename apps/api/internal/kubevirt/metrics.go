@@ -5,7 +5,7 @@ import (
 )
 
 type metrics struct {
-	vmBootTotal        *prometheus.CounterVec
+	vmBootTotal *prometheus.CounterVec
 }
 
 func newMetrics(reg prometheus.Registerer) *metrics {
@@ -18,6 +18,6 @@ func newMetrics(reg prometheus.Registerer) *metrics {
 	)
 	reg.MustRegister(vmBootTotal)
 	return &metrics{
-		vmBootTotal:        vmBootTotal,
+		vmBootTotal: vmBootTotal,
 	}
 }

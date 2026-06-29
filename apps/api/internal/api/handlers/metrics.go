@@ -47,7 +47,7 @@ func newHandlerMetrics(reg prometheus.Registerer) *handlerMetrics {
 		},
 		[]string{"result"}, // success | fallback | rate_limited | error
 	)
-    reg.MustRegister(wsConnectionsEstablished, wsConnectionDrops, validationDuration, aiHintDuration)
+	reg.MustRegister(wsConnectionsEstablished, wsConnectionDrops, validationDuration, aiHintDuration)
 	return &handlerMetrics{
 		wsConnectionsEstablished: wsConnectionsEstablished,
 		wsConnectionDrops:        wsConnectionDrops,
