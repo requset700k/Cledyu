@@ -11,6 +11,11 @@ IMPORT_AMI="${IMPORT_AMI:-true}"
 GHCR_USER="${GHCR_USER:-ykgoesdumb}"
 REF="${REF:-main}"
 
+# 전체 출력을 로그로 캡처한다. metal 은 실패 시 self-terminate 되어 사후 콘솔 접근이 안 되므로,
+# finish() 가 이 로그를 sentinel 과 함께 S3 에 올려 원인을 진단할 수 있게 한다. set -x 로 명령 추적.
+exec > >(tee -a /var/log/cledyu-baker.log) 2>&1
+set -x
+
 STATUS="failed"
 AMI_ID=""
 WORK=/opt/cledyu
@@ -19,6 +24,7 @@ log() { echo "[baker] $*"; }
 finish() {
   printf '{"status":"%s","tag":"%s","ami":"%s"}\n' "$STATUS" "$TAG" "$AMI_ID" > /tmp/done.json
   aws s3 cp /tmp/done.json "s3://$BAKER_BUCKET/builds/$TAG/done.json" --region "$REGION" || true
+  aws s3 cp /var/log/cledyu-baker.log "s3://$BAKER_BUCKET/builds/$TAG/baker.log" --region "$REGION" || true
   TOKEN=$(curl -sX PUT "http://169.254.169.254/latest/api/token" \
     -H "X-aws-ec2-metadata-token-ttl-seconds: 60") || true
   IID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
@@ -27,9 +33,20 @@ finish() {
 }
 trap finish EXIT
 
-# 도구 설치(metal 은 Amazon Linux 2023 가정 — packer/qemu/docker/awscli).
-if ! dnf install -y git docker qemu-kvm awscli unzip; then
-  yum install -y git docker qemu-kvm awscli unzip
+# 도구 설치(metal 은 Amazon Linux 2023 가정). awscli 는 AL2023 에 v2 가 기본 설치돼 있어
+# dnf 패키지로 잡으면 "No match for argument: awscli" 로 트랜잭션 전체가 실패하므로 제외한다.
+if ! dnf install -y git docker qemu-kvm qemu-img unzip; then
+  yum install -y git docker qemu-kvm qemu-img unzip
+fi
+# packer-qemu 는 기본적으로 qemu-system-x86_64 바이너리를 찾는다. AL2023 의 qemu-kvm 은
+# /usr/libexec/qemu-kvm 로 깔리므로, 그 이름으로 PATH 에 링크해 packer 가 찾게 한다.
+if ! command -v qemu-system-x86_64 > /dev/null 2>&1; then
+  for cand in /usr/libexec/qemu-kvm /usr/bin/qemu-kvm; do
+    if [ -x "$cand" ]; then
+      ln -sf "$cand" /usr/local/bin/qemu-system-x86_64
+      break
+    fi
+  done
 fi
 systemctl enable --now docker
 curl -fsSL -o /tmp/packer.zip \
