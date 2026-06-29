@@ -502,6 +502,13 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 		return
 	}
 
+	// 검증 시작 시간 기록
+	if h.met != nil {
+		h.met.validationMu.Lock()
+		h.met.validationStartTimes[traceID] = time.Now()
+		h.met.validationMu.Unlock()
+	}
+
 	// 결과가 올 때까지 validating으로 둔다. 실제 pass/fail은 ApplyValidationResult가 확정한다.
 	h.markStepValidating(sessionID, idx)
 	c.JSON(http.StatusAccepted, gin.H{
@@ -530,6 +537,21 @@ func (h *Handler) markStepValidating(sessionID string, idx int) {
 // 모두 통과면 passed로 확정 후 다음 스텝을 활성화한다. 실패면 failed로 두되 스텝을 진행시키지
 // 않아(current 유지) 사용자가 다시 시도할 수 있게 한다. 모르는 세션/스텝은 무시한다(지연 결과 등).
 func (h *Handler) ApplyValidationResult(r validation.ValidationResult) {
+	// 검증 지연 기록
+    if h.met != nil && r.TraceID != "" {
+        h.met.validationMu.Lock()
+        start, ok := h.met.validationStartTimes[r.TraceID]
+        delete(h.met.validationStartTimes, r.TraceID)
+        h.met.validationMu.Unlock()
+        if ok {
+            result := "failed"
+            if r.Passed {
+                result = "passed"
+            }
+            h.met.validationDuration.WithLabelValues(result).Observe(time.Since(start).Seconds())
+        }
+    }
+	
 	var completedUser, completedLab string
 	found := h.steps.withSession(r.SessionID, func(ss *sessionSteps) bool {
 		idx := -1
