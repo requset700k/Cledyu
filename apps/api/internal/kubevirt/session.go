@@ -408,16 +408,17 @@ func (m *Manager) Get(ctx context.Context, sessionID string) (*Session, error) {
 			if ann["cledyu.io/ready-at"] == "" {
 				readyAt := time.Now().UTC()
 				nsObj.Annotations["cledyu.io/ready-at"] = readyAt.Format(time.RFC3339)
-				_, _ = m.core.CoreV1().Namespaces().Update(ctx, nsObj, metav1.UpdateOptions{})
-				if !startedAt.IsZero() && m.met != nil {
-					m.met.vmBootTotal.WithLabelValues("success", "onprem").Inc()
+				if _, err := m.core.CoreV1().Namespaces().Update(ctx, nsObj, metav1.UpdateOptions{}); err == nil {
+					if !startedAt.IsZero() && m.met != nil {
+						m.met.vmBootTotal.WithLabelValues("success", "onprem").Inc()
+					}
 				}
 			}
 		case "Failed", "Succeeded":
-			status = "failed"
-			if ann["cledyu.io/boot-result-recorded"] == "" && m.met != nil {
-				nsObj.Annotations["cledyu.io/boot-result-recorded"] = "true"
-				_, _ = m.core.CoreV1().Namespaces().Update(ctx, nsObj, metav1.UpdateOptions{})
+		status = "failed"
+		if ann["cledyu.io/boot-result-recorded"] == "" && m.met != nil {
+			nsObj.Annotations["cledyu.io/boot-result-recorded"] = "true"
+			if _, err := m.core.CoreV1().Namespaces().Update(ctx, nsObj, metav1.UpdateOptions{}); err == nil {
 				m.met.vmBootTotal.WithLabelValues("failed", "onprem").Inc()
 			}
 		}
