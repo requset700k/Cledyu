@@ -18,3 +18,5 @@ for _i in $(seq 1 24); do
 done
 systemctl stop k3s
 systemctl disable k3s || true
+# 주의: 여기서 server/db 를 지워도 99-smoke.sh 가 k3s 를 재기동하며 노드를 다시 등록한다.
+# 따라서 노드 상태 리셋은 캡처 직전(맨 마지막) 99-cleanup.sh 에서 수행한다.
