@@ -10,6 +10,7 @@ code-server --version
 terraform version
 command -v ansible
 helm version --short
+command -v amazon-ssm-agent
 # nginx 이미지 캐시 확인 — 이미지는 10-k3s.sh 가 crictl(k8s.io ns)로 받았으므로 동일하게
 # crictl 로 확인한다. containerd 가 꺼져 있어 잠깐 기동→확인→정지한다.
 systemctl start k3s

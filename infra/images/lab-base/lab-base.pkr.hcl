@@ -61,6 +61,7 @@ build {
       "provisioners/30-code-server.sh",
       "provisioners/40-terraform.sh",
       "provisioners/50-ansible-helm.sh",
+      "provisioners/60-ssm-agent.sh",
       "provisioners/99-smoke.sh",
       "provisioners/99-cleanup.sh",
     ]
