@@ -19,7 +19,7 @@ spec:
     # import 한다(infra/images/lab-base, ghcr public). 세션 cloud-init 의 apt 비용을 줄인다.
     # 재베이킹 시 이 태그를 bump 한다(Replace=true 라 CDI 가 base PVC 를 재import).
     registry:
-      url: "docker://ghcr.io/requset700k/cledyu-lab-base:28347829535"
+      url: "docker://ghcr.io/requset700k/cledyu-lab-base:28352520644"
   storage:
     accessModes:
       - ReadWriteOnce
