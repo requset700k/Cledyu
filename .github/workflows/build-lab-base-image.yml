@@ -30,7 +30,8 @@ env:
   BAKER_INSTANCE_PROFILE: cledyu-lab-baker-instance
   BAKER_ROLE_ARN: arn:aws:iam::504284203153:role/cledyu-lab-gha-baker
   METAL_TYPE: m5.metal
-  METAL_AMI_SSM: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+  # Ubuntu 22.04 로 베이크한다. AL2023 는 qemu-system 패키지가 없어 packer-qemu 에 부적합.
+  METAL_AMI_SSM: /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id
 
 concurrency:
   group: build-lab-base-image
@@ -51,7 +52,7 @@ jobs:
           role-to-assume: ${{ env.BAKER_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Resolve metal AMI (Amazon Linux 2023)
+      - name: Resolve metal AMI (Ubuntu 22.04)
         id: ami
         run: |
           AMI=$(aws ssm get-parameter --name "$METAL_AMI_SSM" \
@@ -72,7 +73,7 @@ jobs:
           IID=$(aws ec2 run-instances --image-id "${{ steps.ami.outputs.ami }}" \
             --instance-type "$METAL_TYPE" \
             --iam-instance-profile "Name=$BAKER_INSTANCE_PROFILE" \
-            --block-device-mappings 'DeviceName=/dev/xvda,Ebs={VolumeSize=120,VolumeType=gp3,DeleteOnTermination=true}' \
+            --block-device-mappings 'DeviceName=/dev/sda1,Ebs={VolumeSize=120,VolumeType=gp3,DeleteOnTermination=true}' \
             --user-data "$USERDATA" \
             --tag-specifications 'ResourceType=instance,Tags=[{Key=cledyu-role,Value=image-baker}]' \
             --instance-initiated-shutdown-behavior terminate \

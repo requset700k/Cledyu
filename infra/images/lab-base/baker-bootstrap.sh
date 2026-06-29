@@ -33,21 +33,16 @@ finish() {
 }
 trap finish EXIT
 
-# 도구 설치(metal 은 Amazon Linux 2023 가정). awscli 는 AL2023 에 v2 가 기본 설치돼 있어
-# dnf 패키지로 잡으면 "No match for argument: awscli" 로 트랜잭션 전체가 실패하므로 제외한다.
-if ! dnf install -y git docker qemu-kvm qemu-img unzip; then
-  yum install -y git docker qemu-kvm qemu-img unzip
-fi
-# packer-qemu 는 기본적으로 qemu-system-x86_64 바이너리를 찾는다. AL2023 의 qemu-kvm 은
-# /usr/libexec/qemu-kvm 로 깔리므로, 그 이름으로 PATH 에 링크해 packer 가 찾게 한다.
-if ! command -v qemu-system-x86_64 > /dev/null 2>&1; then
-  for cand in /usr/libexec/qemu-kvm /usr/bin/qemu-kvm; do
-    if [ -x "$cand" ]; then
-      ln -sf "$cand" /usr/local/bin/qemu-system-x86_64
-      break
-    fi
-  done
-fi
+# 도구 설치(metal 은 Ubuntu 22.04). AL2023 는 qemu-system 패키지가 없어 packer-qemu 에 부적합해
+# Ubuntu 로 베이크한다. qemu-system-x86 이 /usr/bin/qemu-system-x86_64 를 제공한다.
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y --no-install-recommends \
+  git docker.io qemu-system-x86 qemu-utils curl unzip
+# aws CLI v2 설치(Ubuntu 엔 미포함). finish() 의 sentinel/log 업로드와 SSM/EC2 호출에 필요해 일찍 깐다.
+curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+unzip -q /tmp/awscliv2.zip -d /tmp
+/tmp/aws/install
 systemctl enable --now docker
 curl -fsSL -o /tmp/packer.zip \
   https://releases.hashicorp.com/packer/1.11.2/packer_1.11.2_linux_amd64.zip
