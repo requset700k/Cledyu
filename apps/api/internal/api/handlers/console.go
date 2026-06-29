@@ -182,10 +182,14 @@ func proxyTerminal(ws *websocket.Conn, conn io.ReadWriteCloser, pinnedCols, pinn
 	_ = ws.SetReadDeadline(time.Time{})
 	_ = ws.SetWriteDeadline(time.Time{})
 
-	// 권위 고정 크기 통보(serial). subprotocol 을 협상한 v2 클라이언트에만 보낸다 — 옛 웹은 제어
-	// 프레임을 일반 텍스트로 출력하므로, 협상 안 된 연결엔 보내지 않아 화면 오염을 막는다.
+	// v2 subprotocol 을 협상했을 때만 제어 프레임을 주고받는다(송신 pin·수신 resize 양방향 대칭).
+	// 협상 안 된 연결(구 웹↔새 API 스큐)은 모든 TextMessage 를 raw 입력으로 전달해 입력 계약을 지킨다.
+	v2 := ws.Subprotocol() == terminalSubprotocolV2
+
+	// 권위 고정 크기 통보(serial). v2 클라이언트에만 보낸다 — 옛 웹은 제어 프레임을 일반 텍스트로
+	// 출력하므로 협상 안 된 연결엔 보내지 않아 화면 오염을 막는다.
 	// 출력 루프·ping 시작 전이라 동시 writer 경합이 없다.
-	if pinnedCols > 0 && pinnedRows > 0 && ws.Subprotocol() == terminalSubprotocolV2 {
+	if v2 && pinnedCols > 0 && pinnedRows > 0 {
 		frame := fmt.Sprintf(`{"type":"resize","cols":%d,"rows":%d}`, pinnedCols, pinnedRows)
 		_ = ws.WriteMessage(websocket.TextMessage, []byte(frame))
 	}
@@ -215,8 +219,9 @@ func proxyTerminal(ws *websocket.Conn, conn io.ReadWriteCloser, pinnedCols, pinn
 				_ = conn.Close()
 				return
 			}
-			// TextMessage 는 리사이즈 제어 프레임 후보다(키 입력은 BinaryMessage 로 온다).
-			if mt == websocket.TextMessage {
+			// v2 협상된 클라이언트의 TextMessage 만 제어 프레임으로 해석한다. 비협상(구 웹)은 모든
+			// 입력을 raw 로 전달하므로, 그 클라이언트가 보낸 resize JSON 도 셸 입력으로 그대로 흘려보낸다.
+			if v2 && mt == websocket.TextMessage {
 				if cols, rows, ok := parseResizeFrame(data); ok {
 					if canResize {
 						_ = resizer.Resize(cols, rows)
