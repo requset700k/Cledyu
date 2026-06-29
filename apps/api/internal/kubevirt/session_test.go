@@ -14,6 +14,9 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
 	"github.com/requset700k/cledyu/api/internal/config"
 )
 
@@ -223,5 +226,38 @@ func TestGetKeepsProvisioningSessionBeforeTimeout(t *testing.T) {
 	}
 	if got.Status != "provisioning" {
 		t.Fatalf("status = %q, want provisioning", got.Status)
+	}
+}
+
+func TestVMBootFailedRecordedOnce(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	met := newMetrics(reg)
+
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{vmiGVR: "VirtualMachineInstanceList"},
+		vmiObj("sess2", "Failed"),
+	)
+	m := &Manager{
+		core: fake.NewSimpleClientset(sessionNSWithTimes("sess2", time.Now().Add(-30*time.Second))),
+		dyn:  dyn,
+		cfg:  &config.KubeVirtConfig{ProvisionTimeoutMinutes: 10},
+		met:  met,
+	}
+
+	sess, err := m.Get(context.Background(), "sess2")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if sess.Status != "failed" {
+		t.Fatalf("status = %q, want failed", sess.Status)
+	}
+	if c := testutil.CollectAndCount(met.vmBootTotal); c != 1 {
+		t.Errorf("실패 메트릭 샘플 수 = %d, want 1", c)
+	}
+
+	m.Get(context.Background(), "sess2")
+	if c := testutil.CollectAndCount(met.vmBootTotal); c != 1 {
+		t.Errorf("중복 기록됨: 샘플 수 = %d, want 1", c)
 	}
 }
