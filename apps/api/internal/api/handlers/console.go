@@ -121,17 +121,31 @@ func (h *Handler) kubevirtConsole(c *gin.Context, sessionID string) {
 	}
 	defer ws.Close() //nolint:errcheck
 
+	// 연결 수립 기록
+    if h.met != nil {
+        h.met.wsConnectionsEstablished.WithLabelValues("kubevirt").Inc()
+    }
+
 	con, err := h.virt.VirtualMachineInstance(ns).SerialConsole(vm, &kvcorev1.SerialConsoleOptions{
-		ConnectionTimeout: 10 * time.Second,
-	})
+        ConnectionTimeout: 10 * time.Second,
+    })
 	if err != nil {
-		h.log.Warn("serial console connect failed", zap.String("ns", ns), zap.String("vm", vm), zap.Error(err))
-		_ = ws.WriteMessage(websocket.TextMessage, []byte("\r\n[VM 콘솔 연결 실패: "+err.Error()+"]\r\n"))
-		return
-	}
+        h.log.Warn("serial console connect failed", zap.String("ns", ns), zap.String("vm", vm), zap.Error(err))
+        _ = ws.WriteMessage(websocket.TextMessage, []byte("\r\n[VM 콘솔 연결 실패: "+err.Error()+"]\r\n"))
+        // 연결 끊김 기록
+        if h.met != nil {
+            h.met.wsConnectionDrops.WithLabelValues("kubevirt").Inc()
+        }
+        return
+    }
 	vmConn := con.AsConn()
 	// serial 콘솔은 winsize 채널이 없어 동적 리사이즈가 불가능하므로 권위 고정 크기를 브라우저에 통보한다.
 	proxyTerminal(ws, vmConn, serialConsoleCols, serialConsoleRows)
+    
+	// proxyTerminal 종료 = 연결 끊김
+    if h.met != nil {
+        h.met.wsConnectionDrops.WithLabelValues("kubevirt").Inc()
+    }
 }
 
 // ec2Console은 EC2 세션 인스턴스에 tailnet SSH PTY로 접속해 WS에 프록시한다.
@@ -155,6 +169,11 @@ func (h *Handler) ec2Console(c *gin.Context, sessionID string) {
 	}
 	defer ws.Close() //nolint:errcheck
 
+	// 연결 수립 기록
+	if h.met != nil {
+		h.met.wsConnectionsEstablished.WithLabelValues("ec2").Inc()
+	}
+
 	term, err := ec2.DialTerminal(c.Request.Context(), addr, ec2.TerminalConfig{
 		User:     h.cfg.AWS.LiveTerminalSSHUser,
 		Password: h.cfg.AWS.LiveTerminalSSHPassword,
@@ -163,10 +182,17 @@ func (h *Handler) ec2Console(c *gin.Context, sessionID string) {
 	if err != nil {
 		h.log.Warn("ec2 ssh terminal connect failed", zap.String("addr", addr), zap.Error(err))
 		_ = ws.WriteMessage(websocket.TextMessage, []byte("\r\n[VM 터미널 연결 실패: "+err.Error()+"]\r\n"))
+		if h.met != nil {
+			h.met.wsConnectionDrops.WithLabelValues("ec2").Inc()
+		}
 		return
 	}
-	// EC2 SSH PTY 는 동적 리사이즈를 지원하므로 권위 고정 크기를 통보하지 않는다(브라우저 크기 권위).
 	proxyTerminal(ws, term, 0, 0)
+
+	// proxyTerminal 종료 = 연결 끊김
+	if h.met != nil {
+		h.met.wsConnectionDrops.WithLabelValues("ec2").Inc()
+	}
 }
 
 // proxyTerminal은 WebSocket과 VM 연결(serial console 또는 SSH PTY)을 양방향으로 프록시한다.
