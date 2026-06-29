@@ -64,23 +64,33 @@ func linuxStep2Checks(t *testing.T) []model.Check {
 func TestLinuxStep2_RequiresOriginalsRemain(t *testing.T) {
 	step2 := linuxStep2Checks(t)
 
-	// cp: backup 사본 + logs 원본 모두 존재 (debug.txt는 backup에 없음 → file_absent 통과)
-	cp := vmFS{present: map[string]bool{
-		"/home/lab/work/backup/app1.log": true,
-		"/home/lab/work/backup/app2.log": true,
-		"/home/lab/work/logs/app1.log":   true,
-		"/home/lab/work/logs/app2.log":   true,
-	}}
-	if _, ok := checker.RunAll(context.Background(), cp, step2); !ok {
-		t.Error("cp(원본 보존) 정답은 step2를 통과해야 함")
+	// 정답 상태: backup 사본 + logs 원본(app1·app2·debug) 모두 존재 (backup엔 debug.txt 없음).
+	allPresent := func() map[string]bool {
+		return map[string]bool{
+			"/home/lab/work/backup/app1.log": true,
+			"/home/lab/work/backup/app2.log": true,
+			"/home/lab/work/logs/app1.log":   true,
+			"/home/lab/work/logs/app2.log":   true,
+			"/home/lab/work/logs/debug.txt":  true,
+		}
 	}
 
-	// mv: backup 사본은 있지만 logs 원본이 사라짐 → step2가 잡아야 한다.
-	mv := vmFS{present: map[string]bool{
-		"/home/lab/work/backup/app1.log": true,
-		"/home/lab/work/backup/app2.log": true,
-	}}
-	if _, ok := checker.RunAll(context.Background(), mv, step2); ok {
-		t.Error("mv(원본 유실)는 step2에서 탈락해야 함 — 안 그러면 step5/6 dead-end")
+	if _, ok := checker.RunAll(context.Background(), vmFS{present: allPresent()}, step2); !ok {
+		t.Error("원본 전부 보존된 cp 정답은 step2를 통과해야 함")
+	}
+
+	// logs 원본 중 하나라도 사라지면 step2가 잡아야 한다.
+	// step5(tar logs)가 app1.log·app2.log·debug.txt 셋을 모두 아카이브에 요구하므로
+	// 셋 다 보존돼야 dead-end가 없다(mv 등으로 원본을 옮기면 복귀 불가).
+	for _, orig := range []string{
+		"/home/lab/work/logs/app1.log",
+		"/home/lab/work/logs/app2.log",
+		"/home/lab/work/logs/debug.txt",
+	} {
+		fs := allPresent()
+		delete(fs, orig) // 이 원본만 유실시킨다
+		if _, ok := checker.RunAll(context.Background(), vmFS{present: fs}, step2); ok {
+			t.Errorf("원본 %s 유실 시 step2에서 탈락해야 함 (step5/6 dead-end 방지)", orig)
+		}
 	}
 }
