@@ -507,7 +507,17 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 	// 결과 메시지의 duration_ms 필드로 대체 필요
 	if h.met != nil {
 		h.met.validationMu.Lock()
-		h.met.validationStartTimes[traceID] = time.Now()
+		// 오래된 항목 정리 (TTL: 5분)
+		now := time.Now()
+		for k, v := range h.met.validationStartTimes {
+			if now.After(v.expiresAt) {
+				delete(h.met.validationStartTimes, k)
+			}
+		}
+		h.met.validationStartTimes[traceID] = validationEntry{
+			startedAt: now,
+			expiresAt: now.Add(5 * time.Minute),
+		}
 		h.met.validationMu.Unlock()
 	}
 
@@ -550,7 +560,7 @@ func (h *Handler) ApplyValidationResult(r validation.ValidationResult) {
 			if r.Passed {
 				result = "passed"
 			}
-			h.met.validationDuration.WithLabelValues(result).Observe(time.Since(start).Seconds())
+			h.met.validationDuration.WithLabelValues(result).Observe(time.Since(start.startedAt).Seconds())
 		}
 	}
 

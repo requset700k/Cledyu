@@ -7,11 +7,16 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+type validationEntry struct {
+	startedAt time.Time
+	expiresAt time.Time
+}
+
 type handlerMetrics struct {
 	wsConnectionsEstablished *prometheus.CounterVec
 	wsConnectionDrops        *prometheus.CounterVec
 	validationDuration       *prometheus.HistogramVec
-	validationStartTimes     map[string]time.Time
+	validationStartTimes     map[string]validationEntry
 	validationMu             sync.Mutex
 	aiHintDuration           *prometheus.HistogramVec
 }
@@ -52,7 +57,7 @@ func newHandlerMetrics(reg prometheus.Registerer) *handlerMetrics {
 		wsConnectionsEstablished: wsConnectionsEstablished,
 		wsConnectionDrops:        wsConnectionDrops,
 		validationDuration:       validationDuration,
-		validationStartTimes:     make(map[string]time.Time),
+		validationStartTimes:     make(map[string]validationEntry),
 		aiHintDuration:           aiHintDuration,
 	}
 }
