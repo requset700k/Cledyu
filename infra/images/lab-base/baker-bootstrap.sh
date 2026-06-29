@@ -100,6 +100,31 @@ JSON
   aws ec2 create-tags --resources "$AMI_ID" --region "$REGION" \
     --tags "Key=Name,Value=cledyu-lab-base-$TAG" "Key=cledyu-role,Value=lab-session-ami"
   log "AMI $AMI_ID"
+
+  # 스냅샷 태깅(prune 의 DeleteSnapshot 가 cledyu-role 태그로 스코프됨).
+  SNAP=$(aws ec2 describe-images --image-ids "$AMI_ID" --region "$REGION" \
+    --query 'Images[0].BlockDeviceMappings[0].Ebs.SnapshotId' --output text)
+  if [ -n "$SNAP" ] && [ "$SNAP" != "None" ]; then
+    aws ec2 create-tags --resources "$SNAP" --region "$REGION" \
+      --tags "Key=cledyu-role,Value=lab-session-ami-snap" || true
+  fi
+
+  # prune-on-bake: lab-session-ami 태그 AMI 중 최신 KEEP 개만 남기고 옛것 deregister + 스냅샷 삭제.
+  # 베이크가 AMI 를 만드는 유일한 주체라 만들 때 정리한다(스냅샷 누적 비용 방지). 방금 만든 건 보호.
+  KEEP=3
+  OLD=$(aws ec2 describe-images --owners self --region "$REGION" \
+    --filters "Name=tag:cledyu-role,Values=lab-session-ami" \
+    --query "sort_by(Images,&CreationDate)[:-${KEEP}].ImageId" --output text)
+  for old in $OLD; do
+    if [ "$old" = "$AMI_ID" ]; then continue; fi
+    osnap=$(aws ec2 describe-images --image-ids "$old" --region "$REGION" \
+      --query 'Images[0].BlockDeviceMappings[0].Ebs.SnapshotId' --output text)
+    aws ec2 deregister-image --image-id "$old" --region "$REGION" || true
+    if [ -n "$osnap" ] && [ "$osnap" != "None" ]; then
+      aws ec2 delete-snapshot --snapshot-id "$osnap" --region "$REGION" || true
+    fi
+    log "pruned old AMI $old (snap $osnap)"
+  done
 fi
 
 STATUS="ok"
