@@ -3,6 +3,11 @@ kind: Application
 metadata:
   name: data-postgres
   namespace: argocd
+  annotations:
+    # postgres StatefulSet 이 kubectl 서버 diff(=실제 apply dry-run)는 0 인데도 ArgoCD client-side
+    # diff 가 상시 OutOfSync 로 표시(volumeClaimTemplates 의 SSA diff 불일치, 알려진 케이스). diff 를
+    # 서버 dry-run 으로 계산하게 해 실제 클러스터 상태와 일치시킨다(ArgoCD 2.13, sync 동작엔 영향 없음).
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 
