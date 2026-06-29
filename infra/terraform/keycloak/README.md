@@ -84,6 +84,7 @@ No modules.
 | [keycloak_oidc_identity_provider.naver](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/oidc_identity_provider) | resource |
 | [keycloak_openid_client.clients](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/openid_client) | resource |
 | [keycloak_openid_client.learn_clients](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/openid_client) | resource |
+| [keycloak_openid_client_service_account_role.cledyu_admin_realm_management](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/openid_client_service_account_role) | resource |
 | [keycloak_openid_group_membership_protocol_mapper.groups](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/openid_group_membership_protocol_mapper) | resource |
 | [keycloak_openid_group_membership_protocol_mapper.learn_groups](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/openid_group_membership_protocol_mapper) | resource |
 | [keycloak_openid_user_realm_role_protocol_mapper.kafka_ui_roles](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/openid_user_realm_role_protocol_mapper) | resource |
@@ -99,6 +100,7 @@ No modules.
 | [keycloak_user.team_members](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/user) | resource |
 | [keycloak_user_groups.team_members](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/user_groups) | resource |
 | [keycloak_user_roles.master_super_admins](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/resources/user_roles) | resource |
+| [keycloak_openid_client.learn_realm_management](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/data-sources/openid_client) | data source |
 | [keycloak_realm.master](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/data-sources/realm) | data source |
 | [keycloak_role.master_admin](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/data-sources/role) | data source |
 | [keycloak_role.master_default_roles](https://registry.terraform.io/providers/mrparkers/keycloak/latest/docs/data-sources/role) | data source |
