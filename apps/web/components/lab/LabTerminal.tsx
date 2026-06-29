@@ -66,6 +66,33 @@ export function LabTerminal({
       term.open(containerRef.current);
       fit.fit();
       const decoder = new TextDecoder();
+      const encoder = new TextEncoder();
+
+      // serial 콘솔처럼 백엔드가 권위 크기를 통보하면 fit 을 끄고 그 크기를 고정한다(serial 은 winsize 채널 없음).
+      let serverPinnedSize = false;
+
+      // 현재 xterm 크기를 백엔드에 통보한다. EC2 PTY 는 이 값으로 SSH window-change 를 적용한다.
+      const sendResize = () => {
+        if (ws?.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+        }
+      };
+
+      // 백엔드가 보낸 TextMessage 가 리사이즈 제어 프레임이면 적용하고 true. 아니면(에러 텍스트 등) false.
+      const applyControlFrame = (text: string): boolean => {
+        if (text.charCodeAt(0) !== 0x7b /* '{' */) return false;
+        try {
+          const msg = JSON.parse(text);
+          if (msg?.type === 'resize' && typeof msg.cols === 'number' && typeof msg.rows === 'number') {
+            serverPinnedSize = true;
+            term.resize(Math.max(1, msg.cols), Math.max(1, msg.rows));
+            return true;
+          }
+        } catch {
+          // JSON 이 아니면 일반 서버 텍스트(연결 실패 메시지 등)이므로 그대로 출력하게 둔다.
+        }
+        return false;
+      };
 
       // 재연결 가능한 종료를 영구 실패로 표시하지 않고 exponential backoff 후 다시 연결한다.
       // retryTimer guard가 error/close 중복 callback에 의한 동시 socket 생성을 방지한다.
@@ -120,12 +147,21 @@ export function LabTerminal({
           openedAt = Date.now();
           setConnectionState('connected');
           term.focus();
+          // 새 PTY(EC2)는 초기 고정 크기로 열리므로 현재 xterm 크기를 즉시 통보해 줄바꿈 정합을 맞춘다.
+          sendResize();
         };
         socket.onmessage = (event) => {
-          const data = typeof event.data === 'string' ? event.data : new Uint8Array(event.data);
-          term.write(data);
+          // 문자열 프레임 = 제어(리사이즈) 또는 서버 텍스트. 바이너리 프레임 = VM 출력.
+          if (typeof event.data === 'string') {
+            if (applyControlFrame(event.data)) return;
+            term.write(event.data);
+            if (onOutput && event.data) onOutput(event.data);
+            return;
+          }
+          const bytes = new Uint8Array(event.data);
+          term.write(bytes);
           if (onOutput) {
-            const chunk = typeof data === 'string' ? data : decoder.decode(data, { stream: true });
+            const chunk = decoder.decode(bytes, { stream: true });
             if (chunk) onOutput(chunk);
           }
         };
@@ -151,11 +187,18 @@ export function LabTerminal({
       connect();
 
       // 재연결 중에는 입력을 버리고, OPEN 상태인 현재 socket에만 키 입력을 전달한다.
+      // 키 입력은 BinaryMessage 로 보낸다 — 백엔드가 TextMessage(JSON 리사이즈 제어)와 구분하기 위함이다.
       term.onData((d) => {
-        if (ws?.readyState === WebSocket.OPEN) ws.send(d);
+        if (ws?.readyState === WebSocket.OPEN) ws.send(encoder.encode(d));
       });
 
-      const onResize = () => fit.fit();
+      // 창 크기가 바뀌면 다시 fit 하고 새 크기를 백엔드에 통보한다. 단, 백엔드가 권위 크기를 고정한
+      // serial 콘솔에서는 fit 을 끄고 통보된 크기를 유지한다(serial 은 동적 리사이즈 불가).
+      const onResize = () => {
+        if (serverPinnedSize) return;
+        fit.fit();
+        sendResize();
+      };
       window.addEventListener('resize', onResize);
 
       dispose = () => {

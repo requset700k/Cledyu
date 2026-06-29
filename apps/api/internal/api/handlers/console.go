@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"time"
@@ -13,6 +15,44 @@ import (
 	"go.uber.org/zap"
 	kvcorev1 "kubevirt.io/client-go/kubevirt/typed/core/v1"
 )
+
+// serialConsoleCols/Rows는 KubeVirt serial console(ttyS0)이 가정하는 고정 터미널 크기다.
+// serial 라인은 winsize 채널이 없어 동적 리사이즈가 불가능하므로, 백엔드가 이 권위 크기를 브라우저에
+// 통보해 xterm 을 거기에 맞춘다(줄바꿈 정합). 추후 라이브 터미널을 SSH PTY 로 옮기면 동적 리사이즈 가능.
+const (
+	serialConsoleCols = 80
+	serialConsoleRows = 24
+	// maxTerminalDim은 비정상/악의적 리사이즈 값을 거르는 상한이다.
+	maxTerminalDim = 1000
+)
+
+// terminalResizer는 PTY 윈도우 크기 변경을 지원하는 연결이다(EC2 SSH PTY 가 구현, serial 은 미구현).
+type terminalResizer interface {
+	Resize(cols, rows int) error
+}
+
+// resizeFrame은 브라우저 ↔ 백엔드가 주고받는 터미널 크기 제어 프레임(WS TextMessage, JSON)이다.
+type resizeFrame struct {
+	Type string `json:"type"`
+	Cols int    `json:"cols"`
+	Rows int    `json:"rows"`
+}
+
+// parseResizeFrame은 브라우저가 보낸 TextMessage 가 리사이즈 제어 프레임이면 cols/rows 를 돌려준다.
+// 키 입력은 BinaryMessage 로 오고, 서버 에러 텍스트('{' 로 시작 안 함)는 JSON 이 아니므로 모두 ok=false.
+func parseResizeFrame(data []byte) (cols, rows int, ok bool) {
+	if len(data) == 0 || data[0] != '{' {
+		return 0, 0, false
+	}
+	var f resizeFrame
+	if err := json.Unmarshal(data, &f); err != nil {
+		return 0, 0, false
+	}
+	if f.Type != "resize" || f.Cols <= 0 || f.Rows <= 0 || f.Cols > maxTerminalDim || f.Rows > maxTerminalDim {
+		return 0, 0, false
+	}
+	return f.Cols, f.Rows, true
+}
 
 // wsUpgrader는 브라우저 WebSocket 업그레이드를 처리한다.
 // WS Upgrade는 CORS 미들웨어를 타지 않으므로 여기서 Origin을 직접 검사한다.
@@ -82,7 +122,8 @@ func (h *Handler) kubevirtConsole(c *gin.Context, sessionID string) {
 		return
 	}
 	vmConn := con.AsConn()
-	proxyTerminal(ws, vmConn)
+	// serial 콘솔은 winsize 채널이 없어 동적 리사이즈가 불가능하므로 권위 고정 크기를 브라우저에 통보한다.
+	proxyTerminal(ws, vmConn, serialConsoleCols, serialConsoleRows)
 }
 
 // ec2Console은 EC2 세션 인스턴스에 tailnet SSH PTY로 접속해 WS에 프록시한다.
@@ -116,17 +157,28 @@ func (h *Handler) ec2Console(c *gin.Context, sessionID string) {
 		_ = ws.WriteMessage(websocket.TextMessage, []byte("\r\n[VM 터미널 연결 실패: "+err.Error()+"]\r\n"))
 		return
 	}
-	proxyTerminal(ws, term)
+	// EC2 SSH PTY 는 동적 리사이즈를 지원하므로 권위 고정 크기를 통보하지 않는다(브라우저 크기 권위).
+	proxyTerminal(ws, term, 0, 0)
 }
 
 // proxyTerminal은 WebSocket과 VM 연결(serial console 또는 SSH PTY)을 양방향으로 프록시한다.
 // keepalive ping으로 유휴 연결 끊김을 막고, 한쪽이 닫히면 다른 쪽도 정리한다.
-func proxyTerminal(ws *websocket.Conn, conn io.ReadWriteCloser) {
+//
+// 리사이즈 프로토콜: 브라우저는 키 입력을 BinaryMessage 로, 터미널 크기 변경을 TextMessage(JSON
+// {"type":"resize","cols","rows"})로 보낸다. conn 이 terminalResizer 면 그 크기를 PTY 에 적용한다.
+// pinnedCols/pinnedRows>0 이면(serial 처럼 리사이즈 불가한 연결) 시작 시 그 권위 크기를 브라우저에 통보한다.
+func proxyTerminal(ws *websocket.Conn, conn io.ReadWriteCloser, pinnedCols, pinnedRows int) {
 	defer conn.Close() //nolint:errcheck
 
 	// http.Server의 ReadTimeout/WriteTimeout(15s)이 장수명 WS를 끊지 않도록 deadline 해제.
 	_ = ws.SetReadDeadline(time.Time{})
 	_ = ws.SetWriteDeadline(time.Time{})
+
+	// 권위 고정 크기 통보(serial). 출력 루프·ping 시작 전이라 동시 writer 경합이 없다.
+	if pinnedCols > 0 && pinnedRows > 0 {
+		frame := fmt.Sprintf(`{"type":"resize","cols":%d,"rows":%d}`, pinnedCols, pinnedRows)
+		_ = ws.WriteMessage(websocket.TextMessage, []byte(frame))
+	}
 
 	// keepalive ping — 유휴 연결이 중간 프록시에 의해 끊기는 것을 방지.
 	stopPing := make(chan struct{})
@@ -144,13 +196,23 @@ func proxyTerminal(ws *websocket.Conn, conn io.ReadWriteCloser) {
 		}
 	}()
 
-	// 브라우저 → VM (키 입력). 읽기 에러(브라우저 종료) 시 VM 연결을 닫아 아래 루프도 종료시킨다.
+	// 브라우저 → VM (키 입력·리사이즈). 읽기 에러(브라우저 종료) 시 VM 연결을 닫아 아래 루프도 종료시킨다.
+	resizer, canResize := conn.(terminalResizer)
 	go func() {
 		for {
-			_, data, err := ws.ReadMessage()
+			mt, data, err := ws.ReadMessage()
 			if err != nil {
 				_ = conn.Close()
 				return
+			}
+			// TextMessage 는 리사이즈 제어 프레임 후보다(키 입력은 BinaryMessage 로 온다).
+			if mt == websocket.TextMessage {
+				if cols, rows, ok := parseResizeFrame(data); ok {
+					if canResize {
+						_ = resizer.Resize(cols, rows)
+					}
+					continue
+				}
 			}
 			if _, err := conn.Write(data); err != nil {
 				return

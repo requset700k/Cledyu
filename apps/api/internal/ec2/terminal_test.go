@@ -112,6 +112,119 @@ func TestDialTerminal_PTYRoundTrip(t *testing.T) {
 	}
 }
 
+// ptyWindowChangeMsg는 SSH "window-change" 채널 요청 페이로드다(RFC 4254 §6.7).
+type ptyWindowChangeMsg struct {
+	Columns uint32
+	Rows    uint32
+	WidthPx uint32
+	HeighPx uint32
+}
+
+// startWindowCaptureSSHServer는 pty-req/shell 을 수락하고 window-change 요청의 cols/rows 를 got 으로 흘린다.
+// Terminal.Resize 가 실제로 SSH window-change 를 보내는지 검증하는 데 쓴다.
+func startWindowCaptureSSHServer(t *testing.T, user, pass string, got chan<- [2]int) string {
+	t.Helper()
+
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("gen host key: %v", err)
+	}
+	signer, err := ssh.NewSignerFromKey(priv)
+	if err != nil {
+		t.Fatalf("signer: %v", err)
+	}
+
+	cfg := &ssh.ServerConfig{
+		PasswordCallback: func(c ssh.ConnMetadata, p []byte) (*ssh.Permissions, error) {
+			if c.User() == user && string(p) == pass {
+				return &ssh.Permissions{}, nil
+			}
+			return nil, errAuth
+		},
+	}
+	cfg.AddHostKey(signer)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	go func() {
+		conn, aerr := ln.Accept()
+		if aerr != nil {
+			return
+		}
+		sshConn, chans, reqs, serr := ssh.NewServerConn(conn, cfg)
+		if serr != nil {
+			_ = conn.Close()
+			return
+		}
+		defer sshConn.Close() //nolint:errcheck
+		go ssh.DiscardRequests(reqs)
+
+		for nc := range chans {
+			if nc.ChannelType() != "session" {
+				_ = nc.Reject(ssh.UnknownChannelType, "only session")
+				continue
+			}
+			ch, chReqs, cerr := nc.Accept()
+			if cerr != nil {
+				return
+			}
+			go func() {
+				for req := range chReqs {
+					switch req.Type {
+					case "pty-req", "shell":
+						_ = req.Reply(true, nil)
+						if req.Type == "shell" {
+							go func() { _, _ = io.Copy(ch, ch); _ = ch.Close() }()
+						}
+					case "window-change":
+						var msg ptyWindowChangeMsg
+						if ssh.Unmarshal(req.Payload, &msg) == nil {
+							got <- [2]int{int(msg.Columns), int(msg.Rows)}
+						}
+					default:
+						_ = req.Reply(false, nil)
+					}
+				}
+			}()
+		}
+	}()
+
+	return ln.Addr().(*net.TCPAddr).IP.String() + ":" + itoa(ln.Addr().(*net.TCPAddr).Port)
+}
+
+// Resize 가 cols/rows 를 SSH window-change 로 셸에 전달하는지 검증한다(브라우저 리사이즈 → PTY 반영 경로).
+func TestTerminal_Resize_SendsWindowChange(t *testing.T) {
+	got := make(chan [2]int, 1)
+	addr := startWindowCaptureSSHServer(t, "lab", "lab", got)
+	host, port, _ := net.SplitHostPort(addr)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	term, err := DialTerminal(ctx, host, TerminalConfig{User: "lab", Password: "lab", Port: port, Timeout: 3 * time.Second})
+	if err != nil {
+		t.Fatalf("DialTerminal: %v", err)
+	}
+	defer term.Close()
+
+	if err := term.Resize(100, 30); err != nil {
+		t.Fatalf("Resize: %v", err)
+	}
+
+	select {
+	case wc := <-got:
+		if wc[0] != 100 || wc[1] != 30 {
+			t.Errorf("window-change = cols %d rows %d, want cols 100 rows 30", wc[0], wc[1])
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("window-change 요청이 도착하지 않음")
+	}
+}
+
 func TestDialTerminal_AuthFailure(t *testing.T) {
 	addr := startEchoSSHServer(t, "lab", "lab")
 	host, port, _ := net.SplitHostPort(addr)
