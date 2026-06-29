@@ -13,6 +13,11 @@ import { refreshSession } from '@/lib/auth-session.mjs';
 
 type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'error';
 
+// 리사이즈 제어 프로토콜 지원을 알리는 WS subprotocol. service-web/service-api 는 순서 보장 없는 별도
+// ArgoCD 앱이라 배포 스큐가 생기므로, 서버가 이 subprotocol 을 echo 한 경우(=새 API)에만 resize 제어
+// 프레임을 보낸다. 옛 API 와 붙으면 echo 가 없어 제어 프레임을 보내지 않아 셸 입력 주입을 막는다.
+const TERMINAL_SUBPROTOCOL_V2 = 'cledyu-term-v2';
+
 // LabTerminal은 lab VM의 serial console에 연결된 실시간 xterm.js 터미널이다.
 // WebSocket은 Next HTTP route handler의 프록시 대상이 아니므로 Go API에 직접 연결한다.
 // 운영/로컬 API origin은 IDE와 공유하고, 터미널 backoff 정책도 runtime-api-origin.mjs에서 관리한다.
@@ -70,6 +75,8 @@ export function LabTerminal({
 
       // serial 콘솔처럼 백엔드가 권위 크기를 통보하면 fit 을 끄고 그 크기를 고정한다(serial 은 winsize 채널 없음).
       let serverPinnedSize = false;
+      // 서버가 subprotocol 을 echo 한 경우(=새 API)에만 true. 옛 API 와의 스큐에서 resize 주입을 막는다.
+      let serverSupportsResize = false;
 
       // 현재 xterm 크기를 백엔드에 통보한다. EC2 PTY 는 이 값으로 SSH window-change 를 적용한다.
       const sendResize = () => {
@@ -132,7 +139,8 @@ export function LabTerminal({
 
         let socket: WebSocket;
         try {
-          socket = new WebSocket(url);
+          // v2 리사이즈 프로토콜을 요청한다. 옛 API 는 echo 하지 않아 socket.protocol 이 빈 값이 된다.
+          socket = new WebSocket(url, [TERMINAL_SUBPROTOCOL_V2]);
         } catch {
           // 잘못된 URL 같은 생성 단계 오류는 같은 값으로 재시도해도 복구되지 않으므로 오류를 유지한다.
           setConnectionState('error');
@@ -147,8 +155,11 @@ export function LabTerminal({
           openedAt = Date.now();
           setConnectionState('connected');
           term.focus();
-          // 새 PTY(EC2)는 초기 고정 크기로 열리므로 현재 xterm 크기를 즉시 통보해 줄바꿈 정합을 맞춘다.
-          sendResize();
+          // 서버가 v2 subprotocol 을 echo 했을 때만(=새 API) 크기를 통보한다. 옛 API 면 보내지 않아
+          // 제어 JSON 이 셸 입력으로 주입되는 배포 스큐 버그를 막는다. 새 PTY(EC2)는 이 통보로 초기
+          // 고정 크기를 실제 xterm 크기로 교정한다.
+          serverSupportsResize = socket.protocol === TERMINAL_SUBPROTOCOL_V2;
+          if (serverSupportsResize) sendResize();
         };
         socket.onmessage = (event) => {
           // 문자열 프레임 = 제어(리사이즈) 또는 서버 텍스트. 바이너리 프레임 = VM 출력.
@@ -197,7 +208,8 @@ export function LabTerminal({
       const onResize = () => {
         if (serverPinnedSize) return;
         fit.fit();
-        sendResize();
+        // 새 API 와 연결됐을 때만 새 크기를 통보한다(옛 API 면 로컬 fit 만, 제어 프레임 미전송).
+        if (serverSupportsResize) sendResize();
       };
       window.addEventListener('resize', onResize);
 

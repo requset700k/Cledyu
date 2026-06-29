@@ -54,9 +54,17 @@ func parseResizeFrame(data []byte) (cols, rows int, ok bool) {
 	return f.Cols, f.Rows, true
 }
 
+// terminalSubprotocolV2는 리사이즈 제어 프로토콜을 지원하는 클라이언트/서버를 식별하는 WS subprotocol 이다.
+// service-web 과 service-api 는 순서 보장 없는 별도 ArgoCD 앱이라 배포 스큐가 생긴다. 클라이언트가 이
+// subprotocol 을 요청하고 서버가 echo 한 경우에만 양쪽이 제어 프레임(resize/pin)을 주고받게 해, 스큐
+// 구간(새 웹↔옛 API, 옛 웹↔새 API)에서 제어 JSON 이 셸 입력으로 주입되거나 화면에 출력되는 걸 막는다.
+const terminalSubprotocolV2 = "cledyu-term-v2"
+
 // wsUpgrader는 브라우저 WebSocket 업그레이드를 처리한다.
 // WS Upgrade는 CORS 미들웨어를 타지 않으므로 여기서 Origin을 직접 검사한다.
+// Subprotocols 를 광고하면 gorilla 가 클라이언트 요청과 일치할 때 응답 헤더로 echo 한다(미요청 시 빈 값).
 var wsUpgrader = websocket.Upgrader{
+	Subprotocols: []string{terminalSubprotocolV2},
 	CheckOrigin: func(r *http.Request) bool {
 		switch r.Header.Get("Origin") {
 		case "", "http://localhost:3000", "https://app.cledyu.local":
@@ -174,8 +182,10 @@ func proxyTerminal(ws *websocket.Conn, conn io.ReadWriteCloser, pinnedCols, pinn
 	_ = ws.SetReadDeadline(time.Time{})
 	_ = ws.SetWriteDeadline(time.Time{})
 
-	// 권위 고정 크기 통보(serial). 출력 루프·ping 시작 전이라 동시 writer 경합이 없다.
-	if pinnedCols > 0 && pinnedRows > 0 {
+	// 권위 고정 크기 통보(serial). subprotocol 을 협상한 v2 클라이언트에만 보낸다 — 옛 웹은 제어
+	// 프레임을 일반 텍스트로 출력하므로, 협상 안 된 연결엔 보내지 않아 화면 오염을 막는다.
+	// 출력 루프·ping 시작 전이라 동시 writer 경합이 없다.
+	if pinnedCols > 0 && pinnedRows > 0 && ws.Subprotocol() == terminalSubprotocolV2 {
 		frame := fmt.Sprintf(`{"type":"resize","cols":%d,"rows":%d}`, pinnedCols, pinnedRows)
 		_ = ws.WriteMessage(websocket.TextMessage, []byte(frame))
 	}
