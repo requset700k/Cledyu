@@ -171,13 +171,22 @@ logs:
     size: 5Gi
 
 # ── ArgoCD 호환 ───────────────────────────────────────────────────────────────
-# ArgoCD는 Helm hook(post-install/post-upgrade)을 실행하지 않으므로
-# migrate-database-job / create-user-job 을 일반 K8s Job으로 배포해야 한다.
+# ArgoCD는 Helm hook(post-install/post-upgrade)을 실행하지 않으므로 useHelmHooks=false 로
+# 일반 K8s Job 으로 배포한다. 다만 그러면 완료된(immutable) Job 을 sync 때마다 ArgoCD 가
+# delete+recreate 하면서 그 순간 앱이 OutOfSync/Missing 으로 깜빡인다. ArgoCD 네이티브 Sync hook
+# 으로 지정해 ArgoCD 가 수명주기를 관리(BeforeHookCreation: 다음 sync 직전 삭제)하게 하면
+# hook 리소스는 앱 health 로 추적되지 않아 깜빡임이 사라진다. (마이그레이션·유저생성은 idempotent)
 migrateDatabaseJob:
   useHelmHooks: false
+  jobAnnotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 
 createUserJob:
   useHelmHooks: false
+  jobAnnotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
 
 # ── PSA restricted 보안 컨텍스트 ─────────────────────────────────────────────
 securityContexts:
