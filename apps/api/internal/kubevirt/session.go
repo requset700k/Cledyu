@@ -416,7 +416,8 @@ func (m *Manager) Get(ctx context.Context, sessionID string) (*Session, error) {
 			}
 		case "Failed", "Succeeded":
 			status = "failed"
-			if ann["cledyu.io/boot-result-recorded"] == "" && m.met != nil {
+			// ready-at가 없는 경우만 부팅 실패로 기록 — 이미 ready였던 VM의 사후 종료는 제외
+			if ann["cledyu.io/ready-at"] == "" && ann["cledyu.io/boot-result-recorded"] == "" && m.met != nil {
 				nsObj.Annotations["cledyu.io/boot-result-recorded"] = "true"
 				if _, err := m.core.CoreV1().Namespaces().Update(ctx, nsObj, metav1.UpdateOptions{}); err == nil {
 					m.met.vmBootTotal.WithLabelValues("failed", "onprem").Inc()
@@ -426,6 +427,13 @@ func (m *Manager) Get(ctx context.Context, sessionID string) (*Session, error) {
 	}
 	if status == "provisioning" && m.provisioningTimedOut(startedAt) {
 		status = "failed"
+		// timeout 부팅 실패도 vm_boot_total에 기록
+		if ann["cledyu.io/boot-result-recorded"] == "" && m.met != nil {
+			nsObj.Annotations["cledyu.io/boot-result-recorded"] = "true"
+			if _, err := m.core.CoreV1().Namespaces().Update(ctx, nsObj, metav1.UpdateOptions{}); err == nil {
+				m.met.vmBootTotal.WithLabelValues("failed", "onprem").Inc()
+			}
+		}
 	}
 
 	return &Session{
