@@ -88,6 +88,16 @@ configs:
     exec.enabled: "true"
     url: https://argocd.cledyu.local
     admin.enabled: "true"
+    # ExternalSecret 은 CRD 가 spec.data[].remoteRef 와 target 에 기본값을 채우는데 손으로 쓴
+    # 매니페스트엔 없어 모든 ESO 앱이 상시 OutOfSync 로 보였다(실질 차이 없음). 그 기본값들만
+    # 무시해 sync status 가 정상이 되도록 전역 정규화한다.
+    resource.customizations.ignoreDifferences.external-secrets.io_ExternalSecret: |
+      jqPathExpressions:
+        - '.spec.data[].remoteRef.conversionStrategy'
+        - '.spec.data[].remoteRef.decodingStrategy'
+        - '.spec.data[].remoteRef.metadataPolicy'
+        - '.spec.target.creationPolicy'
+        - '.spec.target.deletionPolicy'
     # OIDC = Keycloak (cledyu realm). clientSecret 은 argocd-secret 의 별도 키 참조.
     # requestedScopes 에 'groups' 미포함: keycloak realm 에 groups client scope 미등록 (후속 PR).
     # 대신 Keycloak client argocd 의 protocol mapper (group_membership) 가 모든 토큰에

@@ -27,6 +27,16 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: monitoring
+  # cledyu-root-ca-bundle ConfigMap 의 data 는 trust-manager 가 소유(trust.cert-manager.io/hash)하며
+  # ca.crt 를 trailing newline 없이 기록한다. git 정적 CM 과 newline 만 달라 상시 OutOfSync 였다 —
+  # 컨트롤러가 소유하는 data 는 무시한다(정적 CM 은 mount 보장용 seed).
+  ignoreDifferences:
+    - group: ""
+      kind: ConfigMap
+      name: cledyu-root-ca-bundle
+      namespace: monitoring
+      jsonPointers:
+        - /data
   syncPolicy:
     automated:
       prune: true

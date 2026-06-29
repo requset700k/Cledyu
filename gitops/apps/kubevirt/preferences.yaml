@@ -1,10 +1,13 @@
 ---
 # Ubuntu 22.04 cloud image 기반 Lab VM 기본 설정.
 # headless 환경이므로 그래픽 디바이스 비활성화, virtio 드라이버 강제 적용.
+# 이름은 cledyu-ubuntu — virt-operator 가 배포하는 common-instancetypes 번들의 ClusterPreference
+# "ubuntu" 와 충돌(번들이 재적용하며 커스텀·ArgoCD 라벨을 벗겨 상시 OutOfSync)하던 것을 피하려
+# 플랫폼 전용 이름으로 분리. 참조처: api orchestrator(session.go), smoke-test-vm.
 apiVersion: instancetype.kubevirt.io/v1beta1
 kind: VirtualMachineClusterPreference
 metadata:
-  name: ubuntu
+  name: cledyu-ubuntu
   annotations:
     argocd.argoproj.io/sync-wave: "20"
 spec:

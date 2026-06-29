@@ -16,6 +16,16 @@ spec:
       recurse: true
   destination:
     server: https://kubernetes.default.svc
+  # CDI operator 가 cdis CRD 의 스키마(versions)를 런타임에 소유·관리한다. git 의 cdi-operator.yaml
+  # 번들 CRD 와 버전 목록이 달라(operator 가 v1alpha1 등을 정리) 상시 OutOfSync 였다 — operator 소유
+  # 필드는 무시한다. (ubuntu preference 충돌은 preferences.yaml 을 cledyu-ubuntu 로 rename 해 해소)
+  ignoreDifferences:
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      name: cdis.cdi.kubevirt.io
+      jqPathExpressions:
+        - '.spec.versions'
+        - '.spec.conversion'
   syncPolicy:
     automated:
       prune: true
