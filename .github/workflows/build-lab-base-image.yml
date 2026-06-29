@@ -80,7 +80,7 @@ jobs:
           done
           USERDATA=$(cat <<EOF
           #!/usr/bin/env bash
-          export REGION=$AWS_REGION TAG=$TAG BAKER_BUCKET=$BAKER_BUCKET IMPORT_AMI=${{ inputs.import_ami || 'true' }} REF=${{ github.sha }}
+          export REGION=$AWS_REGION TAG=$TAG BAKER_BUCKET=$BAKER_BUCKET IMPORT_AMI=${{ github.event_name == 'push' && 'true' || inputs.import_ami }} REF=${{ github.sha }}
           curl -fsSL https://raw.githubusercontent.com/requset700k/cledyu/${{ github.sha }}/infra/images/lab-base/baker-bootstrap.sh -o /tmp/b.sh
           bash /tmp/b.sh
           EOF

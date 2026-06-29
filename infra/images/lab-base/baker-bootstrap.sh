@@ -112,15 +112,31 @@ JSON
   # prune-on-bake: lab-session-ami 태그 AMI 중 최신 KEEP 개만 남기고 옛것 deregister + 스냅샷 삭제.
   # 베이크가 AMI 를 만드는 유일한 주체라 만들 때 정리한다(스냅샷 누적 비용 방지). 방금 만든 건 보호.
   KEEP=3
+  # 배포는 수동이라 현재 Launch Template 이 참조하는 AMI 가 최신 KEEP 밖일 수 있다. 그 AMI 는
+  # 운영 중이므로 prune 에서 반드시 제외한다(방금 만든 AMI 도 제외).
+  LT_ID=$(aws ec2 describe-launch-templates --region "$REGION" \
+    --query "LaunchTemplates[?starts_with(LaunchTemplateName,'cledyu-lab-session')].LaunchTemplateId | [0]" \
+    --output text 2>/dev/null || echo "None")
+  LT_AMI="None"
+  if [ -n "$LT_ID" ] && [ "$LT_ID" != "None" ]; then
+    # '$Default' 는 AWS Launch Template 의 기본 버전 별칭 리터럴이라 셸 확장하면 안 된다(단일따옴표 유지).
+    # shellcheck disable=SC2016
+    LT_AMI=$(aws ec2 describe-launch-template-versions --launch-template-id "$LT_ID" --region "$REGION" \
+      --versions '$Default' --query 'LaunchTemplateVersions[0].LaunchTemplateData.ImageId' --output text 2>/dev/null || echo "None")
+  fi
+  log "prune keeps newest $KEEP + in-use LT AMI $LT_AMI"
   OLD=$(aws ec2 describe-images --owners self --region "$REGION" \
     --filters "Name=tag:cledyu-role,Values=lab-session-ami" \
     --query "sort_by(Images,&CreationDate)[:-${KEEP}].ImageId" --output text)
   for old in $OLD; do
-    if [ "$old" = "$AMI_ID" ]; then continue; fi
+    if [ "$old" = "$AMI_ID" ] || [ "$old" = "$LT_AMI" ]; then continue; fi
     osnap=$(aws ec2 describe-images --image-ids "$old" --region "$REGION" \
       --query 'Images[0].BlockDeviceMappings[0].Ebs.SnapshotId' --output text)
     aws ec2 deregister-image --image-id "$old" --region "$REGION" || true
     if [ -n "$osnap" ] && [ "$osnap" != "None" ]; then
+      # 이전 베이크 스냅샷엔 태그가 없을 수 있어, 삭제 전 태그해 tag-scoped DeleteSnapshot 가 통과되게 한다.
+      aws ec2 create-tags --resources "$osnap" --region "$REGION" \
+        --tags "Key=cledyu-role,Value=lab-session-ami-snap" || true
       aws ec2 delete-snapshot --snapshot-id "$osnap" --region "$REGION" || true
     fi
     log "pruned old AMI $old (snap $osnap)"

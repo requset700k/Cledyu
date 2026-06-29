@@ -104,6 +104,8 @@ data "aws_iam_policy_document" "baker_instance" {
     actions = [
       "ec2:ImportImage", "ec2:DescribeImportImageTasks",
       "ec2:CreateTags", "ec2:DescribeImages", "ec2:DescribeSnapshots",
+      # prune 가 현재 Launch Template 이 참조하는 AMI 를 제외하기 위해 조회한다.
+      "ec2:DescribeLaunchTemplates", "ec2:DescribeLaunchTemplateVersions",
     ]
     resources = ["*"]
   }
