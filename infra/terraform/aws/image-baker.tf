@@ -56,8 +56,10 @@ data "aws_iam_policy_document" "gha_baker" {
     resources = [aws_s3_bucket.baker.arn, "${aws_s3_bucket.baker.arn}/*"]
   }
   statement {
+    # AWS 공개 파라미터(빈 account 세그먼트)에서 metal 베이스 AMI 를 조회한다.
+    # Ubuntu(canonical/...) 와 Amazon Linux(ami-amazon-linux-latest/...) 모두 /aws/service/* 아래에 있다.
     actions   = ["ssm:GetParameter"]
-    resources = ["arn:aws:ssm:${var.region}::parameter/aws/service/ami-amazon-linux-latest/*"]
+    resources = ["arn:aws:ssm:${var.region}::parameter/aws/service/*"]
   }
 }
 
