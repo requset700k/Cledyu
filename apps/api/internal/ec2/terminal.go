@@ -13,8 +13,8 @@ import (
 const (
 	defaultSSHPort = "22"
 	ptyTermType    = "xterm-256color"
-	// 프론트 xterm 은 현재 리사이즈 프로토콜을 보내지 않으므로(시리얼 콘솔과 동일 raw 입력 계약)
-	// 합리적인 고정 PTY 크기로 연다. 동적 리사이즈는 WS 제어 프레임 도입 시 후속.
+	// PTY 초기 크기. 브라우저가 연결 직후 resize 제어 프레임으로 실제 xterm 크기를 보내 Resize 로
+	// 덮어쓰므로(console 핸들러), 이 값은 첫 리사이즈 전까지의 임시값일 뿐이다.
 	ptyCols = 120
 	ptyRows = 40
 )
@@ -119,6 +119,12 @@ func DialTerminal(ctx context.Context, host string, tc TerminalConfig) (*Termina
 
 func (t *Terminal) Read(p []byte) (int, error)  { return t.stdout.Read(p) }
 func (t *Terminal) Write(p []byte) (int, error) { return t.stdin.Write(p) }
+
+// Resize는 PTY 윈도우 크기를 cols×rows 로 변경한다(SSH window-change). 브라우저 xterm 의 리사이즈를
+// 셸 readline 에 반영해, 긴 명령줄이 같은 줄을 덮어쓰지 않고 올바르게 줄바꿈되도록 한다.
+func (t *Terminal) Resize(cols, rows int) error {
+	return t.session.WindowChange(rows, cols)
+}
 
 // Close는 셸 세션과 SSH 연결을 닫는다(진행 중인 Read 는 EOF 로 풀린다).
 func (t *Terminal) Close() error {
