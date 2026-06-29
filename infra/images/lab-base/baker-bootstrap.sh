@@ -11,6 +11,15 @@ IMPORT_AMI="${IMPORT_AMI:-true}"
 GHCR_USER="${GHCR_USER:-ykgoesdumb}"
 REF="${REF:-main}"
 
+# cloud-init user-data 는 root 로 실행되지만 HOME 이 비어 있을 수 있다. packer 는 설정 디렉터리
+# 결정에 HOME 을 요구하므로(없으면 "No $HOME environment variable found") 명시한다.
+export HOME=/root
+
+# 전체 출력을 로그로 캡처한다. metal 은 실패 시 self-terminate 되어 사후 콘솔 접근이 안 되므로,
+# finish() 가 이 로그를 sentinel 과 함께 S3 에 올려 원인을 진단할 수 있게 한다. set -x 로 명령 추적.
+exec > >(tee -a /var/log/cledyu-baker.log) 2>&1
+set -x
+
 STATUS="failed"
 AMI_ID=""
 WORK=/opt/cledyu
@@ -19,6 +28,7 @@ log() { echo "[baker] $*"; }
 finish() {
   printf '{"status":"%s","tag":"%s","ami":"%s"}\n' "$STATUS" "$TAG" "$AMI_ID" > /tmp/done.json
   aws s3 cp /tmp/done.json "s3://$BAKER_BUCKET/builds/$TAG/done.json" --region "$REGION" || true
+  aws s3 cp /var/log/cledyu-baker.log "s3://$BAKER_BUCKET/builds/$TAG/baker.log" --region "$REGION" || true
   TOKEN=$(curl -sX PUT "http://169.254.169.254/latest/api/token" \
     -H "X-aws-ec2-metadata-token-ttl-seconds: 60") || true
   IID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
@@ -27,10 +37,16 @@ finish() {
 }
 trap finish EXIT
 
-# 도구 설치(metal 은 Amazon Linux 2023 가정 — packer/qemu/docker/awscli).
-if ! dnf install -y git docker qemu-kvm awscli unzip; then
-  yum install -y git docker qemu-kvm awscli unzip
-fi
+# 도구 설치(metal 은 Ubuntu 22.04). AL2023 는 qemu-system 패키지가 없어 packer-qemu 에 부적합해
+# Ubuntu 로 베이크한다. qemu-system-x86 이 /usr/bin/qemu-system-x86_64 를 제공한다.
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y --no-install-recommends \
+  git docker.io qemu-system-x86 qemu-utils curl unzip xorriso
+# aws CLI v2 설치(Ubuntu 엔 미포함). finish() 의 sentinel/log 업로드와 SSM/EC2 호출에 필요해 일찍 깐다.
+curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+unzip -q /tmp/awscliv2.zip -d /tmp
+/tmp/aws/install
 systemctl enable --now docker
 curl -fsSL -o /tmp/packer.zip \
   https://releases.hashicorp.com/packer/1.11.2/packer_1.11.2_linux_amd64.zip
@@ -40,10 +56,13 @@ git clone https://github.com/requset700k/cledyu.git "$WORK"
 git -C "$WORK" checkout "$REF"
 cd "$WORK/infra/images/lab-base" || exit 1
 
-# ghcr 로그인(PAT 는 SSM SecureString).
+# ghcr 로그인(PAT 는 SSM SecureString). set -x 로그에 PAT 가 평문으로 찍히지 않게 이 구간만 추적 끔.
+set +x
 GHCR_PAT=$(aws ssm get-parameter --name /cledyu/baker/ghcr_pat --with-decryption \
   --region "$REGION" --query Parameter.Value --output text)
 echo "$GHCR_PAT" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+unset GHCR_PAT
+set -x
 
 # 빌드 + ghcr push(온프렘 레그).
 IMAGE="$IMAGE" TAG="$TAG" bash build-and-push.sh

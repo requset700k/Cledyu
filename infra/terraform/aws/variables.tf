@@ -127,7 +127,9 @@ variable "public_ingress_allowed_cidrs" {
 }
 
 variable "github_repo" {
+  # OIDC sub 클레임은 레포 정식 대소문자(requset700k/Cledyu)를 쓰고 StringLike 는 대소문자를
+  # 구분하므로, 소문자로 두면 AssumeRoleWithWebIdentity 가 거부된다(정식 대문자 C 사용).
   description = "베이커 워크플로를 실행하는 GitHub 레포(owner/name). OIDC sub 제한에 사용."
   type        = string
-  default     = "requset700k/cledyu"
+  default     = "requset700k/Cledyu"
 }
