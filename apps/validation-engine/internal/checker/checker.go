@@ -7,10 +7,16 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/requset700k/cledyu/validation-engine/internal/executor"
 	"github.com/requset700k/cledyu/validation-engine/internal/model"
 )
+
+// defaultCheckTimeout은 체크 하나가 VM에서 실행되는 기본 상한이다.
+// virtctl ssh가 인증/연결 단계에서 매달리거나 명령이 끝나지 않을 때 한 체크당 이 시간에 끊는다.
+// Check.Timeout(초)이 지정되면 그 값으로 덮어쓴다(ansible-playbook 등 20s를 넘는 명령용).
+const defaultCheckTimeout = 20 * time.Second
 
 // 보안을 위한 정규표현식 정의 (Command Injection 방지)
 // 허용되는 파일 경로 패턴 — 절대경로만 허용, 셸 메타문자 금지
@@ -30,6 +36,15 @@ var safeCommandRe = regexp.MustCompile(`^[a-zA-Z0-9 /._\-=:@%"']+$`)
 
 // Run은 체크 항목 하나를 VM에서 실행하고 결과를 돌려준다.
 func Run(ctx context.Context, exe executor.VMExecutor, check model.Check) model.CheckResult {
+	// 체크별 실행 상한을 여기서 한 번만 건다. executor는 상한을 직접 걸지 않고
+	// 이 ctx의 deadline을 따른다(모든 체크 타입·executor 공통).
+	timeout := defaultCheckTimeout
+	if check.Timeout > 0 {
+		timeout = time.Duration(check.Timeout) * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	switch check.Type {
 	case model.CheckCommand:
 		return runCommand(ctx, exe, check) // 일반 명령어 실행 및 결과 확인

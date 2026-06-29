@@ -6,18 +6,15 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"time"
 
 	"github.com/requset700k/cledyu/validation-engine/internal/model"
 )
 
 // 랩 VM SSH 접속 기본값. 세션 VM cloud-init이 user "lab"에 엔진 공개키를 authorized_keys로 넣고,
 // 엔진은 대응하는 private key(LAB_SSH_KEY)로 접속한다. 미설정 시 키 없이 시도(로컬/테스트).
-const (
-	defaultLabSSHUser = "lab"
-	// execTimeout: virtctl ssh가 인증/연결 단계에서 멈출 때 30s+ 매달리지 않도록 한 체크당 상한.
-	execTimeout = 20 * time.Second
-)
+// 한 체크당 실행 상한은 checker가 ctx deadline으로 건다(checker.defaultCheckTimeout 또는
+// Check.Timeout). 여기서 별도 상한을 또 걸면 per-check timeout이 20s로 잘리므로 걸지 않는다.
+const defaultLabSSHUser = "lab"
 
 // KubeVirtExecutor는 KubeVirt VM에 명령어를 실행하는 도구
 // virtctl ssh(native client)를 통해 Kubernetes API 서버를 거쳐 VM에 접속
@@ -68,10 +65,9 @@ func (e *KubeVirtExecutor) Exec(ctx context.Context, cmd string) (string, error)
 		"vmi/"+e.vmName,
 	)
 
-	// 인증/연결 단계에서 멈추는 경우를 대비해 한 체크당 타임아웃을 건다.
-	runCtx, cancel := context.WithTimeout(ctx, execTimeout)
-	defer cancel()
-	command := exec.CommandContext(runCtx, "virtctl", args...)
+	// 실행 상한은 호출자(checker)가 ctx에 deadline으로 걸어둔다.
+	// ctx 만료 시 CommandContext가 virtctl 프로세스를 종료한다.
+	command := exec.CommandContext(ctx, "virtctl", args...)
 
 	// 명령어 출력(stdout)과 에러(stderr)를 각각 수집한다.
 	var stdout, stderr bytes.Buffer

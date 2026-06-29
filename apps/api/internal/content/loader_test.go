@@ -59,6 +59,36 @@ func TestLoad_InitAndIDE(t *testing.T) {
 	}
 }
 
+// ansible 멱등성 단계(step 4)는 ansible-playbook 재실행이 기본 20s를 넘겨 killed 되므로
+// per-check timeout 을 둔다. yaml 태그(timeout)가 어긋나면 0으로 파싱돼 다시 깨지므로 가드한다.
+func TestLoad_AnsibleStep4_HasTimeout(t *testing.T) {
+	labs, err := Load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	an, ok := labs["lab-ansible-basics"]
+	if !ok {
+		t.Fatal("lab-ansible-basics not loaded")
+	}
+	var found bool
+	for _, st := range an.Steps {
+		if st.ID != 4 {
+			continue
+		}
+		for _, ck := range st.Checks {
+			if ck.Type == "command" {
+				found = true
+				if ck.Timeout < 30 {
+					t.Errorf("ansible step4 command check timeout=%d, 기본 20s 초과값 기대(>=30)", ck.Timeout)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("ansible step4 command check를 찾지 못함")
+	}
+}
+
 func TestStaticHint(t *testing.T) {
 	s := Step{Hint: "legacy", HintLevels: []string{"l1", "l2", "l3"}}
 	cases := []struct {

@@ -45,6 +45,9 @@ type wireCheck struct {
 	Name       string `yaml:"name,omitempty" json:"name,omitempty"`
 	Expect     string `yaml:"expect,omitempty" json:"expect,omitempty"`
 	ExpectCode int    `yaml:"expect_code,omitempty" json:"expect_code,omitempty"`
+	// Timeout 도 API 발행 Check(message.Check json:"timeout")의 일부다. 빠지면 미러가
+	// 어긋나 per-check timeout 의 와이어 유실을 못 잡는다.
+	Timeout int `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 }
 
 // wireLab 는 랩 YAML 에서 검증에 필요한 부분(id·steps·checks)만 추린 형태다.
@@ -165,6 +168,11 @@ func TestLabContent_WirePreservesFields(t *testing.T) {
 				mc := toModelCheck(t, wc)
 				where := func() string {
 					return lab.ID + " step " + strconv.Itoa(step.ID) + " check " + strconv.Itoa(i) + " (" + wc.Type + ")"
+				}
+				// per-check timeout 은 모든 타입에 공통이다. YAML 에 적은 값이
+				// 와이어 직렬화 후에도 그대로 보존돼야 한다(timeout 태그 드리프트 차단).
+				if wc.Timeout != mc.Timeout {
+					t.Errorf("%s: timeout 이 와이어 직렬화 후 %d→%d 로 바뀜 — API/엔진 JSON 태그 불일치", where(), wc.Timeout, mc.Timeout)
 				}
 				switch model.CheckType(wc.Type) {
 				case model.CheckCommand:

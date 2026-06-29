@@ -48,6 +48,7 @@ type Check struct {
 	Name       string    `json:"name,omitempty"`
 	Expect     string    `json:"expect,omitempty"`
 	ExpectCode int       `json:"expect_code,omitempty"`
+	Timeout    int       `json:"timeout,omitempty"` // 체크 실행 제한 시간(초). 0이면 검증엔진 기본값(20s).
 }
 
 // ValidationRequest is published to the validation-requests Kafka topic.

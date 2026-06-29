@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/requset700k/cledyu/validation-engine/internal/model"
 )
@@ -422,5 +423,59 @@ func TestRunAll_UnknownType(t *testing.T) {
 	})
 	if result.Passed {
 		t.Error("알 수 없는 타입은 실패해야 함")
+	}
+}
+
+// --- per-check timeout ---
+
+// deadlineCapture는 Exec에 넘어온 ctx의 남은 deadline을 기록하는 mock executor다.
+type deadlineCapture struct {
+	remaining time.Duration
+	hasDL     bool
+}
+
+func (d *deadlineCapture) Exec(ctx context.Context, _ string) (string, error) {
+	dl, ok := ctx.Deadline()
+	d.hasDL = ok
+	if ok {
+		d.remaining = time.Until(dl)
+	}
+	return "ok", nil
+}
+
+func (d *deadlineCapture) Close() {}
+
+// Check.Timeout(초)이 지정되면 그 값이 executor ctx의 deadline으로 전달돼야 한다.
+// (ansible-playbook 처럼 기본 20s를 넘는 명령을 위해 필요)
+func TestRun_PerCheckTimeout_Applied(t *testing.T) {
+	cap := &deadlineCapture{}
+	Run(context.Background(), cap, model.Check{
+		Type:    model.CheckCommand,
+		Command: "ansible-playbook",
+		Expect:  "ok",
+		Timeout: 60,
+	})
+	if !cap.hasDL {
+		t.Fatal("executor ctx에 deadline이 있어야 함")
+	}
+	// 60s 근처여야 한다(기본 20s가 아님). 실행 지연을 감안해 폭넓게 검사.
+	if cap.remaining <= 40*time.Second || cap.remaining > 60*time.Second {
+		t.Errorf("Timeout=60 인데 남은 deadline=%v (40~60s 기대)", cap.remaining)
+	}
+}
+
+// Check.Timeout 미지정 시 기본 타임아웃(20s)이 적용돼야 한다.
+func TestRun_DefaultTimeout_Applied(t *testing.T) {
+	cap := &deadlineCapture{}
+	Run(context.Background(), cap, model.Check{
+		Type:    model.CheckCommand,
+		Command: "ls",
+		Expect:  "ok",
+	})
+	if !cap.hasDL {
+		t.Fatal("executor ctx에 deadline이 있어야 함")
+	}
+	if cap.remaining <= 10*time.Second || cap.remaining > 20*time.Second {
+		t.Errorf("기본 Timeout 인데 남은 deadline=%v (10~20s 기대)", cap.remaining)
 	}
 }

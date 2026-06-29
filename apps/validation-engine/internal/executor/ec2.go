@@ -61,7 +61,8 @@ func (e *EC2Executor) Exec(ctx context.Context, cmd string) (string, error) {
 	commandID := aws.ToString(out.Command.CommandId)
 
 	// SSM은 비동기로 명령을 실행하므로 완료될 때까지 폴링한다.
-	// ctx 타임아웃(5분) 안에 완료되지 않으면 ctx.Err()로 종료된다.
+	// 실행 상한은 호출자(checker)가 ctx deadline 으로 건다(기본 20s, Check.Timeout 으로 조정).
+	// 그 시간 안에 완료되지 않으면 ctx.Done()으로 빠져나간다.
 	for {
 		result, err := e.client.GetCommandInvocation(ctx, &ssm.GetCommandInvocationInput{
 			CommandId:  aws.String(commandID),

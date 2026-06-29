@@ -670,6 +670,7 @@ func toValidationChecks(checks []content.Check) []validation.Check {
 			Name:       check.Name,
 			Expect:     check.Expect,
 			ExpectCode: check.ExpectCode,
+			Timeout:    check.Timeout,
 		})
 	}
 	return out
