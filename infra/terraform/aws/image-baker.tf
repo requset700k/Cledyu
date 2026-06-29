@@ -39,6 +39,11 @@ data "aws_iam_policy_document" "gha_baker" {
     resources = ["*"]
   }
   statement {
+    # launch 전 "이전 베이크 metal 이 vCPU 를 반환했는지" 가드에 사용(연속 트리거 충돌 회피).
+    actions   = ["ec2:DescribeInstances"]
+    resources = ["*"]
+  }
+  statement {
     actions   = ["ec2:TerminateInstances"]
     resources = ["*"]
     condition {
@@ -98,7 +103,9 @@ data "aws_iam_policy_document" "baker_instance" {
   statement {
     actions = [
       "ec2:ImportImage", "ec2:DescribeImportImageTasks",
-      "ec2:CreateTags",
+      "ec2:CreateTags", "ec2:DescribeImages", "ec2:DescribeSnapshots",
+      # prune 가 현재 Launch Template 이 참조하는 AMI 를 제외하기 위해 조회한다.
+      "ec2:DescribeLaunchTemplates", "ec2:DescribeLaunchTemplateVersions",
     ]
     resources = ["*"]
   }
@@ -109,6 +116,25 @@ data "aws_iam_policy_document" "baker_instance" {
       test     = "StringEquals"
       variable = "ec2:ResourceTag/cledyu-role"
       values   = ["image-baker"]
+    }
+  }
+  # prune-on-bake: 오래된 lab-base AMI/스냅샷 정리. 태그로 스코프해 베이커가 만든 것만 삭제.
+  statement {
+    actions   = ["ec2:DeregisterImage"]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:ResourceTag/cledyu-role"
+      values   = ["lab-session-ami"]
+    }
+  }
+  statement {
+    actions   = ["ec2:DeleteSnapshot"]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "ec2:ResourceTag/cledyu-role"
+      values   = ["lab-session-ami-snap"]
     }
   }
   statement {

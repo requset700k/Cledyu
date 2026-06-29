@@ -1,14 +1,16 @@
 ---
 # 세션 VM 베이스 이미지 베이킹 — hosted runner 가 AWS OIDC 로 인증해 일회성 EC2 *.metal 을
 # 띄우고, metal 이 packer-qemu 로 qcow2 를 구워 ghcr push + (옵션)AMI import 후 self-terminate.
-# self-hosted KVM 러너 불필요. workflow_dispatch 전용(public repo fork-PR RCE 방지).
+# self-hosted KVM 러너 불필요. 베이크는 hosted runner + 일회성 클라우드 metal 에서만 돌아 fork-PR
+# RCE 우려가 없으므로, lab-base/** 변경이 main 에 머지되면 자동 트리거한다(수동 dispatch 도 유지).
+# 배포(base-datavolume bump + EC2 ami_id)는 자동화하지 않는다 — 사람이 검증 후 양 provider 함께.
 name: build lab base image
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "이미지 태그(미입력 시 날짜)"
+        description: "이미지 태그(미입력 시 run id)"
         required: false
         default: ""
       import_ami:
@@ -19,6 +21,10 @@ on:
         description: "sentinel 폴링 최대 대기 시간(분)"
         required: false
         default: "90"
+  push:
+    branches: [main]
+    paths:
+      - "infra/images/lab-base/**"
 
 permissions:
   id-token: write
@@ -35,7 +41,8 @@ env:
 
 concurrency:
   group: build-lab-base-image
-  cancel-in-progress: true
+  # 진행 중 베이크를 죽이면 launch 된 metal 이 orphan 으로 남아 계속 과금되므로 큐잉한다(취소 금지).
+  cancel-in-progress: false
 
 jobs:
   bake:
@@ -63,9 +70,17 @@ jobs:
         id: launch
         run: |
           TAG="${{ steps.t.outputs.tag }}"
+          # 이전 베이크 metal 이 vCPU 를 반환할 때까지 대기 — 연속 트리거 시 VcpuLimitExceeded·orphan 회피.
+          for _w in $(seq 1 40); do
+            busy=$(aws ec2 describe-instances \
+              --filters "Name=instance-type,Values=$METAL_TYPE" "Name=instance-state-name,Values=pending,running,shutting-down,stopping" \
+              --query 'length(Reservations[].Instances[])' --output text)
+            [ "$busy" = "0" ] && break
+            echo "waiting for metal vcpu to free (busy=$busy)"; sleep 30
+          done
           USERDATA=$(cat <<EOF
           #!/usr/bin/env bash
-          export REGION=$AWS_REGION TAG=$TAG BAKER_BUCKET=$BAKER_BUCKET IMPORT_AMI=${{ inputs.import_ami }} REF=${{ github.sha }}
+          export REGION=$AWS_REGION TAG=$TAG BAKER_BUCKET=$BAKER_BUCKET IMPORT_AMI=${{ github.event_name == 'push' && 'true' || inputs.import_ami }} REF=${{ github.sha }}
           curl -fsSL https://raw.githubusercontent.com/requset700k/cledyu/${{ github.sha }}/infra/images/lab-base/baker-bootstrap.sh -o /tmp/b.sh
           bash /tmp/b.sh
           EOF
@@ -84,9 +99,10 @@ jobs:
       - name: Poll for completion sentinel
         run: |
           TAG="${{ steps.t.outputs.tag }}"
-          MAX=$(( ${{ inputs.poll_timeout_min }} * 2 ))
+          MAX=$(( ${{ inputs.poll_timeout_min || '90' }} * 2 ))
           for _i in $(seq 1 "$MAX"); do
             if aws s3 cp "s3://$BAKER_BUCKET/builds/$TAG/done.json" /tmp/done.json 2>/dev/null; then
+              echo "### lab-base bake 결과 (배포는 수동: base-datavolume url + EC2 ami_id)" >> "$GITHUB_STEP_SUMMARY"
               cat /tmp/done.json >> "$GITHUB_STEP_SUMMARY"
               grep -q '"status":"ok"' /tmp/done.json && exit 0
               echo "baker reported failure" && exit 1
