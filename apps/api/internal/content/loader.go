@@ -30,7 +30,7 @@ type Check struct {
 	Name       string `yaml:"name,omitempty" json:"name,omitempty"`
 	Expect     string `yaml:"expect,omitempty" json:"expect,omitempty"`
 	ExpectCode int    `yaml:"expect_code,omitempty" json:"expect_code,omitempty"`
-	// Timeout 은 이 체크 하나의 실행 제한 시간(초). 0이면 검증엔진 기본값(20s).
+	// Timeout 은 이 체크 하나의 실행 제한 시간(초). 0이면 검증엔진 executor별 기본값(KubeVirt 20s / EC2 5m).
 	// JSON 태그는 검증엔진 model.Check(json:"timeout")와 일치시킨다.
 	Timeout int `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 }

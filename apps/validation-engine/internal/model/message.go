@@ -85,7 +85,7 @@ type Check struct {
 	Expect     string `json:"expect,omitempty"`      // 출력/내용에 포함돼야 할 문자열
 	ExpectCode int    `json:"expect_code,omitempty"` // 기대하는 HTTP 상태코드
 
-	// Timeout: 이 체크 하나의 실행 제한 시간(초). 0이면 checker 기본값(20s).
+	// Timeout: 이 체크 하나의 실행 제한 시간(초). 0이면 executor별 기본값(KubeVirt 20s / EC2 5m).
 	// ansible-playbook 처럼 기본 20s를 넘기는 명령에 더 큰 값을 준다.
 	Timeout int `json:"timeout,omitempty"`
 }
