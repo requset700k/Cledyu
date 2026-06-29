@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/requset700k/cledyu/api/internal/ai"
@@ -65,6 +66,7 @@ func (h *Handler) RequestHint(c *gin.Context) {
 	}
 
 	if h.ai != nil {
+		start := time.Now()
 		resp, err := h.ai.RequestHint(c.Request.Context(), ai.HintRequest{
 			UserID:    uid,
 			SessionID: sessionID,
@@ -81,6 +83,9 @@ func (h *Handler) RequestHint(c *gin.Context) {
 		})
 		switch {
 		case err == nil:
+			if h.met != nil {
+				h.met.aiHintDuration.WithLabelValues("success").Observe(time.Since(start).Seconds())
+			}
 			h.emitEvent(events.Event{
 				Type: events.HintRequested, UserID: uid, SessionID: sessionID, LabID: labID,
 				StepID: req.StepID, HintLevel: level, HintSource: "ai",
@@ -94,6 +99,9 @@ func (h *Handler) RequestHint(c *gin.Context) {
 			})
 			return
 		case errors.Is(err, ai.ErrRateLimited):
+			if h.met != nil {
+				h.met.aiHintDuration.WithLabelValues("rate_limited").Observe(time.Since(start).Seconds())
+			}
 			// 한도 초과는 정적 폴백으로 우회시키지 않는다 — Guardrails 의 목적 유지.
 			c.JSON(http.StatusTooManyRequests, gin.H{
 				"error": "힌트 사용 한도에 도달했습니다. 잠시 후 다시 시도하세요.",
@@ -101,6 +109,9 @@ func (h *Handler) RequestHint(c *gin.Context) {
 			})
 			return
 		default:
+			if h.met != nil {
+				h.met.aiHintDuration.WithLabelValues("fallback").Observe(time.Since(start).Seconds())
+			}
 			h.log.Warn("ai tutor 미가용 — 정적 힌트로 폴백", zap.Error(err),
 				zap.String("session_id", sessionID), zap.Int("step_id", req.StepID))
 		}

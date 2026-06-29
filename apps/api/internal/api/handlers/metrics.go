@@ -13,6 +13,7 @@ type handlerMetrics struct {
 	validationDuration       *prometheus.HistogramVec
 	validationStartTimes     map[string]time.Time
 	validationMu             sync.Mutex
+	aiHintDuration           *prometheus.HistogramVec
 }
 
 func newHandlerMetrics(reg prometheus.Registerer) *handlerMetrics {
@@ -38,11 +39,20 @@ func newHandlerMetrics(reg prometheus.Registerer) *handlerMetrics {
 		},
 		[]string{"result"}, // passed | failed
 	)
-	reg.MustRegister(wsConnectionsEstablished, wsConnectionDrops, validationDuration)
+	aiHintDuration := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "ai_hint_latency_seconds",
+			Help:    "AI 힌트 요청부터 응답까지 걸린 시간(초).",
+			Buckets: []float64{0.5, 1, 2, 3, 5, 10, 15},
+		},
+		[]string{"result"}, // success | fallback | rate_limited | error
+	)
+    reg.MustRegister(wsConnectionsEstablished, wsConnectionDrops, validationDuration, aiHintDuration)
 	return &handlerMetrics{
 		wsConnectionsEstablished: wsConnectionsEstablished,
 		wsConnectionDrops:        wsConnectionDrops,
 		validationDuration:       validationDuration,
 		validationStartTimes:     make(map[string]time.Time),
+		aiHintDuration:           aiHintDuration,
 	}
 }

@@ -11,6 +11,10 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/requset700k/cledyu/api/internal/ai"
 	"github.com/requset700k/cledyu/api/internal/content"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
 	"go.uber.org/zap"
 )
 
@@ -218,5 +222,29 @@ func TestRequestHint_AIRateLimited(t *testing.T) {
 	}
 	if body := decode(t, w); body["code"] != "hint_rate_limited" {
 		t.Fatalf("expected hint_rate_limited code, got %v", body)
+	}
+}
+
+func TestRequestHint_AIMetricsRecorded(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	met := newHandlerMetrics(reg)
+
+	bff := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		var hr ai.HintRequest
+		_ = json.NewDecoder(req.Body).Decode(&hr)
+		_ = json.NewEncoder(w).Encode(ai.HintResponse{
+			Hint: "힌트", HintLevel: hr.HintLevel, Model: "gemini",
+		})
+	}))
+	defer bff.Close()
+
+	h := hintTestHandler(t, bff.URL)
+	h.met = met
+	r := hintRouter(h)
+
+	postHint(r, "s1", map[string]any{"step_id": 1})
+
+	if c := testutil.CollectAndCount(met.aiHintDuration); c != 1 {
+		t.Errorf("ai hint duration 샘플 수 = %d, want 1", c)
 	}
 }
