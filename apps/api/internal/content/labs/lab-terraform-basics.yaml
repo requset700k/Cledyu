@@ -16,16 +16,9 @@ tags:
   - iac
   - ide
 init:
-  # curl·unzip 은 베이스 이미지(lab-base)에 미리 구워져 있어 packages(apt) 단계를 생략한다.
-  # cloud-init 이 apt-get update/install 을 건너뛰어 세션 부팅이 빨라진다.
+  # terraform·code-server 는 베이스 이미지(lab-base)에 이미 설치돼 있다(다운로드 0).
+  # 여기서는 code-server 워크스페이스/설정을 만들고 lab 사용자 서비스를 기동만 한다.
   runcmd:
-    # terraform 설치 (releases.hashicorp.com zip → /usr/local/bin)
-    - curl -fsSL -o /tmp/terraform.zip https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip
-    - unzip -o /tmp/terraform.zip -d /usr/local/bin
-    - rm -f /tmp/terraform.zip
-    # code-server 설치 + lab 사용자 서비스 기동 (워크스페이스 /home/lab/workspace)
-    - curl -fsSL https://code-server.dev/install.sh -o /tmp/code-server-install.sh
-    - sh /tmp/code-server-install.sh
     - mkdir -p /home/lab/workspace /home/lab/.config/code-server
     - "printf 'bind-addr: 0.0.0.0:13337\\nauth: none\\ncert: false\\n' > /home/lab/.config/code-server/config.yaml"
     - chown -R lab:lab /home/lab/workspace /home/lab/.config

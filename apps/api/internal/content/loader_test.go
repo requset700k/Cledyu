@@ -49,8 +49,9 @@ func TestLoad_InitAndIDE(t *testing.T) {
 	if an.IDE {
 		t.Error("ansible lab must not declare ide (경량 구성)")
 	}
-	if len(an.Init.Packages) == 0 {
-		t.Errorf("ansible lab must install ansible-core via init packages, got %+v", an.Init)
+	// ansible-core 는 베이스 이미지(lab-base)에 베이킹되므로 랩이 init.packages 로 설치하지 않는다.
+	if len(an.Init.Packages) != 0 {
+		t.Errorf("ansible lab must not declare init packages (baked into base), got %+v", an.Init)
 	}
 
 	// IDE 없는 기존 랩은 init 도 ide 도 없어야 한다(zero value 회귀 확인).

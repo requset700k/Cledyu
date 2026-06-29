@@ -16,19 +16,12 @@ tags:
   - kubernetes
   - gitops
 init:
-  # curl 은 베이스 이미지(lab-base)에 미리 구워져 있어 packages(apt) 단계를 생략한다.
-  # cloud-init 이 apt-get update/install 을 건너뛰어 세션 부팅이 빨라진다.
+  # k3s·helm 은 베이스 이미지(lab-base)에 이미 설치돼 있다(k3s 는 서비스만 꺼둠, nginx 캐시 포함).
+  # 여기서는 k3s 서비스 기동과 KUBECONFIG 노출만 한다(다운로드 0 → 세션 부팅 단축).
   runcmd:
-    - curl -sfL https://get.k3s.io -o /tmp/k3s-install.sh
-    # cluster/service CIDR 을 호스트 파드망과 겹치지 않게 지정(lab-k8s-basics 와 동일한 이유).
-    - INSTALL_K3S_EXEC="--write-kubeconfig-mode 644 --cluster-cidr=10.244.0.0/16 --service-cidr=10.245.0.0/16" sh /tmp/k3s-install.sh
+    - systemctl enable --now k3s
     - echo KUBECONFIG=/etc/rancher/k3s/k3s.yaml >> /etc/environment
     - "printf 'export KUBECONFIG=/etc/rancher/k3s/k3s.yaml\\n' > /etc/profile.d/k3s-kubeconfig.sh"
-    - curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 -o /tmp/get-helm-3.sh
-    - bash /tmp/get-helm-3.sh
-    # helm create 기본 차트가 배포하는 nginx 이미지를 미리 받아둔다(릴리스 검증엔 불필요하나
-    # 학습자가 Pod 까지 확인할 때 빠르게 뜨도록). CRI(k8s.io) 네임스페이스로 받아야 Pod 가 캐시 사용.
-    - 'for i in $(seq 1 12); do k3s crictl pull docker.io/library/nginx:1.27-alpine && break; sleep 5; done'
 steps:
   - id: 1
     title: Helm 설치 확인과 저장소 추가

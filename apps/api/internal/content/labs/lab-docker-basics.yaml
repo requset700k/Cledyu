@@ -14,11 +14,10 @@ tags:
   - container
   - dockerfile
 init:
-  packages:
-    # docker.io 는 무거워 베이스에 굽지 않고 세션마다 설치한다(apt 단계 유지).
-    # curl 은 베이스 이미지(lab-base)에 구워져 있어 여기서 선언하지 않는다.
-    - docker.io
+  # docker 는 베이스 이미지(lab-base)에 이미 설치돼 있다(서비스만 꺼둠). 여기서 기동 후
+  # lab 사용자 docker 그룹·소켓 권한을 설정한다(다운로드 0 → 세션 부팅 단축).
   runcmd:
+    - systemctl enable --now docker
     - usermod -aG docker lab
     - chmod 666 /var/run/docker.sock
 steps:
