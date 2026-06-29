@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/requset700k/cledyu/validation-engine/internal/model"
 )
@@ -17,6 +18,8 @@ type mockExecutor struct {
 func (m *mockExecutor) Exec(_ context.Context, _ string) (string, error) {
 	return m.output, m.err
 }
+
+func (m *mockExecutor) DefaultTimeout() time.Duration { return 20 * time.Second }
 
 func (m *mockExecutor) Close() {}
 
@@ -422,5 +425,87 @@ func TestRunAll_UnknownType(t *testing.T) {
 	})
 	if result.Passed {
 		t.Error("알 수 없는 타입은 실패해야 함")
+	}
+}
+
+// --- per-check timeout ---
+
+// deadlineCapture는 Exec에 넘어온 ctx의 남은 deadline을 기록하는 mock executor다.
+// defaultTO는 DefaultTimeout()이 돌려줄 값(0이면 20s로 간주) — executor별 기본값 검증용.
+type deadlineCapture struct {
+	defaultTO time.Duration
+	remaining time.Duration
+	hasDL     bool
+}
+
+func (d *deadlineCapture) Exec(ctx context.Context, _ string) (string, error) {
+	dl, ok := ctx.Deadline()
+	d.hasDL = ok
+	if ok {
+		d.remaining = time.Until(dl)
+	}
+	return "ok", nil
+}
+
+func (d *deadlineCapture) DefaultTimeout() time.Duration {
+	if d.defaultTO == 0 {
+		return 20 * time.Second
+	}
+	return d.defaultTO
+}
+
+func (d *deadlineCapture) Close() {}
+
+// Check.Timeout(초)이 지정되면 그 값이 executor ctx의 deadline으로 전달돼야 한다.
+// (ansible-playbook 처럼 기본 20s를 넘는 명령을 위해 필요)
+func TestRun_PerCheckTimeout_Applied(t *testing.T) {
+	cap := &deadlineCapture{}
+	Run(context.Background(), cap, model.Check{
+		Type:    model.CheckCommand,
+		Command: "ansible-playbook",
+		Expect:  "ok",
+		Timeout: 60,
+	})
+	if !cap.hasDL {
+		t.Fatal("executor ctx에 deadline이 있어야 함")
+	}
+	// 60s 근처여야 한다(기본 20s가 아님). 실행 지연을 감안해 폭넓게 검사.
+	if cap.remaining <= 40*time.Second || cap.remaining > 60*time.Second {
+		t.Errorf("Timeout=60 인데 남은 deadline=%v (40~60s 기대)", cap.remaining)
+	}
+}
+
+// Check.Timeout 미지정 시 기본 타임아웃(20s)이 적용돼야 한다.
+func TestRun_DefaultTimeout_Applied(t *testing.T) {
+	cap := &deadlineCapture{}
+	Run(context.Background(), cap, model.Check{
+		Type:    model.CheckCommand,
+		Command: "ls",
+		Expect:  "ok",
+	})
+	if !cap.hasDL {
+		t.Fatal("executor ctx에 deadline이 있어야 함")
+	}
+	if cap.remaining <= 10*time.Second || cap.remaining > 20*time.Second {
+		t.Errorf("기본 Timeout 인데 남은 deadline=%v (10~20s 기대)", cap.remaining)
+	}
+}
+
+// Check.Timeout 미지정 시 기본값은 executor 별로 달라야 한다.
+// 예) EC2 는 SSM 전송+폴링으로 20s를 쉽게 넘기므로 KubeVirt(20s)보다 큰 기본을 쓴다.
+// checker 가 고정 상수가 아니라 exe.DefaultTimeout() 을 따르는지 검증한다.
+func TestRun_PerExecutorDefault_Applied(t *testing.T) {
+	cap := &deadlineCapture{defaultTO: 5 * time.Minute} // EC2 류의 큰 기본값
+	Run(context.Background(), cap, model.Check{
+		Type:    model.CheckCommand,
+		Command: "ls",
+		Expect:  "ok",
+	})
+	if !cap.hasDL {
+		t.Fatal("executor ctx에 deadline이 있어야 함")
+	}
+	// 고정 20s가 아니라 executor 기본(5분)을 따라야 한다.
+	if cap.remaining <= 4*time.Minute {
+		t.Errorf("executor 기본 5분을 따라야 하는데 남은 deadline=%v (4분 초과 기대) — 고정 20s 상수를 쓰고 있음", cap.remaining)
 	}
 }

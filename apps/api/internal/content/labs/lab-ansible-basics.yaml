@@ -97,3 +97,6 @@ steps:
       - type: command
         command: ansible-playbook -i /home/lab/ansible/inventory.ini /home/lab/ansible/site.yml
         expect: changed=0
+        # ansible-playbook 재실행은 fact 수집 + SSH 터널로 ~22s 걸려 기본 20s를 넘긴다.
+        # 기본값이면 PLAY RECAP(changed=0) 직전에 killed 되므로 여유를 둔다.
+        timeout: 60

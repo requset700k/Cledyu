@@ -5,6 +5,7 @@ package executor
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/requset700k/cledyu/validation-engine/internal/model"
 )
@@ -14,6 +15,10 @@ import (
 type VMExecutor interface {
 	// Exec는 VM 안에서 명령어를 실행하고 출력 결과를 돌려준다.
 	Exec(ctx context.Context, cmd string) (output string, err error)
+
+	// DefaultTimeout은 체크가 timeout을 지정하지 않았을 때 쓸 한 체크당 기본 상한이다.
+	// 백엔드 특성에 따라 다르다(KubeVirt virtctl ssh는 짧게, EC2 SSM은 전송+폴링이 길어 넉넉히).
+	DefaultTimeout() time.Duration
 
 	// Close는 VM 연결을 닫는다.
 	Close()

@@ -11,6 +11,11 @@ import (
 	"github.com/requset700k/cledyu/validation-engine/internal/model"
 )
 
+// ec2DefaultTimeout: timeout 미지정 체크의 기본 상한. SSM은 SendCommand 후 결과를 비동기로
+// 폴링하므로 전송+실행 왕복이 수십 초~분 단위일 수 있다. KubeVirt(20s)보다 넉넉히 잡아,
+// 명시 timeout이 없어도 consumer handlerTimeout(5분) 안에서 완료될 수 있게 한다.
+const ec2DefaultTimeout = 5 * time.Minute
+
 // EC2Executor는 AWS EC2 VM에 SSH 키 없이 SSM(AWS Systems Manager)으로 명령을 실행한다.
 // SSM은 AWS가 제공하는 원격 명령 실행 서비스로, EC2 인스턴스에 SSM Agent가 설치돼 있으면
 // SSH 없이도 AWS API를 통해 명령을 보낼 수 있다.
@@ -18,6 +23,9 @@ type EC2Executor struct {
 	instanceID string      // 명령을 실행할 EC2 인스턴스 ID (예: "i-0abc1234567890")
 	client     *ssm.Client // AWS SSM API 클라이언트
 }
+
+// DefaultTimeout은 timeout 미지정 체크의 기본 상한이다(SSM 왕복이 길어 KubeVirt보다 넉넉히).
+func (e *EC2Executor) DefaultTimeout() time.Duration { return ec2DefaultTimeout }
 
 // newEC2Executor는 EC2Executor를 생성한다.
 // VMSpec에서 인스턴스 ID와 리전을 읽어 AWS SSM 클라이언트를 초기화한다.
@@ -61,7 +69,8 @@ func (e *EC2Executor) Exec(ctx context.Context, cmd string) (string, error) {
 	commandID := aws.ToString(out.Command.CommandId)
 
 	// SSM은 비동기로 명령을 실행하므로 완료될 때까지 폴링한다.
-	// ctx 타임아웃(5분) 안에 완료되지 않으면 ctx.Err()로 종료된다.
+	// 실행 상한은 호출자(checker)가 ctx deadline 으로 건다(기본 20s, Check.Timeout 으로 조정).
+	// 그 시간 안에 완료되지 않으면 ctx.Done()으로 빠져나간다.
 	for {
 		result, err := e.client.GetCommandInvocation(ctx, &ssm.GetCommandInvocationInput{
 			CommandId:  aws.String(commandID),

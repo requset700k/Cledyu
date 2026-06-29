@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/requset700k/cledyu/validation-engine/internal/executor"
 	"github.com/requset700k/cledyu/validation-engine/internal/model"
@@ -30,6 +31,16 @@ var safeCommandRe = regexp.MustCompile(`^[a-zA-Z0-9 /._\-=:@%"']+$`)
 
 // Run은 체크 항목 하나를 VM에서 실행하고 결과를 돌려준다.
 func Run(ctx context.Context, exe executor.VMExecutor, check model.Check) model.CheckResult {
+	// 체크별 실행 상한을 여기서 한 번만 건다. executor는 상한을 직접 걸지 않고
+	// 이 ctx의 deadline을 따른다(모든 체크 타입·executor 공통).
+	// timeout 미지정 시 기본값은 executor 별로 다르다(KubeVirt 20s, EC2 SSM은 더 길게).
+	timeout := exe.DefaultTimeout()
+	if check.Timeout > 0 {
+		timeout = time.Duration(check.Timeout) * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	switch check.Type {
 	case model.CheckCommand:
 		return runCommand(ctx, exe, check) // 일반 명령어 실행 및 결과 확인

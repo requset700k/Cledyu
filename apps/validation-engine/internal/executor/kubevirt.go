@@ -13,10 +13,13 @@ import (
 
 // 랩 VM SSH 접속 기본값. 세션 VM cloud-init이 user "lab"에 엔진 공개키를 authorized_keys로 넣고,
 // 엔진은 대응하는 private key(LAB_SSH_KEY)로 접속한다. 미설정 시 키 없이 시도(로컬/테스트).
+// 한 체크당 실행 상한은 checker가 ctx deadline으로 건다(Check.Timeout 또는 DefaultTimeout).
+// 여기서 별도 상한을 또 걸면 per-check timeout이 잘리므로 Exec에서는 걸지 않는다.
 const (
 	defaultLabSSHUser = "lab"
-	// execTimeout: virtctl ssh가 인증/연결 단계에서 멈출 때 30s+ 매달리지 않도록 한 체크당 상한.
-	execTimeout = 20 * time.Second
+	// kubevirtDefaultTimeout: virtctl ssh가 인증/연결 단계에서 멈출 때 오래 매달리지 않도록 한
+	// 한 체크당 기본 상한. timeout을 더 길게 줘야 하는 명령(ansible-playbook 등)은 Check.Timeout으로 늘린다.
+	kubevirtDefaultTimeout = 20 * time.Second
 )
 
 // KubeVirtExecutor는 KubeVirt VM에 명령어를 실행하는 도구
@@ -68,10 +71,9 @@ func (e *KubeVirtExecutor) Exec(ctx context.Context, cmd string) (string, error)
 		"vmi/"+e.vmName,
 	)
 
-	// 인증/연결 단계에서 멈추는 경우를 대비해 한 체크당 타임아웃을 건다.
-	runCtx, cancel := context.WithTimeout(ctx, execTimeout)
-	defer cancel()
-	command := exec.CommandContext(runCtx, "virtctl", args...)
+	// 실행 상한은 호출자(checker)가 ctx에 deadline으로 걸어둔다.
+	// ctx 만료 시 CommandContext가 virtctl 프로세스를 종료한다.
+	command := exec.CommandContext(ctx, "virtctl", args...)
 
 	// 명령어 출력(stdout)과 에러(stderr)를 각각 수집한다.
 	var stdout, stderr bytes.Buffer
@@ -84,6 +86,9 @@ func (e *KubeVirtExecutor) Exec(ctx context.Context, cmd string) (string, error)
 
 	return stdout.String(), nil
 }
+
+// DefaultTimeout은 timeout 미지정 체크의 기본 상한이다(virtctl ssh는 짧게 끊는다).
+func (e *KubeVirtExecutor) DefaultTimeout() time.Duration { return kubevirtDefaultTimeout }
 
 // Close는 KubeVirt는 매번 새 연결을 쓰므로 닫을 것이 없다.
 func (e *KubeVirtExecutor) Close() {}
