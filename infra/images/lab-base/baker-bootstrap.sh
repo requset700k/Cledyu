@@ -42,7 +42,7 @@ trap finish EXIT
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends \
-  git docker.io qemu-system-x86 qemu-utils curl unzip
+  git docker.io qemu-system-x86 qemu-utils curl unzip xorriso
 # aws CLI v2 설치(Ubuntu 엔 미포함). finish() 의 sentinel/log 업로드와 SSM/EC2 호출에 필요해 일찍 깐다.
 curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
 unzip -q /tmp/awscliv2.zip -d /tmp
