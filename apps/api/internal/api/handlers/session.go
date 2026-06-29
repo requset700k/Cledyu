@@ -505,7 +505,7 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 	// 검증 시작 시간 기록 — 단일 레플리카 전제. 다중 레플리카 환경에서는
 	// Pod 간 공유가 안 되어 duration이 누락될 수 있으므로 Redis 또는
 	// 결과 메시지의 duration_ms 필드로 대체 필요
-	if h.met != 요l {
+	if h.met != nil {
 		h.met.validationMu.Lock()
 		h.met.validationStartTimes[traceID] = time.Now()
 		h.met.validationMu.Unlock()
