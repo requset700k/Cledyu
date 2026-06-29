@@ -131,7 +131,7 @@ func (m *Manager) Create(ctx context.Context, sessionID, labID, userID string, i
 				},
 				"preference": map[string]interface{}{
 					"kind": "VirtualMachineClusterPreference",
-					"name": "ubuntu",
+					"name": "cledyu-ubuntu",
 				},
 				"dataVolumeTemplates": []interface{}{
 					map[string]interface{}{
