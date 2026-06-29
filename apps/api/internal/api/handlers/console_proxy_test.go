@@ -87,7 +87,8 @@ func TestProxyTerminal_V2_ResizePropagatesAndInputContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer c.Close() //nolint:errcheck
+	defer resp.Body.Close() //nolint:errcheck
+	defer c.Close()         //nolint:errcheck
 	if got := resp.Header.Get("Sec-WebSocket-Protocol"); got != terminalSubprotocolV2 {
 		t.Fatalf("subprotocol 미협상: %q", got)
 	}
@@ -131,7 +132,8 @@ func TestProxyTerminal_NonV2_ResizeJSONPassesThroughRaw(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer c.Close() //nolint:errcheck
+	defer resp.Body.Close() //nolint:errcheck
+	defer c.Close()         //nolint:errcheck
 	if got := resp.Header.Get("Sec-WebSocket-Protocol"); got != "" {
 		t.Fatalf("미요청인데 subprotocol 협상됨: %q", got)
 	}
