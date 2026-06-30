@@ -38,7 +38,7 @@ func newLoginRouter(t *testing.T, idp *fakeIDP) *gin.Engine {
 		provider = p
 	}
 
-	h := handlers.New(cfg, zap.NewNop(), nil, nil, nil, nil, nil, provider)
+	h := handlers.New(cfg, zap.NewNop(), nil, nil, nil, nil, nil, nil, provider)
 	r := gin.New()
 	r.GET("/api/v1/auth/login", h.Login)
 	return r

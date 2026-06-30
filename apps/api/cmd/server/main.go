@@ -131,25 +131,28 @@ func main() {
 	// 세션 생성 직렬화 락 — Redis 연결되면 분산 락(다중 레플리카 안전), 아니면 in-memory.
 	// 연결 확인(ping)에 실패하면 MemLocker 로 폴백한다(단일 인스턴스 best-effort).
 	var locker lock.Locker = lock.NewMemLocker()
+	var redisClient *redis.Client
+
 	if cfg.Redis.Addr != "" {
-		rdb := redis.NewClient(&redis.Options{
+		redisClient = redis.NewClient(&redis.Options{
 			Addr:     cfg.Redis.Addr,
 			Password: cfg.Redis.Password,
 			DB:       cfg.Redis.DB,
 		})
 		pingCtx, cancelPing := context.WithTimeout(ctx, 3*time.Second)
-		if err := rdb.Ping(pingCtx).Err(); err != nil {
+		if err := redisClient.Ping(pingCtx).Err(); err != nil {
 			logger.Warn("redis 미연결 — 세션 락 in-memory 폴백(다중 레플리카 비권장)", zap.Error(err))
-			_ = rdb.Close()
+			_ = redisClient.Close()
+			redisClient = nil
 		} else {
-			locker = lock.NewRedisLocker(rdb)
-			defer rdb.Close() //nolint:errcheck
+			locker = lock.NewRedisLocker(redisClient)
+			defer redisClient.Close() //nolint:errcheck
 			logger.Info("redis 연결 — 분산 세션 락 활성", zap.String("addr", cfg.Redis.Addr))
 		}
 		cancelPing()
 	}
 
-	router, h := api.NewRouter(cfg, logger, sessions, validator, eventsPub, db, locker)
+	router, h := api.NewRouter(cfg, logger, sessions, validator, eventsPub, db, locker, redisClient)
 
 	// 세션 VM 파일 탐색 — 수동 새로고침 기반의 read-only 경로다. Secret/RBAC 미설정이면
 	// 기능만 비활성화하고 API 서버는 계속 기동한다(파일 endpoint는 503).
