@@ -109,6 +109,7 @@ export function LabSession({
       <SessionBoot
         status={status}
         provisioningStage={session?.provisioning_stage}
+        vmProvider={session?.vm_provider}
         graceStartedAt={readyAtRef.current}
         graceMs={BOOT_GRACE_MS}
         onGraceComplete={() => setBootGraceComplete(true)}
@@ -335,12 +336,14 @@ function SessionExpired({ labId }: { labId: string }) {
 function SessionBoot({
   status,
   provisioningStage,
+  vmProvider,
   graceStartedAt,
   graceMs,
   onGraceComplete,
 }: {
   status: string | undefined;
   provisioningStage?: string;
+  vmProvider?: string;
   graceStartedAt: number | null;
   graceMs: number;
   onGraceComplete: () => void;
@@ -357,7 +360,7 @@ function SessionBoot({
     if (graceState.complete) onGraceComplete();
   }, [graceState.complete, onGraceComplete]);
 
-  const stages = bootStageViewStates(status, provisioningStage, graceStartedAt);
+  const stages = bootStageViewStates(status, provisioningStage, vmProvider, graceStartedAt);
 
   return (
     <div className="mt-6 bg-slate-800/50 border border-slate-700 rounded-xl p-8">

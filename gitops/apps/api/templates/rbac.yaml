@@ -30,6 +30,11 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["create"]
+  # 프로비저닝 진단용 root PVC 상태 조회.
+  # session.go 는 session-rootdisk PVC 가 Bound 인지 확인해 "디스크 복제"와 "VM 시작" 단계를 구분한다.
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims"]
+    verbs: ["get"]
   # KubeVirt VM 생성
   - apiGroups: ["kubevirt.io"]
     resources: ["virtualmachines"]

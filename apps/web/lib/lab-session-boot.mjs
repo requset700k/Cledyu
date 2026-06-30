@@ -45,11 +45,32 @@ export function shouldShowSessionBoot(status, graceStartedAt, now, graceMs, skip
  *
  * @param {string | undefined} status
  * @param {string | undefined} provisioningStage
+ * @param {string | undefined} vmProvider
  * @param {number | null} graceStartedAt
  * @returns {{ label: string, done: boolean, inProgress: boolean }[]}
  */
-export function bootStageViewStates(status, provisioningStage, graceStartedAt) {
+export function bootStageViewStates(status, provisioningStage, vmProvider, graceStartedAt) {
   const sessionKnown = status !== undefined;
+  const hasKubeVirtStage =
+    vmProvider === 'kubevirt' &&
+    (provisioningStage === 'disk_cloning' || provisioningStage === 'vm_starting');
+  if (!hasKubeVirtStage) {
+    const vmReady = status === 'ready' || status === 'active' || graceStartedAt !== null;
+    return [
+      { label: '세션 생성', done: sessionKnown, inProgress: false },
+      {
+        label: 'VM 프로비저닝',
+        done: vmReady,
+        inProgress: sessionKnown && !vmReady,
+      },
+      {
+        label: '자동 로그인 활성화',
+        done: false,
+        inProgress: vmReady,
+      },
+    ];
+  }
+
   const diskReady =
     status === 'ready' ||
     status === 'active' ||

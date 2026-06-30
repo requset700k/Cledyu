@@ -47,7 +47,7 @@ describe('shouldShowSessionBoot', () => {
 
 describe('bootStageViewStates', () => {
   it('shows disk cloning before the VM can start', () => {
-    assert.deepEqual(bootStageViewStates('provisioning', 'disk_cloning', null), [
+    assert.deepEqual(bootStageViewStates('provisioning', 'disk_cloning', 'kubevirt', null), [
       { label: '세션 생성', done: true, inProgress: false },
       { label: '디스크 복제', done: false, inProgress: true },
       { label: 'VM 시작', done: false, inProgress: false },
@@ -56,7 +56,7 @@ describe('bootStageViewStates', () => {
   });
 
   it('shows VM startup after the root disk is ready', () => {
-    assert.deepEqual(bootStageViewStates('provisioning', 'vm_starting', null), [
+    assert.deepEqual(bootStageViewStates('provisioning', 'vm_starting', 'kubevirt', null), [
       { label: '세션 생성', done: true, inProgress: false },
       { label: '디스크 복제', done: true, inProgress: false },
       { label: 'VM 시작', done: false, inProgress: true },
@@ -65,11 +65,26 @@ describe('bootStageViewStates', () => {
   });
 
   it('shows autologin grace after the VM is running', () => {
-    assert.deepEqual(bootStageViewStates('ready', undefined, 1_000), [
+    assert.deepEqual(bootStageViewStates('ready', undefined, 'kubevirt', 1_000), [
       { label: '세션 생성', done: true, inProgress: false },
-      { label: '디스크 복제', done: true, inProgress: false },
-      { label: 'VM 시작', done: true, inProgress: false },
+      { label: 'VM 프로비저닝', done: true, inProgress: false },
       { label: '자동 로그인 활성화', done: false, inProgress: true },
+    ]);
+  });
+
+  it('keeps provider-neutral provisioning when the backend does not expose KubeVirt stages', () => {
+    assert.deepEqual(bootStageViewStates('provisioning', undefined, 'ec2', null), [
+      { label: '세션 생성', done: true, inProgress: false },
+      { label: 'VM 프로비저닝', done: false, inProgress: true },
+      { label: '자동 로그인 활성화', done: false, inProgress: false },
+    ]);
+  });
+
+  it('keeps provider-neutral provisioning when stage information is not available yet', () => {
+    assert.deepEqual(bootStageViewStates('provisioning', undefined, 'kubevirt', null), [
+      { label: '세션 생성', done: true, inProgress: false },
+      { label: 'VM 프로비저닝', done: false, inProgress: true },
+      { label: '자동 로그인 활성화', done: false, inProgress: false },
     ]);
   });
 });
