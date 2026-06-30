@@ -24,17 +24,17 @@ steps:
   - id: 1
     title: 컨테이너 실행
     description: >
-      nginx 이미지를 받아 web 이라는 이름의 컨테이너를 백그라운드(-d)로 실행하고,
+      nginx:alpine 이미지를 받아 web 이라는 이름의 컨테이너를 백그라운드(-d)로 실행하고,
       호스트 8080 포트를 컨테이너 80 포트에 연결(-p)하세요. docker ps 로 상태를,
       curl 로 응답을 확인합니다.
     commands:
-      - docker run -d --name web -p 8080:80 nginx
+      - docker run -d --name web -p 8080:80 nginx:alpine
       - docker ps
       - curl http://localhost:8080
     hint_levels:
       - "이미지를 내려받아 컨테이너로 실행하는 명령 하나면 됩니다. 백그라운드 실행과 포트 연결 옵션이 각각 무엇인지 떠올려 보세요."
       - "docker run 에 -d(백그라운드), --name(이름), -p <호스트포트>:<컨테이너포트> 를 조합합니다."
-      - "docker run -d --name web -p 8080:80 nginx 실행 후 curl http://localhost:8080 에서 nginx 페이지가 나오면 성공입니다."
+      - "docker run -d --name web -p 8080:80 nginx:alpine 실행 후 curl http://localhost:8080 에서 nginx 페이지가 나오면 성공입니다."
     checks:
       # docker ps + web 부분일치는 web2/webserver 도 매칭돼 이름을 엄격 검증 못 했다.
       # docker inspect 는 이름 정확 매칭(web ≠ web2) + State.Status 로 running 을 확인한다.
@@ -44,7 +44,7 @@ steps:
         expect: running
       - type: command
         command: docker inspect web
-        expect: nginx
+        expect: nginx:alpine
       - type: command
         command: docker port web 80
         expect: ":8080"
@@ -79,7 +79,7 @@ steps:
       echo "built with dockerfile" > ~/app/html/index.html
 
       ~/app/Dockerfile:
-        FROM nginx
+        FROM nginx:alpine
         COPY html /usr/share/nginx/html
     commands:
       - mkdir -p ~/app/html
@@ -88,16 +88,15 @@ steps:
       - docker build -t myweb:v1 ~/app
     hint_levels:
       - "이미지는 Dockerfile 의 명령(FROM, COPY...)으로 정의하고 별도 명령으로 빌드합니다. 베이스 이미지 위에 정적 파일만 얹으면 됩니다."
-      - "FROM nginx 에 COPY html /usr/share/nginx/html 두 줄이면 충분합니다. docker build 에 -t <이름:태그> 와 컨텍스트 경로를 넘기세요."
+      - "FROM nginx:alpine 에 COPY html /usr/share/nginx/html 두 줄이면 충분합니다. docker build 에 -t <이름:태그> 와 컨텍스트 경로를 넘기세요."
       - "Dockerfile 작성 후 docker build -t myweb:v1 ~/app 을 실행하면 docker images 목록에 myweb 이 보입니다."
     checks:
       - type: file_exists
         path: /home/lab/app/Dockerfile
       # Dockerfile 이 nginx 기반인지(내용) 확인 — file_exists 만으론 빈/엉뚱한 파일도 통과한다.
-      # "FROM nginx" 부분일치라 FROM nginx:alpine 같은 태그 변형도 수용한다.
       - type: file_content
         path: /home/lab/app/Dockerfile
-        expect: FROM nginx
+        expect: FROM nginx:alpine
       # myweb:v1 까지 명시해 정확한 태그가 빌드됐는지 확인('docker images'+myweb 는 myweb:v2 등도 통과).
       - type: command
         command: docker images myweb:v1

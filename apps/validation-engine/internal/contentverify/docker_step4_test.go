@@ -78,9 +78,9 @@ func TestDockerStep4_VerifiesContainerSpec(t *testing.T) {
 		t.Error("이름이 web2 가 아니면 step4에서 탈락해야 함")
 	}
 
-	// 이미지가 myweb:v1 이 아님(nginx) → 탈락.
+	// 이미지가 myweb:v1 이 아님(nginx:alpine) → 탈락.
 	wrongImage := docker4Fake{
-		inspectOut: `[{"State":{"Status":"running"},"Config":{"Image":"nginx"}}]`,
+		inspectOut: `[{"State":{"Status":"running"},"Config":{"Image":"nginx:alpine"}}]`,
 		portOut:    "0.0.0.0:8081", curlOut: "built with dockerfile",
 	}
 	if _, ok := checker.RunAll(context.Background(), wrongImage, step4); ok {

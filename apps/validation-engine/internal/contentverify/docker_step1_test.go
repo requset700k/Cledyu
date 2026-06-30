@@ -57,18 +57,18 @@ func dockerStep1Checks(t *testing.T) []model.Check {
 	return out
 }
 
-// step1 지문은 "nginx 이미지" + "호스트 8080 → 컨테이너 80" 을 명시한다. running + 200 만 보면
+// step1 지문은 "nginx:alpine 이미지" + "호스트 8080 → 컨테이너 80" 을 명시한다. running + 200 만 보면
 // httpd 로 만들거나(이미지) -p 없이 다른 8080 서버를 띄워도(포트) 통과한다. 그러면 step2
 // (nginx 웹루트 /usr/share/nginx/html 에 쓰고 curl 8080 으로 확인)에서 뒤늦게 막히는데, 복귀
 // 불가라 step1 로 돌아가 못 고친다(dead-end). 그래서 이미지·포트를 step1 에서 검증해야 한다.
 func TestDockerStep1_VerifiesImageAndPort(t *testing.T) {
 	step1 := dockerStep1Checks(t)
-	runningNginx := `[{"State":{"Status":"running"},"Config":{"Image":"nginx"}}]`
+	runningNginx := `[{"State":{"Status":"running"},"Config":{"Image":"nginx:alpine"}}]`
 
-	// 정답: nginx + 컨테이너80→호스트8080 + 200
+	// 정답: nginx:alpine + 컨테이너80→호스트8080 + 200
 	good := dockerFake{inspectOut: runningNginx, portOut: "0.0.0.0:8080", httpCode: "200"}
 	if _, ok := checker.RunAll(context.Background(), good, step1); !ok {
-		t.Error("nginx + 8080:80 + 200 정답은 step1을 통과해야 함")
+		t.Error("nginx:alpine + 8080:80 + 200 정답은 step1을 통과해야 함")
 	}
 
 	// httpd 이미지: 이미지가 틀림 → 탈락해야 한다(step2 의 nginx 경로 dead-end 방지).
@@ -77,7 +77,17 @@ func TestDockerStep1_VerifiesImageAndPort(t *testing.T) {
 		portOut:    "0.0.0.0:8080", httpCode: "200",
 	}
 	if _, ok := checker.RunAll(context.Background(), httpd, step1); ok {
-		t.Error("이미지가 nginx 가 아니면(httpd) step1에서 탈락해야 함")
+		t.Error("이미지가 nginx:alpine 가 아니면(httpd) step1에서 탈락해야 함")
+	}
+
+	// plain nginx(태그 없음): 지문이 nginx:alpine 을 명시하므로 위반 → 탈락해야 한다.
+	// 이 케이스가 strict 검증("nginx:alpine")을 잠근다 — 체크를 lenient("nginx")로 되돌리면 여기서 잡힌다.
+	plainNginx := dockerFake{
+		inspectOut: `[{"State":{"Status":"running"},"Config":{"Image":"nginx"}}]`,
+		portOut:    "0.0.0.0:8080", httpCode: "200",
+	}
+	if _, ok := checker.RunAll(context.Background(), plainNginx, step1); ok {
+		t.Error("plain nginx(nginx:alpine 아님)는 step1에서 탈락해야 함 — strict 검증 잠금")
 	}
 
 	// 포트 미매핑: 컨테이너 80 이 8080 에 안 붙음(-p 누락 + 다른 8080 서버) → docker port 빈 출력 → 탈락.
