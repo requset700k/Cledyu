@@ -49,19 +49,29 @@ func k8sStep2Checks(t *testing.T) []model.Check {
 	return out
 }
 
-// step2는 "nginx 이미지로" 단일 Pod 실행을 명시한다. STATUS=Running 만 보면 httpd 같은
-// 엉뚱한 이미지로도 통과해 학습자가 틀린 걸 모른다. 이미지가 nginx 인지도 검증해야 한다.
+// step2는 "nginx:alpine(경량) 이미지로" 단일 Pod 실행을 명시한다. STATUS=Running 만 보면 httpd
+// 는 물론 무거운 plain nginx 로도 통과해 학습자가 틀린 걸 모른다. 교육 목적상 가장 경량인
+// nginx:alpine 을 강제하려고 이미지 태그까지 검증한다(substring 이라 plain nginx 도 탈락).
 func TestK8sStep2_VerifiesNginxImage(t *testing.T) {
 	step2 := k8sStep2Checks(t)
 	running := "NAME    READY   STATUS    RESTARTS   AGE\nnginx   1/1     Running   0          5s\n"
 
-	// nginx 정답: Running + 이미지 nginx → 통과해야 한다.
-	nginx := k8sPodFake{
+	// nginx:alpine 정답: Running + 경량 이미지 → 통과해야 한다.
+	alpine := k8sPodFake{
+		getOut:  running,
+		yamlOut: "spec:\n  containers:\n  - name: nginx\n    image: nginx:alpine\n",
+	}
+	if _, ok := checker.RunAll(context.Background(), alpine, step2); !ok {
+		t.Error("nginx:alpine 이미지 정답은 step2를 통과해야 함")
+	}
+
+	// plain nginx 오답: 경량 태그가 아님 → 탈락해야 한다(가장 경량 이미지 사용 강제).
+	plain := k8sPodFake{
 		getOut:  running,
 		yamlOut: "spec:\n  containers:\n  - name: nginx\n    image: nginx\n",
 	}
-	if _, ok := checker.RunAll(context.Background(), nginx, step2); !ok {
-		t.Error("nginx 이미지 정답은 step2를 통과해야 함")
+	if _, ok := checker.RunAll(context.Background(), plain, step2); ok {
+		t.Error("경량 태그가 아니면(plain nginx) step2에서 탈락해야 함")
 	}
 
 	// httpd 오답: Running 이지만 이미지가 틀림 → 탈락해야 한다(학습자에게 이미지 오류 알림).
@@ -70,6 +80,6 @@ func TestK8sStep2_VerifiesNginxImage(t *testing.T) {
 		yamlOut: "spec:\n  containers:\n  - name: nginx\n    image: httpd\n",
 	}
 	if _, ok := checker.RunAll(context.Background(), httpd, step2); ok {
-		t.Error("이미지가 nginx 가 아니면(httpd) step2에서 탈락해야 함")
+		t.Error("이미지가 nginx:alpine 이 아니면(httpd) step2에서 탈락해야 함")
 	}
 }
