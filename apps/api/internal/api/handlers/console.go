@@ -140,7 +140,7 @@ func (h *Handler) kubevirtConsole(c *gin.Context, sessionID string) {
 	}
 	vmConn := con.AsConn()
 	proxyTerminal(ws, vmConn, serialConsoleCols, serialConsoleRows)
-    
+
 	// proxyTerminal 종료 = 연결 끊김
 	if h.met != nil {
 		h.met.wsConnectionDrops.WithLabelValues("kubevirt").Inc()
