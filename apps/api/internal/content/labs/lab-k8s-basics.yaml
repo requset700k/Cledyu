@@ -57,6 +57,13 @@ steps:
       - type: command
         command: kubectl get pod nginx
         expect: Running
+      # 문제가 "nginx 이미지로" 실행을 명시하므로 이미지도 검증한다. STATUS=Running 만 보면
+      # httpd 같은 엉뚱한 이미지로도 통과해 학습자가 틀린 걸 모른다. -o yaml 은 셸 메타문자가
+      # 없어 명령 화이트리스트를 그대로 통과하며, spec 의 'image: nginx' 줄을 확인한다.
+      # (httpd면 컨테이너 이름이 nginx여도 'image: httpd'라 'image: nginx'엔 안 걸림)
+      - type: command
+        command: kubectl get pod nginx -o yaml
+        expect: "image: nginx"
   - id: 3
     title: Pod 관찰과 라벨
     description: >
