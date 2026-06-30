@@ -1,6 +1,6 @@
 image:
   repository: ghcr.io/requset700k/validation-engine
-  tag: sha-b1e62bf
+  tag: sha-a5c23e9
   # Always: tag가 latest로 고정된 동안 파드 재시작 시 항상 새 :latest를 pull 한다.
   # IfNotPresent면 노드에 캐시된 구버전 :latest를 계속 써서 새 코드가 배포되지 않는다(api와 동일 정책).
   pullPolicy: Always
