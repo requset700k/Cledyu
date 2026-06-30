@@ -21,12 +21,15 @@ const (
 
 // Session은 프로바이더 무관 세션 상태다. 온프렘/EC2 어느 쪽이 띄웠든 동일 형태로 표현한다.
 type Session struct {
-	ID        string    `json:"id"`
-	LabID     string    `json:"lab_id"`
-	UserID    string    `json:"user_id"`
-	Status    string    `json:"status"` // provisioning | ready | failed
-	StartedAt time.Time `json:"started_at"`
-	ExpiresAt time.Time `json:"expires_at"`
+	ID     string `json:"id"`
+	LabID  string `json:"lab_id"`
+	UserID string `json:"user_id"`
+	Status string `json:"status"` // provisioning | ready | failed
+	// ProvisioningStage는 provisioning 상태를 사용자/운영자가 구분할 수 있게 하는 세부 단계다.
+	// 빈 값이면 세부 단계가 없거나 provider가 해당 정보를 제공하지 않는다는 뜻이다.
+	ProvisioningStage string    `json:"provisioning_stage,omitempty"`
+	StartedAt         time.Time `json:"started_at"`
+	ExpiresAt         time.Time `json:"expires_at"`
 
 	// Provider는 이 세션을 프로비저닝한 백엔드다(ProviderKubeVirt | ProviderEC2).
 	Provider string `json:"provider"`

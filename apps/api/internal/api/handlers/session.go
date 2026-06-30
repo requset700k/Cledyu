@@ -129,6 +129,7 @@ func prepareSessionCreation(ctx context.Context, sessions sessionCreationManager
 //   - terminal_url : 라이브 터미널 랩이 ready 일 때 제공. KubeVirt 는 serial console,
 //     EC2 는 tailnet SSH PTY 로 같은 /ws 경로가 프로바이더에 맞게 접속한다(console.go).
 //   - vm_provider  : 세션을 띄운 프로바이더(kubevirt | ec2).
+//   - provisioning_stage : provisioning 상태일 때 디스크 복제/VM 시작 중 어디서 대기 중인지 표시한다.
 func (h *Handler) sessionResponse(s *session.Session) gin.H {
 	out := gin.H{
 		"id":          s.ID,
@@ -138,6 +139,9 @@ func (h *Handler) sessionResponse(s *session.Session) gin.H {
 		"started_at":  s.StartedAt.UTC().Format(time.RFC3339),
 		"expires_at":  s.ExpiresAt.UTC().Format(time.RFC3339),
 		"vm_provider": s.Provider,
+	}
+	if s.ProvisioningStage != "" {
+		out["provisioning_stage"] = s.ProvisioningStage
 	}
 	out["current_step"] = 0
 	h.steps.withSession(s.ID, func(ss *sessionSteps) bool {
