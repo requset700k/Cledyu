@@ -11,6 +11,7 @@ on:
       - apps/**/*.go
       - apps/**/go.mod
       - apps/**/go.sum
+      - apps/api/internal/content/labs/**
       - .golangci.yml
       - .github/workflows/go-lint.yml
   push:
@@ -19,6 +20,7 @@ on:
       - apps/**/*.go
       - apps/**/go.mod
       - apps/**/go.sum
+      - apps/api/internal/content/labs/**
       - .golangci.yml
       - .github/workflows/go-lint.yml
 

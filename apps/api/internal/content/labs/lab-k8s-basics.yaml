@@ -44,19 +44,26 @@ steps:
   - id: 2
     title: Pod 실행
     description: >
-      nginx 이미지로 단일 Pod 를 실행합니다. Pod 는 배포 가능한 가장 작은 단위로,
+      nginx:alpine (경량) 이미지로 단일 Pod 를 실행합니다. Pod 는 배포 가능한 가장 작은 단위로,
       하나 이상의 컨테이너를 감쌉니다. STATUS 가 Running 이 될 때까지 확인하세요.
     commands:
-      - kubectl run nginx --image=nginx --restart=Never
+      - kubectl run nginx --image=nginx:alpine --restart=Never
       - kubectl get pod nginx -w
     hint_levels:
       - "Deployment 없이 Pod 하나만 바로 만드는 kubectl 명령이 있습니다. 단일 Pod 가 되려면 재시작 정책을 어떻게 줘야 할까요?"
       - "kubectl run <이름> 에 --image 와 --restart=Never 를 함께 지정합니다. -w 옵션으로 상태 변화를 지켜볼 수 있습니다."
-      - "kubectl run nginx --image=nginx --restart=Never 실행 후 kubectl get pod nginx 가 Running 을 보일 때까지 기다리세요."
+      - "kubectl run nginx --image=nginx:alpine --restart=Never 실행 후 kubectl get pod nginx 가 Running 을 보일 때까지 기다리세요."
     checks:
       - type: command
         command: kubectl get pod nginx
         expect: Running
+      # 문제가 "nginx:alpine(경량) 이미지로" 실행을 명시하므로 이미지도 검증한다. STATUS=Running
+      # 만 보면 httpd 는 물론 무거운 plain nginx 로도 통과해 학습자가 틀린 걸 모른다. -o yaml 은 셸
+      # 메타문자가 없어 명령 화이트리스트를 그대로 통과하며, spec 의 'image: nginx:alpine' 줄을 확인
+      # 한다(substring 이라 plain nginx·httpd·nginxdemos 등은 모두 탈락 → 경량 태그를 강제한다).
+      - type: command
+        command: kubectl get pod nginx -o yaml
+        expect: "image: nginx:alpine"
   - id: 3
     title: Pod 관찰과 라벨
     description: >
@@ -78,20 +85,25 @@ steps:
   - id: 4
     title: Deployment와 스케일링
     description: >
-      replica 2개의 Deployment 를 만들고 4개로 스케일합니다. Deployment 는 ReplicaSet 을
-      통해 원하는 수의 Pod 를 선언적으로 유지하며, 장애 시 자동 복구합니다.
+      nginx:alpine (경량) 이미지로 replica 2개의 Deployment 를 만들고 4개로 스케일합니다. Deployment 는
+      ReplicaSet 을 통해 원하는 수의 Pod 를 선언적으로 유지하며, 장애 시 자동 복구합니다.
     commands:
-      - kubectl create deployment web --image=nginx --replicas=2
+      - kubectl create deployment web --image=nginx:alpine --replicas=2
       - kubectl scale deployment web --replicas=4
       - kubectl get deployment web
     hint_levels:
       - "여러 복제본을 선언적으로 유지하는 리소스를 만들고, 만든 뒤 복제본 수를 바꾸는 명령 두 가지가 필요합니다."
       - "kubectl create deployment 로 만들고 kubectl scale deployment <이름> --replicas=<수> 로 조절합니다."
-      - "kubectl create deployment web --image=nginx --replicas=2 후 kubectl scale deployment web --replicas=4 — READY 4/4 가 목표입니다."
+      - "kubectl create deployment web --image=nginx:alpine --replicas=2 후 kubectl scale deployment web --replicas=4 — READY 4/4 가 목표입니다."
     checks:
       - type: command
         command: kubectl get deployment web
         expect: 4/4
+      # 지문이 "nginx:alpine(경량) 이미지로" 생성을 명시하므로 web Deployment 이미지도 검증한다.
+      # READY=4/4 만 보면 httpd·plain nginx 등으로도 통과한다.
+      - type: command
+        command: kubectl get deployment web -o yaml
+        expect: "image: nginx:alpine"
   - id: 5
     title: Service로 노출
     description: >
@@ -105,6 +117,18 @@ steps:
       - "kubectl create service nodeport 를 사용합니다. --tcp=<port>:<targetPort> 와 --node-port 옵션이 필요하며, Service 이름이 Deployment 라벨(app=web)과 같아야 셀렉터가 맞습니다."
       - "kubectl create service nodeport web --tcp=80:80 --node-port=30080 실행 후 curl http://localhost:30080 에서 nginx 환영 페이지가 나오면 성공입니다."
     checks:
+      # 문제가 "NodePort Service 로 web 을 30080 에 노출"을 명시하므로 서비스 존재·타입·포트를
+      # 검증한다. 200 만 보면 python3 -m http.server 30080 처럼 서비스 없이 응답만 띄워도
+      # 통과한다(절차 우회). web 서비스가 NodePort 타입으로 30080 을 노출하는지 확인한다.
+      # - "NodePort": TYPE 칸 (LoadBalancer 등 다른 타입 차단)
+      # - "30080":   PORT(S) 의 '80:30080/TCP' (서비스 port 는 자유라 --tcp=XX:80 도 정답)
+      # - targetPort(=nginx 80)는 get service 에 안 보이지만, 틀리면 200 이 안 오므로 http 가 검증.
+      - type: command
+        command: kubectl get service web
+        expect: "NodePort"
+      - type: command
+        command: kubectl get service web
+        expect: "30080"
       - type: http_response
         url: http://localhost:30080
         expect_code: 200
