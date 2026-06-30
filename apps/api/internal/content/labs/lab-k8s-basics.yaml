@@ -112,6 +112,18 @@ steps:
       - "kubectl create service nodeport 를 사용합니다. --tcp=<port>:<targetPort> 와 --node-port 옵션이 필요하며, Service 이름이 Deployment 라벨(app=web)과 같아야 셀렉터가 맞습니다."
       - "kubectl create service nodeport web --tcp=80:80 --node-port=30080 실행 후 curl http://localhost:30080 에서 nginx 환영 페이지가 나오면 성공입니다."
     checks:
+      # 문제가 "NodePort Service 로 web 을 30080 에 노출"을 명시하므로 서비스 존재·타입·포트를
+      # 검증한다. 200 만 보면 python3 -m http.server 30080 처럼 서비스 없이 응답만 띄워도
+      # 통과한다(절차 우회). web 서비스가 NodePort 타입으로 30080 을 노출하는지 확인한다.
+      # - "NodePort": TYPE 칸 (LoadBalancer 등 다른 타입 차단)
+      # - "30080":   PORT(S) 의 '80:30080/TCP' (서비스 port 는 자유라 --tcp=XX:80 도 정답)
+      # - targetPort(=nginx 80)는 get service 에 안 보이지만, 틀리면 200 이 안 오므로 http 가 검증.
+      - type: command
+        command: kubectl get service web
+        expect: "NodePort"
+      - type: command
+        command: kubectl get service web
+        expect: "30080"
       - type: http_response
         url: http://localhost:30080
         expect_code: 200
