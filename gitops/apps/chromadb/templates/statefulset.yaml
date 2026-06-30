@@ -43,13 +43,19 @@ spec:
             - name: tmp
               mountPath: /tmp
           readinessProbe:
-            tcpSocket:
-              port: http
+            exec:
+              command:
+                - python
+                - -c
+                - "import socket; s = socket.create_connection(('127.0.0.1', {{ .Values.service.port }}), 2); s.close()"
             initialDelaySeconds: 10
             periodSeconds: 10
           livenessProbe:
-            tcpSocket:
-              port: http
+            exec:
+              command:
+                - python
+                - -c
+                - "import socket; s = socket.create_connection(('127.0.0.1', {{ .Values.service.port }}), 2); s.close()"
             initialDelaySeconds: 30
             periodSeconds: 30
             failureThreshold: 3
