@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -236,11 +237,14 @@ func proxyTerminal(ws *websocket.Conn, conn io.ReadWriteCloser, pinnedCols, pinn
 	}()
 
 	// 브라우저 → VM (키 입력·리사이즈). 읽기 에러(브라우저 종료) 시 VM 연결을 닫아 아래 루프도 종료시킨다.
+	var clientDisconnected atomic.Bool
+
 	resizer, canResize := conn.(terminalResizer)
 	go func() {
 		for {
 			mt, data, err := ws.ReadMessage()
 			if err != nil {
+				clientDisconnected.Store(true) // 플래그 설정
 				_ = conn.Close()
 				return
 			}
@@ -270,7 +274,7 @@ func proxyTerminal(ws *websocket.Conn, conn io.ReadWriteCloser, pinnedCols, pinn
 			}
 		}
 		if err != nil {
-			if errors.Is(err, io.EOF) {
+			if errors.Is(err, io.EOF) || clientDisconnected.Load() {
 				return "normal" // VM 쪽 정상 종료
 			}
 			return "error" // 그 외(연결 리셋, 타임아웃 등)는 비정상
