@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
 	"github.com/requset700k/cledyu/api/internal/content"
 	"github.com/requset700k/cledyu/api/internal/events"
 	"github.com/requset700k/cledyu/api/internal/session"
@@ -496,13 +497,20 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 		VM:        vmSpecForSession(sess, sessionID),
 		Checks:    toValidationChecks(step.Checks),
 	}
+
 	if err := h.validator.PublishRequest(c.Request.Context(), msg); err != nil {
 		h.log.Error("publish validation request", zap.Error(err), zap.String("session_id", sessionID), zap.Int("step_id", req.StepID))
 		h.err(c, http.StatusBadGateway, "publish validation request failed")
 		return
 	}
 
-	// 결과가 올 때까지 validating으로 둔다. 실제 pass/fail은 ApplyValidationResult가 확정한다.
+	// 검증 시작 시간 기록
+	if h.redis != nil {
+		if err := h.redis.Set(c.Request.Context(), "validation:start:"+traceID, time.Now().UnixMilli(), 5*time.Minute).Err(); err != nil {
+			h.log.Warn("failed to set validation start time in redis", zap.Error(err))
+		}
+	}
+
 	h.markStepValidating(sessionID, idx)
 	c.JSON(http.StatusAccepted, gin.H{
 		"status":   "validating",
@@ -530,6 +538,24 @@ func (h *Handler) markStepValidating(sessionID string, idx int) {
 // 모두 통과면 passed로 확정 후 다음 스텝을 활성화한다. 실패면 failed로 두되 스텝을 진행시키지
 // 않아(current 유지) 사용자가 다시 시도할 수 있게 한다. 모르는 세션/스텝은 무시한다(지연 결과 등).
 func (h *Handler) ApplyValidationResult(r validation.ValidationResult) {
+	// Redis를 통한 지연 시간 기록 처리
+	if h.redis != nil && r.TraceID != "" {
+		v, err := h.redis.GetDel(context.Background(), "validation:start:"+r.TraceID).Int64()
+		if err == nil {
+			result := "failed"
+			if r.Passed {
+				result = "passed"
+			}
+			if h.met != nil {
+				h.met.validationDuration.WithLabelValues(result).Observe(time.Since(time.UnixMilli(v)).Seconds())
+			}
+		} else if errors.Is(err, redis.Nil) {
+			h.log.Debug("validation start time not found (likely expired)", zap.String("trace_id", r.TraceID))
+		} else {
+			h.log.Warn("failed to get/del validation start time", zap.Error(err))
+		}
+	}
+
 	var completedUser, completedLab string
 	found := h.steps.withSession(r.SessionID, func(ss *sessionSteps) bool {
 		idx := -1

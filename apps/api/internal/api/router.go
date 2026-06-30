@@ -9,6 +9,7 @@ import (
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
 	"github.com/requset700k/cledyu/api/internal/api/handlers"
 	"github.com/requset700k/cledyu/api/internal/auth"
 	"github.com/requset700k/cledyu/api/internal/config"
@@ -25,7 +26,7 @@ import (
 // 핸들러는 검증 결과 consumer가 stepStore를 갱신(ApplyValidationResult)하도록 main에서 참조한다.
 // eventsPub은 학습 이벤트(lab-events) 발행기, db 는 PostgreSQL 영속 계층 — 둘 다 nil 허용(로컬/CI).
 // locks 는 세션 생성 직렬화 락 — nil 이면 handlers.New 가 in-memory 폴백한다.
-func NewRouter(cfg *config.Config, log *zap.Logger, sessions session.Provider, validator validation.Publisher, eventsPub events.Publisher, db *store.Store, locks lock.Locker) (*gin.Engine, *handlers.Handler) {
+func NewRouter(cfg *config.Config, log *zap.Logger, sessions session.Provider, validator validation.Publisher, eventsPub events.Publisher, db *store.Store, locks lock.Locker, redisClient *redis.Client) (*gin.Engine, *handlers.Handler) {
 	gin.SetMode(cfg.Server.Mode)
 
 	// Keycloak OIDC provider — discovery(.well-known) 수행. Keycloak 미가용(CI/로컬)
@@ -52,7 +53,7 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions session.Provider, v
 		AllowCredentials: true,
 	}))
 
-	h := handlers.New(cfg, log, sessions, validator, eventsPub, db, locks, authProvider)
+	h := handlers.New(cfg, log, sessions, validator, eventsPub, db, locks, redisClient, authProvider)
 
 	r.GET("/health", h.Health)
 	r.GET("/ready", h.Ready)

@@ -14,6 +14,8 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/requset700k/cledyu/api/internal/config"
 	"github.com/requset700k/cledyu/api/internal/session"
 )
@@ -56,6 +58,7 @@ type Manager struct {
 	core kubernetes.Interface
 	dyn  dynamic.Interface
 	cfg  *config.KubeVirtConfig
+	met  *metrics
 }
 
 func NewManager(cfg *config.KubeVirtConfig) (*Manager, error) {
@@ -63,7 +66,12 @@ func NewManager(cfg *config.KubeVirtConfig) (*Manager, error) {
 	if err != nil {
 		return nil, fmt.Errorf("kubevirt manager: %w", err)
 	}
-	return &Manager{core: core, dyn: dyn, cfg: cfg}, nil
+	return &Manager{
+		core: core,
+		dyn:  dyn,
+		cfg:  cfg,
+		met:  newMetrics(prometheus.DefaultRegisterer),
+	}, nil
 }
 
 // BootInit은 session.BootInit 의 별칭이다(랩별 cloud-init 추가 작업).
@@ -397,12 +405,35 @@ func (m *Manager) Get(ctx context.Context, sessionID string) (*Session, error) {
 		switch phase {
 		case "Running":
 			status = "ready"
+			if ann["cledyu.io/ready-at"] == "" {
+				readyAt := time.Now().UTC()
+				nsObj.Annotations["cledyu.io/ready-at"] = readyAt.Format(time.RFC3339)
+				if _, err := m.core.CoreV1().Namespaces().Update(ctx, nsObj, metav1.UpdateOptions{}); err == nil {
+					if !startedAt.IsZero() && m.met != nil {
+						m.met.vmBootTotal.WithLabelValues("success", "onprem").Inc()
+					}
+				}
+			}
 		case "Failed", "Succeeded":
 			status = "failed"
+			// ready-at가 없는 경우만 부팅 실패로 기록 — 이미 ready였던 VM의 사후 종료는 제외
+			if ann["cledyu.io/ready-at"] == "" && ann["cledyu.io/boot-result-recorded"] == "" && m.met != nil {
+				nsObj.Annotations["cledyu.io/boot-result-recorded"] = "true"
+				if _, err := m.core.CoreV1().Namespaces().Update(ctx, nsObj, metav1.UpdateOptions{}); err == nil {
+					m.met.vmBootTotal.WithLabelValues("failed", "onprem").Inc()
+				}
+			}
 		}
 	}
 	if status == "provisioning" && m.provisioningTimedOut(startedAt) {
 		status = "failed"
+		// timeout 부팅 실패도 vm_boot_total에 기록
+		if ann["cledyu.io/boot-result-recorded"] == "" && m.met != nil {
+			nsObj.Annotations["cledyu.io/boot-result-recorded"] = "true"
+			if _, err := m.core.CoreV1().Namespaces().Update(ctx, nsObj, metav1.UpdateOptions{}); err == nil {
+				m.met.vmBootTotal.WithLabelValues("failed", "onprem").Inc()
+			}
+		}
 	}
 
 	return &Session{

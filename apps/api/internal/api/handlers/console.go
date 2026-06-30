@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -121,17 +122,30 @@ func (h *Handler) kubevirtConsole(c *gin.Context, sessionID string) {
 	}
 	defer ws.Close() //nolint:errcheck
 
+	// 연결 수립 기록
+	if h.met != nil {
+		h.met.wsConnectionsEstablished.WithLabelValues("kubevirt").Inc()
+	}
+
 	con, err := h.virt.VirtualMachineInstance(ns).SerialConsole(vm, &kvcorev1.SerialConsoleOptions{
 		ConnectionTimeout: 10 * time.Second,
 	})
 	if err != nil {
 		h.log.Warn("serial console connect failed", zap.String("ns", ns), zap.String("vm", vm), zap.Error(err))
 		_ = ws.WriteMessage(websocket.TextMessage, []byte("\r\n[VM 콘솔 연결 실패: "+err.Error()+"]\r\n"))
+		// 연결 끊김 기록
+		if h.met != nil {
+			h.met.wsConnectionDrops.WithLabelValues("kubevirt", "error").Inc()
+		}
 		return
 	}
 	vmConn := con.AsConn()
-	// serial 콘솔은 winsize 채널이 없어 동적 리사이즈가 불가능하므로 권위 고정 크기를 브라우저에 통보한다.
-	proxyTerminal(ws, vmConn, serialConsoleCols, serialConsoleRows)
+	reason := proxyTerminal(ws, vmConn, serialConsoleCols, serialConsoleRows)
+
+	// proxyTerminal 종료 = 연결 끊김
+	if h.met != nil {
+		h.met.wsConnectionDrops.WithLabelValues("kubevirt", reason).Inc()
+	}
 }
 
 // ec2Console은 EC2 세션 인스턴스에 tailnet SSH PTY로 접속해 WS에 프록시한다.
@@ -155,6 +169,11 @@ func (h *Handler) ec2Console(c *gin.Context, sessionID string) {
 	}
 	defer ws.Close() //nolint:errcheck
 
+	// 연결 수립 기록
+	if h.met != nil {
+		h.met.wsConnectionsEstablished.WithLabelValues("ec2").Inc()
+	}
+
 	term, err := ec2.DialTerminal(c.Request.Context(), addr, ec2.TerminalConfig{
 		User:     h.cfg.AWS.LiveTerminalSSHUser,
 		Password: h.cfg.AWS.LiveTerminalSSHPassword,
@@ -163,10 +182,17 @@ func (h *Handler) ec2Console(c *gin.Context, sessionID string) {
 	if err != nil {
 		h.log.Warn("ec2 ssh terminal connect failed", zap.String("addr", addr), zap.Error(err))
 		_ = ws.WriteMessage(websocket.TextMessage, []byte("\r\n[VM 터미널 연결 실패: "+err.Error()+"]\r\n"))
+		if h.met != nil {
+			h.met.wsConnectionDrops.WithLabelValues("ec2", "error").Inc()
+		}
 		return
 	}
-	// EC2 SSH PTY 는 동적 리사이즈를 지원하므로 권위 고정 크기를 통보하지 않는다(브라우저 크기 권위).
-	proxyTerminal(ws, term, 0, 0)
+	reason := proxyTerminal(ws, term, 0, 0)
+
+	// proxyTerminal 종료 = 연결 끊김
+	if h.met != nil {
+		h.met.wsConnectionDrops.WithLabelValues("ec2", reason).Inc()
+	}
 }
 
 // proxyTerminal은 WebSocket과 VM 연결(serial console 또는 SSH PTY)을 양방향으로 프록시한다.
@@ -175,7 +201,7 @@ func (h *Handler) ec2Console(c *gin.Context, sessionID string) {
 // 리사이즈 프로토콜: 브라우저는 키 입력을 BinaryMessage 로, 터미널 크기 변경을 TextMessage(JSON
 // {"type":"resize","cols","rows"})로 보낸다. conn 이 terminalResizer 면 그 크기를 PTY 에 적용한다.
 // pinnedCols/pinnedRows>0 이면(serial 처럼 리사이즈 불가한 연결) 시작 시 그 권위 크기를 브라우저에 통보한다.
-func proxyTerminal(ws *websocket.Conn, conn io.ReadWriteCloser, pinnedCols, pinnedRows int) {
+func proxyTerminal(ws *websocket.Conn, conn io.ReadWriteCloser, pinnedCols, pinnedRows int) (closeReason string) {
 	defer conn.Close() //nolint:errcheck
 
 	// http.Server의 ReadTimeout/WriteTimeout(15s)이 장수명 WS를 끊지 않도록 deadline 해제.
@@ -211,11 +237,14 @@ func proxyTerminal(ws *websocket.Conn, conn io.ReadWriteCloser, pinnedCols, pinn
 	}()
 
 	// 브라우저 → VM (키 입력·리사이즈). 읽기 에러(브라우저 종료) 시 VM 연결을 닫아 아래 루프도 종료시킨다.
+	var clientDisconnected atomic.Bool
+
 	resizer, canResize := conn.(terminalResizer)
 	go func() {
 		for {
 			mt, data, err := ws.ReadMessage()
 			if err != nil {
+				clientDisconnected.Store(true) // 플래그 설정
 				_ = conn.Close()
 				return
 			}
@@ -241,11 +270,14 @@ func proxyTerminal(ws *websocket.Conn, conn io.ReadWriteCloser, pinnedCols, pinn
 		n, err := conn.Read(buf)
 		if n > 0 {
 			if werr := ws.WriteMessage(websocket.BinaryMessage, buf[:n]); werr != nil {
-				return
+				return "normal"
 			}
 		}
 		if err != nil {
-			return
+			if errors.Is(err, io.EOF) || clientDisconnected.Load() {
+				return "normal" // VM 쪽 정상 종료
+			}
+			return "error" // 그 외(연결 리셋, 타임아웃 등)는 비정상
 		}
 	}
 }

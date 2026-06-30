@@ -3,9 +3,12 @@ package handlers
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/redis/go-redis/v9"
 	"github.com/requset700k/cledyu/api/internal/ai"
 	"github.com/requset700k/cledyu/api/internal/auth"
 	"github.com/requset700k/cledyu/api/internal/config"
@@ -20,6 +23,11 @@ import (
 	"github.com/requset700k/cledyu/api/internal/vmfiles"
 	"go.uber.org/zap"
 	"kubevirt.io/client-go/kubecli"
+)
+
+var (
+	defaultHandlerMetrics     *handlerMetrics
+	defaultHandlerMetricsOnce sync.Once
 )
 
 // Handler는 모든 HTTP 핸들러의 공유 의존성을 보관한다.
@@ -37,9 +45,11 @@ type Handler struct {
 	db        persistence                   // PostgreSQL 영속 계층. nil 허용 — in-memory 전용(로컬/CI).
 	kcAdmin   roleAssigner                  // Keycloak Admin(역할 승격). nil 허용 — 미설정 시 역할 승격 API 501.
 	locks     lock.Locker                   // 유저별 세션 생성 직렬화 — Redis 분산 락 또는 in-memory(MemLocker).
+	redis     *redis.Client                 // 검증 지연 시간 기록(traceID → startedAt). nil 허용 — 미설정 시 duration 메트릭 생략.
 	ec2Dial   ec2.DialFunc                  // EC2 세션 라이브 터미널용 tailnet 다이얼러(tsnet). nil이면 기본 net.Dialer(클러스터에선 도달 불가).
 	vmFiles   vmFileService                 // 세션 VM 파일 목록·미리보기 서비스. 미설정이면 endpoint만 503.
 	bq        bqAnalytics                   // D3 강사 분석 BigQuery 조회. nil 허용 — 미설정 시 503.
+	met       *handlerMetrics               // Prometheus 도메인 메트릭 수집기. nil 허용 — 로컬/CI 폴백.
 }
 
 // SetEC2Dial는 EC2 세션(tailnet MagicDNS)에 닿는 다이얼러를 주입한다. main이 tsnet 노드를
@@ -67,7 +77,7 @@ type roleAssigner interface {
 // sessions·authProvider·eventsPub·db 는 nil 허용. 시작 시 임베드된 Lab DSL 콘텐츠를
 // 로드하고, serial console 용 KubeVirt 클라이언트를 초기화한다.
 // 클러스터 미연결(CI/로컬) 환경에서도 New가 성공하도록 둘 다 실패 시 nil/empty 폴백한다.
-func New(cfg *config.Config, log *zap.Logger, sessions session.Provider, validator validation.Publisher, eventsPub events.Publisher, db *store.Store, locks lock.Locker, authProvider *auth.Provider) *Handler {
+func New(cfg *config.Config, log *zap.Logger, sessions session.Provider, validator validation.Publisher, eventsPub events.Publisher, db *store.Store, locks lock.Locker, redisClient *redis.Client, authProvider *auth.Provider) *Handler {
 	labs, err := content.Load()
 	if err != nil {
 		log.Error("lab content load failed; detail pages will lack steps", zap.Error(err))
@@ -119,6 +129,13 @@ func New(cfg *config.Config, log *zap.Logger, sessions session.Provider, validat
 		db:        p,
 		kcAdmin:   kc,
 		locks:     locks,
+		redis:     redisClient,
+		met: func() *handlerMetrics {
+			defaultHandlerMetricsOnce.Do(func() {
+				defaultHandlerMetrics = newHandlerMetrics(prometheus.DefaultRegisterer)
+			})
+			return defaultHandlerMetrics
+		}(),
 	}
 }
 
