@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { bootGraceViewState, bootStageViewStates, shouldShowSessionBoot } from './lab-session-boot.mjs';
+import {
+  bootGraceViewState,
+  bootStageViewStates,
+  shouldShowSessionBoot,
+} from './lab-session-boot.mjs';
 
 describe('bootGraceViewState', () => {
   it('marks grace complete at the same boundary that fills progress to 100 percent', () => {
