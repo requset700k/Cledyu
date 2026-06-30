@@ -34,7 +34,7 @@ func newHandlerMetrics(reg prometheus.Registerer) *handlerMetrics {
 			Name: "ws_connection_drop_total",
 			Help: "WebSocket 연결 끊김 횟수.",
 		},
-		[]string{"provider"},
+		[]string{"provider", "result"},
 	)
 	validationDuration := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
