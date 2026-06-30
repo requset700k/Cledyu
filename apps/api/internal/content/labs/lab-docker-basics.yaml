@@ -124,6 +124,15 @@ steps:
       - "docker run -d --name web2 -p 8081:80 에 이미지 이름 myweb:v1 을 지정하세요."
       - "docker run -d --name web2 -p 8081:80 myweb:v1 실행 후 curl http://localhost:8081 출력이 built with dockerfile 이면 성공입니다."
     checks:
+      # 이미지가 myweb:v1 인지
+      - type: command
+        command: docker inspect web2
+        expect: myweb:v1
+      # 컨테이너 80 이 호스트 8081 에 매핑됐는지
+      - type: command
+        command: docker port web2 80
+        expect: "8081"
+      # 실제로 그 페이지를 서비스하는지 결과로 최종 확인
       - type: command
         command: curl -s http://localhost:8081
         expect: built with dockerfile
