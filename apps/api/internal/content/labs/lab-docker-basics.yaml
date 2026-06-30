@@ -42,6 +42,12 @@ steps:
       - type: command
         command: docker inspect web
         expect: running
+      - type: command
+        command: docker inspect web
+        expect: nginx
+      - type: command
+        command: docker port web 80
+        expect: "8080"
       - type: http_response
         url: http://localhost:8080
         expect_code: 200
