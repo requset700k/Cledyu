@@ -47,7 +47,7 @@ steps:
         expect: nginx
       - type: command
         command: docker port web 80
-        expect: "8080"
+        expect: ":8080"
       - type: http_response
         url: http://localhost:8080
         expect_code: 200
@@ -131,7 +131,7 @@ steps:
       # 컨테이너 80 이 호스트 8081 에 매핑됐는지
       - type: command
         command: docker port web2 80
-        expect: "8081"
+        expect: ":8081"
       # 실제로 그 페이지를 서비스하는지 결과로 최종 확인
       - type: command
         command: curl -s http://localhost:8081

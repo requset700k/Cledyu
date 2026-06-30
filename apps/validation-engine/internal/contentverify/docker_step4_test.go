@@ -92,4 +92,10 @@ func TestDockerStep4_VerifiesContainerSpec(t *testing.T) {
 	if _, ok := checker.RunAll(context.Background(), wrongPort, step4); ok {
 		t.Error("8081 에 매핑 안 됐으면 step4에서 탈락해야 함")
 	}
+
+	// 다른 포트(18081)에 매핑 → "0.0.0.0:18081" 은 "8081" 을 부분문자열로 포함. 콜론까지 매칭(:8081)해야 정확히 걸러낸다.
+	wrongPortNum := docker4Fake{inspectOut: runningMyweb, portOut: "0.0.0.0:18081", curlOut: "built with dockerfile"}
+	if _, ok := checker.RunAll(context.Background(), wrongPortNum, step4); ok {
+		t.Error("호스트 포트가 18081 이면(8081 아님) step4에서 탈락해야 함 — 부분매칭 방지")
+	}
 }

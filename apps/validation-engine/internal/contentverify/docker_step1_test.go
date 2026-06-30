@@ -85,4 +85,11 @@ func TestDockerStep1_VerifiesImageAndPort(t *testing.T) {
 	if _, ok := checker.RunAll(context.Background(), noPort, step1); ok {
 		t.Error("컨테이너 80 이 호스트 8080 에 매핑 안 됐으면 step1에서 탈락해야 함")
 	}
+
+	// 다른 포트(18080)에 매핑 → "0.0.0.0:18080" 은 "8080" 을 부분문자열로 포함하므로, 부분매칭이면
+	// 통과해버린다(버그). 콜론까지 매칭(:8080)해야 18080 을 정확히 걸러낸다.
+	wrongPortNum := dockerFake{inspectOut: runningNginx, portOut: "0.0.0.0:18080", httpCode: "200"}
+	if _, ok := checker.RunAll(context.Background(), wrongPortNum, step1); ok {
+		t.Error("호스트 포트가 18080 이면(8080 아님) step1에서 탈락해야 함 — 부분매칭 방지")
+	}
 }
