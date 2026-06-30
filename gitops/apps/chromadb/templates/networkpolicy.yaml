@@ -13,6 +13,11 @@ spec:
   policyTypes:
     - Ingress
   ingress:
+    # Cilium enforces host-origin kubelet probe traffic, so keep the probe port
+    # open while restricting application callers in the rules below.
+    - ports:
+        - protocol: TCP
+          port: {{ .Values.service.port }}
     {{- range .Values.networkPolicy.allowedPodLabels }}
     - from:
         - podSelector:
