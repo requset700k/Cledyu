@@ -42,6 +42,7 @@ export function shouldShowSessionBoot(status, graceStartedAt, now, graceMs, skip
  * 준비 화면에 표시할 세부 단계를 만든다.
  * API가 내려주는 provisioning_stage는 VMI Running 이전 병목(디스크 복제/VM 시작)을,
  * graceStartedAt은 VMI Running 이후 터미널 자동 로그인 보호 시간을 의미한다.
+ * status=ready 이후에는 API가 provisioning_stage를 omit하므로 항상 3단계 뷰로 표시한다.
  *
  * @param {string | undefined} status
  * @param {string | undefined} provisioningStage
