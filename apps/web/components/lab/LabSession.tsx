@@ -10,7 +10,11 @@ import { LabTerminal } from './LabTerminal';
 import { LabWorkspace } from './LabWorkspace';
 import { AiTutorPanel } from './AiTutorPanel';
 import { SessionTimer } from './SessionTimer';
-import { bootGraceViewState, shouldShowSessionBoot } from '@/lib/lab-session-boot.mjs';
+import {
+  bootGraceViewState,
+  bootStageViewStates,
+  shouldShowSessionBoot,
+} from '@/lib/lab-session-boot.mjs';
 import { appendTerminalTail } from '@/lib/terminal-tail.mjs';
 
 // VM이 Running으로 보고된 이후에도 cloud-init final stage(랩 init + getty 재시작 + autologin 활성)
@@ -104,6 +108,7 @@ export function LabSession({
     return (
       <SessionBoot
         status={status}
+        provisioningStage={session?.provisioning_stage}
         graceStartedAt={readyAtRef.current}
         graceMs={BOOT_GRACE_MS}
         onGraceComplete={() => setBootGraceComplete(true)}
@@ -329,11 +334,13 @@ function SessionExpired({ labId }: { labId: string }) {
 // VM 콘솔의 login 프롬프트가 노출되는 것을 차단하기 위해 LabTerminal은 마운트하지 않는다.
 function SessionBoot({
   status,
+  provisioningStage,
   graceStartedAt,
   graceMs,
   onGraceComplete,
 }: {
   status: string | undefined;
+  provisioningStage?: string;
   graceStartedAt: number | null;
   graceMs: number;
   onGraceComplete: () => void;
@@ -350,8 +357,7 @@ function SessionBoot({
     if (graceState.complete) onGraceComplete();
   }, [graceState.complete, onGraceComplete]);
 
-  const stage1Done = status !== undefined;
-  const stage2Done = graceStartedAt !== null;
+  const stages = bootStageViewStates(status, provisioningStage, graceStartedAt);
 
   return (
     <div className="mt-6 bg-slate-800/50 border border-slate-700 rounded-xl p-8">
@@ -373,9 +379,14 @@ function SessionBoot({
       </div>
 
       <ul className="space-y-2 text-sm">
-        <BootStage done={stage1Done} label="세션 생성" />
-        <BootStage done={stage2Done} inProgress={!stage2Done && stage1Done} label="VM 프로비저닝" />
-        <BootStage done={false} inProgress={stage2Done} label="자동 로그인 활성화" />
+        {stages.map((stage) => (
+          <BootStage
+            key={stage.label}
+            done={stage.done}
+            inProgress={stage.inProgress}
+            label={stage.label}
+          />
+        ))}
       </ul>
     </div>
   );

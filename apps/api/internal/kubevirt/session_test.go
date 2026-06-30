@@ -139,6 +139,66 @@ func vmiObj(id, phase string) *unstructured.Unstructured {
 	}}
 }
 
+func rootDiskPVC(id string, phase corev1.PersistentVolumeClaimPhase) *corev1.PersistentVolumeClaim {
+	return &corev1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "session-rootdisk", Namespace: "lab-" + id},
+		Status:     corev1.PersistentVolumeClaimStatus{Phase: phase},
+	}
+}
+
+func TestGetReportsDiskCloneProvisioningStage(t *testing.T) {
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{vmiGVR: "VirtualMachineInstanceList"},
+	)
+	m := &Manager{
+		core: fake.NewSimpleClientset(
+			sessionNSWithTimes("clone", time.Now()),
+			rootDiskPVC("clone", corev1.ClaimPending),
+		),
+		dyn: dyn,
+		cfg: &config.KubeVirtConfig{ProvisionTimeoutMinutes: 10},
+	}
+
+	got, err := m.Get(context.Background(), "clone")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != "provisioning" {
+		t.Fatalf("status = %q, want provisioning", got.Status)
+	}
+	if got.ProvisioningStage != "disk_cloning" {
+		t.Fatalf("provisioning stage = %q, want disk_cloning", got.ProvisioningStage)
+	}
+}
+
+func TestGetReportsVMStartingProvisioningStage(t *testing.T) {
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{vmiGVR: "VirtualMachineInstanceList"},
+		vmiObj("boot", "Scheduling"),
+	)
+	m := &Manager{
+		core: fake.NewSimpleClientset(
+			sessionNSWithTimes("boot", time.Now()),
+			rootDiskPVC("boot", corev1.ClaimBound),
+		),
+		dyn: dyn,
+		cfg: &config.KubeVirtConfig{ProvisionTimeoutMinutes: 10},
+	}
+
+	got, err := m.Get(context.Background(), "boot")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != "provisioning" {
+		t.Fatalf("status = %q, want provisioning", got.Status)
+	}
+	if got.ProvisioningStage != "vm_starting" {
+		t.Fatalf("provisioning stage = %q, want vm_starting", got.ProvisioningStage)
+	}
+}
+
 func TestReapStuckSessions(t *testing.T) {
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
 		runtime.NewScheme(),

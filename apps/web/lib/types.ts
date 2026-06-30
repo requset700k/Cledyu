@@ -72,6 +72,7 @@ export interface Session {
   lab_id: string;
   user_id: string;
   status: SessionStatus;
+  provisioning_stage?: 'disk_cloning' | 'vm_starting';
   vm_provider?: VMProvider;
   terminal_url?: string; // status가 ready가 되면 채워짐 (/api/v1/sessions/:id/ws)
   ide_url?: string; // IDE 랩만 — code-server 프록시 경로 (/api/v1/sessions/:id/ide/)

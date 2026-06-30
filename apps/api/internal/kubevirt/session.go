@@ -34,6 +34,12 @@ const (
 	// user-id annotation으로 매칭한다.
 	labelManagedBy = "cledyu.io/managed-by"
 	managedByValue = "cledyu-session"
+
+	// rootDiskPVCName은 세션 VM dataVolumeTemplates가 생성하는 루트 디스크 PVC 이름이다.
+	rootDiskPVCName = "session-rootdisk"
+
+	provisioningStageDiskCloning = "disk_cloning"
+	provisioningStageVMStarting  = "vm_starting"
 )
 
 var (
@@ -399,12 +405,14 @@ func (m *Manager) Get(ctx context.Context, sessionID string) (*Session, error) {
 	expiresAt, _ := time.Parse(time.RFC3339, ann["cledyu.io/expires-at"])
 
 	status := "provisioning"
+	provisioningStage := ""
 	vmi, err := m.dyn.Resource(vmiGVR).Namespace(ns).Get(ctx, "session-vm", metav1.GetOptions{})
 	if err == nil {
 		phase, _, _ := unstructured.NestedString(vmi.Object, "status", "phase")
 		switch phase {
 		case "Running":
 			status = "ready"
+			provisioningStage = ""
 			if ann["cledyu.io/ready-at"] == "" {
 				readyAt := time.Now().UTC()
 				nsObj.Annotations["cledyu.io/ready-at"] = readyAt.Format(time.RFC3339)
@@ -416,6 +424,7 @@ func (m *Manager) Get(ctx context.Context, sessionID string) (*Session, error) {
 			}
 		case "Failed", "Succeeded":
 			status = "failed"
+			provisioningStage = ""
 			// ready-at가 없는 경우만 부팅 실패로 기록 — 이미 ready였던 VM의 사후 종료는 제외
 			if ann["cledyu.io/ready-at"] == "" && ann["cledyu.io/boot-result-recorded"] == "" && m.met != nil {
 				nsObj.Annotations["cledyu.io/boot-result-recorded"] = "true"
@@ -423,10 +432,15 @@ func (m *Manager) Get(ctx context.Context, sessionID string) (*Session, error) {
 					m.met.vmBootTotal.WithLabelValues("failed", "onprem").Inc()
 				}
 			}
+		default:
+			provisioningStage = m.provisioningStage(ctx, ns, phase)
 		}
+	} else {
+		provisioningStage = m.provisioningStage(ctx, ns, "")
 	}
 	if status == "provisioning" && m.provisioningTimedOut(startedAt) {
 		status = "failed"
+		provisioningStage = ""
 		// timeout 부팅 실패도 vm_boot_total에 기록
 		if ann["cledyu.io/boot-result-recorded"] == "" && m.met != nil {
 			nsObj.Annotations["cledyu.io/boot-result-recorded"] = "true"
@@ -437,14 +451,28 @@ func (m *Manager) Get(ctx context.Context, sessionID string) (*Session, error) {
 	}
 
 	return &Session{
-		ID:        sessionID,
-		LabID:     ann["cledyu.io/lab-id"],
-		UserID:    ann["cledyu.io/user-id"],
-		Status:    status,
-		StartedAt: startedAt,
-		ExpiresAt: expiresAt,
-		Provider:  session.ProviderKubeVirt,
+		ID:                sessionID,
+		LabID:             ann["cledyu.io/lab-id"],
+		UserID:            ann["cledyu.io/user-id"],
+		Status:            status,
+		ProvisioningStage: provisioningStage,
+		StartedAt:         startedAt,
+		ExpiresAt:         expiresAt,
+		Provider:          session.ProviderKubeVirt,
 	}, nil
+}
+
+func (m *Manager) provisioningStage(ctx context.Context, ns, vmiPhase string) string {
+	pvc, err := m.core.CoreV1().PersistentVolumeClaims(ns).Get(ctx, rootDiskPVCName, metav1.GetOptions{})
+	if err == nil && pvc.Status.Phase == corev1.ClaimBound {
+		return provisioningStageVMStarting
+	}
+	if vmiPhase != "" {
+		// VMI가 이미 생성됐으면 PVC 조회가 일시적으로 실패해도 clone 이후 단계로 보는 편이
+		// 사용자에게 더 정확하다. 이 값은 진단용 표시이며 상태 전이는 VMI phase가 결정한다.
+		return provisioningStageVMStarting
+	}
+	return provisioningStageDiskCloning
 }
 
 func (m *Manager) provisioningTimedOut(startedAt time.Time) bool {

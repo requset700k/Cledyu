@@ -44,6 +44,27 @@ func TestSessionResponseOmitsTerminalURLUntilReady(t *testing.T) {
 	}
 }
 
+func TestSessionResponseIncludesProvisioningStage(t *testing.T) {
+	h := &Handler{
+		steps: newStepStore(nil, zap.NewNop()),
+	}
+	sess := &session.Session{
+		ID:                "abc123",
+		LabID:             "lab-k8s-basics",
+		UserID:            "alice",
+		Status:            "provisioning",
+		ProvisioningStage: "disk_cloning",
+		StartedAt:         time.Now(),
+		ExpiresAt:         time.Now().Add(time.Hour),
+		Provider:          session.ProviderKubeVirt,
+	}
+
+	got := h.sessionResponse(sess)
+	if got["provisioning_stage"] != "disk_cloning" {
+		t.Fatalf("provisioning_stage = %v, want disk_cloning", got["provisioning_stage"])
+	}
+}
+
 // EC2 라이브 터미널 광고는 (1) 세션 인스턴스 tailnet 가입(세션 authkey)과 (2) api 자신의 tsnet
 // 가입(ec2Dial 주입) 둘 다 있어야 한다. 하나라도 없으면 /ws 접속이 깨지므로 광고하지 않는다.
 func TestSessionResponseEC2TerminalGatedByTailnet(t *testing.T) {

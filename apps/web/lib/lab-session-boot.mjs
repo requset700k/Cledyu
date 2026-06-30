@@ -37,3 +37,42 @@ export function shouldShowSessionBoot(status, graceStartedAt, now, graceMs, skip
   if (graceStartedAt === null) return true;
   return now - graceStartedAt < graceMs;
 }
+
+/**
+ * 준비 화면에 표시할 세부 단계를 만든다.
+ * API가 내려주는 provisioning_stage는 VMI Running 이전 병목(디스크 복제/VM 시작)을,
+ * graceStartedAt은 VMI Running 이후 터미널 자동 로그인 보호 시간을 의미한다.
+ *
+ * @param {string | undefined} status
+ * @param {string | undefined} provisioningStage
+ * @param {number | null} graceStartedAt
+ * @returns {{ label: string, done: boolean, inProgress: boolean }[]}
+ */
+export function bootStageViewStates(status, provisioningStage, graceStartedAt) {
+  const sessionKnown = status !== undefined;
+  const diskReady =
+    status === 'ready' ||
+    status === 'active' ||
+    graceStartedAt !== null ||
+    provisioningStage === 'vm_starting';
+  const vmRunning = status === 'ready' || status === 'active' || graceStartedAt !== null;
+
+  return [
+    { label: '세션 생성', done: sessionKnown, inProgress: false },
+    {
+      label: '디스크 복제',
+      done: diskReady,
+      inProgress: sessionKnown && !diskReady,
+    },
+    {
+      label: 'VM 시작',
+      done: vmRunning,
+      inProgress: diskReady && !vmRunning,
+    },
+    {
+      label: '자동 로그인 활성화',
+      done: false,
+      inProgress: vmRunning,
+    },
+  ];
+}

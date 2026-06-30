@@ -231,6 +231,30 @@ NAME                                 AGE   PHASE     IP
 virtualmachineinstance/session-vm    ...   Running   ...
 ```
 
+세션이 Web의 `VM 프로비저닝` 단계에서 오래 머물면 API 응답의 `provisioning_stage`로
+병목을 먼저 구분한다.
+
+```bash
+curl -s http://localhost:8080/api/v1/sessions/<session_id> | jq '{status, provisioning_stage}'
+```
+
+예상 의미:
+
+| `provisioning_stage` | 의미 | 우선 확인 대상 |
+|---|---|---|
+| `disk_cloning` | 세션 루트 디스크 PVC가 아직 Bound 되지 않음 | CDI DataVolume, PVC, Longhorn |
+| `vm_starting` | 루트 디스크는 준비됐고 VMI가 Running 전 단계 | VMI phase, virt-launcher Pod, node scheduling |
+| 값 없음 + `status=ready` | VMI가 Running이며 Web의 자동 로그인 보호 대기 단계 | cloud-init final stage, getty/autologin |
+
+세부 리소스는 다음 순서로 확인한다.
+
+```bash
+kubectl get dv,pvc,vm,vmi,pod -n lab-<session_id>
+kubectl describe dv session-rootdisk -n lab-<session_id>
+kubectl describe pvc session-rootdisk -n lab-<session_id>
+kubectl get events -n lab-<session_id> --sort-by=.lastTimestamp
+```
+
 ### 9. Web에서 터미널 확인
 
 브라우저에서 접속한다.
