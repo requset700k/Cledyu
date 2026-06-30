@@ -85,8 +85,8 @@ steps:
   - id: 4
     title: Deployment와 스케일링
     description: >
-      replica 2개의 Deployment 를 만들고 4개로 스케일합니다. Deployment 는 ReplicaSet 을
-      통해 원하는 수의 Pod 를 선언적으로 유지하며, 장애 시 자동 복구합니다.
+      nginx 이미지로 replica 2개의 Deployment 를 만들고 4개로 스케일합니다. Deployment 는
+      ReplicaSet 을 통해 원하는 수의 Pod 를 선언적으로 유지하며, 장애 시 자동 복구합니다.
     commands:
       - kubectl create deployment web --image=nginx --replicas=2
       - kubectl scale deployment web --replicas=4
@@ -99,6 +99,11 @@ steps:
       - type: command
         command: kubectl get deployment web
         expect: 4/4
+      # 지문이 "nginx 이미지로" 생성을 명시하므로 web Deployment 이미지도 검증한다.
+      # READY=4/4 만 보면 httpd 등으로도 통과한다.
+      - type: command
+        command: kubectl get deployment web -o yaml
+        expect: "image: nginx"
   - id: 5
     title: Service로 노출
     description: >
