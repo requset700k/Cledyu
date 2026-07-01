@@ -24,12 +24,12 @@ import (
 	"github.com/requset700k/cledyu/api/internal/tailnet"
 	"github.com/requset700k/cledyu/api/internal/validation"
 	"github.com/requset700k/cledyu/api/internal/vmfiles"
-	"go.uber.org/zap"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
+	"go.uber.org/zap"
 )
 
 const (
@@ -56,8 +56,8 @@ func main() {
 	defer stop()
 
 	otlpExp, otelErr := otlptracegrpc.New(ctx,
-    otlptracegrpc.WithEndpoint("alloy.loki.svc.cluster.local:4317"),
-    otlptracegrpc.WithInsecure(),
+		otlptracegrpc.WithEndpoint("alloy.loki.svc.cluster.local:4317"),
+		otlptracegrpc.WithInsecure(),
 	)
 	if otelErr != nil {
 		logger.Warn("OTel exporter 초기화 실패 — trace 비활성", zap.Error(otelErr))
