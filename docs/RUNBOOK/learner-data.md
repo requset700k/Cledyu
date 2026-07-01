@@ -55,6 +55,18 @@ ESO 매니페스트와 같은 방식으로 적용한다(kubectl apply).
 | `session_steps` | 스텝별 status/attempts/hint_level/checks(JSONB) | 검증·힌트 사용 |
 | `lab_completions` | (user, lab) 최초 완료 + session id | 마지막 스텝 통과 시 |
 
+### 3.1 단계 검증 순서 계약
+
+학습자용 UI 는 아직 통과하지 않은 뒤쪽 단계를 잠그지만, 최종 순서 보장은 API 가 담당한다.
+`POST /api/v1/sessions/{session_id}/validate` 는 요청한 step 앞의 모든 단계가 `passed` 인
+경우에만 검증을 실행한다. 이전 단계가 남아 있으면 validator 를 호출하지 않고
+`409 Conflict` 와 `previous step must be passed before validating this step` 을 반환한다.
+
+- 같은 step 을 다시 검증하는 것은 허용한다. 실패한 step 을 고친 뒤 재시도할 수 있어야 한다.
+- 존재하지 않는 세션이나 step 은 기존과 같이 `404` 로 처리한다.
+- 프론트의 단계 잠금은 사용자 경험용 보조 장치다. 브라우저 DevTools 나 직접 API 호출로
+  뒤쪽 step 검증을 시도해도 서버에서 같은 순서 규칙을 적용해야 한다.
+
 ## 4. 운영 작업
 
 - **백업**: PVC(Longhorn) 스냅샷 + Velero 일정에 `postgres` 네임스페이스 포함(RPO 1h).
