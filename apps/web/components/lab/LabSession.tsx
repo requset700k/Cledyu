@@ -6,7 +6,7 @@ import { api } from '@/lib/api';
 import type { Lab, Session, StepProgress, StepStatus } from '@/lib/types';
 import { StepList } from './StepList';
 import { TerminalPlaceholder } from './TerminalPlaceholder';
-import { LabTerminal } from './LabTerminal';
+import { LabTerminal, TerminalReadinessProbe } from './LabTerminal';
 import { LabWorkspace } from './LabWorkspace';
 import { AiTutorPanel } from './AiTutorPanel';
 import { SessionTimer } from './SessionTimer';
@@ -56,6 +56,7 @@ export function LabSession({
     terminalTailRef.current = appendTerminalTail(terminalTailRef.current, chunk);
   }, []);
   const getTerminalTail = useCallback(() => terminalTailRef.current, []);
+  const completeBootGrace = useCallback(() => setBootGraceComplete(true), []);
   useEffect(() => {
     const s = session?.status;
     if (skipBootGrace) return;
@@ -106,14 +107,22 @@ export function LabSession({
   // 라이브 터미널 랩은 부팅 동안 학생에게 로그인 프롬프트가 노출되지 않도록 SessionBoot로 가린다.
   if (booting && wantsLiveTerminal) {
     return (
-      <SessionBoot
-        status={status}
-        provisioningStage={session?.provisioning_stage}
-        vmProvider={session?.vm_provider}
-        graceStartedAt={readyAtRef.current}
-        graceMs={BOOT_GRACE_MS}
-        onGraceComplete={() => setBootGraceComplete(true)}
-      />
+      <>
+        {session?.terminal_url && session?.vm_provider === 'kubevirt' && (
+          <TerminalReadinessProbe
+            terminalPath={session.terminal_url}
+            onReady={completeBootGrace}
+          />
+        )}
+        <SessionBoot
+          status={status}
+          provisioningStage={session?.provisioning_stage}
+          vmProvider={session?.vm_provider}
+          graceStartedAt={readyAtRef.current}
+          graceMs={BOOT_GRACE_MS}
+          onGraceComplete={completeBootGrace}
+        />
+      </>
     );
   }
 
@@ -255,12 +264,14 @@ export function LabSession({
                 idePath={session.ide_url}
                 heightClass="h-[60vh] xl:h-[calc(100vh-15rem)]"
                 onTerminalOutput={appendTerminalOutput}
+                redrawTerminalOnConnect={session?.vm_provider === 'kubevirt'}
               />
             ) : (
               <LabTerminal
                 terminalPath={terminalUrl}
                 heightClass="h-[60vh] xl:h-[calc(100vh-13rem)]"
                 onOutput={appendTerminalOutput}
+                redrawOnConnect={session?.vm_provider === 'kubevirt'}
               />
             )
           ) : (
