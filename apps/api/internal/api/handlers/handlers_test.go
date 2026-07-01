@@ -143,11 +143,12 @@ func TestListLabs_UsesEmbeddedLabDSLMetadata(t *testing.T) {
 
 	var body struct {
 		Items []struct {
-			ID          string `json:"id"`
-			Description string `json:"description"`
-			DurationMin int    `json:"duration_min"`
-			StepCount   int    `json:"step_count"`
-			VMType      string `json:"vm_type"`
+			ID          string   `json:"id"`
+			Description string   `json:"description"`
+			DurationMin int      `json:"duration_min"`
+			StepCount   int      `json:"step_count"`
+			Tags        []string `json:"tags"`
+			VMType      string   `json:"vm_type"`
 		} `json:"items"`
 		Total int `json:"total"`
 	}
@@ -162,6 +163,7 @@ func TestListLabs_UsesEmbeddedLabDSLMetadata(t *testing.T) {
 		Description string
 		DurationMin int
 		StepCount   int
+		Tags        []string
 		VMType      string
 	}, len(body.Items))
 	for _, item := range body.Items {
@@ -169,11 +171,13 @@ func TestListLabs_UsesEmbeddedLabDSLMetadata(t *testing.T) {
 			Description string
 			DurationMin int
 			StepCount   int
+			Tags        []string
 			VMType      string
 		}{
 			Description: item.Description,
 			DurationMin: item.DurationMin,
 			StepCount:   item.StepCount,
+			Tags:        item.Tags,
 			VMType:      item.VMType,
 		}
 	}
@@ -189,8 +193,14 @@ func TestListLabs_UsesEmbeddedLabDSLMetadata(t *testing.T) {
 	if got := byID["lab-k8s-basics"].DurationMin; got != 75 {
 		t.Fatalf("lab-k8s-basics duration_min=%d, want 75 from DSL", got)
 	}
-	if got := byID["lab-k8s-basics"].Description; got != "단일 노드 k3s 클러스터에서 Pod·Deployment·Service·롤링 업데이트를 직접 실습합니다" {
+	if got := byID["lab-k8s-basics"].Description; got != "Pod, Deployment, Service 기본 개념 실습" {
 		t.Fatalf("lab-k8s-basics description=%q does not match DSL", got)
+	}
+	wantDockerTags := []string{"docker", "container", "dockerfile"}
+	for i, want := range wantDockerTags {
+		if got := byID["lab-docker-basics"].Tags[i]; got != want {
+			t.Fatalf("lab-docker-basics tags[%d]=%q, want %q", i, got, want)
+		}
 	}
 	// 목록 API가 공개하는 vm_type은 실제 세션 프로비저닝에 쓰이는 instancetype과 일치해야 한다.
 	// Helm 랩은 chart 패키징/업그레이드 실습 때문에 session.go에서도 lab-medium으로 생성한다.

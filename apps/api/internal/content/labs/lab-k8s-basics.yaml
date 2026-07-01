@@ -4,7 +4,7 @@
 # 검증 command 는 엔진 화이트리스트(영숫자/공백/ /._-=:@%"') 안에서만 작성 — 파이프/글롭 금지.
 id: lab-k8s-basics
 title: Kubernetes 기초
-description: 단일 노드 k3s 클러스터에서 Pod·Deployment·Service·롤링 업데이트를 직접 실습합니다
+description: Pod, Deployment, Service 기본 개념 실습
 difficulty: intermediate
 duration_min: 75
 vm_type: lab-small
