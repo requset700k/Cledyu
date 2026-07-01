@@ -40,9 +40,12 @@ steps:
       - type: command
         command: helm version
         expect: v3.
+      # helm repo list -o json 의 {"name":...,"url":...} 인접쌍으로 이름(bitnami)과 URL 을 함께
+      # 검증한다. 텍스트 출력은 이름이 URL(charts.bitnami.com)에도 들어가 이름만 따로 못 묶는다.
+      # (json 은 컴팩트 + name 다음 url 인접 — helm repo list -o json 으로 실측 확인)
       - type: command
-        command: helm repo list
-        expect: bitnami
+        command: helm repo list -o json
+        expect: '"name":"bitnami","url":"https://charts.bitnami.com/bitnami"'
   - id: 2
     title: 차트 생성
     description: >
@@ -56,10 +59,33 @@ steps:
       - "helm create <이름> 을 실행하면 해당 이름의 디렉터리에 Chart.yaml 과 templates/ 가 만들어집니다."
       - "helm create mychart 실행 후 ~/mychart/Chart.yaml 이 존재하면 성공입니다."
     checks:
+      # helm create mychart 가 생성하는 파일 전부를 step2 에서 확인한다.
+      # 일부만 확인하면 나머지를 삭제·미생성해도 통과하는데, step3 lint 에서 막히면
+      # step2 로 돌아갈 수 없어 dead-end 가 된다(폭포수 모델).
+      - type: file_exists
+        path: /home/lab/mychart/.helmignore
       - type: file_exists
         path: /home/lab/mychart/Chart.yaml
       - type: file_exists
         path: /home/lab/mychart/values.yaml
+      - type: file_exists
+        path: /home/lab/mychart/templates/NOTES.txt
+      - type: file_exists
+        path: /home/lab/mychart/templates/_helpers.tpl
+      - type: file_exists
+        path: /home/lab/mychart/templates/deployment.yaml
+      - type: file_exists
+        path: /home/lab/mychart/templates/hpa.yaml
+      - type: file_exists
+        path: /home/lab/mychart/templates/httproute.yaml
+      - type: file_exists
+        path: /home/lab/mychart/templates/ingress.yaml
+      - type: file_exists
+        path: /home/lab/mychart/templates/service.yaml
+      - type: file_exists
+        path: /home/lab/mychart/templates/serviceaccount.yaml
+      - type: file_exists
+        path: /home/lab/mychart/templates/tests/test-connection.yaml
   - id: 3
     title: 차트 검증과 패키징
     description: >
@@ -76,8 +102,12 @@ steps:
       - type: command
         command: helm lint mychart
         expect: 0 chart(s) failed
-      - type: file_exists
-        path: /home/lab/mychart-0.1.0.tgz
+      # helm show chart 로 .tgz 가 진짜 helm 패키지이고 내용이 mychart 인지 확인한다.
+      # file_exists 만으론 touch 로 만든 빈 파일도 통과(위조). show chart 는 gzip 아니면 에러로 탈락.
+      # 줄바꿈 경계(name: mychart\n)로 otherchart·mychart2 등 부분매칭도 방지.
+      - type: command
+        command: helm show chart /home/lab/mychart-0.1.0.tgz
+        expect: "name: mychart\n"
   - id: 4
     title: 릴리스 설치
     description: >
@@ -94,9 +124,13 @@ steps:
       - type: command
         command: helm status web
         expect: deployed
+      # web 릴리스의 현재 차트가 mychart 인지 확인 — 올바른 차트로 설치했는지 검증.
+      # helm get metadata 는 릴리스를 정확히 지정(인자)하므로 web 의 CHART 만 본다.
+      # (helm list -f web 의 -f 는 정규식이라 web2 같은 형제 릴리스도 매칭돼 false-positive 가 됨)
+      # -o yaml + 줄바꿈 경계(chart: mychart\n)로 mychart2·notmychart 같은 부분매칭도 막는다.
       - type: command
-        command: helm list
-        expect: web
+        command: helm get metadata web -o yaml
+        expect: "chart: mychart\n"
   - id: 5
     title: 값 오버라이드 업그레이드
     description: >
@@ -110,12 +144,22 @@ steps:
       - "helm upgrade <릴리스> <차트> --set <키>=<값> 형태입니다. 적용된 사용자 값은 helm get values 로 확인합니다."
       - "helm upgrade web mychart --set replicaCount=2 후 helm get values web 에 replicaCount: 2 가 보이면 성공입니다."
     checks:
+      # 지문이 "replicaCount 를 2 로" 명시하므로 키 존재뿐 아니라 값(2)까지 검증한다.
+      # 끝에 줄바꿈(\n)을 둬 "replicaCount: 2" 가 "replicaCount: 20/25/200" 에 부분매칭되는 걸 막는다.
+      # (helm get values 는 yaml 출력이라 값 줄이 줄바꿈으로 끝난다)
       - type: command
         command: helm get values web
-        expect: replicaCount
+        expect: "replicaCount: 2\n"
       - type: command
         command: helm history web
         expect: superseded
+      # 지문이 "mychart 로" upgrade 를 명시한다. 차트를 안 보면 엉뚱한 차트로 upgrade 해도
+      # 통과하므로, upgrade 후 web 의 CHART 가 여전히 mychart 인지 확인한다(step4 이후 변할 수 있음).
+      # helm get metadata 는 릴리스 한정(인자)이라 형제 릴리스 false-positive 가 없다.
+      # -o yaml + 줄바꿈 경계(chart: mychart\n)로 mychart2·notmychart 같은 부분매칭도 막는다.
+      - type: command
+        command: helm get metadata web -o yaml
+        expect: "chart: mychart\n"
   - id: 6
     title: 롤백
     description: >
