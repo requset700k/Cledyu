@@ -135,8 +135,7 @@ export function LabSession({
     steps[0]?.id;
   // URL/클라이언트 상태에 이전 선택값이 남아도, 아직 열 수 없는 미래 단계면 현재 진행 단계로 되돌린다.
   // 실제 통과 여부는 서버 StepProgress가 진실 원천이고, Web은 학습자 화면에서 선행 단계 흐름을 보조한다.
-  const selectedStepAllowed =
-    selectedId !== null && isStepSelectable(steps, selectedId, statusOf);
+  const selectedStepAllowed = selectedId !== null && isStepSelectable(steps, selectedId, statusOf);
   const currentId = selectedStepAllowed ? selectedId : activeStepId;
   const currentStep = steps.find((s) => s.id === currentId) ?? steps[0];
 
@@ -192,10 +191,6 @@ export function LabSession({
               {currentStep.description}
             </p>
 
-            {/*
-              currentStep.commands는 Lab DSL에 남겨두되 학습자 화면에는 렌더링하지 않는다.
-              이 값은 검증/운영 보조에는 유용하지만, 화면에 노출되면 단계별 정답지처럼 보일 수 있다.
-            */}
             <div className="flex items-center gap-3">
               <button
                 type="button"
