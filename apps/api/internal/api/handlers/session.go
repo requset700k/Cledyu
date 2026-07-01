@@ -447,12 +447,14 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 	if h.denyIfNotStoreOwner(c, sessionID) {
 		return
 	}
-	idx, err := h.findStepIndex(sessionID, req.StepID)
+	idx, err := h.findValidatableStepIndex(sessionID, req.StepID)
 	if err != nil {
 		if errors.Is(err, errStepSessionNotFound) {
 			h.err(c, http.StatusNotFound, "session not found")
-		} else {
+		} else if errors.Is(err, errStepNotFound) {
 			h.err(c, http.StatusNotFound, "step not found")
+		} else {
+			h.err(c, http.StatusConflict, "previous step must be passed before validating this step")
 		}
 		return
 	}
@@ -624,14 +626,26 @@ func (h *Handler) ApplyValidationResult(r validation.ValidationResult) {
 
 var errStepSessionNotFound = errors.New("session not found")
 var errStepNotFound = errors.New("step not found")
+var errStepOrderBlocked = errors.New("previous step not passed")
 
-func (h *Handler) findStepIndex(sessionID string, stepID int) (int, error) {
+// findValidatableStepIndex는 step 존재 여부와 순서 접근 가능 여부를 같은 stepStore 스냅샷에서 판단한다.
+// Web UI도 미래 단계를 disabled 처리하지만, API 직접 호출 우회를 막는 최종 경계는 서버다.
+func (h *Handler) findValidatableStepIndex(sessionID string, stepID int) (int, error) {
 	idx := -1
+	blocked := false
 	found := h.steps.withSession(sessionID, func(ss *sessionSteps) bool {
 		for i := range ss.Steps {
 			if ss.Steps[i].StepID == stepID {
 				idx = i
 				break
+			}
+		}
+		if idx >= 0 {
+			for i := 0; i < idx; i++ {
+				if ss.Steps[i].Status != "passed" {
+					blocked = true
+					break
+				}
 			}
 		}
 		return false
@@ -641,6 +655,9 @@ func (h *Handler) findStepIndex(sessionID string, stepID int) (int, error) {
 	}
 	if idx == -1 {
 		return -1, errStepNotFound
+	}
+	if blocked {
+		return -1, errStepOrderBlocked
 	}
 	return idx, nil
 }
