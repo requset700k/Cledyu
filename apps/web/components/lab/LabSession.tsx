@@ -15,6 +15,7 @@ import {
   bootStageViewStates,
   shouldShowSessionBoot,
 } from '@/lib/lab-session-boot.mjs';
+import { isStepSelectable } from '@/lib/lab-step-access.mjs';
 import { appendTerminalTail } from '@/lib/terminal-tail.mjs';
 
 // VM이 Running으로 보고된 이후에도 cloud-init final stage(랩 init + getty 재시작 + autologin 활성)
@@ -138,7 +139,10 @@ export function LabSession({
     progress.find((p) => p.status === 'active')?.step_id ??
     progress.find((p) => p.status === 'failed')?.step_id ??
     steps[0]?.id;
-  const currentId = selectedId ?? activeStepId;
+  // URL/클라이언트 상태에 이전 선택값이 남아도, 아직 열 수 없는 미래 단계면 현재 진행 단계로 되돌린다.
+  // 실제 통과 여부는 서버 StepProgress가 진실 원천이고, Web은 학습자 화면에서 선행 단계 흐름을 보조한다.
+  const selectedStepAllowed = selectedId !== null && isStepSelectable(steps, selectedId, statusOf);
+  const currentId = selectedStepAllowed ? selectedId : activeStepId;
   const currentStep = steps.find((s) => s.id === currentId) ?? steps[0];
 
   if (!currentStep) {
@@ -180,6 +184,7 @@ export function LabSession({
               statusOf={statusOf}
               currentId={currentStep.id}
               onSelect={setSelectedId}
+              isSelectable={(id) => isStepSelectable(steps, id, statusOf)}
             />
           </div>
 
@@ -191,20 +196,6 @@ export function LabSession({
             <p className="text-slate-300 text-sm whitespace-pre-line mb-4">
               {currentStep.description}
             </p>
-
-            {currentStep.commands && currentStep.commands.length > 0 && (
-              <div className="mb-4">
-                <p className="text-slate-400 text-xs mb-1">이 단계에서 실행할 명령</p>
-                <div className="font-mono text-sm text-slate-300 bg-slate-950 border border-slate-700 rounded-md px-3 py-2 space-y-0.5">
-                  {currentStep.commands.map((cmd, i) => (
-                    <div key={i}>
-                      <span className="text-emerald-400 select-none">$ </span>
-                      {cmd}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
 
             <div className="flex items-center gap-3">
               <button
@@ -272,7 +263,7 @@ export function LabSession({
               />
             )
           ) : (
-            <TerminalPlaceholder commands={currentStep.commands ?? []} />
+            <TerminalPlaceholder />
           )}
         </div>
       </div>
