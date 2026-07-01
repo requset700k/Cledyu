@@ -32,11 +32,14 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "dr_backups" {
   }
 }
 
-# 수명주기 — 프리픽스별로 보관 책임이 다르다.
-#  postgres/ : 실제 retention 은 CNPG barman(retentionPolicy)이 관리(고유 키 WAL 삭제). 여기 규칙은
-#              versioning 잔재(non-current) 정리 backstop 일 뿐이다.
-#  vault/    : 6시간마다 고유 키 .snap 이 쌓이며 삭제 주체가 없다 → 여기서 현재 버전까지 만료시킨다.
-#  longhorn/ : Longhorn RecurringJob(retain)이 자체 삭제하므로 별도 규칙을 두지 않는다.
+# 수명주기 — versioning 이 켜져 있어 "삭제"는 delete marker 를 남기고 데이터는 non-current 버전으로
+# 보존된다. 따라서 삭제 주체가 있는 프리픽스도 non-current 정리 규칙이 필요하다.
+#  postgres/ : base/WAL retention 은 CNPG barman(retentionPolicy)이 관리. 여기선 그 삭제로 남은
+#              non-current 버전을 정리하는 backstop.
+#  vault/    : 6시간마다 고유 키 .snap 이 쌓이며 삭제 주체가 없다 → 현재 버전까지 만료시킨다.
+#  longhorn/ : Longhorn RecurringJob(retain)이 DeleteObject 로 지우지만 versioning 탓에 non-current
+#              버전이 남으므로 그 잔재를 정리한다.
+#  전체      : 실패한 multipart 업로드의 미완료 part 를 자동 중단해 과금 누수를 막는다.
 resource "aws_s3_bucket_lifecycle_configuration" "dr_backups" {
   bucket = aws_s3_bucket.dr_backups.id
 
@@ -64,6 +67,26 @@ resource "aws_s3_bucket_lifecycle_configuration" "dr_backups" {
       noncurrent_days = 7
     }
   }
+
+  rule {
+    id     = "backstop-noncurrent-longhorn"
+    status = "Enabled"
+    filter {
+      prefix = "longhorn/"
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+  }
+
+  rule {
+    id     = "abort-incomplete-multipart"
+    status = "Enabled"
+    filter {}
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
 }
 
 # 백업 전용 쓰기 IAM 사용자 — 액세스 키는 apply 후 콘솔/CLI 로 수동 발급해 Vault(cledyu/aws/backup)에
@@ -80,6 +103,11 @@ data "aws_iam_policy_document" "backup" {
       "s3:DeleteObject",
       "s3:ListBucket",
       "s3:GetBucketLocation",
+      # 큰 객체(Postgres base backup·Longhorn 볼륨)는 multipart 업로드를 타므로, 실패한 업로드를
+      # 중단·조회할 수 있어야 미완료 part 과금 누수를 막는다.
+      "s3:AbortMultipartUpload",
+      "s3:ListMultipartUploadParts",
+      "s3:ListBucketMultipartUploads",
     ]
     resources = [
       aws_s3_bucket.dr_backups.arn,
