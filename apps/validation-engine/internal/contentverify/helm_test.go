@@ -49,6 +49,13 @@ func (h helmFake) Exec(_ context.Context, cmd string) (string, error) {
 func (h helmFake) DefaultTimeout() time.Duration { return 20 * time.Second }
 func (h helmFake) Close()                        {}
 
+// metaYAML 은 helm get metadata web -o yaml 의 실제 출력을 모사한다(로컬 v4.2.2 실측:
+// chart 키 아래 차트 이름이 그대로, 값 줄은 줄바꿈으로 끝난다). expect 는 "chart: <이름>\n"
+// 로 정확매칭하므로, chart 이름이 mychart2·notmychart 처럼 mychart 를 포함해도 탈락해야 한다.
+func metaYAML(chart string) string {
+	return "appVersion: 1.16.0\nchart: " + chart + "\nname: web\nnamespace: default\nrevision: 1\nstatus: deployed\nversion: 0.1.0\n"
+}
+
 func helmChecks(t *testing.T, stepID int) []model.Check {
 	t.Helper()
 	var out []model.Check
@@ -176,22 +183,24 @@ func TestHelmStep4_VerifiesChartName(t *testing.T) {
 		t.Errorf("step4 차트 체크는 helm get metadata web(릴리스 한정)을 써야 함 (현재: %q)", metaCmd)
 	}
 
+	status := "NAME: web\nSTATUS: deployed\nREVISION: 1"
+
 	// 정답: deployed + web 의 CHART 가 mychart
-	good := helmFake{
-		statusOut:   "NAME: web\nSTATUS: deployed\nREVISION: 1",
-		metadataOut: "NAME: web\nCHART: mychart\nVERSION: 0.1.0\nNAMESPACE: default\nREVISION: 1",
-	}
+	good := helmFake{statusOut: status, metadataOut: metaYAML("mychart")}
 	if _, ok := checker.RunAll(context.Background(), good, step4); !ok {
 		t.Error("deployed + mychart 정답은 step4를 통과해야 함")
 	}
 
 	// 엉뚱한 차트(bitnami/nginx)로 설치 → web 의 CHART 가 mychart 아님 → 탈락.
-	wrongChart := helmFake{
-		statusOut:   "NAME: web\nSTATUS: deployed\nREVISION: 1",
-		metadataOut: "NAME: web\nCHART: nginx\nVERSION: 18.1.0\nNAMESPACE: default\nREVISION: 1",
-	}
+	wrongChart := helmFake{statusOut: status, metadataOut: metaYAML("nginx")}
 	if _, ok := checker.RunAll(context.Background(), wrongChart, step4); ok {
 		t.Error("mychart 가 아닌 차트로 설치하면 step4에서 탈락해야 함")
+	}
+
+	// mychart 를 포함하는 다른 차트(mychart2)로 설치 → 부분매칭으로 통과하면 안 됨(줄바꿈 경계).
+	lookalikeChart := helmFake{statusOut: status, metadataOut: metaYAML("mychart2")}
+	if _, ok := checker.RunAll(context.Background(), lookalikeChart, step4); ok {
+		t.Error("mychart2 차트로 설치하면 step4에서 탈락해야 함 — 부분매칭 방지")
 	}
 }
 
@@ -238,7 +247,7 @@ func TestHelmStep5_VerifiesValueAndChart(t *testing.T) {
 	step5 := helmChecks(t, 5)
 
 	historySuperseded := "REVISION\tSTATUS\n1\tsuperseded\n2\tdeployed"
-	metaMychart := "NAME: web\nCHART: mychart\nVERSION: 0.1.0\nNAMESPACE: default\nREVISION: 2"
+	metaMychart := metaYAML("mychart")
 
 	// 회귀 가드: 차트 체크가 릴리스 한정 명령(helm get metadata web)을 쓰도록 고정.
 	var metaCmd string
@@ -281,9 +290,18 @@ func TestHelmStep5_VerifiesValueAndChart(t *testing.T) {
 	// 엉뚱한 차트(nginx)로 upgrade → web 의 CHART 가 mychart 아님 → 탈락(값은 정답이라 차트만 격리).
 	wrongChart := helmFake{
 		valuesOut: values("replicaCount: 2"), historyOut: historySuperseded,
-		metadataOut: "NAME: web\nCHART: nginx\nVERSION: 18.1.0\nNAMESPACE: default\nREVISION: 2",
+		metadataOut: metaYAML("nginx"),
 	}
 	if _, ok := checker.RunAll(context.Background(), wrongChart, step5); ok {
 		t.Error("mychart 가 아닌 차트로 upgrade 하면 step5에서 탈락해야 함 — 차트 fidelity")
+	}
+
+	// mychart 를 포함하는 다른 차트(mychart2)로 upgrade → 부분매칭으로 통과하면 안 됨(줄바꿈 경계).
+	lookalikeChart := helmFake{
+		valuesOut: values("replicaCount: 2"), historyOut: historySuperseded,
+		metadataOut: metaYAML("mychart2"),
+	}
+	if _, ok := checker.RunAll(context.Background(), lookalikeChart, step5); ok {
+		t.Error("mychart2 차트로 upgrade 하면 step5에서 탈락해야 함 — 부분매칭 방지")
 	}
 }

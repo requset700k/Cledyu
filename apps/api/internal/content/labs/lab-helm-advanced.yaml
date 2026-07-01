@@ -127,9 +127,10 @@ steps:
       # web 릴리스의 현재 차트가 mychart 인지 확인 — 올바른 차트로 설치했는지 검증.
       # helm get metadata 는 릴리스를 정확히 지정(인자)하므로 web 의 CHART 만 본다.
       # (helm list -f web 의 -f 는 정규식이라 web2 같은 형제 릴리스도 매칭돼 false-positive 가 됨)
+      # -o yaml + 줄바꿈 경계(chart: mychart\n)로 mychart2·notmychart 같은 부분매칭도 막는다.
       - type: command
-        command: helm get metadata web
-        expect: mychart
+        command: helm get metadata web -o yaml
+        expect: "chart: mychart\n"
   - id: 5
     title: 값 오버라이드 업그레이드
     description: >
@@ -155,9 +156,10 @@ steps:
       # 지문이 "mychart 로" upgrade 를 명시한다. 차트를 안 보면 엉뚱한 차트로 upgrade 해도
       # 통과하므로, upgrade 후 web 의 CHART 가 여전히 mychart 인지 확인한다(step4 이후 변할 수 있음).
       # helm get metadata 는 릴리스 한정(인자)이라 형제 릴리스 false-positive 가 없다.
+      # -o yaml + 줄바꿈 경계(chart: mychart\n)로 mychart2·notmychart 같은 부분매칭도 막는다.
       - type: command
-        command: helm get metadata web
-        expect: mychart
+        command: helm get metadata web -o yaml
+        expect: "chart: mychart\n"
   - id: 6
     title: 롤백
     description: >
