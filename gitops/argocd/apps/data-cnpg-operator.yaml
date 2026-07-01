@@ -1,0 +1,43 @@
+---
+# CloudNativePG 오퍼레이터를 ArgoCD로 배포(멀티소스: upstream 차트 + $values).
+# sync-wave 0 — Cluster CR(data-postgres-cnpg)보다 먼저 CRD·오퍼레이터가 서야 한다.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: data-cnpg-operator
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    # 1) cloudnative-pg 공식 Helm 차트 (버전 고정 — apply 전 최신 stable 확인해 핀)
+    - repoURL: https://cloudnative-pg.github.io/charts
+      chart: cloudnative-pg
+      targetRevision: 0.23.0
+      helm:
+        releaseName: cnpg
+        valueFiles:
+          - $values/gitops/apps/cnpg-operator/values.yaml
+    # 2) values.yaml 제공 Git 레포 (ref: values)
+    - repoURL: https://github.com/requset700k/Cledyu.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnpg-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true # 대형 CRD annotation 초과 방지
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
