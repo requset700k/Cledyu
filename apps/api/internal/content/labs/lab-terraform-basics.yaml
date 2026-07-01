@@ -5,7 +5,7 @@
 # (영숫자/공백/ /._-=:@%"') 안에서만 작성한다.
 id: lab-terraform-basics
 title: Terraform 기초
-description: 브라우저 VS Code에서 HCL을 작성하고 init·plan·apply로 IaC 워크플로를 실습합니다
+description: HCL 문법, 리소스 선언, state 관리
 difficulty: intermediate
 duration_min: 60
 vm_type: lab-small
@@ -14,7 +14,7 @@ ide: true
 tags:
   - terraform
   - iac
-  - ide
+  - state
 init:
   # terraform·code-server 는 베이스 이미지(lab-base)에 이미 설치돼 있다(다운로드 0).
   # 여기서는 code-server 워크스페이스/설정을 만들고 lab 사용자 서비스를 기동만 한다.

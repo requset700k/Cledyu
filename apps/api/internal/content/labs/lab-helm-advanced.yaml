@@ -13,8 +13,8 @@ vm_type: lab-medium
 environment: ubuntu
 tags:
   - helm
-  - kubernetes
-  - gitops
+  - chart
+  - release
 init:
   # k3s·helm 은 베이스 이미지(lab-base)에 이미 설치돼 있다(k3s 는 서비스만 꺼둠, nginx 캐시 포함).
   # 여기서는 k3s 서비스 기동과 KUBECONFIG 노출만 한다(다운로드 0 → 세션 부팅 단축).

@@ -4,7 +4,7 @@
 # 이미 열려 있어 그룹 추가가 반영되지 않기 때문(검증엔진 ssh 세션은 그룹으로 동작).
 id: lab-docker-basics
 title: Docker 기초
-description: 컨테이너 실행과 exec, Dockerfile 빌드, 수명주기 관리까지 컨테이너 핵심기 실습
+description: 이미지 빌드, 컨테이너 실행, 레이어 이해
 difficulty: beginner
 duration_min: 60
 vm_type: lab-small
