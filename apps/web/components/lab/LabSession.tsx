@@ -109,10 +109,7 @@ export function LabSession({
     return (
       <>
         {session?.terminal_url && session?.vm_provider === 'kubevirt' && (
-          <TerminalReadinessProbe
-            terminalPath={session.terminal_url}
-            onReady={completeBootGrace}
-          />
+          <TerminalReadinessProbe terminalPath={session.terminal_url} onReady={completeBootGrace} />
         )}
         <SessionBoot
           status={status}

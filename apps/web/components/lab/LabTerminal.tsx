@@ -10,10 +10,7 @@ import {
   shouldReconnect,
 } from '@/lib/runtime-api-origin.mjs';
 import { refreshSession } from '@/lib/auth-session.mjs';
-import {
-  createTerminalReadinessGate,
-  TERMINAL_READY_REDRAW,
-} from '@/lib/terminal-readiness.mjs';
+import { createTerminalReadinessGate, TERMINAL_READY_REDRAW } from '@/lib/terminal-readiness.mjs';
 
 type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'error';
 
