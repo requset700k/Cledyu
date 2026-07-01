@@ -21,6 +21,8 @@ type labSummaryResponse struct {
 	StepCount   int      `json:"step_count"`
 }
 
+// labCatalogTieBreakOrder는 같은 난이도 안에서의 권장 학습 순서다.
+// 예를 들어 Kubernetes는 이름이 "기초"여도 Docker 이후의 클러스터 개념을 다루므로 중급으로 분리한다.
 var labCatalogTieBreakOrder = []string{
 	"lab-linux-basics",
 	"lab-docker-basics",
@@ -30,6 +32,8 @@ var labCatalogTieBreakOrder = []string{
 	"lab-helm-advanced",
 }
 
+// labDifficultyRank는 카탈로그를 입문 → 중급 → 고급 순서로 보여주기 위한 정렬 기준이다.
+// 난이도 값은 Lab DSL에 남기고, 같은 난이도 안에서의 세부 학습 순서는 labCatalogTieBreakOrder가 담당한다.
 var labDifficultyRank = map[string]int{
 	"beginner":     0,
 	"intermediate": 1,
@@ -49,6 +53,9 @@ func publicLabSummary(lab content.LabContent) labSummaryResponse {
 	}
 }
 
+// orderedLabIDs는 map iteration 순서에 의존하지 않고 학습 흐름에 맞는 안정적인 카드 순서를 만든다.
+// 1차 기준은 실제 실습 난이도이고, 같은 난이도 안에서는 기본기 → 컨테이너 → 클러스터/IaC → 패키징 순서로 묶는다.
+// 새 Lab이 추가됐는데 난이도나 tie-break 순서가 빠져 있으면 목록 뒤로 보내 안전하게 노출한다.
 func orderedLabIDs(labs map[string]content.LabContent) []string {
 	ids := make([]string, 0, len(labs))
 	for id := range labs {

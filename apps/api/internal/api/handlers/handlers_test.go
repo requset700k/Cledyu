@@ -209,6 +209,8 @@ func TestListLabs_KeepsCatalogDisplayOrder(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// 카탈로그는 파일명이나 map iteration 순서가 아니라 실제 학습 난이도와 선행 지식 기준으로 노출한다.
+	// Linux/Docker를 입문으로 먼저 배치하고, Kubernetes·Ansible·Terraform은 중급, Helm은 고급으로 둔다.
 	want := []string{
 		"lab-linux-basics",
 		"lab-docker-basics",
@@ -225,6 +227,8 @@ func TestListLabs_KeepsCatalogDisplayOrder(t *testing.T) {
 			t.Fatalf("lab order[%d]=%q, want %q", i, got, wantID)
 		}
 	}
+	// 제목의 "기초" 여부와 난이도는 다를 수 있다. Kubernetes는 기초 Lab이지만 Docker 이후에 다루는
+	// 클러스터 리소스 실습이므로 beginner가 아니라 intermediate로 유지한다.
 	wantDifficulties := []string{"beginner", "beginner", "intermediate", "intermediate", "intermediate", "advanced"}
 	for i, wantDifficulty := range wantDifficulties {
 		if got := body.Items[i].Difficulty; got != wantDifficulty {
