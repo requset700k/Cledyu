@@ -6,7 +6,7 @@
 id: lab-terraform-basics
 title: Terraform 기초
 description: 브라우저 VS Code에서 HCL을 작성하고 init·plan·apply로 IaC 워크플로를 실습합니다
-difficulty: beginner
+difficulty: intermediate
 duration_min: 60
 vm_type: lab-small
 environment: ubuntu
