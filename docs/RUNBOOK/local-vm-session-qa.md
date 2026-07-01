@@ -275,7 +275,35 @@ password: lab
 `Cledyu ~ ➜` 형태로 보여야 한다. 기존에 이미 생성된 VM에는 cloud-init 변경이
 소급 적용되지 않으므로 프롬프트 변경을 검증할 때는 새 세션을 생성한다.
 
-### 10. VM 파일 조회 forced command 사전조건 확인
+### 10. 터미널 준비 완료 신호 기반 boot grace 확인
+
+KubeVirt 세션은 VMI가 `Running`으로 바뀌어도 곧바로 학습자에게 터미널을 보여주지 않는다.
+guest 내부에서 lab 계정의 login shell이 실행되고 `.bash_profile`이 끝까지 적용되어야
+부팅 로그 대신 정상 프롬프트를 보여줄 수 있기 때문이다.
+
+새 세션 VM의 `.bash_profile`은 다음 순서로 실행된다.
+
+1. 기존 `/home/lab/.bashrc` 로드
+2. serial console 부팅 스크롤백 clear
+3. `/home/lab`로 이동
+4. Web 전용 readiness sentinel(`CledyuTerminalReady=1`) 출력
+
+Web은 `SessionBoot` 화면을 유지한 채 숨겨진 terminal probe를 먼저 연결한다. probe가
+readiness sentinel을 감지하면 `BOOT_GRACE_MS`를 끝까지 기다리지 않고 실습 화면으로
+전환한다. 실제 화면에 보이는 터미널은 연결 직후 `Ctrl+L` redraw를 보내 `Cledyu ~ ➜`
+프롬프트를 다시 그린다.
+
+검증 기준:
+
+- 프로비저닝 진행 바가 100%까지 차지 않아도 readiness sentinel이 확인되면 실습 화면으로 전환될 수 있다.
+- 터미널 첫 화면에 cloud-init/apt/k3s 설치 로그가 보이지 않아야 한다.
+- 사용자가 Enter를 누르지 않아도 `Cledyu ~ ➜` 프롬프트가 보여야 한다.
+- readiness sentinel을 받지 못하는 기존 VM이나 예외 상황에서는 기존 `BOOT_GRACE_MS=120s` fallback이 유지된다.
+
+이 검증은 새로 생성한 KubeVirt 세션 VM에서만 의미가 있다. 이미 생성된 VM에는 cloud-init
+userdata가 소급 적용되지 않는다.
+
+### 11. VM 파일 조회 forced command 사전조건 확인
 
 읽기 전용 파일 탐색기 기반은 세션 VM 내부의 cloud-init forced command
 `/usr/local/libexec/cledyu-list-files`를 `python3`로 실행한다. `ubuntu-2204-base` 이미지를
@@ -302,7 +330,7 @@ Python 3.10.12
 EC2 오버플로우 세션(`internal/ec2/cloudinit.go`)은 Tailscale SSH 기반의 별도 경로를 사용하므로,
 이 KubeVirt 세션 VM 파일 조회 helper와 별도 후속 작업으로 다룬다.
 
-### 11. 배포 환경의 VM 콘솔 RBAC 확인
+### 12. 배포 환경의 VM 콘솔 RBAC 확인
 
 ArgoCD 동기화 후 API ServiceAccount가 세션 네임스페이스의 KubeVirt serial
 console에 접근할 수 있는지 확인한다.
@@ -482,7 +510,12 @@ cloud-init 설치 로그나 준비 전 프롬프트가 보일 수 있다. API가
 부팅 초기에 `serial-getty@ttyS0`를 멈추고, 랩별 init이 끝난 뒤 autologin getty를
 다시 시작한다.
 
-세션 상태 조회는 VM이 `Running`이 되면 `ready`로 전환한다. Web은 이후 최대 2분간
+세션 상태 조회는 VM이 `Running`이 되면 `ready`로 전환한다. Web은 곧바로 터미널을 노출하지
+않고 숨겨진 terminal probe를 먼저 연결한다. probe가 login shell의 readiness sentinel
+(`CledyuTerminalReady=1`)을 감지하면 기존 `BOOT_GRACE_MS`를 끝까지 기다리지 않고 실습
+화면으로 전환한다.
+
+readiness sentinel을 받지 못하면 기존 보호 동작으로 fallback한다. 즉 Web은 최대 2분간
 부팅 카드를 유지해 랩별 init 완료와 autologin getty 재시작을 기다린다. 반대로 기본
 프로비저닝 제한 시간(10분, CDI/Longhorn clone이 정상적으로 7분까지 걸리는 케이스를
 감안한 값)을 넘겼는데도 VM이 `Running`이 아니면 `failed`로 표시한다. 이 namespace는

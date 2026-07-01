@@ -54,6 +54,9 @@ export function LabTerminal({
     // 같은 장애 구간에서 refresh token을 반복 회전하지 않되 실패 시 1분 뒤 다시 시도한다.
     let authRefreshedForOutage = false;
     let lastAuthRefreshAttemptAt: number | null = null;
+    // Ctrl+L redraw는 boot grace handoff 직후 첫 표시 연결에서만 보낸다. 재연결 때마다 보내면
+    // foreground 프로세스(cat, REPL, TUI 등)의 stdin으로 form-feed가 주입될 수 있다.
+    let initialRedrawSent = false;
     // xterm과 resize listener 정리를 비동기 초기화 완료 후 effect cleanup에 연결한다.
     let dispose: (() => void) | null = null;
     setConnectionState('connecting');
@@ -170,7 +173,8 @@ export function LabTerminal({
           // 고정 크기를 실제 xterm 크기로 교정한다.
           serverSupportsResize = socket.protocol === TERMINAL_SUBPROTOCOL_V2;
           if (serverSupportsResize) sendResize();
-          if (redrawOnConnect) {
+          if (redrawOnConnect && !initialRedrawSent) {
+            initialRedrawSent = true;
             socket.send(encoder.encode(TERMINAL_READY_REDRAW));
           }
         };
