@@ -25,6 +25,11 @@ import (
 	"github.com/requset700k/cledyu/api/internal/validation"
 	"github.com/requset700k/cledyu/api/internal/vmfiles"
 	"go.uber.org/zap"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/resource"
+	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
 )
 
 const (
@@ -49,6 +54,29 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+
+	otlpExp, otelErr := otlptracegrpc.New(ctx,
+    otlptracegrpc.WithEndpoint("alloy.loki.svc.cluster.local:4317"),
+    otlptracegrpc.WithInsecure(),
+	)
+	if otelErr != nil {
+		logger.Warn("OTel exporter 초기화 실패 — trace 비활성", zap.Error(otelErr))
+	} else {
+		tp := sdktrace.NewTracerProvider(
+			sdktrace.WithBatcher(otlpExp),
+			sdktrace.WithResource(resource.NewWithAttributes(
+				semconv.SchemaURL,
+				semconv.ServiceNameKey.String("cledyu-api"),
+			)),
+		)
+		otel.SetTracerProvider(tp)
+		defer func() {
+			if err := tp.Shutdown(context.Background()); err != nil {
+				logger.Error("OTel shutdown error", zap.Error(err))
+			}
+		}()
+		logger.Info("OTel TracerProvider 초기화 완료")
+	}
 
 	// 세션 프로바이더 배선:
 	//   - 온프렘 KubeVirt 매니저(primary)
