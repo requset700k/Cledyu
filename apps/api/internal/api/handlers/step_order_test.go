@@ -8,6 +8,8 @@ import (
 )
 
 func stepOrderHandler() *Handler {
+	// validator를 비워 두면 ValidateStep이 mock pass 경로를 탄다.
+	// 이 테스트의 관심사는 validation-engine 자체가 아니라 서버의 단계 순서 방어다.
 	h := &Handler{log: zap.NewNop(), steps: newStepStore(nil, nil)}
 	h.steps.m["s1"] = &sessionSteps{
 		LabID:  "lab-linux-basics",
@@ -41,6 +43,8 @@ func TestValidateStep_BlocksOutOfOrderStep(t *testing.T) {
 
 func TestValidateStep_AllowsNextStepAfterPreviousPassed(t *testing.T) {
 	h := stepOrderHandler()
+	// 정상 진행 시나리오: 이전 단계가 passed면 다음 active 단계는 검증 요청을 받을 수 있다.
+	// 순서 차단 로직이 정상적인 same-session 진행까지 막지 않는지 확인한다.
 	h.steps.m["s1"].Steps[0].Status = "passed"
 	h.steps.m["s1"].Steps[1].Status = "active"
 	r := ownershipRouter(h, "alice")

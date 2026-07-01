@@ -447,6 +447,9 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 	if h.denyIfNotStoreOwner(c, sessionID) {
 		return
 	}
+	// 검증엔진 요청을 발행하기 전에 서버가 step 순서를 먼저 확인한다.
+	// Web UI의 disabled 상태는 사용자가 직접 API를 호출하면 우회할 수 있으므로,
+	// 이전 단계가 통과되지 않은 요청은 여기서 409로 끊어야 한다.
 	idx, err := h.findValidatableStepIndex(sessionID, req.StepID)
 	if err != nil {
 		if errors.Is(err, errStepSessionNotFound) {
@@ -630,6 +633,7 @@ var errStepOrderBlocked = errors.New("previous step not passed")
 
 // findValidatableStepIndex는 step 존재 여부와 순서 접근 가능 여부를 같은 stepStore 스냅샷에서 판단한다.
 // Web UI도 미래 단계를 disabled 처리하지만, API 직접 호출 우회를 막는 최종 경계는 서버다.
+// 반환된 idx는 이후 markStepValidating/markStepPassed에서 같은 step 배열 위치를 갱신하는 데 사용한다.
 func (h *Handler) findValidatableStepIndex(sessionID string, stepID int) (int, error) {
 	idx := -1
 	blocked := false
