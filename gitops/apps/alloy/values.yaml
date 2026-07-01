@@ -40,7 +40,7 @@ alloy:
         }
       }
 
-       // OTel Trace 수집 → Tempo 전송 
+       // OTel Trace 수집 → Tempo 전송
       otelcol.receiver.otlp "default" {
         grpc {
           endpoint = "0.0.0.0:4317"
