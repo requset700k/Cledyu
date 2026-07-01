@@ -1,0 +1,7 @@
+# ESO가 S3 백업 자격증명(cledyu-backup-s3)을 뿌릴 네임스페이스.
+# Vault kv(cledyu/aws/backup: access_key_id, secret_access_key)가 원본.
+# 키 발급: apply 후 콘솔/CLI 로 cledyu-lab-backup-writer 사용자의 액세스 키를 발급하고
+#          vault kv put cledyu/aws/backup access_key_id=<발급값> secret_access_key=<발급값>
+namespaces:
+  - postgres
+  - vault
