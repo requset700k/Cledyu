@@ -9,7 +9,7 @@ title: Helm 고급
 description: Helm chart 작성, 패키징, 배포 자동화
 difficulty: advanced
 duration_min: 90
-vm_type: lab-small
+vm_type: lab-medium
 environment: ubuntu
 tags:
   - helm

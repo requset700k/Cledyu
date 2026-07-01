@@ -147,6 +147,7 @@ func TestListLabs_UsesEmbeddedLabDSLMetadata(t *testing.T) {
 			Description string `json:"description"`
 			DurationMin int    `json:"duration_min"`
 			StepCount   int    `json:"step_count"`
+			VMType      string `json:"vm_type"`
 		} `json:"items"`
 		Total int `json:"total"`
 	}
@@ -161,16 +162,19 @@ func TestListLabs_UsesEmbeddedLabDSLMetadata(t *testing.T) {
 		Description string
 		DurationMin int
 		StepCount   int
+		VMType      string
 	}, len(body.Items))
 	for _, item := range body.Items {
 		byID[item.ID] = struct {
 			Description string
 			DurationMin int
 			StepCount   int
+			VMType      string
 		}{
 			Description: item.Description,
 			DurationMin: item.DurationMin,
 			StepCount:   item.StepCount,
+			VMType:      item.VMType,
 		}
 	}
 
@@ -187,6 +191,11 @@ func TestListLabs_UsesEmbeddedLabDSLMetadata(t *testing.T) {
 	}
 	if got := byID["lab-k8s-basics"].Description; got != "단일 노드 k3s 클러스터에서 Pod·Deployment·Service·롤링 업데이트를 직접 실습합니다" {
 		t.Fatalf("lab-k8s-basics description=%q does not match DSL", got)
+	}
+	// 목록 API가 공개하는 vm_type은 실제 세션 프로비저닝에 쓰이는 instancetype과 일치해야 한다.
+	// Helm 랩은 chart 패키징/업그레이드 실습 때문에 session.go에서도 lab-medium으로 생성한다.
+	if got := byID["lab-helm-advanced"].VMType; got != "lab-medium" {
+		t.Fatalf("lab-helm-advanced vm_type=%q, want lab-medium to match provisioning", got)
 	}
 }
 
