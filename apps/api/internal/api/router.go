@@ -44,6 +44,7 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions session.Provider, v
 	r.Use(middleware.Logger(log))
 	// RED 메트릭 기록 — Prometheus 스크랩용. SLO 담당자가 도메인 SLI 를 위에 얹는다.
 	r.Use(middleware.Metrics())
+	r.Use(middleware.Tracing("cledyu-api"))
 	r.Use(cors.New(cors.Config{
 		// Next.js dev server(3000) 및 클러스터 프론트엔드에서의 요청 허용.
 		// 프로덕션에서는 Traefik이 CORS를 처리하므로 이 설정은 로컬 개발 전용.
