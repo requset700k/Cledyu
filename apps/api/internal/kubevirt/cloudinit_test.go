@@ -90,6 +90,9 @@ func TestRenderCloudInit_ClearsSerialConsoleOnLogin(t *testing.T) {
 			t.Fatalf("expected %q in .bash_profile, got:\n%s", want, profile)
 		}
 	}
+	if !strings.Contains(profile, "CledyuTerminalReady=1") {
+		t.Fatalf("expected terminal readiness sentinel in .bash_profile, got:\n%s", profile)
+	}
 }
 
 // 학생 터미널 프롬프트에는 내부 세션 hostname(session-xxxx)이 보이지 않아야 한다.

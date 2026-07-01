@@ -10,6 +10,7 @@ import {
   shouldReconnect,
 } from '@/lib/runtime-api-origin.mjs';
 import { refreshSession } from '@/lib/auth-session.mjs';
+import { createTerminalReadinessGate, TERMINAL_READY_REDRAW } from '@/lib/terminal-readiness.mjs';
 
 type ConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'error';
 
@@ -28,10 +29,12 @@ export function LabTerminal({
   terminalPath,
   heightClass = 'h-80',
   onOutput,
+  redrawOnConnect = false,
 }: {
   terminalPath: string;
   heightClass?: string;
   onOutput?: (chunk: string) => void;
+  redrawOnConnect?: boolean;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
@@ -48,6 +51,9 @@ export function LabTerminal({
     // 같은 장애 구간에서 refresh token을 반복 회전하지 않되 실패 시 1분 뒤 다시 시도한다.
     let authRefreshedForOutage = false;
     let lastAuthRefreshAttemptAt: number | null = null;
+    // Ctrl+L redraw는 boot grace handoff 직후 첫 표시 연결에서만 보낸다. 재연결 때마다 보내면
+    // foreground 프로세스(cat, REPL, TUI 등)의 stdin으로 form-feed가 주입될 수 있다.
+    let initialRedrawSent = false;
     // xterm과 resize listener 정리를 비동기 초기화 완료 후 effect cleanup에 연결한다.
     let dispose: (() => void) | null = null;
     setConnectionState('connecting');
@@ -164,6 +170,10 @@ export function LabTerminal({
           // 고정 크기를 실제 xterm 크기로 교정한다.
           serverSupportsResize = socket.protocol === TERMINAL_SUBPROTOCOL_V2;
           if (serverSupportsResize) sendResize();
+          if (redrawOnConnect && !initialRedrawSent) {
+            initialRedrawSent = true;
+            socket.send(encoder.encode(TERMINAL_READY_REDRAW));
+          }
         };
         socket.onmessage = (event) => {
           // 문자열 프레임 = 제어(리사이즈) 또는 서버 텍스트. 바이너리 프레임 = VM 출력.
@@ -231,7 +241,7 @@ export function LabTerminal({
       ws?.close(1000, 'component disposed');
       dispose?.();
     };
-  }, [terminalPath, onOutput]);
+  }, [terminalPath, onOutput, redrawOnConnect]);
 
   return (
     <div className="rounded-lg border border-slate-700 bg-slate-950 overflow-hidden">
@@ -263,4 +273,60 @@ export function LabTerminal({
       <div ref={containerRef} className={`${heightClass} w-full p-2`} />
     </div>
   );
+}
+
+// SessionBoot 이 화면을 가리고 있는 동안 serial console에 먼저 붙어 VM 내부 login shell 준비 여부만 확인한다.
+// sentinel을 잡으면 boot grace를 즉시 종료하고, 실제 화면 터미널은 새 연결에서 prompt redraw만 다시 수행한다.
+export function TerminalReadinessProbe({
+  terminalPath,
+  onReady,
+}: {
+  terminalPath: string;
+  onReady: () => void;
+}) {
+  useEffect(() => {
+    let disposed = false;
+    let readyTimer: ReturnType<typeof setTimeout> | null = null;
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+    const readinessGate = createTerminalReadinessGate();
+    const base = browserWebSocketOrigin();
+    const token = process.env.NODE_ENV === 'development' ? 'dev-token' : '';
+    const url = `${base}${terminalPath}${token ? `?token=${token}` : ''}`;
+    let socket: WebSocket;
+    try {
+      socket = new WebSocket(url, [TERMINAL_SUBPROTOCOL_V2]);
+    } catch {
+      return undefined;
+    }
+
+    socket.binaryType = 'arraybuffer';
+    socket.onopen = () => {
+      socket.send(encoder.encode(TERMINAL_READY_REDRAW));
+    };
+    socket.onmessage = (event) => {
+      if (disposed) return;
+      if (typeof event.data === 'string') {
+        readinessGate.consume(event.data);
+      } else {
+        readinessGate.consume(decoder.decode(new Uint8Array(event.data), { stream: true }));
+      }
+      if (readinessGate.isReady() && !readyTimer) {
+        socket.send(encoder.encode(TERMINAL_READY_REDRAW));
+        readyTimer = setTimeout(() => {
+          if (disposed) return;
+          onReady();
+          socket.close(1000, 'terminal ready');
+        }, 100);
+      }
+    };
+
+    return () => {
+      disposed = true;
+      if (readyTimer) clearTimeout(readyTimer);
+      socket.close(1000, 'probe disposed');
+    };
+  }, [terminalPath, onReady]);
+
+  return null;
 }
