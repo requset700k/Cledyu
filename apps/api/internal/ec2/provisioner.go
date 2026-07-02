@@ -25,13 +25,13 @@ import (
 
 // 세션 인스턴스 식별·메타데이터 태그. KubeVirt 의 namespace 라벨/annotation 과 의미가 1:1 대응한다.
 const (
-	tagManagedBy = "cledyu.io/managed-by"
-	managedValue = "cledyu-session"
-	tagSessionID = "cledyu.io/session-id"
-	tagUserID    = "cledyu.io/user-id"
-	tagLabID     = "cledyu.io/lab-id"
-	tagStartedAt = "cledyu.io/started-at"
-	tagExpiresAt = "cledyu.io/expires-at"
+	tagManagedBy          = "cledyu.io/managed-by"
+	managedValue          = "cledyu-session"
+	tagSessionID          = "cledyu.io/session-id"
+	tagUserID             = "cledyu.io/user-id"
+	tagLabID              = "cledyu.io/lab-id"
+	tagStartedAt          = "cledyu.io/started-at"
+	tagExpiresAt          = "cledyu.io/expires-at"
 	tagBootResultRecorded = "cledyu.io/boot-result-recorded"
 )
 
@@ -133,7 +133,7 @@ func (p *Provisioner) Get(ctx context.Context, sessionID string) (*session.Sessi
 		return nil, session.ErrNotFound
 	}
 	sess := instanceToSession(inst, p.cfg.Region)
-	// KubeVirt Get()의 ready-at 최초 관측 시점 기록과 대응 
+	// KubeVirt Get()의 ready-at 최초 관측 시점 기록과 대응
 	// running 전이를 처음 본 폴링에서 vm_boot_total{result=success,env=ec2}를 1회 기록
 	if sess.Status == "ready" {
 		p.recordBootOnce(ctx, inst, vmmetrics.ResultSuccess)
