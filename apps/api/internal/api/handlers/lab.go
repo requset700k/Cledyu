@@ -101,13 +101,12 @@ func orderedLabIDs(labs map[string]content.LabContent) []string {
 }
 
 // labStepResponse는 학습자 화면에 필요한 step 정보만 노출한다.
-// checks는 validation-engine 전용 정답 조건이므로 API 응답에서 제외한다.
+// commands/checks는 정답 역할을 할 수 있으므로 브라우저 응답에서도 제외한다.
 type labStepResponse struct {
-	ID          int      `json:"id"`
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	Commands    []string `json:"commands,omitempty"`
-	Hint        string   `json:"hint,omitempty"`
+	ID          int    `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Hint        string `json:"hint,omitempty"`
 }
 
 func publicSteps(steps []content.Step) []labStepResponse {
@@ -117,7 +116,6 @@ func publicSteps(steps []content.Step) []labStepResponse {
 			ID:          step.ID,
 			Title:       step.Title,
 			Description: step.Description,
-			Commands:    step.Commands,
 			Hint:        step.Hint,
 		})
 	}

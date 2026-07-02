@@ -1,6 +1,6 @@
 // 실제 xterm.js 터미널/VM WebSocket 연동 전까지의 placeholder.
-// 현재 단계에서 실행할 명령을 읽기 전용으로 보여준다.
-export function TerminalPlaceholder({ commands }: { commands: string[] }) {
+// Lab DSL commands는 정답지 역할을 할 수 있어 학습자 화면에는 노출하지 않는다.
+export function TerminalPlaceholder() {
   return (
     <div className="rounded-lg border border-slate-700 bg-slate-950 overflow-hidden">
       <div className="flex items-center gap-1.5 px-3 py-2 border-b border-slate-800 bg-slate-900">
@@ -12,16 +12,7 @@ export function TerminalPlaceholder({ commands }: { commands: string[] }) {
         </span>
       </div>
       <pre className="p-4 text-sm text-slate-300 font-mono leading-relaxed overflow-x-auto">
-        {commands.length === 0 ? (
-          <span className="text-slate-600"># 이 단계에는 실행할 명령이 없습니다</span>
-        ) : (
-          commands.map((cmd, i) => (
-            <div key={i}>
-              <span className="text-emerald-400 select-none">$ </span>
-              {cmd}
-            </div>
-          ))
-        )}
+        <span className="text-slate-600"># 실습 안내를 확인한 뒤 환경이 준비되면 진행하세요</span>
       </pre>
     </div>
   );

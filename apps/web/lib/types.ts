@@ -28,7 +28,6 @@ export interface StepContent {
   id: number;
   title: string;
   description: string;
-  commands?: string[];
   hint?: string;
   hint_levels?: string[]; // 레벨 1(개념)→2(방향)→3(구체) 정적 힌트 — AI 미가용 시 폴백
 }
