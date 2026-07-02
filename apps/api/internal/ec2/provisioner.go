@@ -20,6 +20,7 @@ import (
 
 	"github.com/requset700k/cledyu/api/internal/config"
 	"github.com/requset700k/cledyu/api/internal/session"
+	"github.com/requset700k/cledyu/api/internal/vmmetrics"
 )
 
 // 세션 인스턴스 식별·메타데이터 태그. KubeVirt 의 namespace 라벨/annotation 과 의미가 1:1 대응한다.
@@ -31,6 +32,7 @@ const (
 	tagLabID     = "cledyu.io/lab-id"
 	tagStartedAt = "cledyu.io/started-at"
 	tagExpiresAt = "cledyu.io/expires-at"
+	tagBootResultRecorded = "cledyu.io/boot-result-recorded"
 )
 
 // ec2API는 프로비저너가 쓰는 EC2 호출 표면이다. 단위 테스트에서 가짜 구현으로 대체한다.
@@ -38,12 +40,14 @@ type ec2API interface {
 	RunInstances(context.Context, *awsec2.RunInstancesInput, ...func(*awsec2.Options)) (*awsec2.RunInstancesOutput, error)
 	DescribeInstances(context.Context, *awsec2.DescribeInstancesInput, ...func(*awsec2.Options)) (*awsec2.DescribeInstancesOutput, error)
 	TerminateInstances(context.Context, *awsec2.TerminateInstancesInput, ...func(*awsec2.Options)) (*awsec2.TerminateInstancesOutput, error)
+	CreateTags(context.Context, *awsec2.CreateTagsInput, ...func(*awsec2.Options)) (*awsec2.CreateTagsOutput, error)
 }
 
 // Provisioner는 EC2 세션 수명주기를 관리한다. session.Provider 를 구현한다.
 type Provisioner struct {
 	api ec2API
 	cfg *config.AWSConfig
+	met *vmmetrics.Recorder
 }
 
 // Provisioner가 프로바이더 중립 계약을 구현함을 컴파일 타임에 보장한다.
@@ -51,17 +55,18 @@ var _ session.Provider = (*Provisioner)(nil)
 
 // NewProvisioner는 표준 AWS SDK 자격증명 체인(환경변수 AWS_ACCESS_KEY_ID/SECRET 등 —
 // Vault→ESO 주입)으로 EC2 클라이언트를 만든다. region 은 AWSConfig 값을 우선한다.
-func NewProvisioner(ctx context.Context, cfg *config.AWSConfig) (*Provisioner, error) {
+// met는 kubevirt 매니저와 공유하는 vm_boot_total Recorder다(nil이면 기록을 건너뛴다).
+func NewProvisioner(ctx context.Context, cfg *config.AWSConfig, met *vmmetrics.Recorder) (*Provisioner, error) {
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.Region))
 	if err != nil {
 		return nil, fmt.Errorf("ec2 provisioner: load aws config: %w", err)
 	}
-	return &Provisioner{api: awsec2.NewFromConfig(awsCfg), cfg: cfg}, nil
+	return &Provisioner{api: awsec2.NewFromConfig(awsCfg), cfg: cfg, met: met}, nil
 }
 
 // newWithAPI는 주입된 EC2 API 로 프로비저너를 만든다(테스트 전용).
-func newWithAPI(api ec2API, cfg *config.AWSConfig) *Provisioner {
-	return &Provisioner{api: api, cfg: cfg}
+func newWithAPI(api ec2API, cfg *config.AWSConfig, met *vmmetrics.Recorder) *Provisioner {
+	return &Provisioner{api: api, cfg: cfg, met: met}
 }
 
 func (p *Provisioner) Create(ctx context.Context, sessionID, labID, userID string, init session.BootInit) (*session.Session, error) {
@@ -127,7 +132,13 @@ func (p *Provisioner) Get(ctx context.Context, sessionID string) (*session.Sessi
 	if inst == nil {
 		return nil, session.ErrNotFound
 	}
-	return instanceToSession(inst, p.cfg.Region), nil
+	sess := instanceToSession(inst, p.cfg.Region)
+	// KubeVirt Get()의 ready-at 최초 관측 시점 기록과 대응 
+	// running 전이를 처음 본 폴링에서 vm_boot_total{result=success,env=ec2}를 1회 기록
+	if sess.Status == "ready" {
+		p.recordBootOnce(ctx, inst, vmmetrics.ResultSuccess)
+	}
+	return sess, nil
 }
 
 func (p *Provisioner) Delete(ctx context.Context, sessionID string) error {
@@ -187,6 +198,12 @@ func (p *Provisioner) ReapStuckSessions(ctx context.Context, timeout time.Durati
 		if now.Sub(started) < timeout {
 			continue
 		}
+		// KubeVirt provisioningTimedOut과 대응되는 EC2 부팅 실패 케이스: timeout 안에 running이
+		// 되지 못해 회수되는 인스턴스를 vm_boot_total{result=failed,env=ec2}로 기록한다.
+		// 주의(범위 문서화): 부트스트랩 스크립트 실패로 인스턴스가 이 timeout 이전에 스스로
+		// shutting-down/terminated 상태가 되는 경우는 activeStateFilter(pending/running)에 걸려
+		// 이 루프에 잡히지 않으므로 현재 미계측이다 — timeout 경로만 커버한다.
+		p.recordBootOnce(ctx, inst, vmmetrics.ResultFailed)
 		if err := p.terminate(ctx, aws.ToString(inst.InstanceId)); err != nil {
 			continue // best-effort — 다음 주기 재시도
 		}
@@ -238,6 +255,26 @@ func (p *Provisioner) VMIAddress(ctx context.Context, sessionID string) (string,
 }
 
 // --- 내부 헬퍼 ---
+
+// recordBootOnce는 inst에 대해 vm_boot_total을 최대 1회만 기록한다.
+// dedup 토큰은 tagBootResultRecorded 태그다 — KubeVirt가 namespace annotation +
+// Update()를 dedup 토큰으로 쓰는 것과 같은 원리로, CreateTags 성공 후에만 Inc를 호출해
+// 여러 API 레플리카의 동시 폴링으로 인한 중복 집계를 막는다.
+func (p *Provisioner) recordBootOnce(ctx context.Context, inst *ectypes.Instance, result string) {
+	if p.met == nil || tagValue(inst, tagBootResultRecorded) != "" {
+		return
+	}
+	_, err := p.api.CreateTags(ctx, &awsec2.CreateTagsInput{
+		Resources: []string{aws.ToString(inst.InstanceId)},
+		Tags: []ectypes.Tag{
+			{Key: aws.String(tagBootResultRecorded), Value: aws.String("true")},
+		},
+	})
+	if err != nil {
+		return // best-effort — 다음 폴링에서 재시도
+	}
+	p.met.RecordBoot(result, session.ProviderEC2)
+}
 
 // activeStateFilter는 종료된(terminated/shutting-down/stopping/stopped) 인스턴스를 제외하고
 // 활성(pending/running) 인스턴스만 남기는 필터다.
