@@ -14,10 +14,9 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/prometheus/client_golang/prometheus"
-
 	"github.com/requset700k/cledyu/api/internal/config"
 	"github.com/requset700k/cledyu/api/internal/session"
+	"github.com/requset700k/cledyu/api/internal/vmmetrics"
 )
 
 // ErrNotFound는 session.ErrNotFound 의 별칭이다(기존 호출부·테스트 호환).
@@ -64,10 +63,10 @@ type Manager struct {
 	core kubernetes.Interface
 	dyn  dynamic.Interface
 	cfg  *config.KubeVirtConfig
-	met  *metrics
+	met  *vmmetrics.Recorder
 }
 
-func NewManager(cfg *config.KubeVirtConfig) (*Manager, error) {
+func NewManager(cfg *config.KubeVirtConfig, met *vmmetrics.Recorder) (*Manager, error) {
 	core, dyn, err := newClients(cfg.Kubeconfig)
 	if err != nil {
 		return nil, fmt.Errorf("kubevirt manager: %w", err)
@@ -76,7 +75,7 @@ func NewManager(cfg *config.KubeVirtConfig) (*Manager, error) {
 		core: core,
 		dyn:  dyn,
 		cfg:  cfg,
-		met:  newMetrics(prometheus.DefaultRegisterer),
+		met:  met,
 	}, nil
 }
 
@@ -417,8 +416,8 @@ func (m *Manager) Get(ctx context.Context, sessionID string) (*Session, error) {
 				readyAt := time.Now().UTC()
 				nsObj.Annotations["cledyu.io/ready-at"] = readyAt.Format(time.RFC3339)
 				if _, err := m.core.CoreV1().Namespaces().Update(ctx, nsObj, metav1.UpdateOptions{}); err == nil {
-					if !startedAt.IsZero() && m.met != nil {
-						m.met.vmBootTotal.WithLabelValues("success", "onprem").Inc()
+					if !startedAt.IsZero() {
+						m.met.RecordBoot(vmmetrics.ResultSuccess, session.ProviderKubeVirt)
 					}
 				}
 			}
@@ -426,10 +425,10 @@ func (m *Manager) Get(ctx context.Context, sessionID string) (*Session, error) {
 			status = "failed"
 			provisioningStage = ""
 			// ready-at가 없는 경우만 부팅 실패로 기록 — 이미 ready였던 VM의 사후 종료는 제외
-			if ann["cledyu.io/ready-at"] == "" && ann["cledyu.io/boot-result-recorded"] == "" && m.met != nil {
+			if ann["cledyu.io/ready-at"] == "" && ann["cledyu.io/boot-result-recorded"] == "" {
 				nsObj.Annotations["cledyu.io/boot-result-recorded"] = "true"
 				if _, err := m.core.CoreV1().Namespaces().Update(ctx, nsObj, metav1.UpdateOptions{}); err == nil {
-					m.met.vmBootTotal.WithLabelValues("failed", "onprem").Inc()
+					m.met.RecordBoot(vmmetrics.ResultFailed, session.ProviderKubeVirt)
 				}
 			}
 		default:
@@ -442,10 +441,10 @@ func (m *Manager) Get(ctx context.Context, sessionID string) (*Session, error) {
 		status = "failed"
 		provisioningStage = ""
 		// timeout 부팅 실패도 vm_boot_total에 기록
-		if ann["cledyu.io/boot-result-recorded"] == "" && m.met != nil {
+		if ann["cledyu.io/boot-result-recorded"] == "" {
 			nsObj.Annotations["cledyu.io/boot-result-recorded"] = "true"
 			if _, err := m.core.CoreV1().Namespaces().Update(ctx, nsObj, metav1.UpdateOptions{}); err == nil {
-				m.met.vmBootTotal.WithLabelValues("failed", "onprem").Inc()
+				m.met.RecordBoot(vmmetrics.ResultFailed, session.ProviderKubeVirt)
 			}
 		}
 	}

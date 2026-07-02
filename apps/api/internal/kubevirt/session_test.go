@@ -18,6 +18,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/requset700k/cledyu/api/internal/config"
+	"github.com/requset700k/cledyu/api/internal/vmmetrics"
 )
 
 // sessionNS는 Create가 만드는 세션 namespace와 동일한 라벨/annotation을 가진 테스트 객체를 만든다.
@@ -291,7 +292,7 @@ func TestGetKeepsProvisioningSessionBeforeTimeout(t *testing.T) {
 
 func TestVMBootFailedRecordedOnce(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	met := newMetrics(reg)
+	met := vmmetrics.New(reg)
 
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
 		runtime.NewScheme(),
@@ -312,12 +313,12 @@ func TestVMBootFailedRecordedOnce(t *testing.T) {
 	if sess.Status != "failed" {
 		t.Fatalf("status = %q, want failed", sess.Status)
 	}
-	if c := testutil.CollectAndCount(met.vmBootTotal); c != 1 {
+	if c := testutil.CollectAndCount(met.Collector()); c != 1 {
 		t.Errorf("실패 메트릭 샘플 수 = %d, want 1", c)
 	}
 
 	m.Get(context.Background(), "sess2")
-	if c := testutil.CollectAndCount(met.vmBootTotal); c != 1 {
+	if c := testutil.CollectAndCount(met.Collector()); c != 1 {
 		t.Errorf("중복 기록됨: 샘플 수 = %d, want 1", c)
 	}
 }

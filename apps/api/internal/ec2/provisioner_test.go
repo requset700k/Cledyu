@@ -12,16 +12,24 @@ import (
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 	ectypes "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
 	"github.com/requset700k/cledyu/api/internal/config"
 	"github.com/requset700k/cledyu/api/internal/session"
+	"github.com/requset700k/cledyu/api/internal/vmmetrics"
 )
 
 // fakeEC2는 ec2API 의 인메모리 가짜 구현이다. 코드가 쓰는 필터(tag:*, instance-state-name)만 해석한다.
 type fakeEC2 struct {
-	instances  []ectypes.Instance
-	nextID     int
-	runInputs  []*awsec2.RunInstancesInput
-	terminated []string
+	instances     []ectypes.Instance
+	nextID        int
+	runInputs     []*awsec2.RunInstancesInput
+	terminated    []string
+	createTagsErr error // 설정 시 CreateTags가 이 에러를 반환한다(부팅 기록 실패 경로 테스트용).
 }
 
 func (f *fakeEC2) RunInstances(_ context.Context, in *awsec2.RunInstancesInput, _ ...func(*awsec2.Options)) (*awsec2.RunInstancesOutput, error) {
@@ -49,6 +57,20 @@ func (f *fakeEC2) DescribeInstances(_ context.Context, in *awsec2.DescribeInstan
 	return &awsec2.DescribeInstancesOutput{
 		Reservations: []ectypes.Reservation{{Instances: matched}},
 	}, nil
+}
+
+func (f *fakeEC2) CreateTags(_ context.Context, in *awsec2.CreateTagsInput, _ ...func(*awsec2.Options)) (*awsec2.CreateTagsOutput, error) {
+	if f.createTagsErr != nil {
+		return nil, f.createTagsErr
+	}
+	for _, id := range in.Resources {
+		for i := range f.instances {
+			if aws.ToString(f.instances[i].InstanceId) == id {
+				f.instances[i].Tags = append(f.instances[i].Tags, in.Tags...)
+			}
+		}
+	}
+	return &awsec2.CreateTagsOutput{}, nil
 }
 
 func (f *fakeEC2) TerminateInstances(_ context.Context, in *awsec2.TerminateInstancesInput, _ ...func(*awsec2.Options)) (*awsec2.TerminateInstancesOutput, error) {
@@ -115,7 +137,7 @@ func testCfg() *config.AWSConfig {
 
 func TestCreate_TagsAndProvider(t *testing.T) {
 	f := &fakeEC2{}
-	p := newWithAPI(f, testCfg())
+	p := newWithAPI(f, testCfg(), nil, nil)
 
 	sess, err := p.Create(context.Background(), "abc123", "lab-k8s-basics", "user-1", session.BootInit{
 		Packages: []string{"jq"},
@@ -157,7 +179,7 @@ func TestCreate_TagsAndProvider(t *testing.T) {
 }
 
 func TestGet_NotFound(t *testing.T) {
-	p := newWithAPI(&fakeEC2{}, testCfg())
+	p := newWithAPI(&fakeEC2{}, testCfg(), nil, nil)
 	_, err := p.Get(context.Background(), "missing")
 	if !errors.Is(err, session.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
@@ -166,7 +188,7 @@ func TestGet_NotFound(t *testing.T) {
 
 func TestGet_AfterCreate(t *testing.T) {
 	f := &fakeEC2{}
-	p := newWithAPI(f, testCfg())
+	p := newWithAPI(f, testCfg(), nil, nil)
 	created, _ := p.Create(context.Background(), "s1", "lab-docker-basics", "u9", session.BootInit{})
 
 	got, err := p.Get(context.Background(), "s1")
@@ -180,7 +202,7 @@ func TestGet_AfterCreate(t *testing.T) {
 
 func TestFindActiveByUser_And_Count(t *testing.T) {
 	f := &fakeEC2{}
-	p := newWithAPI(f, testCfg())
+	p := newWithAPI(f, testCfg(), nil, nil)
 	ctx := context.Background()
 	_, _ = p.Create(ctx, "s1", "lab-a", "userA", session.BootInit{})
 	_, _ = p.Create(ctx, "s2", "lab-b", "userB", session.BootInit{})
@@ -200,7 +222,7 @@ func TestFindActiveByUser_And_Count(t *testing.T) {
 
 func TestDelete_Terminates(t *testing.T) {
 	f := &fakeEC2{}
-	p := newWithAPI(f, testCfg())
+	p := newWithAPI(f, testCfg(), nil, nil)
 	ctx := context.Background()
 	created, _ := p.Create(ctx, "s1", "lab-a", "userA", session.BootInit{})
 
@@ -221,7 +243,7 @@ func TestDelete_Terminates(t *testing.T) {
 
 func TestReapExpiredSessions(t *testing.T) {
 	f := &fakeEC2{}
-	p := newWithAPI(f, testCfg())
+	p := newWithAPI(f, testCfg(), nil, nil)
 	ctx := context.Background()
 	_, _ = p.Create(ctx, "fresh", "lab-a", "u1", session.BootInit{})
 
@@ -251,7 +273,7 @@ func TestReapExpiredSessions(t *testing.T) {
 
 func TestVMIAddress(t *testing.T) {
 	f := &fakeEC2{}
-	p := newWithAPI(f, testCfg())
+	p := newWithAPI(f, testCfg(), nil, nil)
 	ctx := context.Background()
 	_, _ = p.Create(ctx, "s1", "lab-a", "u1", session.BootInit{})
 
@@ -264,6 +286,124 @@ func TestVMIAddress(t *testing.T) {
 	addr, err := p.VMIAddress(ctx, "s1")
 	if err != nil || addr != "lab-s1" {
 		t.Errorf("VMIAddress = %q, %v; want lab-s1", addr, err)
+	}
+}
+
+// TestVMBootSuccessRecordedOnce_EC2는 리뷰 코멘트가 지적한 EC2 부팅 성공 미계측을 검증
+// running 전이를 처음 관측한 Get() 호출에서 vm_boot_total{result=success,env=ec2}가 1회 기록,
+// 이후 반복 폴링에서는 dedup 태그(tagBootResultRecorded)로 중복 집계되지 않아야 함
+func TestVMBootSuccessRecordedOnce_EC2(t *testing.T) {
+	s, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis 구동 실패: %v", err)
+	}
+	defer s.Close()
+
+	// 2. 가짜 Redis 주소로 클라이언트 생성
+	rdb := redis.NewClient(&redis.Options{Addr: s.Addr()})
+	defer rdb.Close()
+
+	reg := prometheus.NewRegistry()
+	met := vmmetrics.New(reg)
+	f := &fakeEC2{}
+
+	p := newWithAPI(f, testCfg(), met, rdb)
+	ctx := context.Background()
+	_, _ = p.Create(ctx, "s1", "lab-a", "u1", session.BootInit{})
+	f.instances[0].State = &ectypes.InstanceState{Name: ectypes.InstanceStateNameRunning}
+
+	if _, err := p.Get(ctx, "s1"); err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if c := testutil.CollectAndCount(met.Collector()); c != 1 {
+		t.Errorf("성공 메트릭 샘플 수 = %d, want 1", c)
+	}
+	if got := testutil.ToFloat64(met.Collector().WithLabelValues(vmmetrics.ResultSuccess, session.ProviderEC2)); got != 1 {
+		t.Errorf("success{env=ec2} = %v, want 1", got)
+	}
+
+	// 반복 폴링 — 중복 집계되면 안 된다.
+	if _, err := p.Get(ctx, "s1"); err != nil {
+		t.Fatalf("Get(재폴링): %v", err)
+	}
+	if c := testutil.CollectAndCount(met.Collector()); c != 1 {
+		t.Errorf("중복 기록됨: 샘플 수 = %d, want 1", c)
+	}
+}
+
+// TestReapStuckSessions_RecordsBootFailure_EC2는 timeout 안에 running이 되지 못해 회수되는
+// EC2 인스턴스가 vm_boot_total{result=failed,env=ec2}로 기록되는지 검증
+func TestReapStuckSessions_RecordsBootFailure_EC2(t *testing.T) {
+	s, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis 구동 실패: %v", err)
+	}
+	defer s.Close()
+
+	rdb := redis.NewClient(&redis.Options{Addr: s.Addr()})
+	defer rdb.Close()
+
+	reg := prometheus.NewRegistry()
+	met := vmmetrics.New(reg)
+	f := &fakeEC2{}
+
+	p := newWithAPI(f, testCfg(), met, rdb)
+	ctx := context.Background()
+	_, _ = p.Create(ctx, "stuck", "lab-a", "u1", session.BootInit{})
+	// started-at 을 timeout 이전 과거로 되돌린다(여전히 pending 상태).
+	past := time.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339)
+	for i := range f.instances[0].Tags {
+		if aws.ToString(f.instances[0].Tags[i].Key) == tagStartedAt {
+			f.instances[0].Tags[i].Value = aws.String(past)
+		}
+	}
+
+	reaped, err := p.ReapStuckSessions(ctx, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("ReapStuckSessions: %v", err)
+	}
+	if len(reaped) != 1 || reaped[0] != "stuck" {
+		t.Fatalf("reaped = %v, want [stuck]", reaped)
+	}
+	if got := testutil.ToFloat64(met.Collector().WithLabelValues(vmmetrics.ResultFailed, session.ProviderEC2)); got != 1 {
+		t.Errorf("failed{env=ec2} = %v, want 1", got)
+	}
+}
+
+// TestVMBootRecord_ReleasesLockOnCreateTagsFailure_EC2는 CreateTags 실패 시 동시성 락이
+// 해제되어 다음 폴링이 부팅 결과를 재기록할 수 있는지 검증한다(락이 남으면 세션 TTL 내내 메트릭 영구 누락).
+func TestVMBootRecord_ReleasesLockOnCreateTagsFailure_EC2(t *testing.T) {
+	s, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis 구동 실패: %v", err)
+	}
+	defer s.Close()
+
+	rdb := redis.NewClient(&redis.Options{Addr: s.Addr()})
+	defer rdb.Close()
+
+	reg := prometheus.NewRegistry()
+	met := vmmetrics.New(reg)
+	f := &fakeEC2{createTagsErr: errors.New("throttled")}
+	p := newWithAPI(f, testCfg(), met, rdb)
+
+	inst := &ectypes.Instance{InstanceId: aws.String("i-boom")}
+	lockKey := "cledyu:lock:vm_boot:i-boom"
+
+	// 1) CreateTags 실패 → 메트릭 미기록 + 락은 해제돼 있어야 한다.
+	p.recordBootOnce(context.Background(), inst, vmmetrics.ResultSuccess)
+	if got := testutil.ToFloat64(met.Collector().WithLabelValues(vmmetrics.ResultSuccess, session.ProviderEC2)); got != 0 {
+		t.Fatalf("실패 경로에서 기록됨: success{env=ec2} = %v, want 0", got)
+	}
+	if s.Exists(lockKey) {
+		t.Fatalf("CreateTags 실패 후에도 락 %q 이 남아 있음 — 재기록이 영구 차단됨", lockKey)
+	}
+
+	// 2) CreateTags 복구 후 재폴링 → 정확히 1회 기록돼야 한다.
+	f.createTagsErr = nil
+	p.recordBootOnce(context.Background(), inst, vmmetrics.ResultSuccess)
+	if got := testutil.ToFloat64(met.Collector().WithLabelValues(vmmetrics.ResultSuccess, session.ProviderEC2)); got != 1 {
+		t.Errorf("복구 후 success{env=ec2} = %v, want 1", got)
 	}
 }
 
