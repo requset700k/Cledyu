@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
 	api "github.com/requset700k/cledyu/api/internal/api"
 	"github.com/requset700k/cledyu/api/internal/bq"
@@ -24,6 +25,7 @@ import (
 	"github.com/requset700k/cledyu/api/internal/tailnet"
 	"github.com/requset700k/cledyu/api/internal/validation"
 	"github.com/requset700k/cledyu/api/internal/vmfiles"
+	"github.com/requset700k/cledyu/api/internal/vmmetrics"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/propagation"
@@ -91,8 +93,10 @@ func main() {
 	//   - 둘 다 있으면 디스패처(온프렘 우선, 만석 시 EC2 버스트)로 묶는다
 	// 주의: 타입 있는 nil 포인터를 인터페이스에 담으면 non-nil 인터페이스가 되는 Go 함정을
 	// 피하려고, 각 프로바이더는 생성 성공 시에만 인터페이스에 대입한다.
+	vmBootMetrics := vmmetrics.New(prometheus.DefaultRegisterer)
+
 	var onprem session.Provider
-	if mgr, err := kubevirt.NewManager(&cfg.KubeVirt); err != nil {
+	if mgr, err := kubevirt.NewManager(&cfg.KubeVirt, vmBootMetrics); err != nil {
 		logger.Warn("kubevirt manager init failed, on-prem sessions disabled", zap.Error(err))
 	} else {
 		onprem = mgr
@@ -100,7 +104,7 @@ func main() {
 
 	var overflow session.Provider
 	if cfg.AWS.LaunchTemplateID != "" && cfg.AWS.MaxActiveSessions > 0 {
-		if prov, err := ec2.NewProvisioner(ctx, &cfg.AWS); err != nil {
+		if prov, err := ec2.NewProvisioner(ctx, &cfg.AWS, vmBootMetrics); err != nil {
 			logger.Warn("ec2 provisioner init failed, overflow disabled", zap.Error(err))
 		} else {
 			overflow = prov
