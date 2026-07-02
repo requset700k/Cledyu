@@ -5,7 +5,7 @@
 id: lab-ansible-basics
 title: Ansible 기초
 description: 인벤토리와 플레이북을 작성하고 멱등성(idempotency)까지 확인하는 구성관리 입문 실습
-difficulty: beginner
+difficulty: intermediate
 duration_min: 45
 vm_type: lab-small
 environment: ubuntu

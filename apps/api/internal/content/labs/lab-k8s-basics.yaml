@@ -5,7 +5,7 @@
 id: lab-k8s-basics
 title: Kubernetes 기초
 description: 단일 노드 k3s 클러스터에서 Pod·Deployment·Service·롤링 업데이트를 직접 실습합니다
-difficulty: beginner
+difficulty: intermediate
 duration_min: 75
 vm_type: lab-small
 environment: ubuntu
