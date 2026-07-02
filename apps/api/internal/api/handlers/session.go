@@ -447,12 +447,20 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 	if h.denyIfNotStoreOwner(c, sessionID) {
 		return
 	}
-	idx, err := h.findStepIndex(sessionID, req.StepID)
+	// 검증엔진 요청을 발행하기 전에 서버가 step 순서를 먼저 확인한다.
+	// Web UI의 disabled 상태는 사용자가 직접 API를 호출하면 우회할 수 있으므로,
+	// 이전 단계가 통과되지 않은 요청은 여기서 409로 끊어야 한다.
+	idx, err := h.findValidatableStepIndex(sessionID, req.StepID)
 	if err != nil {
-		if errors.Is(err, errStepSessionNotFound) {
+		switch {
+		case errors.Is(err, errStepSessionNotFound):
 			h.err(c, http.StatusNotFound, "session not found")
-		} else {
+		case errors.Is(err, errStepNotFound):
 			h.err(c, http.StatusNotFound, "step not found")
+		case errors.Is(err, errStepOrderBlocked):
+			h.err(c, http.StatusConflict, "previous step must be passed before validating this step")
+		default:
+			h.err(c, http.StatusInternalServerError, "step validation precheck failed")
 		}
 		return
 	}
@@ -624,14 +632,27 @@ func (h *Handler) ApplyValidationResult(r validation.ValidationResult) {
 
 var errStepSessionNotFound = errors.New("session not found")
 var errStepNotFound = errors.New("step not found")
+var errStepOrderBlocked = errors.New("previous step not passed")
 
-func (h *Handler) findStepIndex(sessionID string, stepID int) (int, error) {
+// findValidatableStepIndex는 step 존재 여부와 순서 접근 가능 여부를 같은 stepStore 스냅샷에서 판단한다.
+// Web UI도 미래 단계를 disabled 처리하지만, API 직접 호출 우회를 막는 최종 경계는 서버다.
+// 반환된 idx는 이후 markStepValidating/markStepPassed에서 같은 step 배열 위치를 갱신하는 데 사용한다.
+func (h *Handler) findValidatableStepIndex(sessionID string, stepID int) (int, error) {
 	idx := -1
+	blocked := false
 	found := h.steps.withSession(sessionID, func(ss *sessionSteps) bool {
 		for i := range ss.Steps {
 			if ss.Steps[i].StepID == stepID {
 				idx = i
 				break
+			}
+		}
+		if idx >= 0 {
+			for i := 0; i < idx; i++ {
+				if ss.Steps[i].Status != "passed" {
+					blocked = true
+					break
+				}
 			}
 		}
 		return false
@@ -641,6 +662,9 @@ func (h *Handler) findStepIndex(sessionID string, stepID int) (int, error) {
 	}
 	if idx == -1 {
 		return -1, errStepNotFound
+	}
+	if blocked {
+		return -1, errStepOrderBlocked
 	}
 	return idx, nil
 }
