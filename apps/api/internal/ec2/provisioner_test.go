@@ -12,6 +12,9 @@ import (
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 	ectypes "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
+
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
@@ -130,7 +133,7 @@ func testCfg() *config.AWSConfig {
 
 func TestCreate_TagsAndProvider(t *testing.T) {
 	f := &fakeEC2{}
-	p := newWithAPI(f, testCfg(), nil)
+	p := newWithAPI(f, testCfg(), nil, nil)
 
 	sess, err := p.Create(context.Background(), "abc123", "lab-k8s-basics", "user-1", session.BootInit{
 		Packages: []string{"jq"},
@@ -172,7 +175,7 @@ func TestCreate_TagsAndProvider(t *testing.T) {
 }
 
 func TestGet_NotFound(t *testing.T) {
-	p := newWithAPI(&fakeEC2{}, testCfg(), nil)
+	p := newWithAPI(&fakeEC2{}, testCfg(), nil, nil)
 	_, err := p.Get(context.Background(), "missing")
 	if !errors.Is(err, session.ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
@@ -181,7 +184,7 @@ func TestGet_NotFound(t *testing.T) {
 
 func TestGet_AfterCreate(t *testing.T) {
 	f := &fakeEC2{}
-	p := newWithAPI(f, testCfg(), nil)
+	p := newWithAPI(f, testCfg(), nil, nil)
 	created, _ := p.Create(context.Background(), "s1", "lab-docker-basics", "u9", session.BootInit{})
 
 	got, err := p.Get(context.Background(), "s1")
@@ -195,7 +198,7 @@ func TestGet_AfterCreate(t *testing.T) {
 
 func TestFindActiveByUser_And_Count(t *testing.T) {
 	f := &fakeEC2{}
-	p := newWithAPI(f, testCfg(), nil)
+	p := newWithAPI(f, testCfg(), nil, nil)
 	ctx := context.Background()
 	_, _ = p.Create(ctx, "s1", "lab-a", "userA", session.BootInit{})
 	_, _ = p.Create(ctx, "s2", "lab-b", "userB", session.BootInit{})
@@ -215,7 +218,7 @@ func TestFindActiveByUser_And_Count(t *testing.T) {
 
 func TestDelete_Terminates(t *testing.T) {
 	f := &fakeEC2{}
-	p := newWithAPI(f, testCfg(), nil)
+	p := newWithAPI(f, testCfg(), nil, nil)
 	ctx := context.Background()
 	created, _ := p.Create(ctx, "s1", "lab-a", "userA", session.BootInit{})
 
@@ -236,7 +239,7 @@ func TestDelete_Terminates(t *testing.T) {
 
 func TestReapExpiredSessions(t *testing.T) {
 	f := &fakeEC2{}
-	p := newWithAPI(f, testCfg(), nil)
+	p := newWithAPI(f, testCfg(), nil, nil)
 	ctx := context.Background()
 	_, _ = p.Create(ctx, "fresh", "lab-a", "u1", session.BootInit{})
 
@@ -266,7 +269,7 @@ func TestReapExpiredSessions(t *testing.T) {
 
 func TestVMIAddress(t *testing.T) {
 	f := &fakeEC2{}
-	p := newWithAPI(f, testCfg(), nil)
+	p := newWithAPI(f, testCfg(), nil, nil)
 	ctx := context.Background()
 	_, _ = p.Create(ctx, "s1", "lab-a", "u1", session.BootInit{})
 
@@ -286,10 +289,21 @@ func TestVMIAddress(t *testing.T) {
 // running 전이를 처음 관측한 Get() 호출에서 vm_boot_total{result=success,env=ec2}가 1회 기록,
 // 이후 반복 폴링에서는 dedup 태그(tagBootResultRecorded)로 중복 집계되지 않아야 함
 func TestVMBootSuccessRecordedOnce_EC2(t *testing.T) {
+	s, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis 구동 실패: %v", err)
+	}
+	defer s.Close()
+
+	// 2. 가짜 Redis 주소로 클라이언트 생성
+	rdb := redis.NewClient(&redis.Options{Addr: s.Addr()})
+	defer rdb.Close()
+
 	reg := prometheus.NewRegistry()
 	met := vmmetrics.New(reg)
 	f := &fakeEC2{}
-	p := newWithAPI(f, testCfg(), met)
+
+	p := newWithAPI(f, testCfg(), met, rdb)
 	ctx := context.Background()
 	_, _ = p.Create(ctx, "s1", "lab-a", "u1", session.BootInit{})
 	f.instances[0].State = &ectypes.InstanceState{Name: ectypes.InstanceStateNameRunning}
@@ -316,10 +330,20 @@ func TestVMBootSuccessRecordedOnce_EC2(t *testing.T) {
 // TestReapStuckSessions_RecordsBootFailure_EC2는 timeout 안에 running이 되지 못해 회수되는
 // EC2 인스턴스가 vm_boot_total{result=failed,env=ec2}로 기록되는지 검증
 func TestReapStuckSessions_RecordsBootFailure_EC2(t *testing.T) {
+	s, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis 구동 실패: %v", err)
+	}
+	defer s.Close()
+
+	rdb := redis.NewClient(&redis.Options{Addr: s.Addr()})
+	defer rdb.Close()
+
 	reg := prometheus.NewRegistry()
 	met := vmmetrics.New(reg)
 	f := &fakeEC2{}
-	p := newWithAPI(f, testCfg(), met)
+
+	p := newWithAPI(f, testCfg(), met, rdb)
 	ctx := context.Background()
 	_, _ = p.Create(ctx, "stuck", "lab-a", "u1", session.BootInit{})
 	// started-at 을 timeout 이전 과거로 되돌린다(여전히 pending 상태).

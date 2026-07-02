@@ -18,6 +18,8 @@ import (
 	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 	ectypes "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
+	"github.com/redis/go-redis/v9"
+
 	"github.com/requset700k/cledyu/api/internal/config"
 	"github.com/requset700k/cledyu/api/internal/session"
 	"github.com/requset700k/cledyu/api/internal/vmmetrics"
@@ -48,6 +50,7 @@ type Provisioner struct {
 	api ec2API
 	cfg *config.AWSConfig
 	met *vmmetrics.Recorder
+	rdb *redis.Client
 }
 
 // Provisioner가 프로바이더 중립 계약을 구현함을 컴파일 타임에 보장한다.
@@ -56,17 +59,17 @@ var _ session.Provider = (*Provisioner)(nil)
 // NewProvisioner는 표준 AWS SDK 자격증명 체인(환경변수 AWS_ACCESS_KEY_ID/SECRET 등 —
 // Vault→ESO 주입)으로 EC2 클라이언트를 만든다. region 은 AWSConfig 값을 우선한다.
 // met는 kubevirt 매니저와 공유하는 vm_boot_total Recorder다(nil이면 기록을 건너뛴다).
-func NewProvisioner(ctx context.Context, cfg *config.AWSConfig, met *vmmetrics.Recorder) (*Provisioner, error) {
+func NewProvisioner(ctx context.Context, cfg *config.AWSConfig, met *vmmetrics.Recorder, rdb *redis.Client) (*Provisioner, error) {
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.Region))
 	if err != nil {
 		return nil, fmt.Errorf("ec2 provisioner: load aws config: %w", err)
 	}
-	return &Provisioner{api: awsec2.NewFromConfig(awsCfg), cfg: cfg, met: met}, nil
+	return &Provisioner{api: awsec2.NewFromConfig(awsCfg), cfg: cfg, met: met, rdb: rdb}, nil
 }
 
 // newWithAPI는 주입된 EC2 API 로 프로비저너를 만든다(테스트 전용).
-func newWithAPI(api ec2API, cfg *config.AWSConfig, met *vmmetrics.Recorder) *Provisioner {
-	return &Provisioner{api: api, cfg: cfg, met: met}
+func newWithAPI(api ec2API, cfg *config.AWSConfig, met *vmmetrics.Recorder, rdb *redis.Client) *Provisioner {
+	return &Provisioner{api: api, cfg: cfg, met: met, rdb: rdb}
 }
 
 func (p *Provisioner) Create(ctx context.Context, sessionID, labID, userID string, init session.BootInit) (*session.Session, error) {
@@ -261,17 +264,28 @@ func (p *Provisioner) VMIAddress(ctx context.Context, sessionID string) (string,
 // Update()를 dedup 토큰으로 쓰는 것과 같은 원리로, CreateTags 성공 후에만 Inc를 호출해
 // 여러 API 레플리카의 동시 폴링으로 인한 중복 집계를 막는다.
 func (p *Provisioner) recordBootOnce(ctx context.Context, inst *ectypes.Instance, result string) {
-	if p.met == nil || tagValue(inst, tagBootResultRecorded) != "" {
+	if p.met == nil || p.rdb == nil || tagValue(inst, tagBootResultRecorded) != "" {
 		return
 	}
-	_, err := p.api.CreateTags(ctx, &awsec2.CreateTagsInput{
+
+	instanceID := aws.ToString(inst.InstanceId)
+	lockKey := fmt.Sprintf("cledyu:lock:vm_boot:%s", instanceID)
+
+	ok, err := p.rdb.SetNX(ctx, lockKey, "true", 24*time.Hour).Result()
+	if err != nil || !ok {
+		// Redis 통신 장애가 났거나 다른 레플리카가 이미 키를 선점했다면 중복 가산 방지를 위해 즉시 리턴
+		return
+	}
+
+	_, err = p.api.CreateTags(ctx, &awsec2.CreateTagsInput{
 		Resources: []string{aws.ToString(inst.InstanceId)},
 		Tags: []ectypes.Tag{
 			{Key: aws.String(tagBootResultRecorded), Value: aws.String("true")},
 		},
 	})
 	if err != nil {
-		return // best-effort — 다음 폴링에서 재시도
+		_, _ = p.rdb.Del(ctx, lockKey).Result()
+		return
 	}
 	p.met.RecordBoot(result, session.ProviderEC2)
 }
