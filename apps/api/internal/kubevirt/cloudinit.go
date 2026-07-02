@@ -226,6 +226,8 @@ bootcmd:
       # serial-console boot scrollback before showing the lab prompt).
       printf '\033[H\033[2J\033[3J'
       cd /home/lab
+      # Web 터미널이 boot log 를 버리고 준비 완료 시점에 바로 표시할 수 있도록 보이지 않는 OSC 신호를 낸다.
+      printf '\033]1337;CledyuTerminalReady=1\a'
   - path: /home/lab/.bashrc
     owner: lab:lab
     permissions: "0644"

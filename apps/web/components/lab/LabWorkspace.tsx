@@ -12,12 +12,14 @@ export function LabWorkspace({
   idePath,
   heightClass = 'h-[560px]',
   onTerminalOutput,
+  redrawTerminalOnConnect = false,
 }: {
   sessionId: string;
   terminalPath: string;
   idePath: string;
   heightClass?: string;
   onTerminalOutput?: (chunk: string) => void;
+  redrawTerminalOnConnect?: boolean;
 }) {
   const [tab, setTab] = useState<'terminal' | 'ide'>('terminal');
 
@@ -36,6 +38,7 @@ export function LabWorkspace({
           terminalPath={terminalPath}
           heightClass={heightClass}
           onOutput={onTerminalOutput}
+          redrawOnConnect={redrawTerminalOnConnect}
         />
       </div>
       <div className={tab === 'ide' ? '' : 'hidden'}>
