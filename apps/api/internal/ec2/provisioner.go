@@ -259,6 +259,12 @@ func (p *Provisioner) VMIAddress(ctx context.Context, sessionID string) (string,
 
 // --- 내부 헬퍼 ---
 
+// bootRecordLockTTL은 recordBootOnce 동시성 락의 수명이다. 영구 dedup 은 tagBootResultRecorded
+// 태그가 담당하므로, 이 락은 CreateTags+Inc 구간과 EC2 태그 전파(eventual consistency) 지연만
+// 덮으면 된다. 세션 TTL(수 시간)보다 훨씬 짧게 잡아, ctx 취소 등으로 해제에 실패해도 곧 만료돼
+// 다음 폴링에서 부팅 결과를 재기록할 수 있게 한다.
+const bootRecordLockTTL = 5 * time.Minute
+
 // recordBootOnce는 inst에 대해 vm_boot_total을 최대 1회만 기록한다.
 // dedup 토큰은 tagBootResultRecorded 태그다 — KubeVirt가 namespace annotation +
 // Update()를 dedup 토큰으로 쓰는 것과 같은 원리로, CreateTags 성공 후에만 Inc를 호출해
@@ -271,7 +277,7 @@ func (p *Provisioner) recordBootOnce(ctx context.Context, inst *ectypes.Instance
 	instanceID := aws.ToString(inst.InstanceId)
 	lockKey := fmt.Sprintf("cledyu:lock:vm_boot:%s", instanceID)
 
-	ok, err := p.rdb.SetNX(ctx, lockKey, "true", 24*time.Hour).Result()
+	ok, err := p.rdb.SetNX(ctx, lockKey, "true", bootRecordLockTTL).Result()
 	if err != nil || !ok {
 		// Redis 통신 장애가 났거나 다른 레플리카가 이미 키를 선점했다면 중복 가산 방지를 위해 즉시 리턴
 		return
@@ -284,7 +290,12 @@ func (p *Provisioner) recordBootOnce(ctx context.Context, inst *ectypes.Instance
 		},
 	})
 	if err != nil {
-		_, _ = p.rdb.Del(ctx, lockKey).Result()
+		// ctx가 취소/만료돼 CreateTags가 실패한 경우, 같은 ctx 로는 Del 도 실행되지 않아 락이
+		// TTL 까지 남는다. 짧은 timeout 의 background ctx 로 즉시 해제해, 다음 폴링이 부팅
+		// 결과를 재기록할 수 있게 한다(bootRecordLockTTL 만료를 기다리지 않도록).
+		relCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		_, _ = p.rdb.Del(relCtx, lockKey).Result()
+		cancel()
 		return
 	}
 	p.met.RecordBoot(result, session.ProviderEC2)

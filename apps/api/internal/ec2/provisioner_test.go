@@ -25,10 +25,11 @@ import (
 
 // fakeEC2는 ec2API 의 인메모리 가짜 구현이다. 코드가 쓰는 필터(tag:*, instance-state-name)만 해석한다.
 type fakeEC2 struct {
-	instances  []ectypes.Instance
-	nextID     int
-	runInputs  []*awsec2.RunInstancesInput
-	terminated []string
+	instances     []ectypes.Instance
+	nextID        int
+	runInputs     []*awsec2.RunInstancesInput
+	terminated    []string
+	createTagsErr error // 설정 시 CreateTags가 이 에러를 반환한다(부팅 기록 실패 경로 테스트용).
 }
 
 func (f *fakeEC2) RunInstances(_ context.Context, in *awsec2.RunInstancesInput, _ ...func(*awsec2.Options)) (*awsec2.RunInstancesOutput, error) {
@@ -59,6 +60,9 @@ func (f *fakeEC2) DescribeInstances(_ context.Context, in *awsec2.DescribeInstan
 }
 
 func (f *fakeEC2) CreateTags(_ context.Context, in *awsec2.CreateTagsInput, _ ...func(*awsec2.Options)) (*awsec2.CreateTagsOutput, error) {
+	if f.createTagsErr != nil {
+		return nil, f.createTagsErr
+	}
 	for _, id := range in.Resources {
 		for i := range f.instances {
 			if aws.ToString(f.instances[i].InstanceId) == id {
@@ -363,6 +367,43 @@ func TestReapStuckSessions_RecordsBootFailure_EC2(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(met.Collector().WithLabelValues(vmmetrics.ResultFailed, session.ProviderEC2)); got != 1 {
 		t.Errorf("failed{env=ec2} = %v, want 1", got)
+	}
+}
+
+// TestVMBootRecord_ReleasesLockOnCreateTagsFailure_EC2는 CreateTags 실패 시 동시성 락이
+// 해제되어 다음 폴링이 부팅 결과를 재기록할 수 있는지 검증한다(락이 남으면 세션 TTL 내내 메트릭 영구 누락).
+func TestVMBootRecord_ReleasesLockOnCreateTagsFailure_EC2(t *testing.T) {
+	s, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis 구동 실패: %v", err)
+	}
+	defer s.Close()
+
+	rdb := redis.NewClient(&redis.Options{Addr: s.Addr()})
+	defer rdb.Close()
+
+	reg := prometheus.NewRegistry()
+	met := vmmetrics.New(reg)
+	f := &fakeEC2{createTagsErr: errors.New("throttled")}
+	p := newWithAPI(f, testCfg(), met, rdb)
+
+	inst := &ectypes.Instance{InstanceId: aws.String("i-boom")}
+	lockKey := "cledyu:lock:vm_boot:i-boom"
+
+	// 1) CreateTags 실패 → 메트릭 미기록 + 락은 해제돼 있어야 한다.
+	p.recordBootOnce(context.Background(), inst, vmmetrics.ResultSuccess)
+	if got := testutil.ToFloat64(met.Collector().WithLabelValues(vmmetrics.ResultSuccess, session.ProviderEC2)); got != 0 {
+		t.Fatalf("실패 경로에서 기록됨: success{env=ec2} = %v, want 0", got)
+	}
+	if s.Exists(lockKey) {
+		t.Fatalf("CreateTags 실패 후에도 락 %q 이 남아 있음 — 재기록이 영구 차단됨", lockKey)
+	}
+
+	// 2) CreateTags 복구 후 재폴링 → 정확히 1회 기록돼야 한다.
+	f.createTagsErr = nil
+	p.recordBootOnce(context.Background(), inst, vmmetrics.ResultSuccess)
+	if got := testutil.ToFloat64(met.Collector().WithLabelValues(vmmetrics.ResultSuccess, session.ProviderEC2)); got != 1 {
+		t.Errorf("복구 후 success{env=ec2} = %v, want 1", got)
 	}
 }
 
