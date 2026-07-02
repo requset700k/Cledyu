@@ -87,6 +87,30 @@ func main() {
 		logger.Info("OTel TracerProvider 초기화 완료")
 	}
 
+	// 세션 생성 직렬화 락 — Redis 연결되면 분산 락(다중 레플리카 안전), 아니면 in-memory.
+	// 연결 확인(ping)에 실패하면 MemLocker 로 폴백한다(단일 인스턴스 best-effort).
+	var locker lock.Locker = lock.NewMemLocker()
+	var redisClient *redis.Client
+
+	if cfg.Redis.Addr != "" {
+		redisClient = redis.NewClient(&redis.Options{
+			Addr:     cfg.Redis.Addr,
+			Password: cfg.Redis.Password,
+			DB:       cfg.Redis.DB,
+		})
+		pingCtx, cancelPing := context.WithTimeout(ctx, 3*time.Second)
+		if err := redisClient.Ping(pingCtx).Err(); err != nil {
+			logger.Warn("redis 미연결 — 세션 락 in-memory 폴백(다중 레플리카 비권장)", zap.Error(err))
+			_ = redisClient.Close()
+			redisClient = nil
+		} else {
+			locker = lock.NewRedisLocker(redisClient)
+			defer redisClient.Close() //nolint:errcheck
+			logger.Info("redis 연결 — 분산 세션 락 활성", zap.String("addr", cfg.Redis.Addr))
+		}
+		cancelPing()
+	}
+
 	// 세션 프로바이더 배선:
 	//   - 온프렘 KubeVirt 매니저(primary)
 	//   - AWS EC2 오버플로우 프로비저너(선택) — AWS.LaunchTemplateID 와 MaxActiveSessions>0 이면 활성
@@ -104,7 +128,7 @@ func main() {
 
 	var overflow session.Provider
 	if cfg.AWS.LaunchTemplateID != "" && cfg.AWS.MaxActiveSessions > 0 {
-		if prov, err := ec2.NewProvisioner(ctx, &cfg.AWS, vmBootMetrics); err != nil {
+		if prov, err := ec2.NewProvisioner(ctx, &cfg.AWS, vmBootMetrics, redisClient); err != nil {
 			logger.Warn("ec2 provisioner init failed, overflow disabled", zap.Error(err))
 		} else {
 			overflow = prov
@@ -165,30 +189,6 @@ func main() {
 		}
 	} else {
 		logger.Warn("db 미설정(CLEDYU_DB_DSN) — 진행 상태가 API 재시작 시 휘발됨")
-	}
-
-	// 세션 생성 직렬화 락 — Redis 연결되면 분산 락(다중 레플리카 안전), 아니면 in-memory.
-	// 연결 확인(ping)에 실패하면 MemLocker 로 폴백한다(단일 인스턴스 best-effort).
-	var locker lock.Locker = lock.NewMemLocker()
-	var redisClient *redis.Client
-
-	if cfg.Redis.Addr != "" {
-		redisClient = redis.NewClient(&redis.Options{
-			Addr:     cfg.Redis.Addr,
-			Password: cfg.Redis.Password,
-			DB:       cfg.Redis.DB,
-		})
-		pingCtx, cancelPing := context.WithTimeout(ctx, 3*time.Second)
-		if err := redisClient.Ping(pingCtx).Err(); err != nil {
-			logger.Warn("redis 미연결 — 세션 락 in-memory 폴백(다중 레플리카 비권장)", zap.Error(err))
-			_ = redisClient.Close()
-			redisClient = nil
-		} else {
-			locker = lock.NewRedisLocker(redisClient)
-			defer redisClient.Close() //nolint:errcheck
-			logger.Info("redis 연결 — 분산 세션 락 활성", zap.String("addr", cfg.Redis.Addr))
-		}
-		cancelPing()
 	}
 
 	router, h := api.NewRouter(cfg, logger, sessions, validator, eventsPub, db, locker, redisClient)
