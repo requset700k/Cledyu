@@ -58,3 +58,21 @@ func TestValidateStep_AllowsNextStepAfterPreviousPassed(t *testing.T) {
 		t.Fatalf("expected step2 to pass through mock validator, got %q", got)
 	}
 }
+
+// 같은 step 재검증(재시도)은 허용해야 한다. 순서 차단은 대상 step 자신의 상태가 아니라
+// 이전 단계만 보므로, 이전이 passed면 실패한 현재 step 을 고쳐 다시 검증할 수 있다.
+func TestValidateStep_AllowsRetryOfFailedStep(t *testing.T) {
+	h := stepOrderHandler()
+	h.steps.m["s1"].Steps[0].Status = "passed"
+	h.steps.m["s1"].Steps[1].Status = "failed"
+	r := ownershipRouter(h, "alice")
+
+	w := doJSON(r, http.MethodPost, "/sessions/s1/validate", map[string]any{"step_id": 2})
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for retry of failed step, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if got := h.steps.m["s1"].Steps[1].Status; got != "passed" {
+		t.Fatalf("expected failed step2 to pass on retry through mock validator, got %q", got)
+	}
+}

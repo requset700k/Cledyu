@@ -452,12 +452,15 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 	// 이전 단계가 통과되지 않은 요청은 여기서 409로 끊어야 한다.
 	idx, err := h.findValidatableStepIndex(sessionID, req.StepID)
 	if err != nil {
-		if errors.Is(err, errStepSessionNotFound) {
+		switch {
+		case errors.Is(err, errStepSessionNotFound):
 			h.err(c, http.StatusNotFound, "session not found")
-		} else if errors.Is(err, errStepNotFound) {
+		case errors.Is(err, errStepNotFound):
 			h.err(c, http.StatusNotFound, "step not found")
-		} else {
+		case errors.Is(err, errStepOrderBlocked):
 			h.err(c, http.StatusConflict, "previous step must be passed before validating this step")
+		default:
+			h.err(c, http.StatusInternalServerError, "step validation precheck failed")
 		}
 		return
 	}
