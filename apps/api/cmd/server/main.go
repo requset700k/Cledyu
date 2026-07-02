@@ -58,7 +58,7 @@ func main() {
 	defer stop()
 
 	otlpExp, otelErr := otlptracegrpc.New(ctx,
-		otlptracegrpc.WithEndpoint("alloy.loki.svc.cluster.local:4317"),
+		otlptracegrpc.WithEndpoint(cfg.OTel.Endpoint),
 		otlptracegrpc.WithInsecure(),
 	)
 	if otelErr != nil {

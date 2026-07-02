@@ -21,6 +21,7 @@ type Config struct {
 	AI          AIConfig        `mapstructure:"ai"`
 	DB          DBConfig        `mapstructure:"db"`
 	Analytics   AnalyticsConfig `mapstructure:"analytics"`
+	OTel        OTelConfig      `mapstructure:"otel"`
 	FrontendURL string          `mapstructure:"frontend_url"`
 }
 
@@ -148,6 +149,10 @@ type RedisConfig struct {
 	DB       int    `mapstructure:"db"`
 }
 
+type OTelConfig struct {
+	Endpoint string `mapstructure:"endpoint"`
+}
+
 func Load() (*Config, error) {
 	v := viper.New()
 	v.SetConfigName("config")
@@ -211,11 +216,12 @@ func Load() (*Config, error) {
 	// BigQuery 분석 — 빈 기본값. env CLEDYU_ANALYTICS_PROJECT_ID 설정 시 강사 분석 활성.
 	v.SetDefault("analytics.project_id", "") // env CLEDYU_ANALYTICS_PROJECT_ID 로 주입
 	v.SetDefault("analytics.dataset", "cledyu_analytics")
+	v.SetDefault("otel.endpoint", "alloy.loki.svc.cluster.local:4317") // env CLEDYU_OTEL_ENDPOINT 로 오버라이드
 
 	if err := v.ReadInConfig(); err != nil {
 		var notFound viper.ConfigFileNotFoundError
 		if !errors.As(err, &notFound) {
-			return nil, fmt.Errorf("read config: %w", err)
+			return nil, fmt.Errorf("read config: %w", err) 
 		}
 	}
 
