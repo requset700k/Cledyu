@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - 리전: `ap-northeast-2` (기존 EC2 오버플로우와 동일, `docs/RUNBOOK/ec2-overflow.md`)
-- 백업 버킷(단일): `cledyu-dr-backups`, 프리픽스 `postgres/`, `vault/`, `longhorn/`
+- 백업 버킷(단일): `cledyu-dr-backups`, 프리픽스 `postgres/`, `vault/`, `longhorn/`, `velero/`
 - S3 자격증명은 정적 IAM 키 → Vault kv → ESO(온프렘이라 IRSA 불가). 기존 ESO 패턴: ClusterSecretStore `vault-backend`, `remoteRef.key` 상대경로
 - ArgoCD 앱 등록 패턴: `gitops/argocd/apps/<name>.yaml`(Application) + `gitops/apps/<name>/`(내용). repoURL `https://github.com/requset700k/Cledyu.git`, targetRevision `main`
 - 커밋만 실행자가 하고, **사용자 확인 전 커밋 금지 규칙은 실행 단계에서 사용자 지시에 따른다**
@@ -626,6 +626,13 @@ git commit -m "feat(dr): Vault raft 스냅샷 CronJob S3 백업"
 
 > Longhorn 리소스는 기존 `gitops/apps/kubevirt/`(storageclass-longhorn-r2.yaml 등)와 동거.
 
+> **⚠️ 버킷 분리 필요(Object Lock 충돌)**: DR 백업 버킷(`cledyu-lab-dr-backups`)은 Object Lock
+> GOVERNANCE 30일이 걸려 있다. Longhorn 은 매시 백업(retain 24 = ~1일)이라 30일 락이 걸리면 24개가
+> 아니라 720개가 삭제 불가로 누적된다(볼륨 단위라 용량도 큼). Longhorn 백업은 온프렘 로컬 복구용
+> (비-DR)이므로, **Object Lock 없는 별도 버킷**(예: `cledyu-lab-longhorn-backups`)을 만들어 거기로
+> 보낸다. 이 경우 backup.tf 에 락 없는 버킷·해당 프리픽스 IAM 을 추가하고, 아래 backupTargetURL 을
+> 그 버킷으로 바꾼다. (실행 단계에서 확정)
+
 **Interfaces:**
 - Consumes: Secret `cledyu-backup-s3`(Task 2, `longhorn-system` ns)
 - Produces: Longhorn backupTarget = `s3://cledyu-dr-backups/longhorn`, 백업 RecurringJob
@@ -770,12 +777,160 @@ git commit -m "docs(dr): PITR 복원 드릴 런북·RPO 실측 기록"
 
 ---
 
+### Task 8: Velero — 클러스터 상태(오브젝트) 백업 → S3
+
+> 2차 설계에서 추가. GitOps는 git에 선언된 리소스만 재현하므로, `lab-sessions`처럼 런타임 동적
+> 생성 리소스는 복원되지 않는다. Velero로 "온프렘에 실제로 떠 있던 워크로드 구성"을 스냅샷 떠
+> EKS 재현을 가능케 한다. 데이터(Postgres/Vault)는 Task 4·5가 담당하므로 Velero는 **오브젝트만**,
+> **PV 스냅샷은 끈다**(Longhorn 스냅샷은 EKS/EBS에서 복원 불가 + PITR 우위). 상세: 스펙 § 클러스터 상태 백업.
+
+**Files:**
+- Create: `gitops/apps/velero/Chart.yaml`
+- Create: `gitops/apps/velero/values.yaml`
+- Create: `gitops/argocd/apps/platform-velero.yaml`
+- Modify: `infra/terraform/aws/backup.tf` (`velero/` 수명주기 규칙 추가 — 아래 Step 0)
+
+**Interfaces:**
+- Consumes: Secret `cledyu-backup-s3`(Task 2) 형식의 자격증명 — Velero는 `[default]` 프로파일
+  형식의 credentials 파일을 요구하므로 velero ns 전용 ExternalSecret으로 매핑
+- Produces: S3 프리픽스 `velero/`에 백업 tarball + 6시간 주기 스케줄
+
+- [ ] **Step 0: 버킷 `velero/` 수명주기 규칙 추가 (backup.tf)**
+
+Velero 도입과 함께 버킷 정리 규칙도 넣는다(주체가 생기는 시점에 규칙도 추가 — 인과 정합).
+`infra/terraform/aws/backup.tf` 의 `aws_s3_bucket_lifecycle_configuration.dr_backups` 에 longhorn 과
+동일 패턴의 규칙을 추가한다(Velero 가 ttl 로 DeleteObject → versioning non-current 잔재 정리):
+```hcl
+  rule {
+    id     = "backstop-noncurrent-velero"
+    status = "Enabled"
+    filter { prefix = "velero/" }
+    noncurrent_version_expiration { noncurrent_days = 30 }
+  }
+```
+Run: `cd infra/terraform/aws && terraform validate && terraform fmt -check backup.tf`
+Expected: valid + fmt 통과.
+
+- [ ] **Step 1: Velero 자격증명 ExternalSecret (velero ns)**
+
+Velero는 AWS credentials를 `[default]\naws_access_key_id=...\naws_secret_access_key=...` 형식의
+단일 파일 키로 요구한다. Task 2 Secret과 키 형식이 다르므로 ESO `template`으로 렌더한다:
+```yaml
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: cledyu-backup-s3-velero
+  namespace: velero
+spec:
+  refreshInterval: 1h
+  secretStoreRef: { name: vault-backend, kind: ClusterSecretStore }
+  target:
+    name: velero-s3-credentials
+    creationPolicy: Owner
+    template:
+      data:
+        cloud: |
+          [default]
+          aws_access_key_id={{ .access_key_id }}
+          aws_secret_access_key={{ .secret_access_key }}
+  data:
+    - secretKey: access_key_id
+      remoteRef: { key: aws/backup, property: access_key_id }
+    - secretKey: secret_access_key
+      remoteRef: { key: aws/backup, property: secret_access_key }
+```
+
+- [ ] **Step 2: Velero 차트 래핑 (BSL = S3 직행, selective 범위)**
+
+`gitops/apps/velero/Chart.yaml`:
+```yaml
+apiVersion: v2
+name: velero
+version: 0.1.0
+dependencies:
+  - name: velero
+    version: "8.0.0"
+    repository: https://vmware-tanzu.github.io/helm-charts
+```
+
+`gitops/apps/velero/values.yaml`:
+```yaml
+velero:
+  initContainers:
+    - name: velero-plugin-for-aws
+      image: velero/velero-plugin-for-aws:v1.11.0
+      volumeMounts:
+        - { name: plugins, mountPath: /target }
+  credentials:
+    existingSecret: velero-s3-credentials   # Step 1 ESO 산출물
+  configuration:
+    backupStorageLocation:
+      - name: default
+        provider: aws
+        bucket: cledyu-lab-dr-backups
+        prefix: velero                       # 버킷 경로 분리(스펙 § 버킷 프리픽스)
+        config:
+          region: ap-northeast-2
+          # s3Url 생략 = AWS S3 직행(MinIO 없음). 로컬 사본 필요 시 BSL 추가로 확장
+    # PV 스냅샷 미사용 — 데이터는 wal-g/raft 담당. 오브젝트만 백업
+    volumeSnapshotLocation: []
+  snapshotsEnabled: false
+  deployNodeAgent: false                     # 파일시스템 백업 미사용
+  schedules:
+    cluster-state:
+      schedule: "0 */6 * * *"                # 6시간 주기(클러스터 상태 RPO)
+      template:
+        ttl: 168h
+        # selective: 컨트롤플레인만, 세션/KubeVirt 제외
+        includedNamespaces: ["api", "web", "ai-tutor", "keycloak", "postgres", "vault"]
+        excludedNamespaces: ["lab-sessions", "kubevirt", "kubevirt-cdi"]
+        snapshotVolumes: false
+```
+
+> 범위(includedNamespaces)는 실제 컨트롤플레인 네임스페이스에 맞춰 실행 단계에서 `kubectl get ns`로
+> 확정한다. `lab-sessions`·KubeVirt 제외는 "세션은 버림" 결정과의 충돌 방지(스펙 §비목표).
+
+- [ ] **Step 3: 검증 (의존성 빌드 + 렌더)**
+
+Run: `cd gitops/apps/velero && helm dependency build && helm template . --namespace velero | kubeconform -strict -ignore-missing-schemas`
+Expected: Velero Deployment/BackupStorageLocation/Schedule 렌더 성공, snapshotsEnabled=false 반영.
+
+- [ ] **Step 4: ArgoCD Application 작성 + Sync**
+
+`gitops/argocd/apps/platform-velero.yaml` (골격 동일, path `gitops/apps/velero`, releaseName `velero`, namespace `velero`).
+Run:
+```bash
+argocd app sync platform-velero
+kubectl -n velero rollout status deploy/velero
+kubectl -n velero get backupstoragelocation default -o jsonpath='{.status.phase}'
+```
+Expected: Velero `Available`, BSL phase `Available`.
+
+- [ ] **Step 5: 수동 백업 트리거 + S3 도달 확인**
+
+Run:
+```bash
+kubectl -n velero exec deploy/velero -- /velero backup create cluster-state-test --wait
+aws s3 ls s3://cledyu-lab-dr-backups/velero/ --recursive | head
+```
+Expected: 백업 Completed, `velero/` 하위에 tarball + 메타데이터 객체 존재.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add gitops/apps/velero gitops/argocd/apps/platform-velero.yaml
+git commit -m "feat(dr): Velero 클러스터 상태 백업(S3 직행, 컨트롤플레인 한정)"
+```
+
+---
+
 ## Self-Review
 
 **Spec coverage (스펙 §백업 계층 대비):**
 - Postgres wal-g/PITR → Task 3·4 (CNPG로 실현, 스펙의 wal-g를 CNPG barman으로 구체화 — 브레인스토밍서 사용자 승인) ✓
 - Vault raft 스냅샷 → Task 5 ✓
 - 범용 PVC Longhorn → Task 6 ✓
+- 클러스터 상태(Velero, 2차 추가) → Task 8 (오브젝트만·PV 스냅샷 끔, selective) ✓
 - S3 버킷/자격증명(버전ing, Vault→ESO) → Task 1·2 ✓
 - Keycloak DB → **본 플랜 범위 밖(Plan A-2)**, 스펙·메모리에 분리 근거 명시 ✓
 - 알림 체계 → Plan D(분리). 본 플랜은 백업 생성까지 ✓
