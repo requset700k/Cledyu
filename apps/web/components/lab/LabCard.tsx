@@ -17,9 +17,7 @@ export function LabCard({ lab }: { lab: Lab }) {
       <h3 className="mb-2 text-base font-semibold text-white transition-colors group-hover:text-brand-400">
         {lab.title}
       </h3>
-      <p className="mb-3 line-clamp-2 text-sm leading-5 text-slate-400">
-        {lab.description}
-      </p>
+      <p className="mb-3 line-clamp-2 text-sm leading-5 text-slate-400">{lab.description}</p>
 
       <div className="mb-4 flex flex-wrap gap-1">
         {lab.tags.map((tag) => (
