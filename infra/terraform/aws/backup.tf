@@ -100,6 +100,8 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "dr_backups" {
 #  postgres/ : base/WAL retention 은 CNPG barman(retentionPolicy)이 관리. 여기선 그 삭제로 남은
 #              non-current 버전을 정리하는 backstop.
 #  vault/    : 6시간마다 고유 키 .snap 이 쌓이며 삭제 주체가 없다 → 현재 버전까지 만료시킨다.
+#              non-current 정리는 Object Lock(30일)에 막혀 그 전엔 삭제 불가하므로 30일로 맞춘다
+#              (7일로 두면 락에 걸려 실질 30일이 되어 의도와 실제가 어긋난다).
 #  전체      : 실패한 multipart 업로드의 미완료 part 를 자동 중단해 과금 누수를 막는다.
 resource "aws_s3_bucket_lifecycle_configuration" "dr_backups" {
   bucket = aws_s3_bucket.dr_backups.id
@@ -125,7 +127,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "dr_backups" {
       days = 90
     }
     noncurrent_version_expiration {
-      noncurrent_days = 7
+      noncurrent_days = 30
     }
   }
 
