@@ -4,7 +4,7 @@
 # hint_levels: 레벨 1(개념) → 2(방향) → 3(구체). AI 도우미 미가용 시의 정적 폴백.
 id: lab-linux-basics
 title: Linux 기초
-description: 파일 트리 구성, find 검색, 권한, 텍스트 처리, 아카이브, 링크까지 셸 실무 기본기 실습
+description: 파일·디렉터리, 권한, 프로세스 등 리눅스 셸 기본기 실습
 difficulty: beginner
 duration_min: 60
 vm_type: lab-small
@@ -12,7 +12,7 @@ environment: ubuntu
 tags:
   - linux
   - shell
-  - ubuntu
+  - filesystem
 steps:
   - id: 1
     title: 작업 트리 구성
