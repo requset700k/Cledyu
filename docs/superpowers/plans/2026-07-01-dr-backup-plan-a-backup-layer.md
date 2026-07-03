@@ -215,60 +215,56 @@ git commit -m "feat(dr): S3 백업 자격증명 ESO 동기화(backup-secrets)"
 
 ### Task 3: CloudNativePG 오퍼레이터 설치
 
+> **구현 방식(실제)**: wrapper Chart 대신 **ArgoCD 멀티소스**(공식 차트 + `$values`)로 구현했다.
+> wrapper Chart는 `helm dependency build`로 공식 차트를 레포에 내려받아야 하는 부담이 있어, 멀티소스로
+> "레지스트리 차트 직접 + 우리 values.yaml"을 배포 시점에 합치는 방식이 더 깔끔하다. 따라서 로컬
+> `Chart.yaml`은 만들지 않고 `values.yaml`만 둔다(값은 upstream 차트에 직접 주입되므로 nesting 없음).
+
 **Files:**
-- Create: `gitops/apps/cnpg-operator/Chart.yaml`
-- Create: `gitops/apps/cnpg-operator/values.yaml`
+- Create: `gitops/apps/cnpg-operator/values.yaml` (Chart.yaml 없음 — 멀티소스)
 - Create: `gitops/argocd/apps/data-cnpg-operator.yaml`
 
 **Interfaces:**
 - Produces: `postgresql.cnpg.io` CRD군(`Cluster`, `ScheduledBackup`, `Backup`) — Task 4가 사용
 
-- [ ] **Step 1: 오퍼레이터 차트 래핑 작성**
-
-`gitops/apps/cnpg-operator/Chart.yaml`:
-```yaml
-apiVersion: v2
-name: cnpg-operator
-version: 0.1.0
-dependencies:
-  - name: cloudnative-pg
-    version: "0.22.1"
-    repository: https://cloudnative-pg.github.io/charts
-```
+- [ ] **Step 1: values.yaml 작성 (nesting 없이 upstream 직접 주입)**
 
 `gitops/apps/cnpg-operator/values.yaml`:
 ```yaml
-cloudnative-pg:
-  crds:
-    create: true
-  monitoring:
-    podMonitorEnabled: true  # 기존 kube-prometheus-stack이 수집
+# 멀티소스라 cloudnative-pg: 래핑 없이 upstream 차트에 직접 주입된다.
+crds:
+  create: true
+monitoring:
+  podMonitorEnabled: true  # 기존 kube-prometheus-stack이 수집
 ```
 
-- [ ] **Step 2: 의존성 빌드 + 검증**
+- [ ] **Step 2: ArgoCD 멀티소스 Application 작성**
 
-Run: `cd gitops/apps/cnpg-operator && helm dependency build && helm template . | kubeconform -strict -ignore-missing-schemas`
-Expected: 렌더 성공(Deployment `cnpg-cloudnative-pg` 등).
-
-- [ ] **Step 3: ArgoCD Application 작성**
-
-`gitops/argocd/apps/data-cnpg-operator.yaml` (Task 2 Application과 동일 골격, 값만 교체):
+`gitops/argocd/apps/data-cnpg-operator.yaml` — 소스 2개: (1) 공식 차트, (2) values 제공 레포(`ref: values`).
+`sync-wave: 0`으로 Cluster CR(data-postgres-cnpg)보다 먼저 CRD·오퍼레이터가 서게 한다.
 ```yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: data-cnpg-operator
   namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
-  source:
-    repoURL: https://github.com/requset700k/Cledyu.git
-    targetRevision: main
-    path: gitops/apps/cnpg-operator
-    helm:
-      releaseName: cnpg
+  sources:
+    - repoURL: https://cloudnative-pg.github.io/charts
+      chart: cloudnative-pg
+      targetRevision: 0.23.0        # apply 전 최신 stable 확인해 핀
+      helm:
+        releaseName: cnpg
+        valueFiles:
+          - $values/gitops/apps/cnpg-operator/values.yaml
+    - repoURL: https://github.com/requset700k/Cledyu.git
+      targetRevision: main
+      ref: values
   destination:
     server: https://kubernetes.default.svc
     namespace: cnpg-system
@@ -278,10 +274,20 @@ spec:
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
-      - ServerSideApply=true
+      - ServerSideApply=true        # 대형 CRD annotation 초과 방지
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
 ```
 
-- [ ] **Step 4: Sync 후 CRD·오퍼레이터 확인**
+> 검증: 멀티소스는 로컬 `helm template` 단독으로 못 합친다. 렌더 확인이 필요하면 upstream 차트를
+> 임시로 받아 `helm template cloudnative-pg/cloudnative-pg -f values.yaml`로 확인하거나, ArgoCD
+> diff(`argocd app diff`)로 sync 전 검증한다.
+
+- [ ] **Step 3: Sync 후 CRD·오퍼레이터 확인**
 
 Run:
 ```bash
@@ -291,7 +297,7 @@ kubectl -n cnpg-system rollout status deploy/cnpg-cloudnative-pg
 ```
 Expected: CRD 존재, 오퍼레이터 Deployment `Available`.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add gitops/apps/cnpg-operator gitops/argocd/apps/data-cnpg-operator.yaml
