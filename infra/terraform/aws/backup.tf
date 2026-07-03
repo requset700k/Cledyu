@@ -139,6 +139,11 @@ resource "aws_s3_bucket_lifecycle_configuration" "dr_backups" {
       days_after_initiation = 7
     }
   }
+
+  # noncurrent_version_expiration 규칙은 versioned bucket 전제다. object_lock_enabled 가 생성 시
+  # versioning 을 자동 활성화하지만, 순서를 명시해 첫 apply 를 안정화하고 object_lock_configuration 과
+  # 일관성을 맞춘다.
+  depends_on = [aws_s3_bucket_versioning.dr_backups]
 }
 
 # 백업 전용 쓰기 IAM 사용자 — 액세스 키는 apply 후 콘솔/CLI 로 수동 발급해 Vault(cledyu/aws/backup)에
