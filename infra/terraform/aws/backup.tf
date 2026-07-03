@@ -1,6 +1,8 @@
-# DR/백업 오프사이트 저장소 — 온프렘 durable 데이터(Postgres WAL/base, Vault raft 스냅샷,
-# Longhorn 볼륨 백업)를 S3 로 내보낸다. 온프렘이 죽어도 여기 사본이 남아 EKS DR 로 복원한다.
+# DR/백업 오프사이트 저장소 — 온프렘 durable 데이터(Postgres WAL/base, Vault raft 스냅샷)를
+# S3 로 내보낸다. 온프렘이 죽어도 여기 사본이 남아 EKS DR 로 복원한다.
 # 자격증명은 정적 IAM 키 → Vault → ESO(온프렘 클러스터라 IRSA 불가).
+# (Longhorn 볼륨 백업은 매시 주기라 아래 Object Lock 30일과 충돌 → 이 버킷을 쓰지 않고 별도
+#  무-락 버킷으로 분리한다. Plan A Task 6 참조.)
 
 resource "aws_s3_bucket" "dr_backups" {
   bucket = "${var.name_prefix}-dr-backups"
@@ -98,8 +100,6 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "dr_backups" {
 #  postgres/ : base/WAL retention 은 CNPG barman(retentionPolicy)이 관리. 여기선 그 삭제로 남은
 #              non-current 버전을 정리하는 backstop.
 #  vault/    : 6시간마다 고유 키 .snap 이 쌓이며 삭제 주체가 없다 → 현재 버전까지 만료시킨다.
-#  longhorn/ : Longhorn RecurringJob(retain)이 DeleteObject 로 지우지만 versioning 탓에 non-current
-#              버전이 남으므로 그 잔재를 정리한다.
 #  전체      : 실패한 multipart 업로드의 미완료 part 를 자동 중단해 과금 누수를 막는다.
 resource "aws_s3_bucket_lifecycle_configuration" "dr_backups" {
   bucket = aws_s3_bucket.dr_backups.id
@@ -130,17 +130,6 @@ resource "aws_s3_bucket_lifecycle_configuration" "dr_backups" {
   }
 
   rule {
-    id     = "backstop-noncurrent-longhorn"
-    status = "Enabled"
-    filter {
-      prefix = "longhorn/"
-    }
-    noncurrent_version_expiration {
-      noncurrent_days = 30
-    }
-  }
-
-  rule {
     id     = "abort-incomplete-multipart"
     status = "Enabled"
     filter {}
@@ -164,7 +153,7 @@ data "aws_iam_policy_document" "backup" {
       "s3:DeleteObject",
       "s3:ListBucket",
       "s3:GetBucketLocation",
-      # 큰 객체(Postgres base backup·Longhorn 볼륨)는 multipart 업로드를 타므로, 실패한 업로드를
+      # 큰 객체(Postgres base backup)는 multipart 업로드를 타므로, 실패한 업로드를
       # 중단·조회할 수 있어야 미완료 part 과금 누수를 막는다.
       "s3:AbortMultipartUpload",
       "s3:ListMultipartUploadParts",

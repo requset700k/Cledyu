@@ -66,7 +66,7 @@ output "baker_instance_profile" {
 
 # ── DR/백업 (backup.tf) ──────────────────────────────────────────────────
 output "backup_bucket" {
-  description = "DR 백업 S3 버킷명(Postgres/Vault/Longhorn 백업 대상)."
+  description = "DR 백업 S3 버킷명(Postgres/Vault 백업 대상; Longhorn은 별도 버킷)."
   value       = aws_s3_bucket.dr_backups.bucket
 }
 
