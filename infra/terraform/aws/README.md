@@ -220,7 +220,7 @@ No modules.
 | ---- | ----------- |
 | <a name="output_api_iam_user"></a> [api\_iam\_user](#output\_api\_iam\_user) | apps/api 용 IAM 사용자명 — 이 사용자의 액세스 키를 발급해 Vault 에 보관한다. |
 | <a name="output_backup_bucket"></a> [backup\_bucket](#output\_backup\_bucket) | DR 백업 S3 버킷명(Postgres/Vault 백업 대상; Longhorn은 별도 버킷). |
-| <a name="output_backup_iam_user"></a> [backup\_iam\_user](#output\_backup\_iam\_user) | 백업용 IAM 사용자명 — 이 사용자의 액세스 키를 발급해 Vault(cledyu/aws/backup)에 보관한다. |
+| <a name="output_backup_iam_users"></a> [backup\_iam\_users](#output\_backup\_iam\_users) | 프리픽스별 백업 IAM 사용자명 맵(postgres/vault) — 각 사용자의 액세스 키를 발급해 Vault(cledyu/aws/backup-postgres, cledyu/aws/backup-vault)에 보관한다. |
 | <a name="output_baker_bucket"></a> [baker\_bucket](#output\_baker\_bucket) | 이미지 베이커 S3 버킷명. |
 | <a name="output_baker_instance_profile"></a> [baker\_instance\_profile](#output\_baker\_instance\_profile) | metal 베이커 인스턴스 프로파일명. |
 | <a name="output_gha_baker_role_arn"></a> [gha\_baker\_role\_arn](#output\_gha\_baker\_role\_arn) | GitHub Action 이 assume 할 베이커 role ARN. |

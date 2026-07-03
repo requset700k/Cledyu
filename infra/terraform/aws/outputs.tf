@@ -70,7 +70,7 @@ output "backup_bucket" {
   value       = aws_s3_bucket.dr_backups.bucket
 }
 
-output "backup_iam_user" {
-  description = "백업용 IAM 사용자명 — 이 사용자의 액세스 키를 발급해 Vault(cledyu/aws/backup)에 보관한다."
-  value       = aws_iam_user.backup.name
+output "backup_iam_users" {
+  description = "프리픽스별 백업 IAM 사용자명 맵(postgres/vault) — 각 사용자의 액세스 키를 발급해 Vault(cledyu/aws/backup-postgres, cledyu/aws/backup-vault)에 보관한다."
+  value       = { for k, u in aws_iam_user.backup : k => u.name }
 }

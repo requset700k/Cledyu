@@ -146,34 +146,59 @@ resource "aws_s3_bucket_lifecycle_configuration" "dr_backups" {
   depends_on = [aws_s3_bucket_versioning.dr_backups]
 }
 
-# 백업 전용 쓰기 IAM 사용자 — 액세스 키는 apply 후 콘솔/CLI 로 수동 발급해 Vault(cledyu/aws/backup)에
-# 보관하고 ESO 가 클러스터로 뿌린다.
+# 백업 전용 쓰기 IAM 사용자 — 프리픽스별로 분리한다.
+#   postgres 백업(CNPG barman)은 postgres/ 만, Vault 스냅샷은 vault/ 만 접근하게 하여,
+#   한쪽 네임스페이스의 Secret/파드가 탈취돼도 다른 프리픽스(특히 vault/ raft 스냅샷=전체 시크릿)를
+#   읽지 못하게 한다(최소권한, blast radius 축소). 액세스 키는 apply 후 콘솔/CLI 로 수동 발급해
+#   Vault(cledyu/aws/backup-<프리픽스>)에 보관하고 ESO 가 해당 네임스페이스로만 뿌린다.
+locals {
+  # 프리픽스명 = IAM 사용자 suffix. velero/ 는 Task 8 에서 자체 스코프 사용자로 추가.
+  backup_writers = toset(["postgres", "vault"])
+}
+
 resource "aws_iam_user" "backup" {
-  name = "${var.name_prefix}-backup-writer"
+  for_each = local.backup_writers
+  name     = "${var.name_prefix}-backup-writer-${each.key}"
 }
 
 data "aws_iam_policy_document" "backup" {
+  for_each = local.backup_writers
+
+  # 객체 read/write 는 자기 프리픽스로만 제한한다(핵심: 교차 프리픽스 GetObject 차단).
   statement {
+    sid = "PrefixObjects"
     actions = [
       "s3:PutObject",
       "s3:GetObject",
       "s3:DeleteObject",
-      "s3:ListBucket",
-      "s3:GetBucketLocation",
       # 큰 객체(Postgres base backup)는 multipart 업로드를 타므로, 실패한 업로드를
       # 중단·조회할 수 있어야 미완료 part 과금 누수를 막는다.
       "s3:AbortMultipartUpload",
       "s3:ListMultipartUploadParts",
-      "s3:ListBucketMultipartUploads",
     ]
-    resources = [
-      aws_s3_bucket.dr_backups.arn,
-      "${aws_s3_bucket.dr_backups.arn}/*",
-    ]
+    resources = ["${aws_s3_bucket.dr_backups.arn}/${each.key}/*"]
+  }
+
+  # 버킷 레벨 액션(리스트/위치). 프리픽스 조건으로 자기 경로 목록만 보게 한다.
+  statement {
+    sid       = "ListOwnPrefix"
+    actions   = ["s3:ListBucket", "s3:ListBucketMultipartUploads"]
+    resources = [aws_s3_bucket.dr_backups.arn]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["${each.key}/*", "${each.key}"]
+    }
+  }
+  statement {
+    sid       = "BucketLocation"
+    actions   = ["s3:GetBucketLocation"]
+    resources = [aws_s3_bucket.dr_backups.arn]
   }
 
   # SSE-KMS 버킷이므로, 객체를 쓰려면 봉투 키 생성(GenerateDataKey)·검증 read 시 복호화(Decrypt)
-  # 권한이 키에 대해 필요하다. 이 키(dr_backups CMK)에만 한정한다.
+  # 권한이 키에 대해 필요하다. 이 키(dr_backups CMK)에만 한정한다. (프리픽스 GetObject 가 없으면
+  # Decrypt 만으론 다른 프리픽스 객체를 읽을 수 없어 상승 경로가 끊긴다.)
   statement {
     sid = "UseBackupKmsKey"
     actions = [
@@ -186,7 +211,8 @@ data "aws_iam_policy_document" "backup" {
 }
 
 resource "aws_iam_user_policy" "backup" {
-  name   = "${var.name_prefix}-backup-s3"
-  user   = aws_iam_user.backup.name
-  policy = data.aws_iam_policy_document.backup.json
+  for_each = local.backup_writers
+  name     = "${var.name_prefix}-backup-s3-${each.key}"
+  user     = aws_iam_user.backup[each.key].name
+  policy   = data.aws_iam_policy_document.backup[each.key].json
 }

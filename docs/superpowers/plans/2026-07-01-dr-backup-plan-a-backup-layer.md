@@ -27,14 +27,15 @@
 - Modify: `infra/terraform/aws/outputs.tf` (버킷명·IAM 사용자명 출력 추가)
 
 **Interfaces:**
-- Produces: S3 버킷 `${var.name_prefix}-dr-backups`(= `cledyu-lab-dr-backups`) — 버전ing·퍼블릭차단·SSE·수명주기 포함
-- Produces: IAM 사용자 `cledyu-lab-backup-writer` + 해당 버킷 한정 정책. **액세스 키는 Terraform이 만들지 않는다**(api/engine 관례 — 장기 키를 GCS state에 안 남김). apply 후 콘솔/CLI로 수동 발급 → Vault.
+- Produces: S3 버킷 `${var.name_prefix}-dr-backups`(= `cledyu-lab-dr-backups`) — 버전ing·퍼블릭차단·SSE-KMS·Object Lock·수명주기 포함
+- Produces: 프리픽스별 IAM 사용자 2개 `cledyu-lab-backup-writer-postgres`(`postgres/*`만), `cledyu-lab-backup-writer-vault`(`vault/*`만) + 각 프리픽스 한정 정책(최소권한, 교차 프리픽스 GetObject 차단). **액세스 키는 Terraform이 만들지 않는다**(api/engine 관례 — 장기 키를 GCS state에 안 남김). apply 후 콘솔/CLI로 수동 발급 → Vault.
 
 - [ ] **Step 1: 백업 리소스 정의 작성**
 
 `infra/terraform/aws/backup.tf` — 컨벤션 준수: `var.name_prefix` 사용, 정책은 `data.aws_iam_policy_document`
-(기존 baker/api/engine 스타일), 퍼블릭차단·SSE(AES256)·프리픽스별 수명주기 포함, `aws_iam_access_key`는
-두지 않음. (실제 파일 내용이 소스 오브 트루스 — 이 저장소의 `infra/terraform/aws/backup.tf` 참조)
+(기존 baker/api/engine 스타일), 퍼블릭차단·SSE-KMS(CMK)·Object Lock(GOVERNANCE 30일)·프리픽스별 수명주기 포함,
+IAM 사용자는 `for_each`로 postgres/vault 프리픽스별 분리, `aws_iam_access_key`는 두지 않음.
+(실제 파일 내용이 소스 오브 트루스 — 이 저장소의 `infra/terraform/aws/backup.tf` 참조)
 
 핵심 리소스:
 ```hcl
@@ -58,9 +59,9 @@ output "backup_bucket" {
   value       = aws_s3_bucket.dr_backups.bucket
 }
 
-output "backup_iam_user" {
-  description = "백업용 IAM 사용자명 — 이 사용자의 액세스 키를 발급해 Vault(cledyu/aws/backup)에 보관한다."
-  value       = aws_iam_user.backup.name
+output "backup_iam_users" {
+  description = "프리픽스별 백업 IAM 사용자명 맵(postgres/vault) — 각 사용자의 액세스 키를 발급해 Vault(cledyu/aws/backup-postgres, cledyu/aws/backup-vault)에 보관한다."
+  value       = { for k, u in aws_iam_user.backup : k => u.name }
 }
 ```
 
@@ -73,7 +74,7 @@ Expected: `Success! The configuration is valid.` + fmt 통과
 
 Run: `cd infra/terraform/aws && terraform init && terraform plan`
 Expected: `Plan: N to add, 0 to change, 0 to destroy` — **기존 리소스 change/destroy가 0인지 확인 후** `terraform apply`.
-`terraform output backup_bucket` → `cledyu-lab-dr-backups`, `terraform output backup_iam_user` → `cledyu-lab-backup-writer`
+`terraform output backup_bucket` → `cledyu-lab-dr-backups`, `terraform output backup_iam_users` → `{postgres = "cledyu-lab-backup-writer-postgres", vault = "cledyu-lab-backup-writer-vault"}`
 
 - [ ] **Step 5: Commit**
 
@@ -93,21 +94,27 @@ git commit -m "feat(dr): S3 백업 버킷·백업 전용 IAM 사용자 추가"
 - Create: `gitops/argocd/apps/data-backup-secrets.yaml`
 
 **Interfaces:**
-- Consumes: Task 1의 IAM 사용자 `cledyu-lab-backup-writer`(콘솔/CLI로 수동 발급한 액세스 키)
+- Consumes: Task 1의 프리픽스별 IAM 사용자 2개(`cledyu-lab-backup-writer-postgres`/`-vault`, 콘솔/CLI로 수동 발급한 액세스 키)
 - Produces: 네임스페이스 `postgres`/`vault` 각각에 Secret `cledyu-backup-s3`
-  (키: `ACCESS_KEY_ID`, `ACCESS_SECRET_KEY`) — Task 4·5가 참조. (Longhorn은 키명 규격이 달라 Task 6 전용 ES)
+  (키: `ACCESS_KEY_ID`, `ACCESS_SECRET_KEY`) — 각 ns는 자기 프리픽스 키만 참조. Task 4·5가 사용. (Longhorn은 키명 규격이 달라 Task 6 전용 ES)
 
 - [ ] **Step 1: 액세스 키 수동 발급 + Vault kv 등록 (수동 사전작업)**
 
-apply 후 콘솔/CLI로 `cledyu-lab-backup-writer` 사용자의 액세스 키를 발급한다:
+apply 후 콘솔/CLI로 **두 사용자 각각** 액세스 키를 발급해 프리픽스별 Vault 경로에 등록한다:
 ```bash
-aws iam create-access-key --user-name cledyu-lab-backup-writer
-# 출력의 AccessKeyId / SecretAccessKey 를 Vault 에 등록
-vault kv put cledyu/aws/backup \
+# postgres 백업용
+aws iam create-access-key --user-name cledyu-lab-backup-writer-postgres
+vault kv put cledyu/aws/backup-postgres \
+  access_key_id="<AccessKeyId>" \
+  secret_access_key="<SecretAccessKey>"
+
+# vault 백업용
+aws iam create-access-key --user-name cledyu-lab-backup-writer-vault
+vault kv put cledyu/aws/backup-vault \
   access_key_id="<AccessKeyId>" \
   secret_access_key="<SecretAccessKey>"
 ```
-Expected: `Success! Data written to: cledyu/aws/backup`
+Expected: 각각 `Success! Data written to: cledyu/aws/backup-postgres` / `...-vault`
 
 - [ ] **Step 2: Helm 차트 스캐폴드 작성**
 
@@ -118,24 +125,24 @@ name: backup-secrets
 version: 0.1.0
 ```
 
-`gitops/apps/backup-secrets/values.yaml`:
+`gitops/apps/backup-secrets/values.yaml` (네임스페이스별로 다른 프리픽스 키 참조):
 ```yaml
-# ESO가 S3 백업 자격증명을 뿌릴 네임스페이스 목록
-namespaces:
-  - postgres
-  - vault
-  - longhorn-system
+secrets:
+  - namespace: postgres
+    vaultKey: aws/backup-postgres
+  - namespace: vault
+    vaultKey: aws/backup-vault
 ```
 
 `gitops/apps/backup-secrets/templates/externalsecret.yaml`:
 ```yaml
-{{- range .Values.namespaces }}
+{{- range .Values.secrets }}
 ---
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
 metadata:
   name: cledyu-backup-s3
-  namespace: {{ . }}
+  namespace: {{ .namespace }}
   annotations:
     argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
@@ -150,11 +157,11 @@ spec:
   data:
     - secretKey: ACCESS_KEY_ID
       remoteRef:
-        key: aws/backup
+        key: {{ .vaultKey }}
         property: access_key_id
     - secretKey: ACCESS_SECRET_KEY
       remoteRef:
-        key: aws/backup
+        key: {{ .vaultKey }}
         property: secret_access_key
 {{- end }}
 ```
@@ -193,7 +200,7 @@ spec:
 - [ ] **Step 4: 검증 (템플릿 렌더 + 스키마)**
 
 Run: `helm template gitops/apps/backup-secrets | kubeconform -strict -ignore-missing-schemas`
-Expected: 에러 없음. 3개 ExternalSecret 렌더됨(`namespace: postgres/vault/longhorn-system`).
+Expected: 에러 없음. 2개 ExternalSecret 렌더됨(`namespace: postgres`→`aws/backup-postgres`, `vault`→`aws/backup-vault`).
 
 - [ ] **Step 5: Sync 후 Secret 생성 확인**
 
@@ -665,10 +672,11 @@ spec:
     name: longhorn-s3-backup
     creationPolicy: Owner
   data:
+    # Longhorn 은 별도 무-락 버킷 + 전용 IAM 사용자를 쓴다(dr_backups 프리픽스 분리와 무관).
     - secretKey: AWS_ACCESS_KEY_ID
-      remoteRef: { key: aws/backup, property: access_key_id }
+      remoteRef: { key: aws/backup-longhorn, property: access_key_id }
     - secretKey: AWS_SECRET_ACCESS_KEY
-      remoteRef: { key: aws/backup, property: secret_access_key }
+      remoteRef: { key: aws/backup-longhorn, property: secret_access_key }
 ---
 apiVersion: longhorn.io/v1beta2
 kind: BackupTarget
@@ -797,16 +805,22 @@ git commit -m "docs(dr): PITR 복원 드릴 런북·RPO 실측 기록"
 - Modify: `infra/terraform/aws/backup.tf` (`velero/` 수명주기 규칙 추가 — 아래 Step 0)
 
 **Interfaces:**
-- Consumes: Secret `cledyu-backup-s3`(Task 2) 형식의 자격증명 — Velero는 `[default]` 프로파일
+- Consumes: `velero/` 전용 IAM 키(`aws/backup-velero`, Step 0에서 생성) — Velero는 `[default]` 프로파일
   형식의 credentials 파일을 요구하므로 velero ns 전용 ExternalSecret으로 매핑
 - Produces: S3 프리픽스 `velero/`에 백업 tarball + 6시간 주기 스케줄
 
-- [ ] **Step 0: 버킷 `velero/` 수명주기 규칙 추가 (backup.tf)**
+- [ ] **Step 0: 버킷 `velero/` 수명주기 규칙 + 전용 IAM 사용자 추가 (backup.tf)**
 
-Velero 도입과 함께 버킷 정리 규칙도 넣는다(주체가 생기는 시점에 규칙도 추가 — 인과 정합).
-`infra/terraform/aws/backup.tf` 의 `aws_s3_bucket_lifecycle_configuration.dr_backups` 에 longhorn 과
-동일 패턴의 규칙을 추가한다(Velero 가 ttl 로 DeleteObject → versioning non-current 잔재 정리):
+Velero 도입과 함께 (1) 버킷 정리 규칙과 (2) `velero/` 프리픽스 전용 IAM 사용자를 넣는다(주체가 생기는
+시점에 규칙·권한도 추가 — 인과 정합, 프리픽스 분리 유지). `local.backup_writers` 에 `"velero"` 를 추가하면
+`for_each` 로 `cledyu-lab-backup-writer-velero`(`velero/*` 한정)가 자동 생성된다. 액세스 키는 수동 발급 →
+`vault kv put cledyu/aws/backup-velero ...`.
 ```hcl
+locals {
+  backup_writers = toset(["postgres", "vault", "velero"]) # velero 추가
+}
+
+# lifecycle 에 규칙 추가 (Velero 가 ttl 로 DeleteObject → versioning non-current 잔재 정리):
   rule {
     id     = "backstop-noncurrent-velero"
     status = "Enabled"
@@ -841,9 +855,9 @@ spec:
           aws_secret_access_key={{ .secret_access_key }}
   data:
     - secretKey: access_key_id
-      remoteRef: { key: aws/backup, property: access_key_id }
+      remoteRef: { key: aws/backup-velero, property: access_key_id }
     - secretKey: secret_access_key
-      remoteRef: { key: aws/backup, property: secret_access_key }
+      remoteRef: { key: aws/backup-velero, property: secret_access_key }
 ```
 
 - [ ] **Step 2: Velero 차트 래핑 (BSL = S3 직행, selective 범위)**
