@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - 리전: `ap-northeast-2` (기존 EC2 오버플로우와 동일, `docs/RUNBOOK/ec2-overflow.md`)
-- 백업 버킷(단일): `cledyu-dr-backups`, 프리픽스 `postgres/`, `vault/`, `longhorn/`, `velero/`
+- 백업 버킷(단일): `cledyu-lab-dr-backups`, 프리픽스 `postgres/`, `vault/`, `longhorn/`, `velero/`
 - S3 자격증명은 정적 IAM 키 → Vault kv → ESO(온프렘이라 IRSA 불가). 기존 ESO 패턴: ClusterSecretStore `vault-backend`, `remoteRef.key` 상대경로
 - ArgoCD 앱 등록 패턴: `gitops/argocd/apps/<name>.yaml`(Application) + `gitops/apps/<name>/`(내용). repoURL `https://github.com/requset700k/Cledyu.git`, targetRevision `main`
 - 커밋만 실행자가 하고, **사용자 확인 전 커밋 금지 규칙은 실행 단계에서 사용자 지시에 따른다**
@@ -354,7 +354,7 @@ spec:
         key: password
   backup:
     barmanObjectStore:
-      destinationPath: "s3://cledyu-dr-backups/postgres"
+      destinationPath: "s3://cledyu-lab-dr-backups/postgres"
       endpointURL: "https://s3.ap-northeast-2.amazonaws.com"
       s3Credentials:
         accessKeyId:
@@ -465,7 +465,7 @@ Run:
 ```bash
 kubectl -n postgres exec cledyu-pg-1 -- \
   cnpg backup cledyu-pg   # 즉시 base backup 트리거(또는 ScheduledBackup 대기)
-aws s3 ls s3://cledyu-dr-backups/postgres/ --recursive | head
+aws s3 ls s3://cledyu-lab-dr-backups/postgres/ --recursive | head
 ```
 Expected: `postgres/` 하위에 base backup + WAL 객체 존재.
 
@@ -569,7 +569,7 @@ spec:
                   TS=$(date -u +%Y%m%dT%H%M%SZ)
                   vault operator raft snapshot save /tmp/vault-raft-$TS.snap
                   aws s3 cp /tmp/vault-raft-$TS.snap \
-                    s3://cledyu-dr-backups/vault/vault-raft-$TS.snap
+                    s3://cledyu-lab-dr-backups/vault/vault-raft-$TS.snap
 ```
 
 `gitops/apps/vault-backup/templates/rbac.yaml`:
@@ -605,7 +605,7 @@ Run:
 argocd app sync platform-vault-backup
 kubectl -n vault create job --from=cronjob/vault-raft-snapshot vault-snap-test
 kubectl -n vault wait --for=condition=complete job/vault-snap-test --timeout=180s
-aws s3 ls s3://cledyu-dr-backups/vault/
+aws s3 ls s3://cledyu-lab-dr-backups/vault/
 ```
 Expected: job 완료, `vault/vault-raft-*.snap` 객체 존재.
 
@@ -635,7 +635,7 @@ git commit -m "feat(dr): Vault raft 스냅샷 CronJob S3 백업"
 
 **Interfaces:**
 - Consumes: Secret `cledyu-backup-s3`(Task 2, `longhorn-system` ns)
-- Produces: Longhorn backupTarget = `s3://cledyu-dr-backups/longhorn`, 백업 RecurringJob
+- Produces: Longhorn backupTarget = `s3://cledyu-lab-dr-backups/longhorn`, 백업 RecurringJob
 
 - [ ] **Step 1: Longhorn S3 secret 키 이름 정합화**
 
@@ -670,7 +670,7 @@ metadata:
   name: default
   namespace: longhorn-system
 spec:
-  backupTargetURL: "s3://cledyu-dr-backups@ap-northeast-2/longhorn"
+  backupTargetURL: "s3://cledyu-lab-dr-backups@ap-northeast-2/longhorn"
   credentialSecret: longhorn-s3-backup
   pollInterval: "5m"
 ```
@@ -745,7 +745,7 @@ spec:
   externalClusters:
     - name: cledyu-pg
       barmanObjectStore:
-        destinationPath: "s3://cledyu-dr-backups/postgres"
+        destinationPath: "s3://cledyu-lab-dr-backups/postgres"
         endpointURL: "https://s3.ap-northeast-2.amazonaws.com"
         s3Credentials:
           accessKeyId: { name: cledyu-backup-s3, key: ACCESS_KEY_ID }
