@@ -38,6 +38,7 @@ import (
 const (
 	vmFileAccessTimeout       = 5 * time.Second
 	vmFileAccessMaxConcurrent = 4
+	otelSampleRatio           = 0.1 // 10% — 트래픽 늘면 조정
 )
 
 func main() {
@@ -59,13 +60,14 @@ func main() {
 	defer stop()
 
 	otlpExp, otelErr := otlptracegrpc.New(ctx,
-		otlptracegrpc.WithEndpoint("alloy.loki.svc.cluster.local:4317"),
+		otlptracegrpc.WithEndpoint(cfg.OTel.Endpoint),
 		otlptracegrpc.WithInsecure(),
 	)
 	if otelErr != nil {
 		logger.Warn("OTel exporter 초기화 실패 — trace 비활성", zap.Error(otelErr))
 	} else {
 		tp := sdktrace.NewTracerProvider(
+			sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(otelSampleRatio))),
 			sdktrace.WithBatcher(otlpExp),
 			sdktrace.WithResource(resource.NewWithAttributes(
 				semconv.SchemaURL,
