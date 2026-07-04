@@ -131,11 +131,26 @@ kubectl -n argocd patch application platform-vault --type merge \
 
 ## 롤백
 
-마이그레이션이 실패/불안정하면:
+> **중요(마이그레이션 완료 후 barrier 상태)**: 마이그레이션이 끝나면 root key(barrier)는 이미
+> **awskms 로 재래핑**되어 있다. 따라서 `values-gcpckms.yaml`(gcpckms 단독)로 되돌려 재기동하면
+> **unseal 되지 않는다**(gcpckms 는 더 이상 현재 barrier 를 풀 키가 아니다). gcpckms 단독 복귀는
+> **마이그레이션이 아직 barrier 를 재래핑하기 전(= all-at-once 재기동 후 unseal-migrate 완료 전)**
+> 에만 유효하다. 시점별로 롤백이 다르다.
+
+**(가) 마이그레이션 진행 중(unseal-migrate 완료 전) 실패** — barrier 아직 gcpckms:
 1. valueFiles 를 `values-gcpckms.yaml`(gcpckms 단독)로 되돌린다.
 2. 파드 재시작 → gcpckms 로 다시 auto-unseal(기존 seal 그대로라 복구됨).
-3. 그래도 안 되면 3단계 raft 스냅샷으로 복원(신규 Vault 에 snapshot restore, gcpckms 로 unseal).
-4. GCP creds/키는 롤백 완료 전까지 삭제하지 않는다.
+
+**(나) 마이그레이션 완료 후 awskms unseal 이 불안정** — barrier 는 awskms:
+1. 대개 원인은 AWS creds/키(`vault-aws-kms-creds`, KMS 키 권한)다. **awskms 설정을 유지**한 채
+   creds/권한을 고쳐 재기동한다(gcpckms 단독으로 되돌리지 말 것 — sealed 고착).
+2. 굳이 GCP 로 되돌리려면 **역마이그레이션**(gcpckms 를 new active + awskms 를 `disabled` 로
+   두고 노드별 `unseal-migrate`)을 5단계와 대칭으로 수행한다. 단순 config 교체가 아니다.
+
+**(다) 최후 보루 — pre-migration raft 스냅샷 복원**(3단계 `pre-awskms-*.snap`):
+- 이 스냅샷은 **gcpckms 로 래핑된 시점**이므로, `values-gcpckms.yaml`(gcpckms) 설정의 새 Vault 에
+  restore 해야 gcpckms 로 unseal 된다. **데이터는 스냅샷 시점으로 롤백**(그 이후 쓰기 손실).
+- GCP creds/키(gcpckms) 는 이 복원 경로 때문에 **유예 기간 동안 삭제 금지**(사후 정리 C 참조).
 
 ## 사후 정리 — GCP 이탈 완성 (마이그레이션 완료 후)
 
@@ -156,6 +171,10 @@ ArgoCD 가 awskms-단독 ConfigMap 을 스테이징(OnDelete → 자동 재시�
 ```bash
 for p in vault-2 vault-1 vault-0; do   # follower 부터, active(vault-0) 마지막
   kubectl -n vault delete pod $p
+  # delete 반환 직후엔 StatefulSet 이 동명 파드를 아직 안 만들었을 수 있다 —
+  # Ready 대기 전에 재생성부터 기다린다(안 그러면 NotFound 로 즉시 실패).
+  kubectl -n vault wait --for=create pod/$p --timeout=60s 2>/dev/null \
+    || until kubectl -n vault get pod/$p >/dev/null 2>&1; do sleep 2; done
   kubectl -n vault wait --for=condition=Ready pod/$p --timeout=180s
   kubectl -n vault exec $p -- sh -c \
     'VAULT_ADDR=https://127.0.0.1:8200 VAULT_SKIP_VERIFY=true vault status -format=json' \
