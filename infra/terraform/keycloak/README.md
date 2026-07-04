@@ -23,20 +23,43 @@ Cledyu Keycloak의 realm, OIDC client, realm role, group, 팀원 초기 계정�
 사람 break-glass 시크릿은 **GCP Secret Manager**(asia-northeast3)에 보관하고
 (예: `cledyu-learn-idp-google-secret`, `cledyu-learn-smtp-key`), apply 시
 `$(gcloud secrets versions access)` 로 `TF_VAR_*` 에 주입한다(채팅·셸 히스토리 회피).
-Terraform state 는 원격 암호화 backend(GCS `cledyu-tf-state`, prefix `keycloak`)에 보관.
+Terraform state 는 원격 암호화 backend(AWS **S3** `cledyu-tf-state`, key `keycloak/terraform.tfstate`,
+ap-northeast-2, DynamoDB 락)에 보관. auth 도 DR-크리티컬이라 복구 대상 클라우드(AWS 계정
+`504284203153`)에 자기완결적으로 둔다. 주의: **state backend 는 AWS(S3)** 이지만, apply 시
+민감값은 여전히 **GCP Secret Manager** 에서 주입하므로 apply 에는 AWS·GCP 자격증명이 모두 필요하다.
 
-## 사용 방법
+## state 이관 (GCS -> S3, 최초 1회 — backend 변경 직후 반드시 먼저)
+
+> **경고**: backend 를 GCS -> S3 로 바꾼 뒤 **이관이 끝나기 전에는** 절대 일반 `terraform init`
+> 후 `plan/apply` 하지 말 것. 빈 S3 backend 기준으로 Keycloak realm/client 를 **전부 신규 생성**
+> 하려는 파괴적 plan 이 나온다(realm 중복/충돌). backend 변경 후 첫 init 은 반드시
+> `-migrate-state` 로 기존 GCS state 를 S3 로 복사한다.
+
+```bash
+cd infra/terraform/keycloak
+export AWS_PROFILE=cledyu AWS_REGION=ap-northeast-2                   # S3 backend(신규)
+export GOOGLE_OAUTH_ACCESS_TOKEN=$(gcloud auth print-access-token)   # 기존 GCS 읽기용
+terraform init -migrate-state   # GCS state -> S3 로 복사(both 접근 필요). 확인 프롬프트 yes
+terraform plan                  # no-change 여야 정상(리소스 신규 생성이 뜨면 중단)
+```
+- state 버킷(S3 `cledyu-tf-state`)·락 테이블(DynamoDB `cledyu-tf-lock`)은 aws 스택과 공유하며
+  out-of-band 부트스트랩 완료됨(`infra/terraform/aws/README.md` 의 생성 절차 참고).
+- 이관 후 GCS 사본(`gs://cledyu-tf-state`, prefix `keycloak`)은 롤백용으로 남겨둔다.
+
+## 사용 방법 (이관 완료 후 — 평시)
 
 ```bash
 cd infra/terraform/keycloak
 cp terraform.tfvars.example terraform.tfvars   # 최초 1회, 보안값 채움
 $EDITOR terraform.tfvars
 
-# GCS backend 접근(택1): ADC 또는 액세스 토큰
+# S3 backend 접근: AWS 자격증명(계정 504284203153) — 신규 운영자는 이것만 있으면 init 된다.
+export AWS_PROFILE=cledyu AWS_REGION=ap-northeast-2
+# GCP Secret Manager 접근(apply 시 민감값 주입용): ADC 또는 액세스 토큰
 gcloud auth application-default login            # 워크스테이션
 export GOOGLE_OAUTH_ACCESS_TOKEN=$(gcloud auth print-access-token)  # 비대화형/CI
 
-terraform init
+terraform init   # 이관 완료 후에는 일반 init (state 는 이미 S3 에 있음)
 # 시크릿은 Secret Manager 에서 변수로 먼저 가져온다. set -e 로 조회 실패 시 즉시 중단해
 # 빈 secret 으로 apply 되는 것을 막는다(VAR=$(실패) terraform 형식은 terraform 을 막지 못함).
 # idp_client_secrets·learn_smtp_password 는 tfvars 에 두지 않는다 — tfvars 값이 TF_VAR 보다
