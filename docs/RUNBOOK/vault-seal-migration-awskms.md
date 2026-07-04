@@ -18,8 +18,8 @@ DR 소스로 유효하려면 이 마이그레이션이 **백업보다 먼저** �
 > 아래 "실행 절차"는 실제 수행된 이력 기록이다. 남은 GCP 이탈 정리는 "사후 정리" 참조.
 
 - seal_type = `awskms`(완료), 3노드 unsealed, Vault 1.21.2. recovery keys 5 / threshold 3.
-- recovery keys 보관: **GCP Secret Manager `cledyu-vault-bootstrap`** (`recovery_keys_b64`).
-  → 사후 정리에서 AWS Secrets Manager 로 이관 예정(그 전까지 break-glass 는 GCP 종속).
+- recovery keys 보관: **AWS Secrets Manager `cledyu/vault/bootstrap`** (2026-07-04 이관 완료,
+  break-glass AWS-네이티브). GCP SM `cledyu-vault-bootstrap` 원본은 이중 백업으로 유지.
 - ArgoCD `platform-vault` 앱은 **auto-sync(prune+selfHeal)** — 마이그레이션 중에는 반드시
   일시 비활성화한다(아래).
 
@@ -148,9 +148,12 @@ kubectl -n argocd patch application platform-vault --type merge \
    두고 노드별 `unseal-migrate`)을 5단계와 대칭으로 수행한다. 단순 config 교체가 아니다.
 
 **(다) 최후 보루 — pre-migration raft 스냅샷 복원**(3단계 `pre-awskms-*.snap`):
-- 이 스냅샷은 **gcpckms 로 래핑된 시점**이므로, `values-gcpckms.yaml`(gcpckms) 설정의 새 Vault 에
-  restore 해야 gcpckms 로 unseal 된다. **데이터는 스냅샷 시점으로 롤백**(그 이후 쓰기 손실).
-- GCP creds/키(gcpckms) 는 이 복원 경로 때문에 **유예 기간 동안 삭제 금지**(사후 정리 C 참조).
+- 이 스냅샷은 **gcpckms 로 래핑된 시점**이므로, `values-gcpckms.yaml`(gcpckms, 복원용으로 보존)
+  설정의 새 Vault 에 restore 해야 gcpckms 로 unseal 된다. **데이터는 스냅샷 시점으로 롤백**.
+- 복원 준비물(사후 정리 C 에서 의도적으로 보존): **GCP KMS 키**(`cledyu-vault-keyring/vault-unseal-key`)
+  + **SA** `vault-unseal-sa` + **`values-gcpckms.yaml`**. 단 k8s Secret `vault-gcp-kms-creds` 는
+  삭제됐으므로 복원 시 SA 키(json)로 재생성한다(`kubectl -n vault create secret generic
+  vault-gcp-kms-creds --from-file=key.json=<sa-key>`).
 
 ## 사후 정리 — GCP 이탈 완성 (마이그레이션 완료 후)
 
@@ -184,12 +187,20 @@ done
 ```
 acid test: GCP creds 가 config 에서 사라졌는데도 파드가 unsealed 로 복귀 = **GCP 독립 실증**.
 
-### C. 자원 회수 (B 검증 후)
+### C. 자원 회수 (B 검증 후) — 2026-07-04 진행
 
-- [ ] k8s Secret `vault-gcp-kms-creds` 삭제: `kubectl -n vault delete secret vault-gcp-kms-creds`
-- [ ] **recovery key 백업을 GCP Secret Manager → AWS Secrets Manager 이관** — 그 전까지 break-glass 는 GCP 종속
-- [ ] GCP KMS key(`cledyu-vault-keyring/vault-unseal-key`) + SA `vault-unseal-sa` **스케줄 삭제**
-      (즉시 삭제 금지 — 롤백/구 raft 스냅샷 복원 대비 유예 기간 후)
-- [ ] `values-gcpckms.yaml`/`.example` 은 이력용으로 두거나 삭제
+- [x] k8s Secret `vault-gcp-kms-creds` 삭제(`kubectl -n vault delete secret vault-gcp-kms-creds`).
+      StatefulSet·파드·ESO 어디에도 미참조 확인 후 삭제, Vault awskms/unsealed 정상.
+- [x] **recovery key 백업을 AWS Secrets Manager 로 이관 완료** —
+      `cledyu/vault/bootstrap`(arn `...:secret:cledyu/vault/bootstrap`, 504284203153/ap-northeast-2).
+      이로써 generate-root break-glass 가 AWS-네이티브. GCP SM `cledyu-vault-bootstrap` 원본은
+      이중 백업으로 유지(제거는 선택).
+- [ ] GCP KMS key(`cledyu-vault-keyring/vault-unseal-key`) + SA `vault-unseal-sa` — **보류(유지)**.
+      pre-migration raft 스냅샷(gcpckms 래핑) 복원의 유일 수단이라 dormant 로 두고 **프로젝트
+      종료(2026-07-22) teardown 때 함께 정리**. 지금 삭제 이득 없음.
+- [x] `values-gcpckms.example.yaml` 제거(중복 템플릿). **`values-gcpckms.yaml` 은 유지** —
+      어떤 앱에도 미연결이지만 위 "다" 스냅샷 복원용 seal config 라 GCP KMS 키와 짝으로 보존
+      (파일 상단 배너 참고). 종료 시 KMS 키와 함께 정리.
 
-C 까지 끝나야 "Vault unseal + break-glass 가 AWS 자기완결"이 성립한다.
+C 완료(KMS 키 보류 제외)로 **"Vault unseal + break-glass 가 AWS 자기완결"** 성립. 잔여 GCP
+종속은 (1) GCP KMS 키(구 스냅샷 복원용, 의도적 보류) (2) GCP SM recovery key 원본(이중 백업).

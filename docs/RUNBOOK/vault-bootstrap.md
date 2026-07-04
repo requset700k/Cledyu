@@ -52,7 +52,12 @@ kubectl -n vault exec vault-0 -- \
 
 명령 실행 결과에는 unseal key 5개와 root token이 포함됨. 이 값은 절대 GitHub, Discord, 공개 Notion, PR 코멘트, 쉘 히스토리에 남기지 않음.
 
-권장 GCP Secret Manager 저장 항목:
+> **갱신(2026-07-04)**: recovery key 백업은 이제 **AWS Secrets Manager `cledyu/vault/bootstrap`**
+> (504284203153/ap-northeast-2)가 **1차**다(awskms seal·DR 이 AWS 라 break-glass 도 AWS-네이티브).
+> 아래 GCP Secret Manager `cledyu-vault-bootstrap` 은 이중 백업(legacy). generate-root 시 recovery
+> key 는 AWS SM 에서 취득한다: `aws secretsmanager get-secret-value --secret-id cledyu/vault/bootstrap`.
+
+권장 recovery key 저장 항목(1차 AWS SM `cledyu/vault/bootstrap`, 2차 GCP SM 아래):
 
 ```text
 Secret: cledyu-vault-bootstrap

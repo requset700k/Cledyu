@@ -1,9 +1,16 @@
 ---
-# GCP Cloud KMS auto-unseal — migration 단계 values.
-# values.yaml 위에 override (server.ha.raft.config 통째 교체).
+# [보존 — 미사용, DR 복원 아티팩트] gcpckms auto-unseal values.
 #
-# extraArgs="-migrate" 는 Shamir → gcpckms 전환 시 first apply 에만 필요.
-# Migration 완료 후 별도 PR 로 -migrate 제거 후 helm sync.
+# 2026-07-04 기준 프로덕션은 awskms 단독 auto-unseal(values-awskms.yaml)이며 이 파일은 어떤
+# ArgoCD 앱에도 연결돼 있지 않다. 그럼에도 **삭제하지 않고 보존**한다: pre-migration raft
+# 스냅샷(gcpckms 로 래핑)을 복원하려면 gcpckms seal 로 구성한 Vault 가 필요한데(런북
+# docs/RUNBOOK/vault-seal-migration-awskms.md 롤백 "다"), 그 복원용 seal config 가 이 파일이다.
+# 보류 중인 GCP KMS 키(cledyu-vault-keyring/vault-unseal-key)와 짝을 이루며, 프로젝트 종료
+# (2026-07-22) teardown 때 KMS 키와 함께 정리한다. 복원 시 아래 k8s Secret vault-gcp-kms-creds
+# 는 삭제됐으므로 SA 키로 재생성해야 한다. (`-migrate` 는 실제 vault server 플래그가 아니다 —
+# 마이그레이션은 config-driven. 아래 -migrate 언급은 과거 오기.)
+#
+# values.yaml 위에 override (server.ha.raft.config 통째 교체).
 #
 # 적용된 GCP 자원:
 #   project    = cledyu-project
