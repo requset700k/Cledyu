@@ -190,7 +190,7 @@ data "aws_iam_policy_document" "backup" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = ["${each.key}/*", "${each.key}"]
+      values   = ["${each.key}/*", each.key]
     }
   }
   statement {
