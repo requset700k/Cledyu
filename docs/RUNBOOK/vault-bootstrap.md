@@ -335,6 +335,63 @@ vault token revoke -self
 최후 3순위: recovery key threshold 3으로 generate-root 후 즉시 revoke
 ```
 
+> **중요 실패 모드(2026-07-04 실증)**: 1순위·2순위가 **동시에** 막힐 수 있다.
+> - 2순위(k8s `vault-admin` 로그인)는 **Kubernetes auth 자체가 고장나면 같이 죽는다** — 예:
+>   `token_reviewer_jwt` 만료로 `auth/kubernetes/login` 이 전역 403 이면 vault-admin 도 403.
+> - 1순위(OIDC)는 실서버 OIDC role 이 `cledyu-platform` 하나뿐으로 드리프트되어 있어
+>   `cledyu-admin` role 로그인이 "role not found" 로 실패한다(런북의 cledyu-operator/
+>   cledyu-admin 명칭과 실제가 불일치 — 아래 인시던트 참고).
+>
+> 이 조합이면 **3순위 generate-root 만 남는다**. 즉 recovery key 접근성이 진짜 최후 보루다.
+
+## Kubernetes Auth token_reviewer_jwt 만료 인시던트 (2026-07-04)
+
+**증상**: ExternalSecrets Operator 의 `ClusterSecretStore vault-backend` 가 "unable to create
+client", 18개 ExternalSecret 전부 `SecretSyncedError`. 앱은 캐시된 k8s Secret 으로 계속 가동
+(즉시 장애 아님). ESO 로그: `PUT auth/kubernetes/login` → **403 permission denied**.
+
+**근본원인**: `auth/kubernetes/config` 의 `token_reviewer_jwt` 가 짧은 수명 projected 토큰으로
+설정돼 **만료**. Vault 가 이 JWT 로 Kubernetes TokenReview API 를 호출하는데 만료되어 실패 →
+**모든 k8s auth 로그인이 전역 403**. Vault 파드 재시작으로 안 고쳐진다(런타임이 아니라 저장된
+config 문제). ExternalSecret refresh 주기(1h)라 실제 auth 붕괴 시점보다 최대 1h 늦게 표면화되어
+직전의 파드 재시작/seal 마이그레이션과 혼동하기 쉽다 — **store `lastTransitionTime` 과 파드
+재시작 시각을 대조**해 인과를 분리할 것.
+
+**진단(비밀 아님)**:
+```bash
+vault read auth/kubernetes/config
+# token_reviewer_jwt_set = true 이면 명시적 reviewer JWT 사용 중(만료 후보)
+```
+
+**수정(정석 — 비만료 reviewer 토큰)**: vault SA(`vault`, 이미 `system:auth-delegator` 보유)용
+**Secret 기반 비만료 토큰**을 만들어 `token_reviewer_jwt` 로 설정한다. projected 토큰과 달리
+`kubernetes.io/service-account-token` Secret 의 토큰은 만료되지 않는다.
+```bash
+kubectl -n vault apply -f - <<'EOF'
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vault-k8s-auth-reviewer
+  namespace: vault
+  annotations:
+    kubernetes.io/service-account.name: vault
+type: kubernetes.io/service-account-token
+EOF
+# 토큰이 채워지길 기다린 뒤(값 미출력):
+REVJWT="$(kubectl -n vault get secret vault-k8s-auth-reviewer -o jsonpath='{.data.token}' | base64 -d)"
+vault write auth/kubernetes/config \
+  kubernetes_host="https://kubernetes.default.svc:443" \
+  disable_iss_validation=true \
+  token_reviewer_jwt="$REVJWT"
+```
+적용 즉시 `ClusterSecretStore vault-backend` Ready=True, 18/18 SecretSynced 회복(ESO 컨트롤러
+재시작으로 즉시 재검증 가능). 이 변경은 GitOps 미관리(수동 config) — Secret `vault-k8s-auth-reviewer`
+는 vault ns 의 라이브 리소스로 유지된다(ArgoCD platform-vault include 목록 밖이라 prune 되지 않음).
+
+**후속(OIDC break-glass 복원)**: `auth/oidc/role` 에 `cledyu-platform` 만 존재하고
+`cledyu-admin` 이 없어 이번에 OIDC admin 진입이 불가했다. 향후 대비로 `cledyu-platform` 구조를
+미러링해 `cledyu-admin` OIDC role(정책 `cledyu-admin`, team-security 그룹)을 재생성 권장.
+
 ## Root Token Break-Glass 전환
 
 2026-05-11 기준 기존 root token은 revoke 완료됨. 이후 평시 Vault 운영은 Keycloak OIDC 로그인과
@@ -464,6 +521,11 @@ tail -n 5 /vault/audit/audit.log
 ```
 
 ## GCP KMS Auto-Unseal 전환
+
+> **이력(2026-07-04 기준 supersede)**: 아래는 최초 gcpckms 도입 절차의 기록이다. 이후 DR 을
+> AWS 기반으로 정하면서 auto-unseal 을 **gcpckms → awskms 로 마이그레이션 완료**했다(3노드
+> awskms 단독 auto-unseal). 현재 seal 절차·롤백·사후정리는
+> `docs/RUNBOOK/vault-seal-migration-awskms.md` 를 따른다.
 
 현재 PR에서는 `values-gcpckms.example.yaml`만 추가함. 실제 전환은 GCP KMS 키 정보와 권한이 준비된 뒤 진행함.
 
