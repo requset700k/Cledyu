@@ -16,9 +16,10 @@ spec:
         releaseName: vault
         valueFiles:
           - $values/gitops/apps/vault/values.yaml
-          # GCP KMS auto-unseal (migration 단계: extraArgs="-migrate" 포함).
-          # migration 완료 후 별도 PR 로 -migrate 제거.
-          - $values/gitops/apps/vault/values-gcpckms.yaml
+          # AWS KMS auto-unseal 마이그레이션 단계 — awskms(active) + gcpckms{disabled}.
+          # 유지보수 창에서 파드 재시작 → 노드별 unseal-migrate 로 재래핑(런북 참고).
+          # 마이그레이션 완료 후 별도 PR 로 gcpckms{disabled}+GCP creds 제거 → awskms 단독.
+          - $values/gitops/apps/vault/values-awskms.yaml
     - repoURL: https://github.com/requset700k/Cledyu.git
       targetRevision: main
       ref: values

@@ -1,0 +1,125 @@
+---
+# AWS KMS auto-unseal — gcpckms -> awskms seal 마이그레이션 단계 values.
+# values.yaml 위에 override (server.ha.raft.config 통째 교체).
+#
+# 이 파일은 저장소에 스테이징만 해 두고, 실제 적용(platform-vault.yaml 의 valueFiles 를
+# values-gcpckms.yaml -> values-awskms.yaml 로 교체)은 **유지보수 창에서 런북대로** 진행한다.
+# 런북: docs/RUNBOOK/vault-seal-migration-awskms.md
+#
+# 마이그레이션 단계 특징(로컬 3노드 raft 재현으로 검증 완료):
+#   - seal "awskms" (신규, active) + seal "gcpckms" { disabled = "true" } (기존 root key 복호화용).
+#   - `-migrate` 는 vault server 플래그가 아니다(존재하지 않음). config만 이렇게 바꿔 재기동하면
+#     Vault 가 "seal migration mode"로 떠서 **sealed 상태로 대기**하고(자동 unseal 안 됨), 운영자가
+#     `vault operator unseal -migrate <recovery-key>` 를 threshold(3) 만큼 넣어 재래핑을 완료한다.
+#   - GCP creds(gcp-kms 볼륨/ GOOGLE_APPLICATION_CREDENTIALS)는 disabled gcpckms 가 복호화에
+#     써야 하므로 **마이그레이션 동안 유지**. 완료 후 제거한다.
+#
+# 사용 AWS 자원(504284203153 / ap-northeast-2, out-of-band 부트스트랩 — DR-durable):
+#   KMS key   = alias/cledyu-vault-unseal
+#               arn:aws:kms:ap-northeast-2:504284203153:key/e29e3ec2-f5e0-4308-af6f-5b576cc99f52
+#   IAM user  = cledyu-vault-unseal (kms:Encrypt/Decrypt/DescribeKey on the key)
+#   k8s Secret= vault-aws-kms-creds (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY) — 유지보수 창에서
+#               kubectl 로 직접 생성(런북). Vault unseal 은 ESO 부트스트랩 못 씀(chicken-egg).
+#
+# 마이그레이션 완료 후 별도 PR 로 정리:
+#   - seal "gcpckms" { disabled } 블록 제거 (awskms 단독으로)
+#   - GCP creds 볼륨/마운트/GOOGLE_APPLICATION_CREDENTIALS 제거
+#   - k8s Secret vault-gcp-kms-creds 삭제, GCP KMS key/SA 삭제
+#   - recovery key 백업을 GCP Secret Manager 밖(AWS Secrets Manager 등)으로 이관
+
+server:
+  # awskms seal 이 표준 AWS 자격증명 체인(env)에서 읽는다.
+  extraSecretEnvironmentVars:
+    - envName: AWS_ACCESS_KEY_ID
+      secretName: vault-aws-kms-creds
+      secretKey: AWS_ACCESS_KEY_ID
+    - envName: AWS_SECRET_ACCESS_KEY
+      secretName: vault-aws-kms-creds
+      secretKey: AWS_SECRET_ACCESS_KEY
+
+  # disabled gcpckms 가 기존 root key 복호화에 쓰므로 마이그레이션 동안 GCP creds 유지.
+  extraEnvironmentVars:
+    GOOGLE_APPLICATION_CREDENTIALS: /vault/userconfig/gcp-kms/key.json
+
+  volumes:
+    - name: vault-tls
+      secret:
+        secretName: vault-tls
+    - name: gcp-kms
+      secret:
+        secretName: vault-gcp-kms-creds
+
+  volumeMounts:
+    - name: vault-tls
+      mountPath: /vault/tls
+      readOnly: true
+    - name: gcp-kms
+      mountPath: /vault/userconfig/gcp-kms
+      readOnly: true
+
+  ha:
+    enabled: true
+    raft:
+      enabled: true
+      config: |
+        ui = true
+        # Keep aligned with base values.yaml: restricted PSA drops CAP_IPC_LOCK, so mlock is disabled.
+        # This assumes Kubernetes nodes run with swap disabled.
+        disable_mlock = true
+
+        # 신규 seal — 마이그레이션 후 유일한 seal 이 된다.
+        seal "awskms" {
+          region     = "ap-northeast-2"
+          kms_key_id = "arn:aws:kms:ap-northeast-2:504284203153:key/e29e3ec2-f5e0-4308-af6f-5b576cc99f52"
+        }
+
+        # 기존 seal — 마이그레이션 동안 disabled 로 두어 기존 root key 를 복호화한다.
+        # 완료 후 별도 PR 로 제거한다.
+        seal "gcpckms" {
+          disabled   = "true"
+          project    = "cledyu-project"
+          region     = "asia-northeast3"
+          key_ring   = "cledyu-vault-keyring"
+          crypto_key = "vault-unseal-key"
+        }
+
+        listener "tcp" {
+          address = "[::]:8200"
+          cluster_address = "[::]:8201"
+          tls_disable = 0
+          tls_cert_file = "/vault/tls/tls.crt"
+          tls_key_file = "/vault/tls/tls.key"
+          tls_client_ca_file = "/vault/tls/ca.crt"
+
+          # Keep aligned with base values.yaml so KMS overlay does not drop metrics behavior.
+          # Revisit when ServiceMonitor scraping uses authenticated access or a dedicated metrics listener.
+          telemetry {
+            unauthenticated_metrics_access = true
+          }
+        }
+
+        storage "raft" {
+          path = "/vault/data"
+
+          retry_join {
+            leader_api_addr = "https://vault-0.vault-internal:8200"
+            leader_ca_cert_file = "/vault/tls/ca.crt"
+          }
+
+          retry_join {
+            leader_api_addr = "https://vault-1.vault-internal:8200"
+            leader_ca_cert_file = "/vault/tls/ca.crt"
+          }
+
+          retry_join {
+            leader_api_addr = "https://vault-2.vault-internal:8200"
+            leader_ca_cert_file = "/vault/tls/ca.crt"
+          }
+        }
+
+        service_registration "kubernetes" {}
+
+        telemetry {
+          prometheus_retention_time = "30s"
+          disable_hostname = true
+        }
