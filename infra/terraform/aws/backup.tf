@@ -95,10 +95,10 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "dr_backups" {
   }
 }
 
-# 수명주기 — versioning 이 켜져 있어 "삭제"는 delete marker 를 남기고 데이터는 non-current 버전으로
-# 보존된다. 따라서 삭제 주체가 있는 프리픽스도 non-current 정리 규칙이 필요하다.
-#  postgres/ : base/WAL retention 은 CNPG barman(retentionPolicy)이 관리. 여기선 그 삭제로 남은
-#              non-current 버전을 정리하는 backstop.
+# 수명주기 — writer 정책에 DeleteObject 가 없으므로(무-delete) 보존 만료 정리는 전적으로 이 lifecycle
+# 이 담당한다. versioning 이 켜져 있어 만료는 delete marker + non-current 정리 조합으로 처리한다.
+#  postgres/ : current(base/WAL) 만료 규칙은 PITR 창 확정과 함께 Task 4 에서 추가한다. 여기선 우선
+#              non-current 잔재만 정리한다(backstop). barman 은 삭제 권한이 없어 retention 을 관리하지 않는다.
 #  vault/    : 6시간마다 고유 키 .snap 이 쌓이며 삭제 주체가 없다 → 현재 버전까지 만료시킨다.
 #              non-current 정리는 Object Lock(30일)에 막혀 그 전엔 삭제 불가하므로 30일로 맞춘다
 #              (7일로 두면 락에 걸려 실질 30일이 되어 의도와 실제가 어긋난다).
@@ -165,14 +165,17 @@ data "aws_iam_policy_document" "backup" {
   for_each = local.backup_writers
 
   # 객체 read/write 는 자기 프리픽스로만 제한한다(핵심: 교차 프리픽스 GetObject 차단).
+  # DeleteObject 는 일부러 제외 — versioned+ObjectLock 버킷에서 DELETE 는 delete marker 를
+  # current 로 얹어 백업이 일반 List/Get 에 "사라진 것처럼" 보이게 할 수 있다(유출·오작동 시 DR 방해).
+  # 보존 만료 정리는 writer 가 아니라 S3 lifecycle 이 담당한다(최소권한) 백업 잡(Task 4 CNPG /
+  # Task 8 Velero)이 삭제를 실제로 요구하면 그때 좁게 재부여하고 lifecycle 보존기간을 확정
   statement {
     sid = "PrefixObjects"
     actions = [
       "s3:PutObject",
       "s3:GetObject",
-      "s3:DeleteObject",
       # 큰 객체(Postgres base backup)는 multipart 업로드를 타므로, 실패한 업로드를
-      # 중단·조회할 수 있어야 미완료 part 과금 누수를 막는다.
+      # 중단·조회할 수 있어야 미완료 part 과금 누수를 막는다(삭제 마커를 남기지 않음).
       "s3:AbortMultipartUpload",
       "s3:ListMultipartUploadParts",
     ]

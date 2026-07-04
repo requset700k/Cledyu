@@ -39,14 +39,16 @@ IAM 사용자는 `for_each`로 postgres/vault 프리픽스별 분리, `aws_iam_a
 
 핵심 리소스:
 ```hcl
-resource "aws_s3_bucket"                            "dr_backups" { bucket = "${var.name_prefix}-dr-backups" }
+resource "aws_s3_bucket"                            "dr_backups" { bucket = "${var.name_prefix}-dr-backups", object_lock_enabled = true }
 resource "aws_s3_bucket_versioning"                 "dr_backups" { ... status = "Enabled" }
+resource "aws_s3_bucket_object_lock_configuration"  "dr_backups" { GOVERNANCE 30일 }
 resource "aws_s3_bucket_public_access_block"        "dr_backups" { ... 4개 true }
-resource "aws_s3_bucket_server_side_encryption_configuration" "dr_backups" { ... AES256 }
-resource "aws_s3_bucket_lifecycle_configuration"    "dr_backups" { postgres/ backstop + vault/ 90d 만료 }
-resource "aws_iam_user"                             "backup" { name = "${var.name_prefix}-backup-writer" }
-data     "aws_iam_policy_document"                  "backup" { PutObject/GetObject/DeleteObject/ListBucket/GetBucketLocation, 버킷 한정 }
-resource "aws_iam_user_policy"                      "backup" { policy = data....json }
+resource "aws_kms_key" / "aws_kms_alias"            "dr_backups" { 고객 관리 CMK(root 위임, 로테이션) }
+resource "aws_s3_bucket_server_side_encryption_configuration" "dr_backups" { ... aws:kms + bucket key }
+resource "aws_s3_bucket_lifecycle_configuration"    "dr_backups" { postgres/ backstop + vault/ 90d 만료 (velero/ 는 Task 8) }
+resource "aws_iam_user"                             "backup" { for_each postgres/vault → "${var.name_prefix}-backup-writer-<프리픽스>" }
+data     "aws_iam_policy_document"                  "backup" { 프리픽스 한정 PutObject/GetObject/Abort/ListMultipartParts + List(s3:prefix 조건) + KMS. **DeleteObject 없음**(정리는 lifecycle) }
+resource "aws_iam_user_policy"                      "backup" { for_each, policy = data....json }
 # aws_iam_access_key 리소스 없음 — 수동 발급
 ```
 
@@ -820,11 +822,14 @@ locals {
   backup_writers = toset(["postgres", "vault", "velero"]) # velero 추가
 }
 
-# lifecycle 에 규칙 추가 (Velero 가 ttl 로 DeleteObject → versioning non-current 잔재 정리):
+# lifecycle 에 규칙 추가. writer 에 DeleteObject 가 없어(무-delete 정책) Velero 는 백업을 직접 못
+# 지우므로, 정리는 전적으로 lifecycle 이 담당한다 — current 만료 + non-current 잔재 정리 둘 다 둔다.
+# expiration 일수(velero 보존 기간)는 Task 8 에서 확정(예: 30일). Object Lock 30일보다 짧게 두면 무의미.
   rule {
-    id     = "backstop-noncurrent-velero"
+    id     = "expire-velero"
     status = "Enabled"
     filter { prefix = "velero/" }
+    expiration { days = 30 }                          # Task 8 에서 보존 기간 확정
     noncurrent_version_expiration { noncurrent_days = 30 }
   }
 ```
