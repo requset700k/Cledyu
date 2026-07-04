@@ -1,0 +1,109 @@
+---
+# [보존 — 미사용, DR 복원 아티팩트] gcpckms auto-unseal values.
+#
+# 2026-07-04 기준 프로덕션은 awskms 단독 auto-unseal(values-awskms.yaml)이며 이 파일은 어떤
+# ArgoCD 앱에도 연결돼 있지 않다. 그럼에도 **삭제하지 않고 보존**한다: pre-migration raft
+# 스냅샷(gcpckms 로 래핑)을 복원하려면 gcpckms seal 로 구성한 Vault 가 필요한데(런북
+# docs/RUNBOOK/vault-seal-migration-awskms.md 롤백 "다"), 그 복원용 seal config 가 이 파일이다.
+# 보류 중인 GCP KMS 키(cledyu-vault-keyring/vault-unseal-key)와 짝을 이루며, 프로젝트 종료
+# (2026-07-22) teardown 때 KMS 키와 함께 정리한다. 복원 시 아래 k8s Secret vault-gcp-kms-creds
+# 는 삭제됐으므로 SA 키로 재생성해야 한다. (`-migrate` 는 실제 vault server 플래그가 아니다 —
+# 마이그레이션은 config-driven. 아래 -migrate 언급은 과거 오기.)
+#
+# values.yaml 위에 override (server.ha.raft.config 통째 교체).
+#
+# 적용된 GCP 자원:
+#   project    = cledyu-project
+#   region     = asia-northeast3
+#   key_ring   = cledyu-vault-keyring
+#   crypto_key = vault-unseal-key
+#   SA         = vault-unseal-sa@cledyu-project.iam.gserviceaccount.com
+#   k8s Secret = vault-gcp-kms-creds (kubectl 로 직접 생성, ESO 도입 후 마이그레이션)
+# 기본 PR1 배포에는 적용하지 않는다.
+# 실제 전환 시 아래 값을 환경에 맞게 채운 뒤 values.yaml 의
+# server.ha.raft.config 에 seal "gcpckms" 블록을 반영한다.
+#
+# 필요한 선행 작업:
+# - GCP KMS key ring / crypto key 생성
+# - Vault Pod가 KMS decrypt/encrypt 권한을 갖도록 Workload Identity 또는
+#   별도 credential secret 구성
+# - 기존 Shamir unseal key / root token 1Password 보관 완료
+# - 변경 전 스냅샷 및 롤백 절차 확인
+
+server:
+  extraEnvironmentVars:
+    GOOGLE_APPLICATION_CREDENTIALS: /vault/userconfig/gcp-kms/key.json
+
+  volumes:
+    - name: vault-tls
+      secret:
+        secretName: vault-tls
+    - name: gcp-kms
+      secret:
+        secretName: vault-gcp-kms-creds
+
+  volumeMounts:
+    - name: vault-tls
+      mountPath: /vault/tls
+      readOnly: true
+    - name: gcp-kms
+      mountPath: /vault/userconfig/gcp-kms
+      readOnly: true
+
+  ha:
+    enabled: true
+    raft:
+      enabled: true
+      config: |
+        ui = true
+        # Keep aligned with base values.yaml: restricted PSA drops CAP_IPC_LOCK, so mlock is disabled.
+        # This assumes Kubernetes nodes run with swap disabled.
+        disable_mlock = true
+
+        seal "gcpckms" {
+          project    = "cledyu-project"
+          region     = "asia-northeast3"
+          key_ring   = "cledyu-vault-keyring"
+          crypto_key = "vault-unseal-key"
+        }
+
+        listener "tcp" {
+          address = "[::]:8200"
+          cluster_address = "[::]:8201"
+          tls_disable = 0
+          tls_cert_file = "/vault/tls/tls.crt"
+          tls_key_file = "/vault/tls/tls.key"
+          tls_client_ca_file = "/vault/tls/ca.crt"
+
+          # Keep aligned with base values.yaml so KMS overlay does not drop metrics behavior.
+          # Revisit when ServiceMonitor scraping uses authenticated access or a dedicated metrics listener.
+          telemetry {
+            unauthenticated_metrics_access = true
+          }
+        }
+
+        storage "raft" {
+          path = "/vault/data"
+
+          retry_join {
+            leader_api_addr = "https://vault-0.vault-internal:8200"
+            leader_ca_cert_file = "/vault/tls/ca.crt"
+          }
+
+          retry_join {
+            leader_api_addr = "https://vault-1.vault-internal:8200"
+            leader_ca_cert_file = "/vault/tls/ca.crt"
+          }
+
+          retry_join {
+            leader_api_addr = "https://vault-2.vault-internal:8200"
+            leader_ca_cert_file = "/vault/tls/ca.crt"
+          }
+        }
+
+        service_registration "kubernetes" {}
+
+        telemetry {
+          prometheus_retention_time = "30s"
+          disable_hostname = true
+        }

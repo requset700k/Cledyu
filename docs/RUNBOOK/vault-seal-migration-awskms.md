@@ -148,9 +148,12 @@ kubectl -n argocd patch application platform-vault --type merge \
    두고 노드별 `unseal-migrate`)을 5단계와 대칭으로 수행한다. 단순 config 교체가 아니다.
 
 **(다) 최후 보루 — pre-migration raft 스냅샷 복원**(3단계 `pre-awskms-*.snap`):
-- 이 스냅샷은 **gcpckms 로 래핑된 시점**이므로, `values-gcpckms.yaml`(gcpckms) 설정의 새 Vault 에
-  restore 해야 gcpckms 로 unseal 된다. **데이터는 스냅샷 시점으로 롤백**(그 이후 쓰기 손실).
-- GCP creds/키(gcpckms) 는 이 복원 경로 때문에 **유예 기간 동안 삭제 금지**(사후 정리 C 참조).
+- 이 스냅샷은 **gcpckms 로 래핑된 시점**이므로, `values-gcpckms.yaml`(gcpckms, 복원용으로 보존)
+  설정의 새 Vault 에 restore 해야 gcpckms 로 unseal 된다. **데이터는 스냅샷 시점으로 롤백**.
+- 복원 준비물(사후 정리 C 에서 의도적으로 보존): **GCP KMS 키**(`cledyu-vault-keyring/vault-unseal-key`)
+  + **SA** `vault-unseal-sa` + **`values-gcpckms.yaml`**. 단 k8s Secret `vault-gcp-kms-creds` 는
+  삭제됐으므로 복원 시 SA 키(json)로 재생성한다(`kubectl -n vault create secret generic
+  vault-gcp-kms-creds --from-file=key.json=<sa-key>`).
 
 ## 사후 정리 — GCP 이탈 완성 (마이그레이션 완료 후)
 
@@ -195,7 +198,9 @@ acid test: GCP creds 가 config 에서 사라졌는데도 파드가 unsealed 로
 - [ ] GCP KMS key(`cledyu-vault-keyring/vault-unseal-key`) + SA `vault-unseal-sa` — **보류(유지)**.
       pre-migration raft 스냅샷(gcpckms 래핑) 복원의 유일 수단이라 dormant 로 두고 **프로젝트
       종료(2026-07-22) teardown 때 함께 정리**. 지금 삭제 이득 없음.
-- [x] `values-gcpckms.yaml`/`.example` 제거(죽은 파일, 어떤 ArgoCD 앱도 미참조).
+- [x] `values-gcpckms.example.yaml` 제거(중복 템플릿). **`values-gcpckms.yaml` 은 유지** —
+      어떤 앱에도 미연결이지만 위 "다" 스냅샷 복원용 seal config 라 GCP KMS 키와 짝으로 보존
+      (파일 상단 배너 참고). 종료 시 KMS 키와 함께 정리.
 
 C 완료(KMS 키 보류 제외)로 **"Vault unseal + break-glass 가 AWS 자기완결"** 성립. 잔여 GCP
 종속은 (1) GCP KMS 키(구 스냅샷 복원용, 의도적 보류) (2) GCP SM recovery key 원본(이중 백업).
