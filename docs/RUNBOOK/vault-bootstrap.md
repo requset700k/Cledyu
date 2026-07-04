@@ -343,11 +343,15 @@ vault token revoke -self
 > **중요 실패 모드(2026-07-04 실증)**: 1순위·2순위가 **동시에** 막힐 수 있다.
 > - 2순위(k8s `vault-admin` 로그인)는 **Kubernetes auth 자체가 고장나면 같이 죽는다** — 예:
 >   `token_reviewer_jwt` 만료로 `auth/kubernetes/login` 이 전역 403 이면 vault-admin 도 403.
-> - 1순위(OIDC)는 실서버 OIDC role 이 `cledyu-platform` 하나뿐으로 드리프트되어 있어
->   `cledyu-admin` role 로그인이 "role not found" 로 실패한다(런북의 cledyu-operator/
->   cledyu-admin 명칭과 실제가 불일치 — 아래 인시던트 참고).
+> - 1순위(OIDC): 인시던트 당시 실서버 OIDC role 이 `cledyu-platform`(operator, team-platform+
+>   team-security) 하나뿐으로 드리프트되어 `cledyu-admin` 로그인이 "role not found" 로 실패했다.
+>   이 조합이면 **3순위 generate-root 만 남았다**(recovery key 접근성이 진짜 최후 보루).
 >
-> 이 조합이면 **3순위 generate-root 만 남는다**. 즉 recovery key 접근성이 진짜 최후 보루다.
+> **복원(2026-07-04)**: recovery key `generate-root` 로 admin 확보 후 `cledyu-admin` policy 로드 +
+> `auth/oidc/role/cledyu-admin` 재생성(정책 `cledyu-operator,cledyu-admin`). 단 운영자가
+> team-security 미소속(team-platform)이라 group 불일치로 막혀, `bound_claims.groups` 를
+> **`[team-platform, team-security]`** 로 두어 로그인 성공. 이제 1순위 OIDC admin 이 정상 동작한다
+> (`vault login -method=oidc role=cledyu-admin`). `cledyu-platform`(operator) role 은 그대로 공존.
 
 ## Kubernetes Auth token_reviewer_jwt 만료 인시던트 (2026-07-04)
 
@@ -393,9 +397,11 @@ vault write auth/kubernetes/config \
 재시작으로 즉시 재검증 가능). 이 변경은 GitOps 미관리(수동 config) — Secret `vault-k8s-auth-reviewer`
 는 vault ns 의 라이브 리소스로 유지된다(ArgoCD platform-vault include 목록 밖이라 prune 되지 않음).
 
-**후속(OIDC break-glass 복원)**: `auth/oidc/role` 에 `cledyu-platform` 만 존재하고
-`cledyu-admin` 이 없어 이번에 OIDC admin 진입이 불가했다. 향후 대비로 `cledyu-platform` 구조를
-미러링해 `cledyu-admin` OIDC role(정책 `cledyu-admin`, team-security 그룹)을 재생성 권장.
+**후속(OIDC break-glass 복원) — 2026-07-04 완료**: `auth/oidc/role` 에 `cledyu-platform` 만
+있어 `cledyu-admin` OIDC 진입이 불가했던 문제를, `cledyu-admin` policy 로드 + `cledyu-admin`
+OIDC role 재생성으로 복원했다. 운영자가 team-security 미소속이라 `bound_claims.groups` 를
+`[team-platform, team-security]` 로 두어 로그인 성공(위 "중요 실패 모드" 및
+`scripts/vault-bootstrap-configure.ps1` 참고). 이제 generate-root 없이 OIDC admin 진입 가능.
 
 ## Root Token Break-Glass 전환
 

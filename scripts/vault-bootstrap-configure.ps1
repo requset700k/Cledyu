@@ -200,8 +200,12 @@ Write-VaultRawJson -Path "auth/oidc/role/cledyu-admin" -Data @{
   bound_audiences = @($VaultOidcClientId)
   allowed_redirect_uris = @($VaultOidcCliRedirectUri, $VaultOidcUiRedirectUri)
   oidc_scopes = @("openid", "profile", "email")
+  # 2026-07-04: team-security 그룹이 실제로 채워져 있지 않아(운영자는 team-platform 소속)
+  # admin 로그인이 group 불일치로 막혔다. break-glass 확보를 위해 team-platform 도 수용한다.
+  # (cledyu-platform 통합 role 이 이미 team-platform 을 operator 로 신뢰하므로 같은 신뢰경계.)
+  # 엄격한 operator/admin 분리를 원하면 team-security 만 두고 운영자를 그 그룹에 넣어야 한다.
   bound_claims = @{
-    groups = @("team-security")
+    groups = @("team-platform", "team-security")
   }
   policies = @("cledyu-operator", "cledyu-admin")
   ttl = "1h"
