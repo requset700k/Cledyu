@@ -166,8 +166,12 @@ Lambda 또는 Step Functions (순차 복구)
   IAM 롤을 부여해 S3에서 백업을 꺼낸다 → 복원 경로에 정적 키가 없다. 온프렘 backup-writer 정적
   키(`infra/terraform/aws/backup.tf`)는 온프렘 쓰기 전용(온프렘은 IAM 롤 불가)으로만 남긴다.
   `terraform output`은 순수 break-glass 폴백.
-- **Vault 부트스트랩 체인**: 복원한 Vault 는 sealed 로 뜬다. auto-unseal(GCP KMS, `values-gcpckms.yaml`)
-  접근도 복원 컴퓨트 롤에 포함해야 unseal→ESO 정상화 순으로 복귀한다.
+- **Vault 부트스트랩 체인**: 복원한 Vault 는 sealed 로 뜬다. auto-unseal은 **AWS KMS**
+  (`alias/cledyu-vault-unseal`, Vault seal이 gcpckms에서 awskms로 이관 완료됨)로,
+  복원 컴퓨트 롤에 그 키의 `kms:Decrypt`만 포함하면 unseal→ESO 정상화 순으로 복귀한다.
+  **이중 클라우드 자격증명 불필요**(unseal이 AWS 계정 안에서 자기완결) — 이전에는
+  GCP KMS 접근을 복원 롤에 별도 공급해야 했으나(닭-달걀 회피 필요), 이관 후엔 S3 백업 read와
+  같은 IAM 롤에 KMS 권한만 얹으면 된다.
 
 ### RTO 설계 (장애 발생 기준, end-to-end)
 

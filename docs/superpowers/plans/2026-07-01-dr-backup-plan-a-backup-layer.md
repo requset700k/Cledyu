@@ -28,7 +28,7 @@
 
 **Interfaces:**
 - Produces: S3 버킷 `${var.name_prefix}-dr-backups`(= `cledyu-lab-dr-backups`) — 버전ing·퍼블릭차단·SSE-KMS·Object Lock·수명주기 포함
-- Produces: 프리픽스별 IAM 사용자 2개 `cledyu-lab-backup-writer-postgres`(`postgres/*`만), `cledyu-lab-backup-writer-vault`(`vault/*`만) + 각 프리픽스 한정 정책(최소권한, 교차 프리픽스 GetObject 차단). **액세스 키는 Terraform이 만들지 않는다**(api/engine 관례 — 장기 키를 GCS state에 안 남김). apply 후 콘솔/CLI로 수동 발급 → Vault.
+- Produces: 프리픽스별 IAM 사용자 2개 `cledyu-lab-backup-writer-postgres`(`postgres/*`만), `cledyu-lab-backup-writer-vault`(`vault/*`만) + 각 프리픽스 한정 정책(최소권한, 교차 프리픽스 GetObject 차단). **액세스 키는 Terraform이 만들지 않는다**(api/engine 관례 — 장기 키를 S3 state에 안 남김). apply 후 콘솔/CLI로 수동 발급 → Vault.
 
 - [ ] **Step 1: 백업 리소스 정의 작성**
 
@@ -72,7 +72,7 @@ output "backup_iam_users" {
 Run: `cd infra/terraform/aws && terraform init -backend=false && terraform validate && terraform fmt -check backup.tf outputs.tf`
 Expected: `Success! The configuration is valid.` + fmt 통과
 
-- [ ] **Step 4: apply (AWS+GCP 자격증명 필요)**
+- [ ] **Step 4: apply (AWS 자격증명 단독 — `AWS_PROFILE=cledyu`)**
 
 Run: `cd infra/terraform/aws && terraform init && terraform plan`
 Expected: `Plan: N to add, 0 to change, 0 to destroy` — **기존 리소스 change/destroy가 0인지 확인 후** `terraform apply`.

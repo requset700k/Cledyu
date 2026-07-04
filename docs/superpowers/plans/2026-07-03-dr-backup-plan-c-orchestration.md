@@ -4,15 +4,18 @@
 
 **Goal:** 온프렘 상실을 오탐 없이 감지하고(pull+push AND + 수동 승인), 감지 후 EKS로 컨트롤플레인·durable 데이터를 자동 복구하며(Lambda/Step Functions), 온프렘 복귀 시 스플릿 브레인을 방지한다(DNS 단일 권한 + 수동 failback).
 
-**Architecture:** 온프렘 push 하트비트(CloudWatch) + AWS pull 프로브(Route 53) → CloudWatch 복합 알람(AND) → EventBridge → Step Functions(수동 승인 게이트 → EKS 기동 → ArgoCD 부트스트랩 → S3 복원 → DNS 전환). 복원 자격증명은 정적 키가 아니라 실행 롤(S3 read + GCP KMS decrypt). failback은 자동 금지, 역복제 후 수동 전환.
+**Architecture:** 온프렘 push 하트비트(CloudWatch) + AWS pull 프로브(Route 53) → CloudWatch 복합 알람(AND) → EventBridge → Step Functions(수동 승인 게이트 → EKS 기동 → ArgoCD 부트스트랩 → S3 복원 → DNS 전환). 복원 자격증명은 정적 키가 아니라 실행 롤(S3 read + Vault unseal용 AWS KMS decrypt). failback은 자동 금지, 역복제 후 수동 전환.
 
-**Tech Stack:** Terraform(CloudWatch/EventBridge/Step Functions/Lambda/IAM/Route 53), 온프렘 CronJob(awscli PutMetricData), Vault(GCP KMS auto-unseal), CloudNativePG(PITR 복원), Velero(오브젝트 복원).
+**Tech Stack:** Terraform(CloudWatch/EventBridge/Step Functions/Lambda/IAM/Route 53), 온프렘 CronJob(awscli PutMetricData), Vault(AWS KMS auto-unseal, alias/cledyu-vault-unseal), CloudNativePG(PITR 복원), Velero(오브젝트 복원).
 
 ## Dependencies (중요)
 
 - **Plan A(백업 계층) 완료 전제**: S3에 Postgres WAL/베이스백업(`postgres/`), Vault raft 스냅샷(`vault/`), Velero(`velero/`)이 실제로 쌓여 있어야 복원할 대상이 있다. Task 5·6은 이 백업들을 읽는다.
 - **Plan B(EKS 오버레이) 완료 전제**: Task 4의 "EKS 기동 → ArgoCD 동기화"는 Plan B가 만든 EKS용 오버레이(Longhorn→EBS, MetalLB→ALB Controller 등)가 있어야 성립한다. **Task 4는 Plan B 없이는 완결 불가** — Task 1~3(감지)·Task 7(런북)은 Plan B와 독립으로 선행 가능.
-- **이중 클라우드 인증**: `infra/terraform/aws`는 GCS backend라 apply에 AWS+GCP 자격증명 동시 필요(`project_aws_tf_dual_cloud_auth`). 정적 검증까지만 하고 실제 apply·검증은 양쪽 접근자에게 위임하는 것이 기본 패턴.
+- **단일 클라우드 인증 (2026-07-04 갱신)**: `infra/terraform/aws`의 state는 GCS→S3로 이전 완료(PR #245),
+  `keycloak` state도 S3로 이전(PR #249). Vault unseal도 GCP KMS→AWS KMS로 이전 완료(PR #246/#247).
+  이 Plan C의 apply·복원 런타임 모두 **AWS 자격증명만으로 완결**된다 — 더 이상 GCP 자격증명이 필요
+  없다(과거엔 이중 클라우드 인증이 블로커였음, `project_aws_tf_dual_cloud_auth` 메모리는 이제 stale).
 
 ## Global Constraints
 
@@ -184,7 +187,7 @@ resource "aws_cloudwatch_composite_alarm" "disaster" {
 Run: `cd infra/terraform/aws && terraform init -backend=false && terraform validate && terraform fmt -check dr-detection.tf`
 Expected: valid + fmt 통과.
 
-- [ ] **Step 4: apply 후 4분면 동작 확인 (AWS+GCP 자격증명 필요)**
+- [ ] **Step 4: apply 후 4분면 동작 확인 (AWS 자격증명만 필요)**
 
 apply 후, 하트비트를 일시 중단(Deployment scale 0)했을 때 push 알람만 ALARM이 되고 **복합 알람은 OK 유지**(pull 정상이므로)를 확인 → 오탐 방지 동작 실증. 스펙 § 재해 감지 4분면 표의 2행.
 ```bash
@@ -284,7 +287,7 @@ git commit -m "feat(dr): EventBridge 규칙·SNS 알림·Step Functions 트리�
   → DnsSwitch    (Lambda: Route53 auth/api → EKS 엔드포인트)
   → Notify       (SNS: RTO 타이머 종료)
 ```
-복원 내부 순서(스펙 § 백업 우선순위 기술 순서): **Vault 복원→unseal(GCP KMS)→ESO 정상화 → Postgres PITR/Keycloak**. Vault가 먼저 열려야 나머지가 시크릿을 받는다.
+복원 내부 순서(스펙 § 백업 우선순위 기술 순서): **Vault 복원→unseal(AWS KMS)→ESO 정상화 → Postgres PITR/Keycloak**. Vault가 먼저 열려야 나머지가 시크릿을 받는다.
 
 - [ ] **Step 2: 단계별 Lambda 스켈레톤**
 
@@ -304,18 +307,18 @@ git commit -m "feat(dr): 복구 Step Functions(승인→EKS→ArgoCD→복원→
 
 ---
 
-### Task 5: 복원 자격증명 — IAM 롤 + GCP KMS 접근
+### Task 5: 복원 자격증명 — IAM 롤 (S3 read + Vault unseal KMS)
 
-> 복원 경로에 정적 키를 두지 않는다(S3 키는 Vault 안에 있어 순환). 복원 컴퓨트에 롤로 S3 read를 주고, 복원된 Vault가 스스로 unseal하도록 GCP KMS decrypt 자격을 **Vault 바깥에서** 공급한다.
+> 복원 경로에 정적 키를 두지 않는다(S3 키는 Vault 안에 있어 순환). 복원 컴퓨트에 롤로 S3 read +
+> Vault unseal용 KMS decrypt를 준다 — **둘 다 AWS 안에서 끝난다**.
 
 **Files:**
 - Modify: `infra/terraform/aws/dr-orchestration.tf` (IAM 롤/정책)
-- Create: `gitops/apps/dr-restore-gcpkms/*` (복원된 Vault용 GCP SA Secret 주입 — EKS 오버레이에 포함)
 
 **Interfaces:**
-- Produces: 복원 실행 롤(S3 `cledyu-lab-dr-backups` read-only), 복원된 Vault에 GCP KMS decrypt 자격 공급 경로
+- Produces: 복원 실행 롤(S3 `cledyu-lab-dr-backups` read-only + Vault unseal KMS decrypt)
 
-- [ ] **Step 1: 복원 실행 롤 (S3 read-only)**
+- [ ] **Step 1: 복원 실행 롤 (S3 read-only + Vault unseal KMS)**
 
 ```hcl
 data "aws_iam_policy_document" "restore" {
@@ -325,25 +328,40 @@ data "aws_iam_policy_document" "restore" {
   }
   # 버킷이 SSE-KMS(dr_backups CMK)라, 백업을 읽으려면 그 키의 복호화 권한도 필요하다(Plan A backup.tf).
   statement {
+    sid       = "BackupBucketKms"
     actions   = ["kms:Decrypt", "kms:DescribeKey"]
     resources = [aws_kms_key.dr_backups.arn]
   }
+  # 복원된 Vault가 auto-unseal 하려면 이 키의 Decrypt 권한이 필요하다(스펙 § Vault 부트스트랩 체인).
+  # alias/cledyu-vault-unseal 은 Vault 보안 작업(PR #246)에서 별도 관리 — 여기선 참조만.
+  statement {
+    sid       = "VaultUnsealKms"
+    actions   = ["kms:Decrypt", "kms:DescribeKey"]
+    resources = ["arn:aws:kms:ap-northeast-2:504284203153:key/e29e3ec2-f5e0-4308-af6f-5b576cc99f52"]
+  }
 }
-# Step Functions/Lambda 실행 롤에 attach. 정적 키 없음.
+# Step Functions/Lambda 실행 롤에 attach. 정적 키 없음. GCP 자격증명 불필요(단일 클라우드로 완결).
 ```
 
-- [ ] **Step 2: GCP KMS 자격 공급 (닭-달걀 회피)**
+> **복원된 Vault 파드에 위 KMS decrypt 권한을 공급하는 방식은 둘 중 하나** (온프렘 운영과 동일):
+> - **IRSA**(권장): Vault ServiceAccount ↔ IAM 롤 연동 → 파드가 static 키 없이 KMS 호출. EKS 네이티브.
+> - **`vault-aws-kms-creds`**: awskms seal이 표준 AWS 자격증명 체인(env)에서 읽는 k8s Secret
+>   (`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`). 온프렘에서 쓰던 방식 그대로. 마이그레이션
+>   런북(`docs/RUNBOOK/vault-seal-migration-awskms.md`) 참조.
 
-복원된 Vault는 sealed로 뜨고 GCP KMS로 unseal한다(스펙 § Vault 부트스트랩 체인). GCP KMS 호출 자격을 Vault 안에 둘 수 없으므로(잠겨서 못 꺼냄), **복원 프로세스가 GCP SA 키(kms decrypt 권한)를 EKS Secret으로 미리 주입**해 Vault config가 참조하게 한다. 이 GCP SA 키만은 Vault 밖의 안전한 곳(예: AWS Secrets Manager, 복원 롤로 접근)에 둔다.
+- [ ] **Step 2: recovery key break-glass 경로 확인 (문서)**
 
-> 이중 클라우드 지점: AWS 복원 롤(S3) + GCP SA(KMS)가 **둘 다** 있어야 복원이 완결된다. terraform apply와 동일한 dual-cloud 제약이 DR 런타임에도 존재.
+auto-unseal(AWS KMS)이 어떤 이유로 실패하면 Vault는 recovery key로 수동 unseal해야 한다. seal
+마이그레이션(#246/#247) 후 recovery key 백업은 **AWS Secrets Manager `cledyu/vault/bootstrap`**에
+있다(과거 GCP Secret Manager `cledyu-vault-bootstrap`에서 이관). DR 복원 시 이 경로가 최후 보루이며,
+복원 컴퓨트/운영자가 접근 가능해야 한다 — 이 역시 AWS 안에서 완결(GCP 불필요).
 
 - [ ] **Step 3: 검증 + Commit**
 
 Run: `terraform validate && terraform fmt -check`
 ```bash
-git add infra/terraform/aws/dr-orchestration.tf gitops/apps/dr-restore-gcpkms
-git commit -m "feat(dr): 복원 실행 롤(S3 read)·GCP KMS unseal 자격 공급"
+git add infra/terraform/aws/dr-orchestration.tf
+git commit -m "feat(dr): 복원 실행 롤(S3 read · Vault unseal AWS KMS decrypt)"
 ```
 
 ---
@@ -419,7 +437,7 @@ git commit -m "docs(dr): DR 오케스트레이션 드릴·실측 RTO 기록"
 **Spec coverage (스펙 § DR 오케스트레이션 / 재해 감지 / RTO / Failback 대비):**
 - 재해 감지 pull+push AND + 수동 게이트 → Task 1·2·3 ✓
 - 복구 순차 오케스트레이션(EKS→ArgoCD→복원→DNS) → Task 4 (Plan B 의존) ✓
-- 복원 자격증명 IAM 롤 + GCP KMS → Task 5 ✓
+- 복원 자격증명 IAM 롤 + Vault unseal AWS KMS → Task 5 ✓
 - 스플릿 브레인/failback → Task 6 ✓
 - RTO 실측 드릴 → Task 7 ✓
 
@@ -432,4 +450,7 @@ git commit -m "docs(dr): DR 오케스트레이션 드릴·실측 RTO 기록"
 - 승인 게이트 야간 무응답 대응(다채널 알림), 역복제 방식(논리 vs 스냅샷)
 - EKS 프로비저닝: 사전생성 빈 클러스터 vs 완전 IaC(비용/RTO 트레이드오프, 스펙 § 미결)
 
-**이중 클라우드:** 복원은 AWS 롤(S3) + GCP SA(KMS) 둘 다 필요. apply·드릴은 양쪽 자격증명 보유자가 수행.
+**단일 클라우드 (2026-07-04 갱신):** `aws` state의 S3 이전(#245) + Vault unseal의 AWS KMS 이전
+(#246/#247) 완료로, 이 Plan C의 apply·복원 런타임은 **AWS 자격증명만으로 완결**된다. 과거엔
+"복원은 AWS 롤(S3) + GCP SA(KMS) 둘 다 필요"였으나 이제 해당 없음 — GCP 관련 리소스·문서는
+전부 이 갱신으로 제거됨.
