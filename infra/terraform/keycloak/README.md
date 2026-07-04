@@ -40,8 +40,19 @@ cd infra/terraform/keycloak
 export AWS_PROFILE=cledyu AWS_REGION=ap-northeast-2                   # S3 backend(신규)
 export GOOGLE_OAUTH_ACCESS_TOKEN=$(gcloud auth print-access-token)   # 기존 GCS 읽기용
 terraform init -migrate-state   # GCS state -> S3 로 복사(both 접근 필요). 확인 프롬프트 yes
-terraform plan                  # no-change 여야 정상(리소스 신규 생성이 뜨면 중단)
+
+# 검증 plan — 이 realm 은 smtp_server.auth.password(=learn_smtp_password)·idp client_secret 을
+# 요구하므로 bare `terraform plan` 은 "Missing required argument" 로 죽는다. SM 에서 주입해 돌린다:
+SM_GOOGLE=$(gcloud secrets versions access latest --secret=cledyu-learn-idp-google-secret --project=cledyu-project)
+SM_SMTP=$(gcloud secrets versions access latest --secret=cledyu-learn-smtp-key --project=cledyu-project)
+TF_VAR_learn_smtp_password="$SM_SMTP" terraform plan \
+  -var "idp_client_secrets={google=\"$SM_GOOGLE\",kakao=\"unused\",naver=\"unused\"}"
 ```
+- **판정**: `add`·`destroy` 가 0 이면 이관 성공(state 가 기존 리소스를 인식). 리소스 **신규 생성/파괴**가
+  뜨면 이관 실패이니 중단.
+- kakao/naver `client_secret` 이 in-place 로 바뀌는 diff(예: `2 to change`)는 **무해**하다 — 위
+  plan 이 kakao/naver 에 `"unused"` placeholder 를 넣어 state 값과 달라 보이는 것뿐(staged IDP,
+  실연동 전). 이관 검증 목적이면 **apply 하지 않는다**.
 - state 버킷(S3 `cledyu-tf-state`)·락 테이블(DynamoDB `cledyu-tf-lock`)은 aws 스택과 공유하며
   out-of-band 부트스트랩 완료됨(`infra/terraform/aws/README.md` 의 생성 절차 참고).
 - 이관 후 GCS 사본(`gs://cledyu-tf-state`, prefix `keycloak`)은 롤백용으로 남겨둔다.
