@@ -16,7 +16,7 @@ Phase 7.5 이후는 Cledyu (KT Tech-Up Labs) 고유 확장입니다.
 | 7     | GitHub Actions CI                          | `.github/workflows/`, `ci/`           | 1-2   |
 | 7.5   | kube-prometheus-stack + cert-manager + metrics-server + Strimzi Kafka 최소본 | `gitops/apps/{monitoring,cert-manager,kafka}/` | 1-2 |
 | 8     | KEDA + VPA 오토스케일링 (Lab 세션 트리거)  | `gitops/apps/autoscaling/`            | 2     |
-| 9     | Velero 백업 + GKE Autopilot DR             | `gitops/apps/velero/`, `infra/gcp/`   | 2     |
+| 9     | Velero 백업 + AWS 기반 DR                  | `gitops/apps/velero/`, `infra/terraform/aws/` | 2 |
 | 10    | Terraform AWS → Crossplane 이관            | `infra/terraform/aws/`, `crossplane/` | 2     |
 | 11    | Istio Ambient Mesh                         | `gitops/apps/istio/`                  | 2     |
 | 12    | **KubeVirt + CDI** (온프렘 Lab VM 풀)       | `gitops/apps/kubevirt/`               | 1-2   |
@@ -34,6 +34,15 @@ Phase 7.5 이후는 Cledyu (KT Tech-Up Labs) 고유 확장입니다.
 KubeVirt(12)는 K8s 플랫폼이 서면 Phase 5~8과 병렬 진행 가능합니다.
 EC2 Orchestrator(13)는 Session API 백엔드(한정현) 코드와 함께 개발되며,
 Phase 10(Crossplane) 이후 Launch Template 관리를 Composition으로 이관합니다.
+
+### 클라우드 사용 범위
+
+- **AWS** — EC2 세션 오버플로우 + 이미지 베이커 + **DR 대상**. Terraform state도 AWS(S3)에 둔다(DR 자기완결성).
+- **GCP** — **AI·학습 데이터 전용**(Gemini API, lab-events 분석, RAG/ChromaDB 데이터)이 목표. 아래 GCP 컨트롤플레인 의존이 아직 남아 있고, 이관 완료 전까지는 **GCP 크레딧 만료/장애가 DR 복구를 막을 수 있으므로 크레딧 유지가 DR 선행조건**이다:
+  - `gcp` Terraform root state — 자기 GCP 리소스와 co-located라 **GCS 유지(항구적 예외)**.
+  - `keycloak` Terraform root state — GCS. **S3 이관 예정**(auth도 DR-크리티컬).
+  - Vault auto-unseal — GCP KMS(`cledyu-vault-keyring/vault-unseal-key`). **AWS KMS로 seal 마이그레이션 예정**. 그 전까지 Vault unseal은 GCP KMS 도달성에 의존.
+- **온프렘(KVM)** — 주 플랫폼. Velero로 백업하여 DR 시 AWS로 복구한다.
 
 ## 마일스톤 체크리스트
 

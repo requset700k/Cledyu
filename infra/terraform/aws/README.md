@@ -68,30 +68,43 @@ user-data 를 **대체**하므로(병합 아님), 베이스 도구는 AMI 에 �
 
 ## 상태(state) 관리
 
-원격 암호화 backend(GCS)를 쓴다 — `versions.tf` 의 `backend "gcs"`
-(bucket `cledyu-tf-state`, prefix `aws`). state 에 client secret·tailscale authkey 등
-민감값이 sensitive 로 들어가므로 로컬 평문 파일을 두지 않는다. `keycloak` 스택도 같은
-버킷(prefix `keycloak`)을 쓴다.
+원격 암호화 backend(AWS **S3**)를 쓴다 — `versions.tf` 의 `backend "s3"`
+(bucket `cledyu-tf-state`, key `aws/terraform.tfstate`, ap-northeast-2, DynamoDB 락).
+DR이 AWS 기반이라 복구에 필요한 state 를 복구 대상 클라우드(AWS 계정 `504284203153`)에
+자기완결적으로 둔다 — GCS 는 만료형 GCP 크레딧이라 복구-크리티컬 자산을 두지 않는다
+(GCP 는 AI·학습 데이터 전용). state 에 client secret·tailscale authkey 등 민감값이
+sensitive 로 들어가므로 버킷에 versioning·Block Public Access·SSE(AES256)를 적용한다.
 
-**부트스트랩 / 신규 운영자:**
+> 이전 이력: `aws` state 는 원래 GCS(`gs://cledyu-tf-state`, prefix `aws`)에 있었고
+> `terraform init -migrate-state` 로 S3 로 옮겼다(GCS 사본은 롤백용으로 남아 있음).
+> `keycloak`·`gcp` 스택은 아직 GCS 유지(`gcp` 는 자기 리소스와 co-located 라 의도적).
+
+**부트스트랩 (state 버킷·락 테이블은 out-of-band, 최초 1회, 생성 완료됨):**
 
 ```bash
-# 0) 버킷은 backend 구성 전에 이미 존재해야 한다(최초 1회, 생성 완료됨):
-#    gcloud storage buckets create gs://cledyu-tf-state --project=cledyu-project \
-#      --location=asia-northeast3 --uniform-bucket-level-access --public-access-prevention
-#    gcloud storage buckets update gs://cledyu-tf-state --versioning
+export AWS_PROFILE=cledyu AWS_REGION=ap-northeast-2   # 계정 504284203153
 
-# 1) GCS 접근(택1): ADC 또는 액세스 토큰
-gcloud auth application-default login        # 워크스테이션
-# 또는 비대화형/CI:
-export GOOGLE_OAUTH_ACCESS_TOKEN=$(gcloud auth print-access-token)
+# 0) S3 state 버킷 + 보호
+aws s3api create-bucket --bucket cledyu-tf-state --region ap-northeast-2 \
+  --create-bucket-configuration LocationConstraint=ap-northeast-2
+aws s3api put-bucket-versioning --bucket cledyu-tf-state \
+  --versioning-configuration Status=Enabled
+aws s3api put-public-access-block --bucket cledyu-tf-state --public-access-block-configuration \
+  BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true
+aws s3api put-bucket-encryption --bucket cledyu-tf-state --server-side-encryption-configuration \
+  '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"},"BucketKeyEnabled":true}]}'
 
-# 2) init (원격 backend 연결). 최초 로컬→원격 이전은 끝났으므로 신규 환경은 그냥 init.
+# 1) DynamoDB 상태 락 테이블
+aws dynamodb create-table --table-name cledyu-tf-lock \
+  --attribute-definitions AttributeName=LockID,AttributeType=S \
+  --key-schema AttributeName=LockID,KeyType=HASH --billing-mode PAY_PER_REQUEST
+
+# 2) 신규 운영자: AWS 크레덴셜만 있으면 init 된다(GCS 인증 불필요).
 terraform init
 ```
 
-> 로컬 backend 시절의 `terraform.tfstate` 는 GCS 로 `init -migrate-state` 후 제거됐다.
-> 신규 운영자는 위 토큰/ADC 없이 `terraform init` 하면 막힌다(GCS 인증 필요).
+> TF 를 1.10+ 로 올리면 `dynamodb_table` 대신 `use_lockfile = true`(S3 네이티브 락)로
+> 바꿔 락 테이블을 없앨 수 있다. 현재 툴체인이 1.5.7 이라 DynamoDB 를 유지한다.
 
 ## 비용 주의
 

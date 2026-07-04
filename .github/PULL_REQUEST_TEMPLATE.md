@@ -64,6 +64,6 @@ pre-commit run -a                    # 포맷·린트·시크릿 스캔 전체
 ### 비용 · DR
 - 월 비용 변화: **+$0 (변화 없음)** 또는 `+$XX (AWS/GCP/온프렘 내역)`.
 - [ ] 예산(AWS $710 / GCP $300 + Google AI Pro $30) 마진 내입니다.
-- [ ] DR 경로(Velero → GKE Autopilot)를 검토했고 RPO 1h / RTO 4h를 유지합니다.
+- [ ] DR 경로(Velero 백업 → AWS 기반 복구)를 검토했고 RPO 1h / RTO 4h를 유지합니다. (GCP는 AI·학습 데이터 용도 전용 — DR 대상 아님)
 
 </details>
