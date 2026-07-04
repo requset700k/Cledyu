@@ -51,7 +51,7 @@
   description: GitHub Actions / pre-commit / lint / release
 - name: "area:dr"
   color: "ff7619"
-  description: DR / Velero / GKE Autopilot / 복구
+  description: DR / Velero / AWS 기반 복구
 
 # ── 우선순위 (언제)
 - name: "priority:P0"
