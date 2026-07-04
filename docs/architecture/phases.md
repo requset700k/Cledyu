@@ -41,7 +41,7 @@ Phase 10(Crossplane) 이후 Launch Template 관리를 Composition으로 이관�
 - **GCP** — **AI·학습 데이터 전용**(Gemini API, lab-events 분석, RAG/ChromaDB 데이터)이 목표. 아래 GCP 컨트롤플레인 의존이 아직 남아 있고, 이관 완료 전까지는 **GCP 크레딧 만료/장애가 DR 복구를 막을 수 있으므로 크레딧 유지가 DR 선행조건**이다:
   - `gcp` Terraform root state — 자기 GCP 리소스와 co-located라 **GCS 유지(항구적 예외)**.
   - `keycloak` Terraform root state — **S3 이관 완료**(auth도 DR-크리티컬). 단 apply 시 민감값은 여전히 GCP Secret Manager 에서 주입.
-  - Vault auto-unseal — **AWS KMS(`alias/cledyu-vault-unseal`)로 seal 마이그레이션 완료**. Vault unseal 은 더 이상 GCP 에 의존하지 않는다. 잔여 GCP 종속: recovery key 백업이 GCP Secret Manager 에 있어 break-glass(generate-root)는 아직 GCP 도달성에 의존(AWS Secrets Manager 이관 예정).
+  - Vault auto-unseal — **AWS KMS(`alias/cledyu-vault-unseal`)로 seal 마이그레이션 완료**, GCP creds/시크릿 제거 완료. recovery key 백업도 **AWS Secrets Manager(`cledyu/vault/bootstrap`)로 이관 완료** → unseal·break-glass 모두 AWS 자기완결. 잔여 GCP 종속은 (a) 구 raft 스냅샷 복원용 GCP KMS 키(의도적 보류, 종료 시 정리) (b) recovery key GCP SM 원본(이중 백업)뿐.
 - **온프렘(KVM)** — 주 플랫폼. Velero로 백업하여 DR 시 AWS로 복구한다.
 
 ## 마일스톤 체크리스트
