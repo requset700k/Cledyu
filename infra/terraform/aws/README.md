@@ -208,7 +208,7 @@ No modules.
 | <a name="input_public_domain"></a> [public\_domain](#input\_public\_domain) | 공개 루트 도메인(Route53 hosted zone 으로 관리). 예 cledyu.com. NS 를 도메인 등록기관에 위임해야 한다. | `string` | `"cledyu.com"` | no |
 | <a name="input_public_ingress_allowed_cidrs"></a> [public\_ingress\_allowed\_cidrs](#input\_public\_ingress\_allowed\_cidrs) | ALB 443/80 인바운드 허용 CIDR. 기본은 공개(0.0.0.0/0) — 검증 단계에서 사무실 IP 로 좁힐 수 있다. | `list(string)` | <pre>[<br/>  "0.0.0.0/0"<br/>]</pre> | no |
 | <a name="input_public_keycloak_host"></a> [public\_keycloak\_host](#input\_public\_keycloak\_host) | Keycloak 공개 FQDN. 구글 OAuth redirect URI 의 호스트가 된다(.../realms/cledyu-learn/broker/google/endpoint). | `string` | `"auth.cledyu.com"` | no |
-| <a name="input_region"></a> [region](#input\_region) | EC2 오버플로우 리전. 온프렘과 가까운 서울 리전을 기본값으로 둔다. | `string` | `"ap-northeast-2"` | no |
+| <a name="input_region"></a> [region](#input\_region) | EC2 오버플로우 리전. 온프렘과 가까운 서울 리전을 기본값으로 둔다.<br/>이 스택은 ap-northeast-2 단일 리전 전제다(S3 state·백업 버킷·KMS·서브넷·pin 된 var.ami\_id 가<br/>모두 리전 종속). 다른 리전을 쓰려면 ami\_id 등 리전 종속 값을 함께 교체해야 하므로 validation<br/>으로 막아 둔다 — 의도적 멀티리전 시 이 validation 을 완화하고 리전별 값을 정비할 것. | `string` | `"ap-northeast-2"` | no |
 | <a name="input_root_volume_gb"></a> [root\_volume\_gb](#input\_root\_volume\_gb) | 세션 인스턴스 루트 볼륨 크기(GiB). | `number` | `20` | no |
 | <a name="input_subnet_id"></a> [subnet\_id](#input\_subnet\_id) | 세션 인스턴스 서브넷. 빈 값이면 선택된 VPC 의 서브넷 중 하나를 자동 선택한다. | `string` | `""` | no |
 | <a name="input_tailscale_auth_key"></a> [tailscale\_auth\_key](#input\_tailscale\_auth\_key) | 프록시 인스턴스가 tailnet 에 가입할 때 쓰는 일회용/재사용 authkey. TF\_VAR\_tailscale\_auth\_key 로 주입(state 평문 저장 회피 위해 tfvars 금지). | `string` | `""` | no |

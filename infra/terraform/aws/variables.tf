@@ -1,7 +1,17 @@
 variable "region" {
-  description = "EC2 오버플로우 리전. 온프렘과 가까운 서울 리전을 기본값으로 둔다."
+  description = <<-EOT
+    EC2 오버플로우 리전. 온프렘과 가까운 서울 리전을 기본값으로 둔다.
+    이 스택은 ap-northeast-2 단일 리전 전제다(S3 state·백업 버킷·KMS·서브넷·pin 된 var.ami_id 가
+    모두 리전 종속). 다른 리전을 쓰려면 ami_id 등 리전 종속 값을 함께 교체해야 하므로 validation
+    으로 막아 둔다 — 의도적 멀티리전 시 이 validation 을 완화하고 리전별 값을 정비할 것.
+  EOT
   type        = string
   default     = "ap-northeast-2"
+
+  validation {
+    condition     = var.region == "ap-northeast-2"
+    error_message = "이 스택은 ap-northeast-2 전용이다(pin 된 ami_id·리전 종속 리소스). 다른 리전은 ami_id 등 리전 값 정비 후 이 validation 을 완화해 사용."
+  }
 }
 
 variable "vpc_id" {
