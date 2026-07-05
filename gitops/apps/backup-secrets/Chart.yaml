@@ -1,0 +1,5 @@
+apiVersion: v2
+name: backup-secrets
+description: DR/백업 S3 자격증명을 대상 네임스페이스로 뿌리는 ExternalSecret 모음
+type: application
+version: 0.1.0

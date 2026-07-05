@@ -63,3 +63,14 @@ output "baker_instance_profile" {
   description = "metal 베이커 인스턴스 프로파일명."
   value       = aws_iam_instance_profile.baker_instance.name
 }
+
+# ── DR/백업 (backup.tf) ──────────────────────────────────────────────────
+output "backup_bucket" {
+  description = "DR 백업 S3 버킷명(Postgres/Vault 백업 대상; Longhorn은 별도 버킷)."
+  value       = aws_s3_bucket.dr_backups.bucket
+}
+
+output "backup_iam_users" {
+  description = "프리픽스별 백업 IAM 사용자명 맵(postgres/vault) — 각 사용자의 액세스 키를 발급해 Vault(cledyu/aws/backup-postgres, cledyu/aws/backup-vault)에 보관한다."
+  value       = { for k, u in aws_iam_user.backup : k => u.name }
+}

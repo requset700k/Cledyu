@@ -1,0 +1,12 @@
+# ESO가 S3 백업 자격증명(cledyu-backup-s3)을 뿌릴 네임스페이스별 매핑.
+# 프리픽스별로 분리한 IAM 사용자 키를 각 네임스페이스에만 주입한다(최소권한):
+#   postgres ns → Vault cledyu/aws/backup-postgres (postgres/ 만 접근)
+#   vault ns    → Vault cledyu/aws/backup-vault    (vault/ 만 접근)
+# 키 발급: apply 후 콘솔/CLI 로 각 사용자(cledyu-lab-backup-writer-<프리픽스>)의 액세스 키를 발급하고
+#   vault kv put cledyu/aws/backup-postgres access_key_id=<발급값> secret_access_key=<발급값>
+#   vault kv put cledyu/aws/backup-vault    access_key_id=<발급값> secret_access_key=<발급값>
+secrets:
+  - namespace: postgres
+    vaultKey: aws/backup-postgres
+  - namespace: vault
+    vaultKey: aws/backup-vault

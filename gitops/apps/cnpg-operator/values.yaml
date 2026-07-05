@@ -1,0 +1,8 @@
+# cloudnative-pg 오퍼레이터 values (ArgoCD multi-source로 upstream 차트에 주입).
+# cledyu Postgres를 Cluster CR로 이관해 WAL 연속 아카이빙·PITR을 S3(barman)로 얻는다.
+crds:
+  create: true
+
+monitoring:
+  # 기존 kube-prometheus-stack이 수집하도록 PodMonitor 노출.
+  podMonitorEnabled: true
