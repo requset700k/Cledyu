@@ -35,12 +35,15 @@ variable "instance_type" {
 
 variable "ami_id" {
   description = <<-EOT
-    세션 인스턴스 AMI. 빈 값이면 Canonical Ubuntu 22.04(amd64) 최신 AMI 를 자동 조회한다.
-    운영에서는 SSM Agent·tailscale·code-server 를 미리 구운 커스텀 AMI(packer) ID 를 넣는 것을 권장한다
-    (런타임 설치 시간 단축). README 의 'AMI 전략' 참고.
+    세션/프록시 인스턴스 AMI(ap-northeast-2). 빈 값이면 Canonical Ubuntu 22.04(amd64) '최신' AMI 를
+    자동 조회하는데(data.aws_ami.ubuntu, most_recent), 이 경우 신규 Ubuntu 릴리스가 나오면 apply
+    마다 AMI 가 바뀌어 **aws_instance.proxy 가 강제 교체**(destroy/create)되고 lab_session 런치
+    템플릿도 드리프트한다. 이를 막기 위해 현재 배포 AMI 로 pin 해 둔다(2026-07). 의도적으로 최신을
+    쓰려면 ""(빈 값)으로 되돌리거나, packer 로 구운 커스텀 AMI(SSM Agent·tailscale·code-server 프리베이크)
+    ID 로 교체한다. README 의 'AMI 전략' 참고.
   EOT
   type        = string
-  default     = ""
+  default     = "ami-0afe1fd15675c3f15"
 }
 
 variable "root_volume_gb" {
