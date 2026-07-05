@@ -9,6 +9,7 @@ metadata:
     # PSA enforce=baseline 이 그 hostPath 를 막아 롤아웃이 정지했다(파드 재생성 시 FailedCreate).
     # 형제 observability ns(monitoring)와 동일하게 enforce=privileged + audit/warn=restricted
     # 로 정합화해 hostPath 는 허용하되 그 외 위반은 계속 감사/경고한다.
+    # 트레이드오프(enforce 폭이 hostPath 보다 넓음)와 강화 방안은 후속 이슈 #254 에서 다룬다.
     pod-security.kubernetes.io/enforce: privileged
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted
