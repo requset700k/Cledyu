@@ -42,20 +42,19 @@ spec:
               mountPath: {{ .Values.storage.mountPath }}
             - name: tmp
               mountPath: /tmp
+          # chromadb 이미지에는 python 바이너리가 없어 exec probe(python -c ...)가 항상
+          # "executable file not found" 로 실패한다(readiness 영구 False -> Service 엔드포인트 이탈).
+          # 바이너리 의존이 없는 httpGet 으로 heartbeat 를 직접 조회한다.
           readinessProbe:
-            exec:
-              command:
-                - python
-                - -c
-                - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:{{ .Values.service.port }}/api/v2/heartbeat', timeout=2)"
+            httpGet:
+              path: /api/v2/heartbeat
+              port: {{ .Values.service.port }}
             initialDelaySeconds: 10
             periodSeconds: 10
           livenessProbe:
-            exec:
-              command:
-                - python
-                - -c
-                - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:{{ .Values.service.port }}/api/v2/heartbeat', timeout=2)"
+            httpGet:
+              path: /api/v2/heartbeat
+              port: {{ .Values.service.port }}
             initialDelaySeconds: 30
             periodSeconds: 30
             failureThreshold: 3
