@@ -85,6 +85,14 @@ cutover는 Vault `cledyu/db/api:dsn`의 호스트를 `postgres.postgres.svc` →
 **chart 0.23.0(=1.25.0)에 핀 고정**하고, 매니페스트 주석으로 "오퍼레이터 ≥1.26 상향 시
 barman-cloud 플러그인으로 이관 필요"를 명시한다.
 
+**retentionPolicy는 설정하지 않는다(코드 리뷰로 발견, 수정 반영됨)**: `backup-writer-postgres`
+IAM 정책은 `s3:DeleteObject`를 의도적으로 제외하고(무-delete 정책), 버킷 전체에 Object Lock
+GOVERNANCE 30일이 걸려 있으며 writer엔 `BypassGovernanceRetention`도 없다. 이 상태에서
+CNPG `retentionPolicy`를 켜면 barman-cloud-backup-delete가 만료 backup/WAL을 직접 지우려
+시도해 매번 AccessDenied로 실패한다. retention 관리는 `infra/terraform/aws/backup.tf`의
+S3 lifecycle에만 맡긴다 — `postgres/` 프리픽스에 current object 만료 35일(PITR 창 30d +
+Object Lock 해제일 경합 방지 여유 5일) 규칙을 추가했다.
+
 ### 4. 롤백 & 폐기 — 유예기간
 
 cutover 성공 후 구 StatefulSet을 **즉시 삭제하지 않고 `replicas: 0`으로만 정지**한다.
