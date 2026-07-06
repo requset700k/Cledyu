@@ -25,7 +25,7 @@ rules:
   # 함수들이 전부 403으로 실패해 세션 생성(실습 시작)이 막힌다.
   - apiGroups: [""]
     resources: ["namespaces"]
-    verbs: ["create", "get", "list", "delete"]
+    verbs: ["create", "get", "list","update", "delete"]
   # 세션 네임스페이스에 cloud-init Secret 생성
   - apiGroups: [""]
     resources: ["secrets"]
