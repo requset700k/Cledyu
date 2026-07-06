@@ -40,13 +40,28 @@ output "public_zone_name_servers" {
 }
 
 output "public_alb_dns_name" {
-  description = "공개 ALB 의 DNS 이름(auth.cledyu.com A ALIAS 타겟). 디버깅·검증용."
+  description = "공개 ALB 의 DNS 이름(app/api/auth.cledyu.com A ALIAS 타겟). 디버깅·검증용."
   value       = var.enable_public_ingress ? aws_lb.public[0].dns_name : ""
 }
 
 output "keycloak_proxy_instance_id" {
   description = "tailnet Keycloak 프록시 인스턴스 ID(tailnet 가입·로그 확인용)."
   value       = var.enable_public_ingress ? aws_instance.proxy[0].id : ""
+}
+
+output "public_app_record" {
+  description = "학습자 web 공개 FQDN(app.cledyu.com). 검증용."
+  value       = var.enable_public_ingress ? aws_route53_record.public["app"].fqdn : ""
+}
+
+output "public_api_record" {
+  description = "학습자 api 공개 FQDN(api.cledyu.com). OAuth 콜백 도달점. 검증용."
+  value       = var.enable_public_ingress ? aws_route53_record.public["api"].fqdn : ""
+}
+
+output "public_waf_web_acl_arn" {
+  description = "공개 ALB 에 연결된 WAF WebACL ARN(CloudWatch 메트릭·sampled requests 확인용)."
+  value       = var.enable_public_ingress ? aws_wafv2_web_acl.public[0].arn : ""
 }
 
 output "gha_baker_role_arn" {
