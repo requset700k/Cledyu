@@ -40,10 +40,13 @@ func (m *Manager) StartVMIWatcher(ctx context.Context) {
 		cache.Indexers{},
 	)
 
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	if _, err := informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(obj interface{}) { m.handleVMIEvent(ctx, obj) },
 		UpdateFunc: func(_, newObj interface{}) { m.handleVMIEvent(ctx, newObj) },
-	})
+	}); err != nil {
+		fmt.Printf("vmi watcher event handler 등록 실패: %v\n", err)
+		return
+	}
 
 	go informer.Run(ctx.Done())
 }
