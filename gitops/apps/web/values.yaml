@@ -11,7 +11,11 @@ service:
   port: 3000
 
 ingress:
-  host: app.cledyu.local
+  # .local = Tailscale 내부(비인증 라우팅 확인용), .com = 공개(ALB→프록시→Traefik).
+  # 인증 세션 config(cookieDomain 등)는 api values 에서 .cledyu.com 단일.
+  hosts:
+    - app.cledyu.local
+    - app.cledyu.com
   tlsSecret: web-tls
 
 env:

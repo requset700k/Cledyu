@@ -9,7 +9,11 @@ service:
   port: 8080
 
 ingress:
-  host: api.cledyu.local
+  # .com 은 OAuth 콜백(api.cledyu.com/api/v1/auth/callback) 도달점. 일반 데이터 호출은
+  # web 이 in-cluster 로 프록시하므로 .com 은 콜백 경로 위주로 쓰인다.
+  hosts:
+    - api.cledyu.local
+    - api.cledyu.com
   tlsSecret: api-tls
 
 # RED 메트릭(/metrics) Prometheus 스크랩. SLO 담당자가 도메인 SLI 를 위에 정의한다.
