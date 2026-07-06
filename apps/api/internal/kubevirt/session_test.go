@@ -316,9 +316,15 @@ func TestVMBootFailedRecordedOnce(t *testing.T) {
 	if got := testutil.ToFloat64(met.Collector().WithLabelValues(vmmetrics.ResultFailed, "kubevirt")); got != 1 {
 		t.Errorf("실패 메트릭 = %v, want 1", got)
 	}
+	if got := testutil.ToFloat64(met.LabStartCollector().WithLabelValues(vmmetrics.ResultFailed, vmmetrics.LabEnvOnprem, vmmetrics.LabReasonVMFailed)); got != 1 {
+		t.Errorf("lab start 실패 메트릭 = %v, want 1", got)
+	}
 
 	m.Get(context.Background(), "sess2")
 	if got := testutil.ToFloat64(met.Collector().WithLabelValues(vmmetrics.ResultFailed, "kubevirt")); got != 1 {
 		t.Errorf("중복 기록됨: 실패 메트릭 = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(met.LabStartCollector().WithLabelValues(vmmetrics.ResultFailed, vmmetrics.LabEnvOnprem, vmmetrics.LabReasonVMFailed)); got != 1 {
+		t.Errorf("중복 기록됨: lab start 실패 메트릭 = %v, want 1", got)
 	}
 }

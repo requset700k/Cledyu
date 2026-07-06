@@ -299,6 +299,15 @@ func (p *Provisioner) recordBootOnce(ctx context.Context, inst *ectypes.Instance
 		return
 	}
 	p.met.RecordBoot(result, session.ProviderEC2)
+	reason := vmmetrics.LabReasonReady
+	if result == vmmetrics.ResultFailed {
+		reason = vmmetrics.LabReasonTimeout
+	}
+	duration := -1.0
+	if started, err := time.Parse(time.RFC3339, tagValue(inst, tagStartedAt)); err == nil {
+		duration = time.Since(started).Seconds()
+	}
+	p.met.RecordLabStart(result, vmmetrics.LabEnvEC2, reason, duration)
 }
 
 // activeStateFilter는 종료된(terminated/shutting-down/stopping/stopped) 인스턴스를 제외하고

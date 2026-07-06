@@ -99,12 +99,14 @@ func (m *Manager) syncBootStatus(ctx context.Context, ns string, phase string) e
 		if ann["cledyu.io/ready-at"] != "" {
 			return nil // 이미 기록됨
 		}
-		nsObj.Annotations["cledyu.io/ready-at"] = time.Now().UTC().Format(time.RFC3339)
+		readyAt := time.Now().UTC()
+		nsObj.Annotations["cledyu.io/ready-at"] = readyAt.Format(time.RFC3339)
 		if _, err := m.core.CoreV1().Namespaces().Update(ctx, nsObj, metav1.UpdateOptions{}); err != nil {
 			return fmt.Errorf("update ready-at annotation: %w", err)
 		}
 		if !startedAt.IsZero() {
 			m.met.RecordBoot(vmmetrics.ResultSuccess, session.ProviderKubeVirt)
+			m.met.RecordLabStart(vmmetrics.ResultSuccess, vmmetrics.LabEnvOnprem, vmmetrics.LabReasonReady, readyAt.Sub(startedAt).Seconds())
 		}
 
 	case "Failed", "Succeeded", "TimedOut":
@@ -117,6 +119,15 @@ func (m *Manager) syncBootStatus(ctx context.Context, ns string, phase string) e
 			return fmt.Errorf("update boot-result-recorded annotation: %w", err)
 		}
 		m.met.RecordBoot(vmmetrics.ResultFailed, session.ProviderKubeVirt)
+		reason := vmmetrics.LabReasonVMFailed
+		if phase == "TimedOut" {
+			reason = vmmetrics.LabReasonTimeout
+		}
+		duration := -1.0
+		if !startedAt.IsZero() {
+			duration = time.Since(startedAt).Seconds()
+		}
+		m.met.RecordLabStart(vmmetrics.ResultFailed, vmmetrics.LabEnvOnprem, reason, duration)
 	}
 
 	return nil
