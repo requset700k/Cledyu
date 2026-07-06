@@ -25,6 +25,11 @@ func New(reg prometheus.Registerer) *Recorder {
 		[]string{"result", "env"},
 	)
 	reg.MustRegister(vmBootTotal)
+	for _, result := range []string{ResultSuccess, ResultFailed} {
+		for _, env := range []string{"kubevirt", "ec2"} {
+			vmBootTotal.WithLabelValues(result, env)
+		}
+	}
 	return &Recorder{vmBootTotal: vmBootTotal}
 }
 
