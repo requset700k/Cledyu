@@ -199,6 +199,46 @@ data "aws_iam_policy_document" "backup" {
       values   = ["${each.key}/*", each.key]
     }
   }
+
+  # HeadBucket(버킷 존재/접근 확인, 실제 CNPG barman-cloud-check-wal-archive가 WAL 아카이빙 전
+  # 매번 호출)은 IAM상 s3:ListBucket 권한을 요구하지만 요청 자체에 prefix 파라미터가 없어
+  # s3:prefix 조건 키가 요청 컨텍스트에 아예 실리지 않는다(2026-07-06 실측: 403 Forbidden으로
+  # 발견 — 위 ListOwnPrefix의 StringLike 조건이 항상 불일치해 거부됨). s3:prefix가 없는
+  # 요청(HeadBucket)만 별도로 허용한다.
+  statement {
+    sid       = "AllowHeadBucketCheck"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.dr_backups.arn]
+    condition {
+      test     = "Null"
+      variable = "s3:prefix"
+      values   = ["true"]
+    }
+  }
+
+  # ListObjectsV2는 prefix 파라미터를 생략해도 S3가 s3:prefix=""(빈 문자열, 키 존재)로 항상
+  # 채워 평가한다(2026-07-06 IAM 정책 시뮬레이터 실측: 빈 값·vault/ 모두 explicitDeny 확인).
+  # 따라서 prefix 없는 전체목록 시도는 이 Deny의 Null=false + StringNotLike 조건에 걸려 차단되고,
+  # 남의 프리픽스(vault/)를 명시한 목록도 동일하게 차단된다.
+  # 반면 HeadBucket은 prefix 개념이 없어 s3:prefix 키가 부재(Null=true)라 위 AllowHeadBucketCheck로만
+  # 통과하는데, HeadBucket은 객체 목록을 반환하지 않으므로 교차 프리픽스 정보 노출은 발생하지 않는다.
+  # 즉 실제 목록 데이터가 새는 경로(빈 prefix·남의 prefix)는 이 Deny로 모두 막힌다.
+  statement {
+    sid       = "DenyForeignPrefixListing"
+    effect    = "Deny"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.dr_backups.arn]
+    condition {
+      test     = "Null"
+      variable = "s3:prefix"
+      values   = ["false"]
+    }
+    condition {
+      test     = "StringNotLike"
+      variable = "s3:prefix"
+      values   = ["${each.key}/*", each.key]
+    }
+  }
   statement {
     sid       = "BucketLocation"
     actions   = ["s3:GetBucketLocation"]
