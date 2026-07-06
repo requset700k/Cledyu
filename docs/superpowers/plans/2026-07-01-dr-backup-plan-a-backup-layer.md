@@ -520,13 +520,15 @@ Expected: 두 값 **동일**. 다르면 cutover 중단, import 재점검(구 DB�
 
 - [ ] **Step 8: 첫 backup S3 도달 확인 (G3)**
 
+ScheduledBackup에 `immediate: true`가 있어 Step 6에서 Cluster와 함께 sync되는
+순간 첫 base backup이 자동으로 시작된다 — 수동 트리거 불필요, 완료만 확인
 Run:
 ```bash
-kubectl cnpg backup cledyu-pg -n postgres   # kubectl cnpg 플러그인으로 즉시 base backup 트리거
-kubectl -n postgres get backup -l cnpg.io/cluster=cledyu-pg   # phase=completed 확인
+kubectl -n postgres get backup -l cnpg.io/cluster=cledyu-pg   # phase=completed 대기(수 분 소요 가능)
 aws s3 ls s3://cledyu-lab-dr-backups/postgres/ --recursive | head
 ```
 Expected: `postgres/` 하위에 base backup + WAL 객체 존재. (구 DB 폐기 전 필수 확인 항목)
+> completed가 안 뜨면 `kubectl cnpg backup cledyu-pg -n postgres`로 수동 재시도.
 
 - [ ] **Step 9: api DSN cutover + unfreeze**
 
