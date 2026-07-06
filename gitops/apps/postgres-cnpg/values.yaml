@@ -10,3 +10,13 @@ storage:
   # 구 StatefulSet과 동일 스토리지 규격 유지(Longhorn 10Gi). 데이터는 barman S3가 durability 담당.
   className: longhorn
   size: 10Gi
+
+# 구 StatefulSet(gitops/apps/postgres)과 동일값 — 미지정 시 BestEffort QoS로 스케줄되어
+# 온프렘 제약 클러스터에서 OOM/noisy-neighbor 위험이 있다(과금 핵심 DB이므로 QoS 보장 필요).
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi

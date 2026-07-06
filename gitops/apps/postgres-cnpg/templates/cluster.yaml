@@ -17,6 +17,14 @@ spec:
   storage:
     size: {{ .Values.storage.size }}
     storageClass: {{ .Values.storage.className }}
+  # 구 StatefulSet과 동등한 QoS 보장(BestEffort 방지) — 코드 리뷰로 발견, 값은 values.yaml 참조.
+  resources:
+    requests:
+      cpu: {{ .Values.resources.requests.cpu }}
+      memory: {{ .Values.resources.requests.memory }}
+    limits:
+      cpu: {{ .Values.resources.limits.cpu }}
+      memory: {{ .Values.resources.limits.memory }}
   bootstrap:
     initdb:
       database: cledyu
