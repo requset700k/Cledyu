@@ -204,8 +204,7 @@ data "aws_iam_policy_document" "backup" {
   # 매번 호출)은 IAM상 s3:ListBucket 권한을 요구하지만 요청 자체에 prefix 파라미터가 없어
   # s3:prefix 조건 키가 요청 컨텍스트에 아예 실리지 않는다(2026-07-06 실측: 403 Forbidden으로
   # 발견 — 위 ListOwnPrefix의 StringLike 조건이 항상 불일치해 거부됨). s3:prefix가 없는
-  # 요청(HeadBucket)만 별도로 허용한다 — 실제 목록 조회(ListObjectsV2)는 prefix 파라미터가
-  # 항상 실려(빈 값이어도) 이 Null 조건에 안 걸리므로, 다른 프리픽스 열람 차단은 그대로 유지된다.
+  # 요청(HeadBucket)만 별도로 허용한다.
   statement {
     sid       = "AllowHeadBucketCheck"
     actions   = ["s3:ListBucket"]
@@ -214,6 +213,27 @@ data "aws_iam_policy_document" "backup" {
       test     = "Null"
       variable = "s3:prefix"
       values   = ["true"]
+    }
+  }
+
+  # 위 AllowHeadBucketCheck는 "prefix 키가 아예 없는 요청"만 허용하려는 의도였으나,
+  # prefix 파라미터 없이 호출한 진짜 ListObjectsV2가 s3:prefix=""(키는 존재, 값만 빈 문자열)로 평가될 가능성을 배제할 수 없다
+  # prefix 키가 실제로 존재하는데(빈 값 포함) 내 프리픽스가 아니면 명시적으로 차단
+  # 명시적 Deny는 다른 모든 Allow보다 항상 우선하므로, 위 조건의 실제 동작과 무관하게 교차 프리픽스 열람이 완전히 막힌다.
+  statement {
+    sid       = "DenyForeignPrefixListing"
+    effect    = "Deny"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.dr_backups.arn]
+    condition {
+      test     = "Null"
+      variable = "s3:prefix"
+      values   = ["false"]
+    }
+    condition {
+      test     = "StringNotLike"
+      variable = "s3:prefix"
+      values   = ["${each.key}/*", each.key]
     }
   }
   statement {
