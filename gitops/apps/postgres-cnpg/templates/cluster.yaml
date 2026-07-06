@@ -55,4 +55,8 @@ spec:
           key: ACCESS_SECRET_KEY
       wal:
         compression: gzip
-    retentionPolicy: "30d"
+    # retentionPolicy 의도적으로 미설정. 설정 시 CNPG가 barman-cloud-backup-delete로
+    # 만료 backup/WAL을 직접 지우려 하는데, backup-writer-postgres IAM 정책엔 s3:DeleteObject가
+    # 없고(무-delete 정책, infra/terraform/aws/backup.tf) 버킷엔 Object Lock GOVERNANCE 30일까지
+    # 걸려 있어(BypassGovernanceRetention도 없음) 매 retention maintenance가 AccessDenied로
+    # 실패한다. 삭제는 전적으로 S3 lifecycle(backup.tf의 postgres/ 프리픽스 규칙)이 담당한다.
