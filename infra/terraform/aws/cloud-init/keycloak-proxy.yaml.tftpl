@@ -23,9 +23,11 @@ write_files:
     content: |
       # ALB→프록시 hop 은 평문 :80. 공개 TLS 는 ALB(ACM)가 종단한다.
       # 공개 Host(app|api|auth.cledyu.com)를 그대로 보존해 tailnet 너머 Traefik LB
-      # (${upstream_url})로 전달한다. ALB 는 원본 Host 를 타겟까지 넘기고, Caddy
-      # reverse_proxy 는 기본적으로 클라이언트 Host 를 업스트림에 전달하므로 Host 를
-      # 특정 호스트로 고정하지 않는다(고정하면 Traefik 이 한 ingress 로만 라우팅됨).
+      # (${upstream_url})로 전달한다. ALB 는 원본 Host 를 타겟까지 넘긴다. 다만 Caddy 는
+      # HTTPS upstream(v2.11+)에서 Host 를 upstream 주소로 자동 설정하므로, 반드시
+      # header_up Host {http.request.host} 로 원본 공개 Host 를 명시 전달해야 Traefik 이
+      # 호스트 rule 로 라우팅한다(미명시 시 Host=10.10.0.101 → ingress 미매칭, 그런데
+      # /healthz 는 Caddy 가 직접 200 이라 ALB 는 healthy 로 보이는 silent 실패).
       :80 {
         # ALB 헬스체크 전용 — 프록시 생존만 판정(Traefik/업스트림 상태와 분리).
         handle /healthz {
@@ -34,6 +36,8 @@ write_files:
 
         handle {
           reverse_proxy ${upstream_url} {
+            header_up Host {http.request.host}
+            header_up X-Forwarded-Host {http.request.host}
             header_up X-Forwarded-Proto https
 %{ if upstream_tls ~}
             # Traefik(내부 CA) HTTPS upstream 전용 — tailnet(WireGuard) 암호화 hop 이라

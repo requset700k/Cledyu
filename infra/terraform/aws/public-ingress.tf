@@ -236,6 +236,11 @@ resource "aws_instance" "proxy" {
     upstream_tls = startswith(var.keycloak_upstream_url, "https://")
   }))
 
+  # user_data(cloud-init)는 최초 launch 때만 실행되고, aws_instance 는 user_data 변경 시
+  # 기본적으로 stop/start 만 해 기존 인스턴스에 새 Caddyfile/헬스체크가 반영되지 않는다.
+  # 강제 교체로 cloud-init 을 새로 돌려 변경분을 실제 적용한다(그렇지 않으면 타깃그룹 unhealthy).
+  user_data_replace_on_change = true
+
   tags = { Name = "${var.name_prefix}-kc-proxy" }
 }
 

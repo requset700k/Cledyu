@@ -86,8 +86,14 @@ resource "aws_wafv2_web_acl" "public" {
         field_to_match {
           uri_path {}
         }
+        # URL_DECODE 를 먼저 적용해 인코딩 회피(예: /%6detrics)를 막는다 — Go/Gin 은 디코드된
+        # 경로로 라우팅하므로 raw 검사만 하면 우회된다. 그 다음 LOWERCASE 로 대소문자 회피 차단.
         text_transformation {
           priority = 0
+          type     = "URL_DECODE"
+        }
+        text_transformation {
+          priority = 1
           type     = "LOWERCASE"
         }
       }
