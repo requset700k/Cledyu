@@ -19,6 +19,13 @@
 
 locals {
   pub = var.enable_public_ingress ? 1 : 0
+
+  # 공개 노출 3-host. 전부 같은 ALB(alias)로 보내고 호스트 분기는 Traefik이 담당한다.
+  public_hosts = var.enable_public_ingress ? {
+    auth = var.public_keycloak_host
+    app  = var.public_app_host
+    api  = var.public_api_host
+  } : {}
 }
 
 # ── Route53 공개 hosted zone (기존 것 참조) ───────────────────────────────
@@ -32,9 +39,10 @@ data "aws_route53_zone" "public" {
 
 # ── ACM 인증서(auth.cledyu.com, DNS 검증) ──────────────────────────────────
 resource "aws_acm_certificate" "auth" {
-  count             = local.pub
-  domain_name       = var.public_keycloak_host
-  validation_method = "DNS"
+  count                     = local.pub
+  domain_name               = "*.${var.public_domain}"
+  subject_alternative_names = [var.public_domain]
+  validation_method         = "DNS"
 
   lifecycle {
     create_before_destroy = true
@@ -43,7 +51,8 @@ resource "aws_acm_certificate" "auth" {
 
 resource "aws_route53_record" "acm_validation" {
   for_each = var.enable_public_ingress ? {
-    for dvo in aws_acm_certificate.auth[0].domain_validation_options : dvo.domain_name => {
+    for dvo in aws_acm_certificate.auth[0].domain_validation_options :
+    dvo.resource_record_name => {
       name   = dvo.resource_record_name
       type   = dvo.resource_record_type
       record = dvo.resource_record_value
@@ -229,11 +238,12 @@ resource "aws_lb_target_group_attachment" "proxy" {
   port             = 80
 }
 
-# ── Route53 A(ALIAS) → ALB ────────────────────────────────────────────────
-resource "aws_route53_record" "auth" {
-  count   = local.pub
+# ── Route53 A(ALIAS) → ALB (auth/app/api 3-host) ──────────────────────────
+resource "aws_route53_record" "public" {
+  for_each = local.public_hosts
+
   zone_id = data.aws_route53_zone.public[0].zone_id
-  name    = var.public_keycloak_host
+  name    = each.value
   type    = "A"
 
   alias {
@@ -241,4 +251,10 @@ resource "aws_route53_record" "auth" {
     zone_id                = aws_lb.public[0].zone_id
     evaluate_target_health = true
   }
+}
+
+# 기존 단일 auth 레코드를 파괴/재생성 없이 map 키 auth 로 이관.
+moved {
+  from = aws_route53_record.auth[0]
+  to   = aws_route53_record.public["auth"]
 }
