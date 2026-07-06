@@ -97,8 +97,11 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "dr_backups" {
 
 # 수명주기 — writer 정책에 DeleteObject 가 없으므로(무-delete) 보존 만료 정리는 전적으로 이 lifecycle
 # 이 담당한다. versioning 이 켜져 있어 만료는 delete marker + non-current 정리 조합으로 처리한다.
-#  postgres/ : current(base/WAL) 만료 규칙은 PITR 창 확정과 함께 Task 4 에서 추가한다. 여기선 우선
-#              non-current 잔재만 정리한다(backstop). barman 은 삭제 권한이 없어 retention 을 관리하지 않는다.
+#  postgres/ : CNPG PITR 창 30d(T4 설계, cluster.yaml)에 맞춰 current(base/WAL) 만료를 35일로 둔다.
+#              barman은 삭제 권한이 없어 retentionPolicy를 설정하지 않는다(cluster.yaml 주석 참조) —
+#              retention 관리는 전적으로 여기 lifecycle이 담당한다. 30일이 아니라 35일인 이유는
+#              Object Lock 기본보존(30일)과 정확히 같은 날짜로 맞추면 락 해제와 lifecycle 만료
+#              평가가 같은 날 경합할 수 있어서다(vault 규칙과 같은 여유 두기 원칙).
 #  vault/    : 6시간마다 고유 키 .snap 이 쌓이며 삭제 주체가 없다 → 현재 버전까지 만료시킨다.
 #              non-current 정리는 Object Lock(30일)에 막혀 그 전엔 삭제 불가하므로 30일로 맞춘다
 #              (7일로 두면 락에 걸려 실질 30일이 되어 의도와 실제가 어긋난다).
@@ -107,10 +110,13 @@ resource "aws_s3_bucket_lifecycle_configuration" "dr_backups" {
   bucket = aws_s3_bucket.dr_backups.id
 
   rule {
-    id     = "backstop-noncurrent-postgres"
+    id     = "expire-postgres-backups"
     status = "Enabled"
     filter {
       prefix = "postgres/"
+    }
+    expiration {
+      days = 35
     }
     noncurrent_version_expiration {
       noncurrent_days = 30
