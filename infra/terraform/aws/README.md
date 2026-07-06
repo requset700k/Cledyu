@@ -195,7 +195,7 @@ No modules.
 
 | Name | Description | Type | Default | Required |
 | ---- | ----------- | ---- | ------- | :------: |
-| <a name="input_ami_id"></a> [ami\_id](#input\_ami\_id) | 세션 인스턴스 AMI. 빈 값이면 Canonical Ubuntu 22.04(amd64) 최신 AMI 를 자동 조회한다.<br/>운영에서는 SSM Agent·tailscale·code-server 를 미리 구운 커스텀 AMI(packer) ID 를 넣는 것을 권장한다<br/>(런타임 설치 시간 단축). README 의 'AMI 전략' 참고. | `string` | `""` | no |
+| <a name="input_ami_id"></a> [ami\_id](#input\_ami\_id) | 세션/프록시 인스턴스 AMI(ap-northeast-2). 빈 값이면 Canonical Ubuntu 22.04(amd64) '최신' AMI 를<br/>자동 조회하는데(data.aws\_ami.ubuntu, most\_recent), 이 경우 신규 Ubuntu 릴리스가 나오면 apply<br/>마다 AMI 가 바뀌어 **aws\_instance.proxy 가 강제 교체**(destroy/create)되고 lab\_session 런치<br/>템플릿도 드리프트한다. 이를 막기 위해 현재 배포 AMI 로 pin 해 둔다(2026-07). 의도적으로 최신을<br/>쓰려면 ""(빈 값)으로 되돌리거나, packer 로 구운 커스텀 AMI(SSM Agent·tailscale·code-server 프리베이크)<br/>ID 로 교체한다. README 의 'AMI 전략' 참고. | `string` | `"ami-0afe1fd15675c3f15"` | no |
 | <a name="input_assign_public_ip"></a> [assign\_public\_ip](#input\_assign\_public\_ip) | 세션 인스턴스에 퍼블릭 IP 를 할당할지. Launch Template 이 network\_interfaces 를 명시하면<br/>subnet 의 MapPublicIpOnLaunch 가 무시되어 기본 미할당이 되므로, default VPC(IGW) 환경에서는<br/>true 여야 인스턴스가 인터넷(tailscale 가입·SSM·패키지 설치)에 도달한다.<br/>private subnet + NAT 구성이면 false 로 둔다. | `bool` | `true` | no |
 | <a name="input_budget_limit_usd"></a> [budget\_limit\_usd](#input\_budget\_limit\_usd) | EC2 오버플로우 월 예산(USD). 0이면 예산 알람을 만들지 않는다. | `number` | `0` | no |
 | <a name="input_budget_notification_emails"></a> [budget\_notification\_emails](#input\_budget\_notification\_emails) | 예산 임계 도달 시 알림 받을 이메일 목록(budget\_limit\_usd>0 일 때 사용). | `list(string)` | `[]` | no |
@@ -208,7 +208,7 @@ No modules.
 | <a name="input_public_domain"></a> [public\_domain](#input\_public\_domain) | 공개 루트 도메인(Route53 hosted zone 으로 관리). 예 cledyu.com. NS 를 도메인 등록기관에 위임해야 한다. | `string` | `"cledyu.com"` | no |
 | <a name="input_public_ingress_allowed_cidrs"></a> [public\_ingress\_allowed\_cidrs](#input\_public\_ingress\_allowed\_cidrs) | ALB 443/80 인바운드 허용 CIDR. 기본은 공개(0.0.0.0/0) — 검증 단계에서 사무실 IP 로 좁힐 수 있다. | `list(string)` | <pre>[<br/>  "0.0.0.0/0"<br/>]</pre> | no |
 | <a name="input_public_keycloak_host"></a> [public\_keycloak\_host](#input\_public\_keycloak\_host) | Keycloak 공개 FQDN. 구글 OAuth redirect URI 의 호스트가 된다(.../realms/cledyu-learn/broker/google/endpoint). | `string` | `"auth.cledyu.com"` | no |
-| <a name="input_region"></a> [region](#input\_region) | EC2 오버플로우 리전. 온프렘과 가까운 서울 리전을 기본값으로 둔다. | `string` | `"ap-northeast-2"` | no |
+| <a name="input_region"></a> [region](#input\_region) | EC2 오버플로우 리전. 온프렘과 가까운 서울 리전을 기본값으로 둔다.<br/>이 스택은 ap-northeast-2 단일 리전 전제다(S3 state·백업 버킷·KMS·서브넷·pin 된 var.ami\_id 가<br/>모두 리전 종속). 다른 리전을 쓰려면 ami\_id 등 리전 종속 값을 함께 교체해야 하므로 validation<br/>으로 막아 둔다 — 의도적 멀티리전 시 이 validation 을 완화하고 리전별 값을 정비할 것. | `string` | `"ap-northeast-2"` | no |
 | <a name="input_root_volume_gb"></a> [root\_volume\_gb](#input\_root\_volume\_gb) | 세션 인스턴스 루트 볼륨 크기(GiB). | `number` | `20` | no |
 | <a name="input_subnet_id"></a> [subnet\_id](#input\_subnet\_id) | 세션 인스턴스 서브넷. 빈 값이면 선택된 VPC 의 서브넷 중 하나를 자동 선택한다. | `string` | `""` | no |
 | <a name="input_tailscale_auth_key"></a> [tailscale\_auth\_key](#input\_tailscale\_auth\_key) | 프록시 인스턴스가 tailnet 에 가입할 때 쓰는 일회용/재사용 authkey. TF\_VAR\_tailscale\_auth\_key 로 주입(state 평문 저장 회피 위해 tfvars 금지). | `string` | `""` | no |
