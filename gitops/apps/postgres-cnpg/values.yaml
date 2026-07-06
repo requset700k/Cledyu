@@ -1,0 +1,12 @@
+# cledyu Postgres → CNPG 이관 차트 values.
+# 백업 대상 = 과금 데이터(수료증·진도·리더보드). RPO 5~15분(WAL 연속 아카이빙 + 일 base backup).
+# 소비자는 api 하나(Vault cledyu/db/api:dsn → ESO Secret cledyu-api-db → CLEDYU_DB_DSN).
+
+# 단일 인스턴스 — DR 목적은 백업이지 HA가 아니며 현 규모·예산에서 다중 인스턴스는 과잉.
+# HA 필요 시 2로 올린다(T4 범위 밖).
+instances: 1
+
+storage:
+  # 구 StatefulSet과 동일 스토리지 규격 유지(Longhorn 10Gi). 데이터는 barman S3가 durability 담당.
+  className: longhorn
+  size: 10Gi

@@ -1,0 +1,5 @@
+apiVersion: v2
+name: postgres-cnpg
+description: cledyu Postgres를 CloudNativePG Cluster로 이관 + S3(barman) WAL 연속 아카이빙·PITR
+type: application
+version: 0.1.0

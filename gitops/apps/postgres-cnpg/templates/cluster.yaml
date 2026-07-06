@@ -1,0 +1,58 @@
+## CNPG Cluster — 구 postgres StatefulSet을 논리 import(microservice)로 이관하고,
+## barman으로 S3(postgres/ 프리픽스)에 WAL 연속 아카이빙 + base backup을 남긴다.
+##
+## 버전 주의(2026-07-06 실측): 배포 오퍼레이터 = cnpg chart 0.23.0 = 1.25.0.
+## in-tree spec.backup.barmanObjectStore는 1.26부터 deprecated(barman-cloud 플러그인이 후속)이나
+## 1.25.0에서는 기본·정상 동작. 오퍼레이터를 chart 0.23.0(=1.25.0)에 핀 고정 유지.
+## ≥1.26 상향 시 barman-cloud 플러그인으로 이관 필요.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cledyu-pg
+  namespace: {{ .Release.Namespace }}
+spec:
+  instances: {{ .Values.instances }}
+  # 구 DB(postgres:16-alpine)와 동일 major 16 — 논리 import 안전.
+  imageName: "ghcr.io/cloudnative-pg/postgresql:16.4"
+  storage:
+    size: {{ .Values.storage.size }}
+    storageClass: {{ .Values.storage.className }}
+  bootstrap:
+    initdb:
+      database: cledyu
+      owner: cledyu
+      # 신 클러스터 app 유저 자격증명(basic-auth) — scheduledbackup.yaml의 ESO가 생성.
+      secret:
+        name: postgres-credentials-cnpg
+      # 구 DB를 논리 복제(microservice = 단일 DB import). write-freeze 상태에서 실행해야 무손실.
+      import:
+        type: microservice
+        databases:
+          - cledyu
+        source:
+          externalCluster: old-postgres
+  externalClusters:
+    - name: old-postgres
+      connectionParameters:
+        host: postgres.postgres.svc
+        user: cledyu
+        dbname: cledyu
+      # 구 DB는 TLS 미설정이라 libpq 기본(prefer)이 plaintext로 폴백. import 소스 비번은 기존 Secret 재사용.
+      password:
+        name: postgres-credentials
+        key: password
+  backup:
+    barmanObjectStore:
+      destinationPath: "s3://cledyu-lab-dr-backups/postgres"
+      endpointURL: "https://s3.ap-northeast-2.amazonaws.com"
+      # Task 2가 postgres ns에 뿌린 Secret(프리픽스 postgres/ 한정 IAM 키).
+      s3Credentials:
+        accessKeyId:
+          name: cledyu-backup-s3
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: cledyu-backup-s3
+          key: ACCESS_SECRET_KEY
+      wal:
+        compression: gzip
+    retentionPolicy: "30d"
