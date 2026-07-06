@@ -46,9 +46,9 @@ keycloak:
   url: "https://auth.cledyu.com"
   realm: "cledyu-learn"
   clientId: "web"
-  redirectUri: "https://api.cledyu.local/api/v1/auth/callback"
-  cookieDomain: ".cledyu.local"
-  frontendUrl: "https://app.cledyu.local"
+  redirectUri: "https://api.cledyu.com/api/v1/auth/callback"
+  cookieDomain: ".cledyu.com"
+  frontendUrl: "https://app.cledyu.com"
   clientSecret:
     secretName: "cledyu-api-oidc"
     secretKey: "client_secret"
