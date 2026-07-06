@@ -216,10 +216,13 @@ data "aws_iam_policy_document" "backup" {
     }
   }
 
-  # 위 AllowHeadBucketCheck는 "prefix 키가 아예 없는 요청"만 허용하려는 의도였으나,
-  # prefix 파라미터 없이 호출한 진짜 ListObjectsV2가 s3:prefix=""(키는 존재, 값만 빈 문자열)로 평가될 가능성을 배제할 수 없다
-  # prefix 키가 실제로 존재하는데(빈 값 포함) 내 프리픽스가 아니면 명시적으로 차단
-  # 명시적 Deny는 다른 모든 Allow보다 항상 우선하므로, 위 조건의 실제 동작과 무관하게 교차 프리픽스 열람이 완전히 막힌다.
+  # ListObjectsV2는 prefix 파라미터를 생략해도 S3가 s3:prefix=""(빈 문자열, 키 존재)로 항상
+  # 채워 평가한다(2026-07-06 IAM 정책 시뮬레이터 실측: 빈 값·vault/ 모두 explicitDeny 확인).
+  # 따라서 prefix 없는 전체목록 시도는 이 Deny의 Null=false + StringNotLike 조건에 걸려 차단되고,
+  # 남의 프리픽스(vault/)를 명시한 목록도 동일하게 차단된다.
+  # 반면 HeadBucket은 prefix 개념이 없어 s3:prefix 키가 부재(Null=true)라 위 AllowHeadBucketCheck로만
+  # 통과하는데, HeadBucket은 객체 목록을 반환하지 않으므로 교차 프리픽스 정보 노출은 발생하지 않는다.
+  # 즉 실제 목록 데이터가 새는 경로(빈 prefix·남의 prefix)는 이 Deny로 모두 막힌다.
   statement {
     sid       = "DenyForeignPrefixListing"
     effect    = "Deny"
