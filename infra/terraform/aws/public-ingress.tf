@@ -132,10 +132,13 @@ resource "aws_lb_target_group" "keycloak_proxy" {
   target_type = "instance"
 
   health_check {
-    path     = "/realms/cledyu-learn"
-    port     = "traffic-port"
-    protocol = "HTTP"
-    matcher  = "200-399"
+    path                = "/healthz"
+    port                = "traffic-port"
+    protocol            = "HTTP"
+    matcher             = "200"
+    interval            = 30
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
   }
 
   tags = { Name = "${var.name_prefix}-kc-proxy" }
@@ -221,10 +224,8 @@ resource "aws_instance" "proxy" {
   user_data = base64encode(templatefile("${path.module}/cloud-init/keycloak-proxy.yaml.tftpl", {
     tailscale_auth_key = var.tailscale_auth_key
     upstream_url       = var.keycloak_upstream_url
-    public_host        = var.public_keycloak_host
     hostname           = "${var.name_prefix}-kc-proxy"
-    # tls_* 옵션은 upstream 스킴과 무관하게 Caddy 의 backend TLS 를 켜므로, https
-    # upstream 일 때만 transport 블록을 렌더한다(http upstream 평문 502 방지).
+    # tls transport 블록은 https upstream 일 때만 렌더(http upstream 평문 502 방지).
     upstream_tls = startswith(var.keycloak_upstream_url, "https://")
   }))
 

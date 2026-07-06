@@ -1,10 +1,11 @@
 #cloud-config
-# Cledyu Keycloak tailnet 리버스프록시 cloud-init.
+# Cledyu 리버스프록시 cloud-init.
 #
-# 역할: ALB(443, ACM TLS 종단)에서 들어온 평문 HTTP 를 받아 tailnet 너머의 Keycloak
-# (upstream_url)으로 포워딩한다. Host 를 공개 FQDN(public_host)으로 보존하고
-# X-Forwarded-Proto=https 를 세팅해, Keycloak(proxy.headers=xforwarded, strict=false)이
-# 공개 도메인 기준으로 issuer·broker·콜백 URL 을 생성하게 한다.
+# 역할: ALB(443, ACM TLS 종단)에서 들어온 평문 HTTP 를 받아 tailnet 너머의 Traefik LB
+# (upstream_url)으로 포워딩한다. 공개 Host(app|api|auth.cledyu.com)를 그대로 보존해
+# 넘기고 X-Forwarded-Proto=https 를 세팅한다 — Traefik 이 Host 기준으로 ingress 를
+# 라우팅하고, Keycloak(proxy.headers=xforwarded, strict=false)은 공개 도메인 기준으로
+# issuer·broker·콜백 URL 을 생성한다.
 #
 # 주의: tailscale authkey 는 user-data(IMDSv2)로 주입된다 — 기존 세션 인스턴스 패턴과 동일.
 # 운영에서는 만료 짧은 ephemeral/재사용 키 권장.
@@ -21,24 +22,29 @@ write_files:
     permissions: "0644"
     content: |
       # ALB→프록시 hop 은 평문 :80. 공개 TLS 는 ALB(ACM)가 종단한다.
-      # upstream 은 tailnet 너머 Traefik LB(예 https://10.10.0.101). Host 를
-      # public_host 로 보내면 Traefik 이 해당 ingress(keycloak)로 라우팅하고,
-      # Keycloak 동적 hostname 이 X-Forwarded-Host 로 공개 URL 을 만든다.
+      # 공개 Host(app|api|auth.cledyu.com)를 그대로 보존해 tailnet 너머 Traefik LB
+      # (${upstream_url})로 전달한다. ALB 는 원본 Host 를 타겟까지 넘기고, Caddy
+      # reverse_proxy 는 기본적으로 클라이언트 Host 를 업스트림에 전달하므로 Host 를
+      # 특정 호스트로 고정하지 않는다(고정하면 Traefik 이 한 ingress 로만 라우팅됨).
       :80 {
-        reverse_proxy ${upstream_url} {
-          header_up Host ${public_host}
-          header_up X-Forwarded-Host ${public_host}
-          header_up X-Forwarded-Proto https
-%{ if upstream_tls ~}
-          # Traefik(내부 CA) HTTPS upstream 전용 — tailnet(WireGuard) 암호화 hop 이라
-          # 인증서 검증은 생략한다. tls_* 옵션은 upstream 스킴과 무관하게 TLS 를 켜므로
-          # http upstream 일 때는 이 블록을 렌더하지 않는다(평문 upstream 502 방지).
-          transport http {
-            tls_insecure_skip_verify
-          }
-%{ endif ~}
+        # ALB 헬스체크 전용 — 프록시 생존만 판정(Traefik/업스트림 상태와 분리).
+        handle /healthz {
+          respond "ok" 200
         }
-        # ALB 헬스체크(/realms/cledyu-learn)는 위 reverse_proxy 로 그대로 흘러간다.
+
+        handle {
+          reverse_proxy ${upstream_url} {
+            header_up X-Forwarded-Proto https
+%{ if upstream_tls ~}
+            # Traefik(내부 CA) HTTPS upstream 전용 — tailnet(WireGuard) 암호화 hop 이라
+            # 인증서 검증은 생략한다. tls_* 옵션은 upstream 스킴과 무관하게 TLS 를 켜므로
+            # http upstream 일 때는 이 블록을 렌더하지 않는다(평문 upstream 502 방지).
+            transport http {
+              tls_insecure_skip_verify
+            }
+%{ endif ~}
+          }
+        }
       }
 
 runcmd:
