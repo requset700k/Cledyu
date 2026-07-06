@@ -79,6 +79,14 @@ func (m *Manager) syncBootStatus(ctx context.Context, ns string, phase string) e
 		return fmt.Errorf("get namespace: %w", err)
 	}
 
+	// Cledyu가 관리하는 세션 namespace가 아니면 무시.
+	// watcher는 전체 namespace의 session-vm이라는 이름을 가진 VMI를 다 받기 때문에,
+	// 우연히 같은 이름의 VMI가 다른(비세션) namespace에 떠도 그 namespace에
+	// annotation을 쓰거나 실패 메트릭을 올리지 않도록 라벨로 한 번 더 확인
+	if nsObj.Labels[labelManagedBy] != managedByValue {
+		return nil
+	}
+
 	ann := nsObj.Annotations
 	if ann == nil {
 		ann = map[string]string{}
