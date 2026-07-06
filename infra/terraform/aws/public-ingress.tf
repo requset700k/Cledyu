@@ -232,6 +232,9 @@ resource "aws_instance" "proxy" {
     tailscale_auth_key = var.tailscale_auth_key
     upstream_url       = var.keycloak_upstream_url
     hostname           = "${var.name_prefix}-kc-proxy"
+    # Caddy host 매처 allowlist — 이 공개 Host 만 Traefik 으로 전달하고 나머지는 404
+    # (내부 .local Ingress 로의 Host 주입 차단).
+    allowed_hosts = join(" ", [var.public_keycloak_host, var.public_app_host, var.public_api_host])
     # tls transport 블록은 https upstream 일 때만 렌더(http upstream 평문 502 방지).
     upstream_tls = startswith(var.keycloak_upstream_url, "https://")
   }))
