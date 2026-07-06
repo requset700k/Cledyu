@@ -126,6 +126,7 @@ func main() {
 		logger.Warn("kubevirt manager init failed, on-prem sessions disabled", zap.Error(err))
 	} else {
 		onprem = mgr
+		mgr.StartVMIWatcher(ctx)
 	}
 
 	var overflow session.Provider

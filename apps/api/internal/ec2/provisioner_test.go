@@ -315,9 +315,6 @@ func TestVMBootSuccessRecordedOnce_EC2(t *testing.T) {
 	if _, err := p.Get(ctx, "s1"); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if c := testutil.CollectAndCount(met.Collector()); c != 1 {
-		t.Errorf("성공 메트릭 샘플 수 = %d, want 1", c)
-	}
 	if got := testutil.ToFloat64(met.Collector().WithLabelValues(vmmetrics.ResultSuccess, session.ProviderEC2)); got != 1 {
 		t.Errorf("success{env=ec2} = %v, want 1", got)
 	}
@@ -326,8 +323,8 @@ func TestVMBootSuccessRecordedOnce_EC2(t *testing.T) {
 	if _, err := p.Get(ctx, "s1"); err != nil {
 		t.Fatalf("Get(재폴링): %v", err)
 	}
-	if c := testutil.CollectAndCount(met.Collector()); c != 1 {
-		t.Errorf("중복 기록됨: 샘플 수 = %d, want 1", c)
+	if got := testutil.ToFloat64(met.Collector().WithLabelValues(vmmetrics.ResultSuccess, session.ProviderEC2)); got != 1 {
+		t.Errorf("중복 기록됨: success{env=ec2} = %v, want 1", got)
 	}
 }
 
