@@ -5,8 +5,8 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: {{ .Release.Name }}
-  namespace: {{ .Release.Namespace }}
+  name: { { .Release.Name } }
+  namespace: { { .Release.Namespace } }
 automountServiceAccountToken: true # in-cluster client 가 K8s API 호출에 토큰을 사용
 
 ---
@@ -55,8 +55,8 @@ roleRef:
   name: "{{ .Release.Name }}-session-provisioner"
 subjects:
   - kind: ServiceAccount
-    name: {{ .Release.Name }}
-    namespace: {{ .Release.Namespace }}
+    name: { { .Release.Name } }
+    namespace: { { .Release.Namespace } }
 
 ---
 # 세션 VM의 serial console 접근 권한.
