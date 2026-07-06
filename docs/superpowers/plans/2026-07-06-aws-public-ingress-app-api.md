@@ -611,16 +611,22 @@ git commit -m "feat(k8s): api keycloak 세션 config 를 .cledyu.com 으로 플�
 
 ---
 
-### Task 7: Keycloak web 클라이언트 redirect URIs에 .com 추가
+### Task 7: Keycloak web 클라이언트 redirect URIs에 .com 추가 (tracked example만; 실제 apply는 Task 8)
+
+**정정(실행 중 발견):** `infra/terraform/keycloak/terraform.tfvars`는 `.gitignore`(`*.tfvars`)로
+**추적되지 않는 시크릿 파일**(admin/client/user 비밀번호 평문 포함)이라 커밋 불가·worktree 미체크아웃.
+따라서 이 태스크는 **추적되는 템플릿 `terraform.tfvars.example`의 web 클라이언트만** 갱신해 의도를
+문서화하고, **실제 realm 적용(untracked `terraform.tfvars` 동일 수정 + keycloak `terraform apply`)은
+Task 8 수동 단계**로 넘긴다. (사용자 승인 2026-07-06.)
 
 **Files:**
-- Modify: `infra/terraform/keycloak/terraform.tfvars` (learn_oidc_clients.web, 82-85)
+- Modify: `infra/terraform/keycloak/terraform.tfvars.example` (learn_oidc_clients.web 블록)
 
 **Interfaces:**
-- Consumes: 기존 `learn_oidc_clients` 변수(clients-learn.tf가 소비).
-- Produces: realm `cledyu-learn`의 `web` 클라이언트가 `.com` redirect/logout/origin을 허용.
+- Consumes: 기존 `learn_oidc_clients` 변수 스키마(clients-learn.tf가 소비).
+- Produces: 추적 템플릿이 `web` 클라이언트의 `.com` redirect/logout/origin을 문서화. 실제 허용은 Task 8 apply 후 적용.
 
-- [ ] **Step 1: web 클라이언트의 URI 리스트에 .com 추가** — `terraform.tfvars`의 `learn_oidc_clients.web`에서 3줄 교체(기존 `.local` 유지하고 `.com` 추가). `root_url`은 `.local` 유지(공개 리다이렉트는 명시 redirect_uri로 결정).
+- [ ] **Step 1: example의 web 클라이언트 URI 리스트에 .com 추가** — `terraform.tfvars.example`의 `learn_oidc_clients.web`에서 3줄 교체(기존 `.local` 유지하고 `.com` 추가). `root_url`은 `.local` 유지.
 
 ```hcl
     valid_redirect_uris             = ["https://api.cledyu.local/api/v1/auth/callback", "https://api.cledyu.com/api/v1/auth/callback"]
@@ -628,21 +634,22 @@ git commit -m "feat(k8s): api keycloak 세션 config 를 .cledyu.com 으로 플�
     web_origins                     = ["https://app.cledyu.local", "https://app.cledyu.com"]
 ```
 
-- [ ] **Step 2: fmt + validate**
+- [ ] **Step 2: fmt + grep 검증** — `.example`은 terraform이 자동 로드/validate하지 않으므로 fmt와 grep으로 확인
 
-Run: `cd /Users/kylekim1223/request700k/cledyu-aws-ingress/infra/terraform/keycloak && terraform fmt && terraform validate`
-Expected: `Success! The configuration is valid.` (validate는 provider init 필요 — 미init시 `terraform init -backend=false` 후 재시도)
+Run: `cd /Users/kylekim1223/request700k/cledyu-aws-ingress/infra/terraform/keycloak && terraform fmt terraform.tfvars.example`
+그리고 web 블록에 `.local`/`.com`이 모두 들어갔는지 grep 확인.
 
 - [ ] **Step 3: 커밋**
 
 ```bash
 cd /Users/kylekim1223/request700k/cledyu-aws-ingress
-git add infra/terraform/keycloak/terraform.tfvars
-git commit -m "feat(sec): cledyu-learn web 클라이언트에 .cledyu.com redirect 허용 추가
+git add infra/terraform/keycloak/terraform.tfvars.example
+git commit -m "feat(sec): cledyu-learn web 클라이언트 예제에 .cledyu.com redirect 추가
 
-공개 e2e 를 위해 web 클라이언트의 valid_redirect_uris/post_logout/web_origins 에
-api.cledyu.com 콜백과 app.cledyu.com 을 추가한다(.local 은 유지). 구글 콘솔 authorized
-redirect(auth.cledyu.com)는 변경 불필요."
+공개 e2e 를 위해 terraform.tfvars.example 의 web 클라이언트 valid_redirect_uris/
+post_logout/web_origins 에 api.cledyu.com 콜백과 app.cledyu.com 을 추가한다(.local
+유지). 실제 적용은 gitignore 된 terraform.tfvars 를 동일하게 수정 후 keycloak
+terraform apply 로 수행한다(Task 8, 시크릿 파일이라 커밋하지 않음)."
 ```
 
 ---
@@ -687,7 +694,7 @@ Expected: ACM ISSUED + SAN에 `*.cledyu.com`/`cledyu.com`, 세 호스트 dig가 
 
 - [ ] **Step 4: gitops PR 머지 → ArgoCD 롤아웃** — Task 5·6 커밋을 PR로(필수 리뷰→admin merge, 사용자 승인 하). ArgoCD가 web/api 롤아웃 후 api Pod env에 `.com` 값 반영 확인(memory: API server proxy로 실측, 레포 grep을 실재 확인으로 과장 금지).
 
-- [ ] **Step 5: keycloak apply** — Task 7 커밋 반영. `cd infra/terraform/keycloak && terraform apply`로 web 클라이언트 redirect URIs에 `.com` 반영.
+- [ ] **Step 5: keycloak apply (untracked tfvars 수동 수정)** — Task 7은 추적 템플릿(`terraform.tfvars.example`)만 갱신했다. 실제 realm 반영은 **메인 체크아웃의 gitignore된 `infra/terraform/keycloak/terraform.tfvars`** 의 `learn_oidc_clients.web` 블록을 example과 동일하게(`.com` redirect/logout/origin 추가) 수정한 뒤 `cd infra/terraform/keycloak && terraform apply`. 이 파일은 시크릿을 포함하므로 커밋하지 않는다.
 
 - [ ] **Step 6: E2E(성공 기준)** — 외부망(테더링 등, 비-Tailscale)에서 `https://app.cledyu.com` → "구글로 로그인" → 구글 동의 → `auth.cledyu.com` 콜백 → `app.cledyu.com` 복귀·로그인 유지 → 랩 시작 → `api.cledyu.com` 콜백·세션쿠키 `.cledyu.com`·랩 세션 기동. 실패 시 6장 실패모드 표로 진단.
 
