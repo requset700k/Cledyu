@@ -84,3 +84,76 @@ spec:
         ticketAlert:
           labels:
             severity: warning
+    # ───────────────────────────────────────────
+    # WebSocket 안정성 SLO: 99.0% 연결이 drop 없이 유지
+    # ───────────────────────────────────────────
+    - name: websocket-stability
+      objective: 99.0
+      description: "WebSocket 연결 끊김률이 1% 미만이어야 한다."
+      sli:
+        events:
+          errorQuery: |
+            sum(rate(ws_connection_drop_total[{{.window}}])) or vector(0)
+          totalQuery: |
+            sum(rate(ws_connection_established_total[{{.window}}]))
+      alerting:
+        name: LabWebSocketStabilitySLO
+        labels:
+          service: lab
+          slo: websocket-stability
+        pageAlert:
+          labels:
+            severity: critical
+        ticketAlert:
+          labels:
+            severity: warning
+    # ───────────────────────────────────────────
+    # Validation 지연 SLO: 99.0% 요청이 10초 이내 응답
+    # ───────────────────────────────────────────
+    - name: validation-latency
+      objective: 99.0
+      description: "ValidateStep 처리 요청 중 99%는 10초 이내에 응답해야 한다."
+      sli:
+        events:
+          errorQuery: |
+            (sum(rate(validation_duration_seconds_count[{{.window}}])) or vector(0))
+            -
+            (sum(rate(validation_duration_seconds_bucket{le="10"}[{{.window}}])) or vector(0))
+          totalQuery: |
+            sum(rate(validation_duration_seconds_count[{{.window}}]))
+      alerting:
+        name: LabValidationLatencySLO
+        labels:
+          service: lab
+          slo: validation-latency
+        pageAlert:
+          labels:
+            severity: critical
+        ticketAlert:
+          labels:
+            severity: warning
+    # ───────────────────────────────────────────
+    # AI 힌트 지연 SLO: 99.0% 요청이 5초 이내 응답
+    # ───────────────────────────────────────────
+    - name: ai-hint-latency
+      objective: 99.0
+      description: "AI 힌트 요청 중 99%는 5초 이내에 응답해야 한다."
+      sli:
+        events:
+          errorQuery: |
+            (sum(rate(ai_hint_latency_seconds_count[{{.window}}])) or vector(0))
+            -
+            (sum(rate(ai_hint_latency_seconds_bucket{le="5"}[{{.window}}])) or vector(0))
+          totalQuery: |
+            sum(rate(ai_hint_latency_seconds_count[{{.window}}]))
+      alerting:
+        name: LabAIHintLatencySLO
+        labels:
+          service: lab
+          slo: ai-hint-latency
+        pageAlert:
+          labels:
+            severity: critical
+        ticketAlert:
+          labels:
+            severity: warning
