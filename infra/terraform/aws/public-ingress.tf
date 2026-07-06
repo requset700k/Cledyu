@@ -49,10 +49,13 @@ resource "aws_acm_certificate" "auth" {
   }
 }
 
-# 와일드카드(*.cledyu.com)와 apex(cledyu.com) SAN 은 ACM 이 동일한 검증 CNAME 을 돌려준다.
+# 와일드카드(*.cledyu.com)와 apex(cledyu.com) SAN 은 ACM 이 **동일한 검증 CNAME** 을 돌려준다.
 # for_each 키를 resource_record_name(=동일값·apply 후 결정) 으로 잡으면 Duplicate object key
-# +unknown-key 로 plan 이 깨지므로, 정적·고유한 domain_name 으로 키를 잡는다(HashiCorp 표준
-# ACM 검증 패턴). 두 도메인이 같은 레코드를 UPSERT 하지만 allow_overwrite=true 로 멱등하다.
+# +unknown-key 로 plan 이 깨진다. 그렇다고 domain_name 으로 잡아 두 도메인 모두 레코드를 만들면
+# 하나의 CNAME 을 두 리소스가 중복 소유해 교체/철거 시 한 리소스가 공유 레코드를 지워 drift/검증
+# 실패가 난다. 따라서 정적·고유한 domain_name 을 키로 쓰되 **apex(=public_domain) 는 제외**해
+# 와일드카드용 레코드 하나만 만든다 — 이 CNAME 하나가 두 도메인을 모두 검증한다(AWS ACM DNS
+# validation). 만약 apex 만 노출하고 와일드카드가 없는 구성이 되면 아래 필터를 조정해야 한다.
 resource "aws_route53_record" "acm_validation" {
   for_each = var.enable_public_ingress ? {
     for dvo in aws_acm_certificate.auth[0].domain_validation_options :
@@ -60,7 +63,7 @@ resource "aws_route53_record" "acm_validation" {
       name   = dvo.resource_record_name
       type   = dvo.resource_record_type
       record = dvo.resource_record_value
-    }
+    } if dvo.domain_name != var.public_domain
   } : {}
 
   zone_id         = data.aws_route53_zone.public[0].zone_id
