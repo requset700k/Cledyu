@@ -317,7 +317,11 @@ git commit -m "feat(dr): CloudNativePG 오퍼레이터 설치"
 
 ### Task 4: cledyu Postgres를 CNPG Cluster로 이관 + S3 백업
 
-> 가장 위험한 태스크. 기존 데이터를 CNPG로 논리 임포트 → 검증 → api DSN cutover → 구 StatefulSet 폐기 순서로 진행한다.
+> 가장 위험한 태스크. **write-freeze**(api 정지)로 무손실을 보장한다: cnpg 앱을 수동 sync로 만들고 →
+> **정비 창(root-apps 정지)** → api 정지 → 논리 import → row 검증(G1) → api DSN cutover+unfreeze →
+> cnpg automated 전환(git) + **정비 창 종료** → **유예기간** 후 구 StatefulSet 폐기.
+> root-apps(selfHeal)가 자식 앱 spec을 git과 강제 일치시키므로 런타임 sync-policy 조작은 정비 창 안에서만 유효하다.
+> 상세 설계·결정 근거: `docs/superpowers/specs/2026-07-06-t4-postgres-cnpg-migration-design.md`.
 
 **Files:**
 - Create: `gitops/apps/postgres-cnpg/Chart.yaml`
@@ -325,7 +329,7 @@ git commit -m "feat(dr): CloudNativePG 오퍼레이터 설치"
 - Create: `gitops/apps/postgres-cnpg/templates/cluster.yaml`
 - Create: `gitops/apps/postgres-cnpg/templates/scheduledbackup.yaml`
 - Create: `gitops/argocd/apps/data-postgres-cnpg.yaml`
-- Modify(폐기): `gitops/argocd/apps/data-postgres.yaml` (구 StatefulSet 앱 — Step 8에서 제거)
+- Modify(폐기): `gitops/argocd/apps/data-postgres.yaml` (구 StatefulSet 앱 — Step 11에서 제거)
 
 **Interfaces:**
 - Consumes: Secret `cledyu-backup-s3`(Task 2), Secret `postgres-credentials`(기존), 구 서비스 `postgres.postgres.svc`(임포트 소스)
@@ -383,8 +387,10 @@ spec:
     retentionPolicy: "30d"
 ```
 
-> 주: CNPG ≥1.26에서 in-tree `barmanObjectStore`는 deprecated이고 barman-cloud 플러그인이 후속 경로다.
-> 위 chart 의존 오퍼레이터 버전(0.22.1)에서는 in-tree가 동작한다. 오퍼레이터 상향 시 플러그인으로 이관.
+> 주(2026-07-06 실측): 배포된 CNPG 오퍼레이터는 helm chart **0.23.0 = 오퍼레이터 1.25.0**이다.
+> in-tree `barmanObjectStore`는 **1.26부터 deprecated**(barman-cloud 플러그인이 후속 경로)이나
+> **1.25.0에서는 기본·정상 동작**하므로 위 설정이 그대로 유효하다. 오퍼레이터를 chart 0.23.0(=1.25.0)에
+> **핀 고정**하고, ≥1.26 상향 시 barman-cloud 플러그인으로 이관한다.
 
 - [ ] **Step 2: CNPG용 credentials Secret + ScheduledBackup 작성**
 
@@ -451,17 +457,54 @@ version: 0.1.0
 Run: `helm template gitops/apps/postgres-cnpg --namespace postgres | kubeconform -strict -ignore-missing-schemas -schema-location default -schema-location 'https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/main/docs/src/samples/{{.ResourceKind}}.json'`
 Expected: 렌더 성공(Cluster/ScheduledBackup/ExternalSecret). CRD 스키마 없으면 `-ignore-missing-schemas`로 통과.
 
-- [ ] **Step 4: ArgoCD Application 작성 + Sync (임포트 실행)**
+- [ ] **Step 4: ArgoCD Application 작성 (수동 sync) + 매니페스트 커밋**
 
 `gitops/argocd/apps/data-postgres-cnpg.yaml` (골격 동일, path `gitops/apps/postgres-cnpg`, releaseName `postgres-cnpg`, namespace `postgres`).
+**중요**: 이관 동안은 `syncPolicy.automated`를 두지 않는다(수동 sync). 자동 sync면 커밋 즉시
+ArgoCD가 Cluster를 만들어 import를 실행 → **api가 아직 안 멈춘 구 DB를 스냅샷**하게 되어 write-freeze가
+무의미해진다. cutover 검증 후 Step 10에서 **git으로**(런타임 토글 아님) automated로 전환한다.
+Run:
+```bash
+git add gitops/apps/postgres-cnpg gitops/argocd/apps/data-postgres-cnpg.yaml
+git commit -m "feat(dr): postgres-cnpg 매니페스트 추가 (수동 sync, import 대기)"
+git push
+kubectl -n argocd get application data-postgres-cnpg
+```
+Expected: `data-postgres-cnpg` Application 존재, 상태 OutOfSync(아직 sync 안 함).
+
+- [ ] **Step 5: 정비 창 진입 + write-freeze (api 정지)**
+
+논리 import는 시작 시점의 일회성 스냅샷이라, import~cutover 사이 구 DB 쓰기는 신 DB에 반영되지 않는다.
+import 직전 api를 정지해 구 DB 쓰기를 물리적으로 차단한다.
+**root-apps 제약**: App-of-Apps 루트 `root-apps`(`ansible/roles/argocd/templates/root-app.yaml.j2`)가
+`selfHeal: true`로 자식 앱 spec을 git과 강제 일치시킨다(재조정 ~3분). `service-api`를 런타임에
+`sync-policy none`으로 바꿔도 root-apps가 되돌려(→ api 재기동) freeze가 깨진다. **먼저 root-apps를 정지**
+(정비 창)해야 그 아래 토글이 유지된다. root-apps는 Ansible이 심을 뿐 상시 재조정 주체가 없어 정지는
+Step 10 복원 전까지 유지된다(정비 창 동안 다른 앱 재조정도 멈춤 — 통제된 유지보수 시간).
+Run:
+```bash
+# 1) 정비 창 진입 — root-apps 정지(자식 토글이 되돌려지지 않게)
+argocd app set root-apps --sync-policy none
+# 2) write-freeze — service-api 정지 + api scale 0
+argocd app set service-api --sync-policy none
+kubectl -n api scale deploy/api --replicas=0
+kubectl -n api rollout status deploy/api --timeout=120s
+# 3) 구 DB 활성 커넥션 없음 확인(자기 세션 제외)
+kubectl -n postgres exec postgres-0 -- psql -U cledyu -d cledyu -tAc \
+  "select count(*) from pg_stat_activity where datname='cledyu' and state='active' and pid<>pg_backend_pid()"
+```
+Expected: root-apps·service-api 모두 sync-policy none, api replicas 0, 구 DB 활성 커넥션 0.
+
+- [ ] **Step 6: import 실행 (수동 sync)**
+
 Run:
 ```bash
 argocd app sync data-postgres-cnpg
 kubectl -n postgres wait --for=condition=Ready cluster/cledyu-pg --timeout=600s
 ```
-Expected: Cluster `Ready`. 임포트 Job 이 구 DB를 논리 복제.
+Expected: Cluster `Ready`. import Job이 정지된 구 DB를 논리 복제.
 
-- [ ] **Step 5: 데이터 일치 검증 (cutover 전 필수)**
+- [ ] **Step 7: 데이터 일치 검증 (G1 — cutover 전 필수)**
 
 Run:
 ```bash
@@ -472,47 +515,69 @@ kubectl -n postgres exec postgres-0 -- psql -U cledyu -d cledyu -tAc \
 kubectl -n postgres exec cledyu-pg-1 -- psql -U cledyu -d cledyu -tAc \
   "select count(*) from session_progress"
 ```
-Expected: 두 값 **동일**. 다르면 cutover 중단하고 임포트 재점검.
+Expected: 두 값 **동일**. 다르면 cutover 중단, import 재점검(구 DB는 정지 상태라 데이터 안전).
+> 착수 시 실제 스키마를 보고 검증 대상 테이블(session_progress + 수료증 관련)을 확정한다.
 
-- [ ] **Step 6: 첫 backup S3 도달 확인**
+- [ ] **Step 8: 첫 backup S3 도달 확인 (G3)**
 
+ScheduledBackup에 `immediate: true`가 있어 Step 6에서 Cluster와 함께 sync되는
+순간 첫 base backup이 자동으로 시작된다 — 수동 트리거 불필요, 완료만 확인
 Run:
 ```bash
-kubectl -n postgres exec cledyu-pg-1 -- \
-  cnpg backup cledyu-pg   # 즉시 base backup 트리거(또는 ScheduledBackup 대기)
+kubectl -n postgres get backup -l cnpg.io/cluster=cledyu-pg   # phase=completed 대기(수 분 소요 가능)
 aws s3 ls s3://cledyu-lab-dr-backups/postgres/ --recursive | head
 ```
-Expected: `postgres/` 하위에 base backup + WAL 객체 존재.
+Expected: `postgres/` 하위에 base backup + WAL 객체 존재. (구 DB 폐기 전 필수 확인 항목)
+> completed가 안 뜨면 `kubectl cnpg backup cledyu-pg -n postgres`로 수동 재시도.
 
-- [ ] **Step 7: api DSN cutover**
+- [ ] **Step 9: api DSN cutover + unfreeze**
 
+> `cledyu-api-db` ExternalSecret은 `infra/kubernetes/external-secrets/`에 존재(out-of-band 적용)하므로 아래
+> annotate는 유효하다. Vault `cledyu/db/api:dsn` 미설정이면 api는 in-memory 폴백이라 DSN/ESO 단계는 생략 가능.
+> 정비 창 중이라 service-api 재개 토글은 유지된다.
 Run:
 ```bash
-# CNPG rw 서비스로 DSN 교체 (기존 cledyu 사용자/비밀번호 유지)
+# 1) DSN을 CNPG rw 서비스로 교체(사용자/비밀번호 유지)
 vault kv patch cledyu/db/api \
   dsn="postgresql://cledyu:$(vault kv get -field=password cledyu/db/postgres)@cledyu-pg-rw.postgres.svc:5432/cledyu?sslmode=require"
-# ESO 강제 리프레시 후 api 롤아웃
+# 2) ESO 강제 리프레시(Secret cledyu-api-db 갱신)
 kubectl -n api annotate externalsecret cledyu-api-db force-sync=$(date +%s) --overwrite
-kubectl -n api rollout restart deploy/api
-kubectl -n api rollout status deploy/api
+# 3) api 재기동(=unfreeze). 정비 창 중이라 root-apps가 되돌리지 않는다.
+argocd app set service-api --sync-policy automated --self-heal --auto-prune
+kubectl -n api rollout status deploy/api --timeout=180s
 ```
-Expected: api 파드 Ready, `/health` 200. 세션 진도 조회 정상.
+Expected: api 파드 Ready, `/health` 200, 세션 진도 조회 정상.
+> 롤백: DSN 원복 → api 롤아웃. 구 DB는 계속 살아있어(Step 11 전) 즉시 복귀 가능.
 
-- [ ] **Step 8: 구 Postgres StatefulSet 폐기**
+- [ ] **Step 10: cnpg automated 전환(git) + 정비 창 종료**
 
+cnpg 앱의 automated 전환은 **런타임이 아니라 git으로** 한다 — root-apps가 git을 강제하므로 런타임 토글은
+복원 시 되돌려진다. `data-postgres-cnpg.yaml`에 automated 블록을 추가·커밋한 뒤 root-apps를 복원한다.
+**구 DB는 이 시점에 정지·삭제하지 않는다** — 계속 살려둬 롤백 안전망으로 쓴다(정지하면 root-apps 복원 시
+git이 여전히 구 DB를 automated로 선언해 다시 기동돼 충돌한다). 폐기는 유예기간 후 git-rm(Step 11)으로만.
+Run:
+```bash
+# 1) 앱 파일에 automated 블록 추가(수동 sync 주석 → 실제 automated: {prune:true, selfHeal:true})
+git add gitops/argocd/apps/data-postgres-cnpg.yaml
+git commit -m "chore(dr): postgres-cnpg 앱 automated sync 전환 (이관 완료)"
+git push
+# 2) 정비 창 종료 — root-apps 복원. 자식 spec을 git 기준 재정렬:
+#    service-api(automated 유지)·data-postgres-cnpg(automated 반영)·data-postgres(그대로 유지, 폐기 전).
+argocd app set root-apps --sync-policy automated --self-heal --auto-prune
+```
+Expected: root-apps Synced, data-postgres-cnpg automated, api 정상, 구 postgres는 여전히 기동(롤백용).
+
+- [ ] **Step 11: 유예기간 후 구 Postgres 폐기 + Commit**
+
+유예기간(구 DB는 살아있는 상태로 대기) 동안 (1) 첫 S3 base backup+WAL 도달(Step 8/G3),
+(2) api 안정 운영, (3) 권장: PITR 복원 드릴(Task 7) 통과 를 **모두 확인한 뒤에만** 실행한다.
 Run:
 ```bash
 git rm -r gitops/apps/postgres gitops/argocd/apps/data-postgres.yaml
-```
-(ArgoCD가 prune으로 구 StatefulSet/PVC 제거. PVC는 `deletionPolicy: Retain` 아님에 유의 —
-삭제 전 Step 6 백업 존재를 반드시 확인했어야 함.)
-
-- [ ] **Step 9: Commit**
-
-```bash
-git add gitops/apps/postgres-cnpg gitops/argocd/apps/data-postgres-cnpg.yaml
 git commit -m "feat(dr): cledyu Postgres를 CNPG로 이관·S3 WAL 백업, 구 StatefulSet 폐기"
+git push
 ```
+(root-apps가 data-postgres 앱을 prune → 구 StatefulSet 제거. PVC는 `Retain`이라 잔존 — 수동 정리 별도.)
 
 ---
 

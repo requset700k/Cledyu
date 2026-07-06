@@ -1,0 +1,81 @@
+## CNPG Cluster — 구 postgres StatefulSet을 논리 import(microservice)로 이관하고,
+## barman으로 S3(postgres/ 프리픽스)에 WAL 연속 아카이빙 + base backup을 남긴다.
+##
+## 버전 주의(2026-07-06 실측): 배포 오퍼레이터 = cnpg chart 0.23.0 = 1.25.0.
+## in-tree spec.backup.barmanObjectStore는 1.26부터 deprecated(barman-cloud 플러그인이 후속)이나
+## 1.25.0에서는 기본·정상 동작. 오퍼레이터를 chart 0.23.0(=1.25.0)에 핀 고정 유지.
+## ≥1.26 상향 시 barman-cloud 플러그인으로 이관 필요.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cledyu-pg
+  namespace: {{ .Release.Namespace }}
+spec:
+  instances: {{ .Values.instances }}
+  # 구 DB(postgres:16-alpine)와 동일 major 16 — 논리 import 안전.
+  # 태그만으론 재풀 시 revision 드리프트 여지가 있어 digest까지 고정
+  # 오퍼레이터 상향 등으로 CNPG 호환 Postgres 버전이 바뀌면 이 digest도 같이 갱신해야 한다.
+  imageName: "ghcr.io/cloudnative-pg/postgresql:16.4@sha256:99be063781d171d3971089b49c992706bdab9ccbd2b57cdf126c7542773aedfe"
+  storage:
+    size: {{ .Values.storage.size }}
+    storageClass: {{ .Values.storage.className }}
+  # 구 StatefulSet과 동등한 QoS 보장(BestEffort 방지) — 코드 리뷰로 발견, 값은 values.yaml 참조.
+  resources:
+    requests:
+      cpu: {{ .Values.resources.requests.cpu }}
+      memory: {{ .Values.resources.requests.memory }}
+    limits:
+      cpu: {{ .Values.resources.limits.cpu }}
+      memory: {{ .Values.resources.limits.memory }}
+  bootstrap:
+    initdb:
+      database: cledyu
+      # 계약: owner는 아래 secret(postgres-credentials-cnpg)의 username과 반드시 일치해야 bootstrap이 성공한다(CNPG가 두 값을 검증)
+      # 이 username은 scheduledbackup.yaml의 ESO가 Vault db/postgres:username에서 가져온다
+      #owner를 바꾸면 그 Vault 값도 같이 바꿔야 한다
+      owner: cledyu
+      # 신 클러스터 app 유저 자격증명(basic-auth) — scheduledbackup.yaml의 ESO가 생성.
+      secret:
+        name: postgres-credentials-cnpg
+      # 구 DB를 논리 복제(microservice = 단일 DB import). write-freeze 상태에서 실행해야 무손실.
+      import:
+        type: microservice
+        databases:
+          - cledyu
+        source:
+          externalCluster: old-postgres
+  externalClusters:
+    - name: old-postgres
+      connectionParameters:
+        host: postgres.postgres.svc
+        user: cledyu
+        dbname: cledyu
+      # 구 DB는 TLS 미설정이라 libpq 기본(prefer)이 plaintext로 폴백. import 소스 비번은 기존 Secret 재사용.
+      password:
+        name: postgres-credentials
+        key: password
+  backup:
+    barmanObjectStore:
+      destinationPath: "s3://cledyu-lab-dr-backups/postgres"
+      endpointURL: "https://s3.ap-northeast-2.amazonaws.com"
+      # Task 2가 postgres ns에 뿌린 Secret(프리픽스 postgres/ 한정 IAM 키).
+      s3Credentials:
+        accessKeyId:
+          name: cledyu-backup-s3
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: cledyu-backup-s3
+          key: ACCESS_SECRET_KEY
+      wal:
+        compression: gzip
+    # retentionPolicy 의도적으로 미설정. 설정 시 CNPG가 barman-cloud-backup-delete로
+    # 만료 backup/WAL을 직접 지우려 하는데, backup-writer-postgres IAM 정책엔 s3:DeleteObject가
+    # 없고(무-delete 정책, infra/terraform/aws/backup.tf) 버킷엔 Object Lock GOVERNANCE 30일까지
+    # 걸려 있어(BypassGovernanceRetention도 없음) 매 retention maintenance가 AccessDenied로
+    # 실패한다. 삭제는 전적으로 S3 lifecycle(backup.tf의 postgres/ 프리픽스 규칙)이 담당한다.
+  # 백업 성공/실패, WAL 아카이빙 지연, 커넥션 등을 Prometheus로 노출
+  # PodMonitor CR을 자동 생성해 기존 kube-prometheus-stack이 스크레이프
+  # 주의: CNPG 1.25 기준 enablePodMonitor는 deprecated
+  # 지금 핀 고정한 1.25.0에선 정상 동작. 오퍼레이터 상향 시 수동 PodMonitor 리소스로 교체 필요
+  monitoring:
+    enablePodMonitor: true

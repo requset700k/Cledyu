@@ -1,0 +1,46 @@
+## 일 base backup 스케줄(WAL은 Cluster의 barman이 연속 아카이빙 → RPO 5~15분).
+## CNPG cron은 6필드(초 분 시 일 월 요일). "0 0 2 * * *" = 매일 02:00:00.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: cledyu-pg-daily
+  namespace: {{ .Release.Namespace }}
+spec:
+  schedule: "0 0 2 * * *"
+  # immediate 없으면 첫 base backup이 다음 02:00까지(최대 24h) 안 뜬다. cutover 직후 완전한
+  # 복원점을 바로 확보하기 위해 생성 즉시 1회 실행 WAL은 연속 아카이빙되지만 완전 복원에는 base backup이 필요
+  immediate: true
+  backupOwnerReference: self
+  cluster:
+    name: cledyu-pg
+---
+## CNPG bootstrap이 요구하는 basic-auth(username/password) Secret.
+## 기존 postgres-credentials(password만)와 별개 — Vault cledyu/db/postgres에서 두 키를 가져온다.
+## 사전작업: vault kv patch cledyu/db/postgres username=cledyu (기존 kv에 username 키 추가).
+apiVersion: external-secrets.io/v1beta1
+kind: ExternalSecret
+metadata:
+  name: postgres-credentials-cnpg
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-backend
+    kind: ClusterSecretStore
+  target:
+    name: postgres-credentials-cnpg
+    creationPolicy: Owner
+    deletionPolicy: Retain
+    template:
+      type: kubernetes.io/basic-auth
+  data:
+    - secretKey: username
+      remoteRef:
+        key: db/postgres
+        property: username
+    - secretKey: password
+      remoteRef:
+        key: db/postgres
+        property: password

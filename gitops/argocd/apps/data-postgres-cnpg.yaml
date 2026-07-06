@@ -1,0 +1,38 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: data-postgres-cnpg
+  namespace: argocd
+  annotations:
+    # 오퍼레이터(data-cnpg-operator, wave 0) 이후에 Cluster CR이 서도록 wave 1.
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/requset700k/Cledyu.git
+    targetRevision: main
+    path: gitops/apps/postgres-cnpg
+    helm:
+      releaseName: postgres-cnpg
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: postgres
+
+  # 이관 동안은 수동 sync(automated 없음). 자동 sync면 커밋 즉시 import가 실행돼
+  # write-freeze 전의 구 DB를 스냅샷하게 된다. cutover 검증 후 아래 automated 블록을 추가한다:
+  #   syncPolicy.automated: { prune: true, selfHeal: true }
+  # (Plan A Task 4 Step 10 — 런타임 `argocd app set`이 아니라 이 파일을 git으로 수정한다.
+  #  root-apps(selfHeal)가 자식 spec을 git과 강제 일치시켜 런타임 토글은 복원 시 되돌려지기 때문.)
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
