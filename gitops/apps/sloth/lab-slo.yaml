@@ -85,6 +85,110 @@ spec:
           labels:
             severity: warning
     # ───────────────────────────────────────────
+    # Lab 시작 시간 SLO: 온프렘 99.0% 세션이 7분 이내 Ready
+    # ───────────────────────────────────────────
+    - name: lab-startup-onprem
+      objective: 99.0
+      description: "온프렘 Lab 시작 요청 중 99%는 7분 이내에 Ready 상태가 되어야 한다."
+      sli:
+        events:
+          errorQuery: |
+            (sum(rate(lab_start_total{env="onprem",result!="success"}[{{.window}}])) or vector(0))
+            +
+            (
+              (sum(rate(lab_startup_duration_seconds_count{env="onprem",result="success"}[{{.window}}])) or vector(0))
+              -
+              (sum(rate(lab_startup_duration_seconds_bucket{env="onprem",result="success",le="420"}[{{.window}}])) or vector(0))
+            )
+          totalQuery: |
+            sum(rate(lab_start_total{env="onprem"}[{{.window}}]))
+      alerting:
+        name: LabStartupOnpremSLO
+        labels:
+          service: lab
+          slo: startup-onprem
+        pageAlert:
+          labels:
+            severity: critical
+        ticketAlert:
+          labels:
+            severity: warning
+    # ───────────────────────────────────────────
+    # Lab 시작 시간 SLO: EC2 99.0% 세션이 10분 이내 Ready
+    # ───────────────────────────────────────────
+    - name: lab-startup-ec2
+      objective: 99.0
+      description: "EC2 Lab 시작 요청 중 99%는 10분 이내에 running 상태가 되어야 한다."
+      sli:
+        events:
+          errorQuery: |
+            (sum(rate(lab_start_total{env="ec2",result!="success"}[{{.window}}])) or vector(0))
+            +
+            (
+              (sum(rate(lab_startup_duration_seconds_count{env="ec2",result="success"}[{{.window}}])) or vector(0))
+              -
+              (sum(rate(lab_startup_duration_seconds_bucket{env="ec2",result="success",le="600"}[{{.window}}])) or vector(0))
+            )
+          totalQuery: |
+            sum(rate(lab_start_total{env="ec2"}[{{.window}}]))
+      alerting:
+        name: LabStartupEC2SLO
+        labels:
+          service: lab
+          slo: startup-ec2
+        pageAlert:
+          labels:
+            severity: critical
+        ticketAlert:
+          labels:
+            severity: warning
+    # ───────────────────────────────────────────
+    # Lab 시작 성공률 SLO: 99.0% 세션이 usable 상태까지 도달
+    # ───────────────────────────────────────────
+    - name: lab-start-success-rate
+      objective: 99.0
+      description: "Lab 시작 시도 중 99% 이상이 사용 가능한 상태까지 도달해야 한다."
+      sli:
+        events:
+          errorQuery: |
+            sum(rate(lab_start_total{result!="success"}[{{.window}}])) or vector(0)
+          totalQuery: |
+            sum(rate(lab_start_total[{{.window}}]))
+      alerting:
+        name: LabStartSuccessRateSLO
+        labels:
+          service: lab
+          slo: startup-success-rate
+        pageAlert:
+          labels:
+            severity: critical
+        ticketAlert:
+          labels:
+            severity: warning
+    # ───────────────────────────────────────────
+    # VM 부팅 성공률 SLO: 99.5%
+    # ───────────────────────────────────────────
+    - name: vm-boot-success-rate
+      objective: 99.5
+      description: "KubeVirt/EC2 VM 부팅 성공률이 99.5% 이상이어야 한다."
+      sli:
+        events:
+          errorQuery: |
+            sum(rate(vm_boot_total{result="failed"}[{{.window}}])) or vector(0)
+          totalQuery: |
+            sum(rate(vm_boot_total[{{.window}}]))
+      alerting:
+        name: LabVMBootSuccessRateSLO
+        labels:
+          service: lab
+          slo: vm-boot-success-rate
+        pageAlert:
+          labels:
+            severity: critical
+        ticketAlert:
+          labels:
+            severity: warning
+    # ───────────────────────────────────────────
     # WebSocket 안정성 SLO: 99.0% 연결이 drop 없이 유지
     # ───────────────────────────────────────────
     - name: websocket-stability
