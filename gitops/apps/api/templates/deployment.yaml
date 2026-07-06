@@ -60,12 +60,14 @@ spec:
               value: {{ .Values.keycloak.realm | quote }}
             - name: CLEDYU_KEYCLOAK_CLIENT_ID
               value: {{ .Values.keycloak.clientId | quote }}
+            # publicExposure 게이트 — false(기본)=.local, true(컷오버)=.com. 공개 DNS/ALB·
+            # Keycloak client .com redirect 준비 전 자동 플립을 막는다(GitOps auto-sync).
             - name: CLEDYU_KEYCLOAK_REDIRECT_URI
-              value: {{ .Values.keycloak.redirectUri | quote }}
+              value: {{ ternary .Values.keycloak.publicRedirectUri .Values.keycloak.redirectUri .Values.keycloak.publicExposure | quote }}
             - name: CLEDYU_KEYCLOAK_COOKIE_DOMAIN
-              value: {{ .Values.keycloak.cookieDomain | quote }}
+              value: {{ ternary .Values.keycloak.publicCookieDomain .Values.keycloak.cookieDomain .Values.keycloak.publicExposure | quote }}
             - name: CLEDYU_FRONTEND_URL
-              value: {{ .Values.keycloak.frontendUrl | quote }}
+              value: {{ ternary .Values.keycloak.publicFrontendUrl .Values.keycloak.frontendUrl .Values.keycloak.publicExposure | quote }}
             - name: CLEDYU_KEYCLOAK_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:

@@ -46,9 +46,20 @@ keycloak:
   url: "https://auth.cledyu.com"
   realm: "cledyu-learn"
   clientId: "web"
-  redirectUri: "https://api.cledyu.com/api/v1/auth/callback"
-  cookieDomain: ".cledyu.com"
-  frontendUrl: "https://app.cledyu.com"
+  # 공개(.com) 세션 전환 게이트. service-api ArgoCD 가 main 을 automated sync 하므로 이 값들은
+  # merge 즉시 Pod env 로 적용된다. 공개 DNS/ALB(enable_public_ingress=true)와 Keycloak client
+  # .com redirect(tfvars apply)가 준비되기 전에 .com 으로 플립하면 현행 .local 인증 흐름까지
+  # 깨진다(.com 쿠키·콜백·app redirect 가 아직 미존재). 따라서 기본 false(=.local 유지)로 두고,
+  # 컷오버(런북/Task 8: infra apply + keycloak client apply 이후)에서만 true 로 플립한다.
+  publicExposure: false
+  # 현행(.local) — publicExposure=false 일 때 사용.
+  redirectUri: "https://api.cledyu.local/api/v1/auth/callback"
+  cookieDomain: ".cledyu.local"
+  frontendUrl: "https://app.cledyu.local"
+  # 공개(.com) — publicExposure=true(컷오버) 일 때 사용.
+  publicRedirectUri: "https://api.cledyu.com/api/v1/auth/callback"
+  publicCookieDomain: ".cledyu.com"
+  publicFrontendUrl: "https://app.cledyu.com"
   clientSecret:
     secretName: "cledyu-api-oidc"
     secretKey: "client_secret"

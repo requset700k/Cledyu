@@ -692,7 +692,8 @@ aws wafv2 get-sampled-requests --web-acl-arn $(terraform output -raw public_waf_
 ```
 Expected: ACM ISSUED + SAN에 `*.cledyu.com`/`cledyu.com`, 세 호스트 dig가 ALB, curl TLS가 ACM 체인·2xx/3xx, 프록시 `/healthz`=200 및 tailnet 라우트 수신.
 
-- [ ] **Step 4: gitops PR 머지 → ArgoCD 롤아웃** — Task 5·6 커밋을 PR로(필수 리뷰→admin merge, 사용자 승인 하). ArgoCD가 web/api 롤아웃 후 api Pod env에 `.com` 값 반영 확인(memory: API server proxy로 실측, 레포 grep을 실재 확인으로 과장 금지).
+- [ ] **Step 4: gitops PR 머지 → ArgoCD 롤아웃** — Task 5·6 커밋을 PR로(필수 리뷰→admin merge, 사용자 승인 하). 머지 자체는 **live 동작 무변경**이다: api keycloak 세션 config 는 `keycloak.publicExposure`(기본 false)로 게이트돼 있어 merge 후에도 `.local` 유지(service-api 가 main 을 automated sync 하므로 자동 플립 방지 — Codex P1). 인그레스 `.com` 호스트 추가·CORS(cfg.FrontendURL 기반, 기본 .local)·WAF 는 무해하게 반영된다.
+- [ ] **Step 4b: (컷오버) `.com` 세션 플립** — Step 1~3(aws apply)와 Step 5(keycloak client apply)가 끝나 공개 DNS/ALB/Keycloak `.com` redirect 가 실재하는 시점에만, `gitops/apps/api/values.yaml` 의 `keycloak.publicExposure: true` 로 플립하는 작은 값 PR 머지 → ArgoCD 가 api Pod env 를 `.com`(redirectUri/cookieDomain/frontendUrl)로 롤아웃. 이 플립으로 CORS/WS Origin 허용도 `cfg.FrontendURL=app.cledyu.com` 으로 따라간다. 순서 역전 시 현행 `.local` 인증이 깨지므로 반드시 infra 준비 후 플립.
 
 - [ ] **Step 5: keycloak apply (untracked tfvars 수동 수정)** — Task 7은 추적 템플릿(`terraform.tfvars.example`)만 갱신했다. 실제 realm 반영은 **메인 체크아웃의 gitignore된 `infra/terraform/keycloak/terraform.tfvars`** 의 `learn_oidc_clients.web` 블록을 example과 동일하게(`.com` redirect/logout/origin 추가) 수정한 뒤 `cd infra/terraform/keycloak && terraform apply`. 이 파일은 시크릿을 포함하므로 커밋하지 않는다.
 
