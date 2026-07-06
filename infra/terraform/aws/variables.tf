@@ -161,3 +161,9 @@ variable "public_api_host" {
   type        = string
   default     = "api.cledyu.com"
 }
+
+variable "waf_rate_limit" {
+  description = "WAF rate-based 룰의 IP당 5분(기본 평가창) 요청 상한. 초과 시 block. 데모 부하 기준 2000."
+  type        = number
+  default     = 2000
+}
