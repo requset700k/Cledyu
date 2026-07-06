@@ -73,3 +73,9 @@ spec:
     # 없고(무-delete 정책, infra/terraform/aws/backup.tf) 버킷엔 Object Lock GOVERNANCE 30일까지
     # 걸려 있어(BypassGovernanceRetention도 없음) 매 retention maintenance가 AccessDenied로
     # 실패한다. 삭제는 전적으로 S3 lifecycle(backup.tf의 postgres/ 프리픽스 규칙)이 담당한다.
+  # 백업 성공/실패, WAL 아카이빙 지연, 커넥션 등을 Prometheus로 노출
+  # PodMonitor CR을 자동 생성해 기존 kube-prometheus-stack이 스크레이프
+  # 주의: CNPG 1.25 기준 enablePodMonitor는 deprecated
+  # 지금 핀 고정한 1.25.0에선 정상 동작. 오퍼레이터 상향 시 수동 PodMonitor 리소스로 교체 필요
+  monitoring:
+    enablePodMonitor: true
