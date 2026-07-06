@@ -412,27 +412,16 @@ func (m *Manager) Get(ctx context.Context, sessionID string) (*Session, error) {
 		case "Running":
 			status = "ready"
 			provisioningStage = ""
-			if ann["cledyu.io/ready-at"] == "" {
-				readyAt := time.Now().UTC()
-				nsObj.Annotations["cledyu.io/ready-at"] = readyAt.Format(time.RFC3339)
-				if _, err := m.core.CoreV1().Namespaces().Update(ctx, nsObj, metav1.UpdateOptions{}); err == nil {
-					if !startedAt.IsZero() {
-						m.met.RecordBoot(vmmetrics.ResultSuccess, session.ProviderKubeVirt)
-					}
-				}
-			}
 		case "Failed", "Succeeded":
 			status = "failed"
 			provisioningStage = ""
-			// ready-at가 없는 경우만 부팅 실패로 기록 — 이미 ready였던 VM의 사후 종료는 제외
-			if ann["cledyu.io/ready-at"] == "" && ann["cledyu.io/boot-result-recorded"] == "" {
-				nsObj.Annotations["cledyu.io/boot-result-recorded"] = "true"
-				if _, err := m.core.CoreV1().Namespaces().Update(ctx, nsObj, metav1.UpdateOptions{}); err == nil {
-					m.met.RecordBoot(vmmetrics.ResultFailed, session.ProviderKubeVirt)
-				}
-			}
 		default:
 			provisioningStage = m.provisioningStage(ctx, ns, phase)
+		}
+		if phase == "Running" || phase == "Failed" || phase == "Succeeded" {
+			if err := m.syncBootStatus(ctx, ns, phase); err != nil {
+				fmt.Printf("boot status sync failed (poll path): ns=%s phase=%s err=%v\n", ns, phase, err)
+			}
 		}
 	} else {
 		provisioningStage = m.provisioningStage(ctx, ns, "")
@@ -440,12 +429,8 @@ func (m *Manager) Get(ctx context.Context, sessionID string) (*Session, error) {
 	if status == "provisioning" && m.provisioningTimedOut(startedAt) {
 		status = "failed"
 		provisioningStage = ""
-		// timeout 부팅 실패도 vm_boot_total에 기록
-		if ann["cledyu.io/boot-result-recorded"] == "" {
-			nsObj.Annotations["cledyu.io/boot-result-recorded"] = "true"
-			if _, err := m.core.CoreV1().Namespaces().Update(ctx, nsObj, metav1.UpdateOptions{}); err == nil {
-				m.met.RecordBoot(vmmetrics.ResultFailed, session.ProviderKubeVirt)
-			}
+		if err := m.syncBootStatus(ctx, ns, "TimedOut"); err != nil {
+			fmt.Printf("boot status sync failed (timeout path): ns=%s err=%v\n", ns, err)
 		}
 	}
 
