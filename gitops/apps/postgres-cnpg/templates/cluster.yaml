@@ -13,7 +13,9 @@ metadata:
 spec:
   instances: {{ .Values.instances }}
   # 구 DB(postgres:16-alpine)와 동일 major 16 — 논리 import 안전.
-  imageName: "ghcr.io/cloudnative-pg/postgresql:16.4"
+  # 태그만으론 재풀 시 revision 드리프트 여지가 있어 digest까지 고정
+  # 오퍼레이터 상향 등으로 CNPG 호환 Postgres 버전이 바뀌면 이 digest도 같이 갱신해야 한다.
+  imageName: "ghcr.io/cloudnative-pg/postgresql:16.4@sha256:99be063781d171d3971089b49c992706bdab9ccbd2b57cdf126c7542773aedfe"
   storage:
     size: {{ .Values.storage.size }}
     storageClass: {{ .Values.storage.className }}
