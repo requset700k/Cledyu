@@ -28,6 +28,9 @@ spec:
   bootstrap:
     initdb:
       database: cledyu
+      # 계약: owner는 아래 secret(postgres-credentials-cnpg)의 username과 반드시 일치해야 bootstrap이 성공한다(CNPG가 두 값을 검증)
+      # 이 username은 scheduledbackup.yaml의 ESO가 Vault db/postgres:username에서 가져온다
+      #owner를 바꾸면 그 Vault 값도 같이 바꿔야 한다
       owner: cledyu
       # 신 클러스터 app 유저 자격증명(basic-auth) — scheduledbackup.yaml의 ESO가 생성.
       secret:
