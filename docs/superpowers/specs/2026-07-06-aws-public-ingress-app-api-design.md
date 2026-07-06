@@ -133,8 +133,11 @@ redirectUri)는 응답당 단일값**이라 `.com` 하나로 간다. `.local` �
   - `keycloak.cookieDomain`: `.cledyu.com`
   - `keycloak.frontendUrl`: `https://app.cledyu.com`
   - `keycloak.url`: 변경 없음(이미 `https://auth.cledyu.com`)
-- **web config(`gitops/apps/web/values.yaml`)**: api endpoint를 `https://api.cledyu.com` 로
-  (런타임 `NEXT_PUBLIC`/route handler가 읽는 값 확인 후 반영).
+- **web config(`gitops/apps/web/values.yaml`)**: 백엔드 호출 URL은 **변경하지 않는다**.
+  web은 `CLEDYU_BACKEND_URL = http://api.api.svc.cluster.local`(in-cluster)로 api를
+  **서버사이드(Next.js route handler) 프록시**한다. 브라우저가 `api.cledyu.com`을 직접
+  때리는 지점은 **OAuth 콜백 리다이렉트뿐**이다. 따라서 web은 `.com` 인그레스 호스트만
+  추가(라우팅)하면 되고 backend URL 플립은 불필요·부적절.
 - **Keycloak client**: realm `cledyu-learn` web/api 클라이언트 valid redirect URIs에
   `https://api.cledyu.com/*`, `https://app.cledyu.com/*` 추가(기존 `.local` 유지). 구글 콘솔
   authorized redirect(`auth.cledyu.com`)는 변경 불필요.
