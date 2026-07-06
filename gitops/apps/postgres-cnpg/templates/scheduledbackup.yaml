@@ -7,6 +7,9 @@ metadata:
   namespace: {{ .Release.Namespace }}
 spec:
   schedule: "0 0 2 * * *"
+  # immediate 없으면 첫 base backup이 다음 02:00까지(최대 24h) 안 뜬다. cutover 직후 완전한
+  # 복원점을 바로 확보하기 위해 생성 즉시 1회 실행 WAL은 연속 아카이빙되지만 완전 복원에는 base backup이 필요
+  immediate: true
   backupOwnerReference: self
   cluster:
     name: cledyu-pg
