@@ -51,8 +51,12 @@ func (f *fakeVMConn) snapshot() (string, [][2]int) {
 
 func newProxyTestServer(t *testing.T, conn *fakeVMConn, pinnedCols, pinnedRows int) string {
 	t.Helper()
+	// wsUpgrader는 (*Handler).wsUpgrader() 로 옮겨져 cfg.FrontendURL 에 origin 검사를 위임한다.
+	// 이 테스트는 CheckOrigin 이 아니라 proxyTerminal 자체(리사이즈 전파)를 검증하므로, 여기서는
+	// Subprotocols 만 동일하게 광고하는 로컬 업그레이더로 충분하다.
+	testUpgrader := websocket.Upgrader{Subprotocols: []string{terminalSubprotocolV2}}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ws, err := wsUpgrader.Upgrade(w, r, nil)
+		ws, err := testUpgrader.Upgrade(w, r, nil)
 		if err != nil {
 			t.Errorf("upgrade: %v", err)
 			return

@@ -46,9 +46,10 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions session.Provider, v
 	r.Use(middleware.Metrics())
 	r.Use(middleware.Tracing("cledyu-api"))
 	r.Use(cors.New(cors.Config{
-		// Next.js dev server(3000) 및 클러스터 프론트엔드에서의 요청 허용.
-		// 프로덕션에서는 Traefik이 CORS를 처리하므로 이 설정은 로컬 개발 전용.
-		AllowOrigins:     []string{"http://localhost:3000", "https://app.cledyu.local"},
+		// Next.js dev server(3000) 및 cfg.FrontendURL(운영 app.cledyu.com, 개발 app.cledyu.local)
+		// 에서의 요청 허용. WS Upgrade 는 이 미들웨어를 타지 않으므로 console.go 의
+		// browserOriginAllowed 가 같은 cfg.FrontendURL 기반으로 별도 검사한다(단일 소스 유지).
+		AllowOrigins:     []string{"http://localhost:3000", cfg.FrontendURL},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Authorization", "Content-Type"},
 		AllowCredentials: true,
