@@ -49,10 +49,14 @@ resource "aws_acm_certificate" "auth" {
   }
 }
 
+# 와일드카드(*.cledyu.com)와 apex(cledyu.com) SAN 은 ACM 이 동일한 검증 CNAME 을 돌려준다.
+# for_each 키를 resource_record_name(=동일값·apply 후 결정) 으로 잡으면 Duplicate object key
+# +unknown-key 로 plan 이 깨지므로, 정적·고유한 domain_name 으로 키를 잡는다(HashiCorp 표준
+# ACM 검증 패턴). 두 도메인이 같은 레코드를 UPSERT 하지만 allow_overwrite=true 로 멱등하다.
 resource "aws_route53_record" "acm_validation" {
   for_each = var.enable_public_ingress ? {
     for dvo in aws_acm_certificate.auth[0].domain_validation_options :
-    dvo.resource_record_name => {
+    dvo.domain_name => {
       name   = dvo.resource_record_name
       type   = dvo.resource_record_type
       record = dvo.resource_record_value
