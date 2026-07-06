@@ -133,11 +133,18 @@ redirectUri)는 응답당 단일값**이라 `.com` 하나로 간다. `.local` �
   - `keycloak.cookieDomain`: `.cledyu.com`
   - `keycloak.frontendUrl`: `https://app.cledyu.com`
   - `keycloak.url`: 변경 없음(이미 `https://auth.cledyu.com`)
-- **web config(`gitops/apps/web/values.yaml`)**: 백엔드 호출 URL은 **변경하지 않는다**.
-  web은 `CLEDYU_BACKEND_URL = http://api.api.svc.cluster.local`(in-cluster)로 api를
-  **서버사이드(Next.js route handler) 프록시**한다. 브라우저가 `api.cledyu.com`을 직접
-  때리는 지점은 **OAuth 콜백 리다이렉트뿐**이다. 따라서 web은 `.com` 인그레스 호스트만
-  추가(라우팅)하면 되고 backend URL 플립은 불필요·부적절.
+- **web config(`gitops/apps/web/values.yaml`)**: 백엔드 호출 URL(`CLEDYU_BACKEND_URL =
+  http://api.api.svc.cluster.local`, in-cluster 서버사이드 프록시)은 **변경하지 않는다**.
+  따라서 web은 `.com` 인그레스 호스트만 추가하면 되고 backend URL 플립은 불필요.
+- **정정(Codex P1, 2026-07-06):** 최초 설계는 "브라우저가 `api.cledyu.com`을 직접 때리는
+  지점은 OAuth 콜백뿐"이라고 적었으나 **틀렸다.** `apps/web/lib/runtime-api-origin.mjs`는
+  랩 화면에서 **터미널 WebSocket(`wss://api.cledyu.com`)과 IDE health check
+  (`https://api.cledyu.com`)를 브라우저에서 직접** 연다(`app.*`→`api.*` 변환). 그런데 api의
+  WS `CheckOrigin`(`apps/api/.../console.go`)과 CORS `AllowOrigins`(`router.go`)가
+  `app.cledyu.local`만 허용해, 공개 학습자는 로그인 후 터미널·IDE가 Origin/CORS에서 거부된다.
+  → 두 게이트를 `cfg.FrontendURL`(운영 `app.cledyu.com`, 개발 `app.cledyu.local`) 기반으로
+  통일해 해결(하드코딩 호스트 제거). 즉 web은 인그레스 호스트 추가 + **api의 브라우저 origin
+  허용을 공개 호스트로 확장**이 함께 필요하다.
 - **Keycloak client**: realm `cledyu-learn` web/api 클라이언트 valid redirect URIs에
   `https://api.cledyu.com/*`, `https://app.cledyu.com/*` 추가(기존 `.local` 유지). 구글 콘솔
   authorized redirect(`auth.cledyu.com`)는 변경 불필요.
