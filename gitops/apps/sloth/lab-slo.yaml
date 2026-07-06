@@ -197,7 +197,7 @@ spec:
       sli:
         events:
           errorQuery: |
-            sum(rate(ws_connection_drop_total[{{.window}}])) or vector(0)
+            sum(rate(ws_connection_drop_total{result="error"}[{{.window}}])) or vector(0)
           totalQuery: |
             sum(rate(ws_connection_established_total[{{.window}}]))
       alerting:
