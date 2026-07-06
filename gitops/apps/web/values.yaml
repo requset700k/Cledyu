@@ -2,7 +2,7 @@ image:
   repository: ghcr.io/requset700k/web
   # main 머지 시 build-web.yml 이 latest + sha-<short> 태그로 push.
   # 운영 환경에서는 sha-<short> 태그로 고정 권장.
-  tag: sha-2b37f8a
+  tag: sha-b404801
   pullPolicy: Always
 
 replicaCount: 1
