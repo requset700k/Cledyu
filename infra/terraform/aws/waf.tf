@@ -1,7 +1,8 @@
 # AWS WAF — 공개 ALB 앞단 보호. enable_public_ingress 게이트.
-# 관리형 룰은 초기 count 모드(override count)로 배포해 정상 학습자 오탐을 CloudWatch
-# sampled requests 로 관측한 뒤 block(override none)으로 전환한다(런북 참고). rate-based
-# 는 처음부터 block(2000/5분이라 정상 트래픽 영향 낮음).
+# 관리형 룰은 count 모드로 배포→sampled requests 로 오탐 관측 후 block(override none) 전환.
+# 2026-07-07 컷오버 E2E(학습자 구글 로그인→랩) 후 관측: 관리형 룰 매칭은 전부 스캐너 노이즈
+# (/.env, /boaform, 평판IP), 학습자 정상 트래픽 오탐 0 → **block(none) 전환 완료**. rate-based·
+# /metrics 는 처음부터 block. 오탐 발생 시 해당 룰을 count 로 되돌려(override count) 관측 재개.
 resource "aws_wafv2_web_acl" "public" {
   count = local.pub
   name  = "${var.name_prefix}-public"
@@ -15,7 +16,7 @@ resource "aws_wafv2_web_acl" "public" {
     name     = "common-rule-set"
     priority = 1
     override_action {
-      count {}
+      none {}
     }
     statement {
       managed_rule_group_statement {
@@ -34,7 +35,7 @@ resource "aws_wafv2_web_acl" "public" {
     name     = "known-bad-inputs"
     priority = 2
     override_action {
-      count {}
+      none {}
     }
     statement {
       managed_rule_group_statement {
@@ -53,7 +54,7 @@ resource "aws_wafv2_web_acl" "public" {
     name     = "ip-reputation"
     priority = 3
     override_action {
-      count {}
+      none {}
     }
     statement {
       managed_rule_group_statement {
