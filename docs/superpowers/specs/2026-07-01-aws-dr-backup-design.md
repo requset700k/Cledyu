@@ -52,7 +52,6 @@ Cledyu는 온프렘(KubeVirt) 세션 풀을 primary로 쓰고, 리소스가 만�
 | Postgres (cledyu) | wal-g 베이스백업 + WAL 연속 아카이빙 → S3 | 5~15분 | 학습자 진도의 유일 원본, PITR |
 | Keycloak DB | wal-g 또는 pg_dump 크론 → S3 | Postgres와 정렬 | 학습자 신원 원본(앱 users는 미러) |
 | Vault | `vault operator raft snapshot save` CronJob → S3 | 1~24h | 시크릿 저빈도 변경 |
-| 범용 PVC | Longhorn RecurringJob backup → S3 | 볼륨별 정책 | crash-consistent 볼륨 백업 |
 
 lab-events는 이 표(온프렘→S3 백업) 대상이 아니다. BQ(GCP)로 안착하는 온프렘 durability 항목이며
 DR 백업 범위 밖이다 — 상세는 아래 § lab-events 내구성 참조.
@@ -65,11 +64,10 @@ DR 백업 범위 밖이다 — 상세는 아래 § lab-events 내구성 참조.
     살고 복구는 불가 → 반쪽. 멀티리전 DR은 본 프로젝트 범위 밖.
   - **S3 Object Lock(GOVERNANCE 30일) 도입**: 백업 자체 손실(writer 키 유출·삭제·랜섬)을 CRR이
     아니라 불변성으로 막는다. versioning이 못 막는 "권한 있는 삭제"까지 30일간 차단. writer엔
-    BypassGovernanceRetention 미부여(키 유출 시 우회 방지). 단 **Longhorn 매시 백업은 30일 락과
-    충돌**(720개 누적)하므로 락 없는 별도 버킷으로 분리(비-DR·온프렘 로컬 복구라 우선순위 낮음).
+    BypassGovernanceRetention 미부여(키 유출 시 우회 방지).
 - **Keycloak realm 설정은 백업하지 않는다** — `infra/terraform/keycloak`로 재생성.
   백업 대상은 학습자 계정이 쌓이는 Keycloak DB뿐.
-- **왜 Longhorn 볼륨 백업이 아닌 wal-g인가(Postgres)**: 볼륨 백업은 crash-consistent이고
+- **왜 볼륨 스냅샷이 아닌 wal-g인가(Postgres)**: 볼륨 백업은 crash-consistent이고
   RPO가 백업 주기만큼 거칠다. wal-g는 WAL 연속 아카이빙으로 RPO를 수분으로 낮추고 PITR을 제공한다.
 
 ### 백업 우선순위
@@ -111,7 +109,7 @@ Velero로 클러스터 전체를 무차별 백업하면 **비목표로 정한 "�
 ### Postgres/Vault와의 역할 분담
 
 데이터 자체는 기존 전용 메커니즘을 유지한다(PITR이 필요한 Postgres는 wal-g가 Velero의 crash-consistent
-스냅샷보다 우월 — § 왜 Longhorn 볼륨 백업이 아닌 wal-g인가 참조). Velero는 **그 외 클러스터
+스냅샷보다 우월 — § 왜 볼륨 스냅샷이 아닌 wal-g인가 참조). Velero는 **그 외 클러스터
 오브젝트**(네임스페이스, ConfigMap, CRD, 동적 생성 리소스)만 담당한다. Postgres/Vault의 PVC는
 Velero 백업 라벨 셀렉터에서 제외해 PV 스냅샷 중복을 피한다.
 
@@ -259,7 +257,7 @@ RTO를 정직하게 정의한다 — **시작선 = 장애 발생 시점**(발동
 
 ## 알림 체계
 
-- **백업 실패**: wal-g / raft 스냅샷 / Longhorn backup 잡 실패 → Prometheus alert
+- **백업 실패**: wal-g / raft 스냅샷 잡 실패 → Prometheus alert
   (kube-prometheus-stack 기존 활용)
 - **RPO 위반**: 마지막 성공 백업이 목표 RPO 초과(예: WAL 아카이브 지연 > 15분) 시 경보
 - **DR 드릴**: 분기 1회 복구 리허설로 실제 RTO 측정·기록
@@ -267,7 +265,7 @@ RTO를 정직하게 정의한다 — **시작선 = 장애 발생 시점**(발동
 
 ## 산출물 위치(예정)
 
-- 백업: `gitops/apps/`(wal-g/raft CronJob, Longhorn RecurringJob, Velero), S3 버킷은 `infra/terraform/aws/`
+- 백업: `gitops/apps/`(wal-g/raft CronJob, Velero), S3 버킷은 `infra/terraform/aws/`
 - DR 오케스트레이션: `infra/terraform/aws/`(EventBridge/Lambda/Step Functions, EKS)
 - EKS 오버레이: `gitops/` 하위 EKS 오버레이 디렉터리
 - lab-events: `apps/airflow/dags/lab_events_to_bq.py`
@@ -279,5 +277,4 @@ RTO를 정직하게 정의한다 — **시작선 = 장애 발생 시점**(발동
 - 온프렘 CloudWatch egress가 tailnet 없이 열려 있는지 실측 확인(push 하트비트 전제)
 - EKS 프로비저닝을 사전생성 빈 클러스터 vs 완전 IaC 생성 중 무엇으로 할지 비용/RTO 트레이드오프 재검토
 - Velero 클러스터 상태 스냅샷 주기(클러스터 상태 RPO), MinIO 중간 계층 실제 필요 여부
-- Longhorn 백업용 무-락 별도 버킷 신설(Object Lock 30일과 매시 백업 충돌 해소, Plan A Task 6)
 - 온프렘 failback 절차 구체화 — 수동 vs 반자동 자동화 수준, 역방향 데이터 복제 방식(§ 온프렘 복귀)

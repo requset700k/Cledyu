@@ -1,8 +1,8 @@
 # DR/백업 오프사이트 저장소 — 온프렘 durable 데이터(Postgres WAL/base, Vault raft 스냅샷)를
 # S3 로 내보낸다. 온프렘이 죽어도 여기 사본이 남아 EKS DR 로 복원한다.
 # 자격증명은 정적 IAM 키 → Vault → ESO(온프렘 클러스터라 IRSA 불가).
-# (Longhorn 볼륨 백업은 매시 주기라 아래 Object Lock 30일과 충돌 → 이 버킷을 쓰지 않고 별도
-#  무-락 버킷으로 분리한다. Plan A Task 6 참조.)
+# (Longhorn 볼륨 백업은 DR 범위 밖이라 이 버킷을 쓰지 않는다 — 온프렘 로컬 복구용이며
+#  오프사이트 DR과는 무관하다고 판단해 Plan A에서 제외했다.)
 
 resource "aws_s3_bucket" "dr_backups" {
   bucket = "${var.name_prefix}-dr-backups"
@@ -25,9 +25,8 @@ resource "aws_s3_bucket_versioning" "dr_backups" {
 # 권한을 주지 않는다(키 유출 시 우회 방지). COMPLIANCE 와 달리 break-glass 탈출구는 관리자에게 남는다.
 #
 # 주의: 이 30일 락은 저빈도 백업(postgres 30d retention·vault 6h·velero 6h)과는 정합적이나,
-# Longhorn 매시 백업(retain 24)과는 충돌한다(720개 누적) → Longhorn 백업은 이 버킷/락 대상에서
-# 제외한다(Plan A Task 6에서 별도 버킷 또는 무-락 처리). Longhorn 은 온프렘 로컬 복구용(비-DR)이라
-# 락 보호의 우선순위가 낮다.
+# Longhorn 매시 백업(retain 24)과는 충돌한다(720개 누적). Longhorn은 온프렘 로컬 복구용(비-DR)이라
+# 이 버킷/락 대상이 아니며, DR 범위 밖으로 판단해 Plan A에서 완전히 제외했다(별도 Task 없음).
 resource "aws_s3_bucket_object_lock_configuration" "dr_backups" {
   bucket = aws_s3_bucket.dr_backups.id
 
