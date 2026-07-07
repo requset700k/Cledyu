@@ -17,6 +17,15 @@ spec:
         spec:
           serviceAccountName: vault-backup
           restartPolicy: OnFailure
+          # vault ns는 PSA restricted(namespace.yaml) + Kyverno baseline-workload-security로
+          # runAsNonRoot·seccompProfile·capabilities.drop 등을 강제한다(코드 리뷰로 발견 — 이게
+          # 없으면 admission에서 거부돼 스냅샷 Pod 자체가 안 뜬다). fsGroup은 두 컨테이너(다른 UID)가
+          # 공유하는 snapshot emptyDir에 그룹 쓰기 권한을 준다.
+          securityContext:
+            runAsNonRoot: true
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
           volumes:
             - name: snapshot
               emptyDir: {}
@@ -30,6 +39,15 @@ spec:
           initContainers:
             - name: vault-snapshot
               image: hashicorp/vault:1.21.2
+              # 기존 vault StatefulSet(gitops/apps/vault/values.yaml)과 동일하게 UID 100 —
+              # 이 클러스터에서 vault 바이너리가 이 UID로 정상 동작함이 이미 검증돼 있다.
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 100
+                runAsGroup: 1000
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: [ALL]
               env:
                 - name: VAULT_ADDR
                   value: "https://vault-active.vault.svc:8200"
@@ -53,6 +71,15 @@ spec:
           containers:
             - name: s3-upload
               image: amazon/aws-cli:2.32.7
+              # 이미지 기본 유저는 root(확인됨)라 임의의 비-root UID를 강제한다. aws CLI는 자격증명을
+              # 전부 env var로 받아(HOME 의존 없음) 임의 UID로도 정상 동작한다.
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                runAsGroup: 1000
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: [ALL]
               env:
                 - name: AWS_DEFAULT_REGION
                   value: "ap-northeast-2"
