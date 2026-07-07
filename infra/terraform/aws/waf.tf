@@ -1,8 +1,10 @@
 # AWS WAF — 공개 ALB 앞단 보호. enable_public_ingress 게이트.
 # 관리형 룰은 count 모드로 배포→sampled requests 로 오탐 관측 후 block(override none) 전환.
 # 2026-07-07 컷오버 E2E(학습자 구글 로그인→랩) 후 관측: 관리형 룰 매칭은 전부 스캐너 노이즈
-# (/.env, /boaform, 평판IP), 학습자 정상 트래픽 오탐 0 → **block(none) 전환 완료**. rate-based·
-# /metrics 는 처음부터 block. 오탐 발생 시 해당 룰을 count 로 되돌려(override count) 관측 재개.
+# (/.env, /boaform, 평판IP), 학습자 정상 트래픽 오탐 0 → **block(none) 전환**. 단 로그아웃은
+# id_token_hint 대용량 쿼리라 CRS SizeRestrictions_QUERYSTRING 에 걸리므로 그 subrule 만 count
+# 로 예외(아래 rule_action_override, Codex P2). rate-based·/metrics 는 처음부터 block. 신규
+# 오탐 발생 시 해당 룰/subrule 을 count 로 되돌려(override count) 관측 재개.
 resource "aws_wafv2_web_acl" "public" {
   count = local.pub
   name  = "${var.name_prefix}-public"
@@ -22,6 +24,17 @@ resource "aws_wafv2_web_acl" "public" {
       managed_rule_group_statement {
         name        = "AWSManagedRulesCommonRuleSet"
         vendor_name = "AWS"
+
+        # SizeRestrictions_QUERYSTRING(>2048B 쿼리 block)만 count 로 예외 처리한다.
+        # Keycloak 로그아웃(api LogoutURL)이 전체 id_token 을 id_token_hint 쿼리로 붙여
+        # groups/roles 포함 토큰은 2048B 를 넘어 이 subrule 에 걸려 로그아웃이 403 된다
+        # (Codex P2). 나머지 CRS(SQLi/XSS/path-traversal 등)는 그대로 block 유지.
+        rule_action_override {
+          name = "SizeRestrictions_QUERYSTRING"
+          action_to_use {
+            count {}
+          }
+        }
       }
     }
     visibility_config {
