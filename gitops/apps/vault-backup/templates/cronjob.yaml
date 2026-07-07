@@ -68,6 +68,11 @@ spec:
                   export VAULT_TOKEN
                   TS=$(date -u +%Y%m%dT%H%M%SZ)
                   vault operator raft snapshot save /snapshot/vault-raft-$TS.snap
+                  # 스냅샷은 0600(owner-only)로 생성돼 그룹 읽기 비트가 없다. fsGroup·runAsGroup으로
+                  # 두 컨테이너가 그룹 1000을 공유해도 0600이면 s3-upload(UID 1000)가 못 읽는다
+                  # (런타임 실측: "File/Directory is not readable"). 0640으로 그룹 읽기만 부여한다
+                  # (other는 계속 차단 — 스냅샷은 Vault 전체 시크릿이라 world-read 금지).
+                  chmod 0640 /snapshot/vault-raft-$TS.snap
           containers:
             - name: s3-upload
               image: amazon/aws-cli:2.32.7
