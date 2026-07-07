@@ -212,7 +212,7 @@ resource "aws_security_group" "proxy" {
 
 resource "aws_instance" "proxy" {
   count                  = local.pub
-  ami                    = local.ami_id
+  ami                    = var.proxy_ami_id
   instance_type          = var.proxy_instance_type
   subnet_id              = local.subnet_id
   vpc_security_group_ids = [aws_security_group.proxy[0].id]
