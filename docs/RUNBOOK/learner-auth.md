@@ -6,16 +6,26 @@
 ## 1. 구조 한눈에
 
 ```
-학습자 브라우저
+학습자 브라우저(공개 인터넷)
   │  로그인/회원가입
   ▼
-app.cledyu.local (web)  ──►  api.cledyu.local (BFF)
+app.cledyu.com (web)  ──►  api.cledyu.com (BFF, OAuth 콜백)
                                   │  authorization code + PKCE
                                   ▼
-                       Keycloak  cledyu-learn  realm
+                    auth.cledyu.com → Keycloak cledyu-learn realm
                           ├─ 이메일 자가가입 (registration_allowed=true)
                           └─ IdP 브로커링: Google / Kakao / Naver
 ```
+
+> **공개 컷오버 상태(2026-07-07~):** 학습자-대면 호스트는 `app|api|auth.cledyu.com`(공개, ACM 와일드카드
+> TLS, ALB→tailnet 프록시→Traefik). api 세션 config(쿠키도메인 `.cledyu.com`, callback `api.cledyu.com`,
+> `CLEDYU_FRONTEND_URL=https://app.cledyu.com`)는 **`gitops/apps/api/values.yaml` 의 `keycloak.publicExposure`
+> 게이트로 전환**된다: `true`=공개 `.com`(현재), `false`=`.local`(내부/컷오버 전, **롤백 경로**). 롤백은
+> 값 PR 로 `publicExposure=false` → ArgoCD 롤아웃이면 즉시 `.local` 복귀(단, 그동안 발급된 `.cledyu.com`
+> 쿠키는 무효). 인프라 게이트는 별개로 `infra/terraform/aws` 의 `enable_public_ingress`(ALB/ACM/WAF/프록시).
+> WS(터미널)·CORS(IDE) Origin 허용은 `CLEDYU_FRONTEND_URL` 을 따라가므로 플립 시 자동 정합. 아래 본문에
+> 남은 `*.cledyu.local` 표기는 내부 서비스(예: `keycloak.cledyu.local` 운영 realm 소비자)와 컷오버 전 경로
+> 설명이다.
 
 - 운영자 SSO(ArgoCD/Grafana/Kafka-UI/kube-apiserver/Vault)는 **별도** `cledyu` realm. 학습자와 격리.
 - 앱은 `cledyu-learn` 하나만 OIDC provider 로 바라본다. 소셜 로그인은 Keycloak 이 위임 처리.
@@ -25,7 +35,7 @@ app.cledyu.local (web)  ──►  api.cledyu.local (BFF)
 1. `GET /api/v1/auth/login` → state/nonce/PKCE 생성(임시 쿠키) → Keycloak 인가 URL 리다이렉트.
    - `?screen=register` 면 Keycloak **회원가입 폼**(`/registrations`)으로 딥링크.
 2. Keycloak → `GET /api/v1/auth/callback?code=…&state=…`
-   - state 쿠키 일치 검증 → code+PKCE 교환 → id_token nonce 검증 → `access_token`/`id_token`/`refresh_token` HttpOnly 쿠키 설정 → `app.cledyu.local/callback` 리다이렉트.
+   - state 쿠키 일치 검증 → code+PKCE 교환 → id_token nonce 검증 → `access_token`/`id_token`/`refresh_token` HttpOnly 쿠키 설정 → `CLEDYU_FRONTEND_URL`/callback 리다이렉트(공개 컷오버: `app.cledyu.com/callback`, 롤백 시 `app.cledyu.local/callback`). 콜백 도달 host 는 `api.cledyu.com`(공개)/`api.cledyu.local`(내부).
 3. 보호 API: `middleware.JWT` 가 access_token 을 JWKS 로 검증, claims(`sub`/`email`/`name`/`realm_access.roles`)를 컨텍스트에 주입.
 4. **silent refresh:** access_token(기본 15m) 만료로 보호 API 가 401 을 돌려주면
    프론트(`lib/api.ts`)가 `POST /api/v1/auth/refresh` 를 1회 호출(동시 401 은 single-flight 공유)
