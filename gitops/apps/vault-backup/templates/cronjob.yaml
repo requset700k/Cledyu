@@ -13,9 +13,18 @@ spec:
   concurrencyPolicy: Forbid
   jobTemplate:
     spec:
+      # 외부 의존성(Vault API·S3 업로드)이 무응답이면 Job이 Active로 고착되는데, concurrencyPolicy:
+      # Forbid 때문에 이후 6h 스냅샷이 전부 skip돼 RPO가 무한정 깨진다. 데드라인으로 fail-fast 시켜
+      # 스케줄 고착을 막는다(레포의 다른 CronJob 관례와 동일).
+      activeDeadlineSeconds: 300
+      backoffLimit: 2
       template:
         spec:
           serviceAccountName: vault-backup
+          # 기본 automount는 두 컨테이너 모두에 SA 토큰을 붙여, s3-upload도 auth/kubernetes/login으로
+          # vault-backup role 토큰을 발급받을 수 있다(위 최소권한 주석 위반). 자동 마운트를 끄고,
+          # Vault 로그인용 projected 토큰을 스냅샷 initContainer에만 마운트해 분리한다.
+          automountServiceAccountToken: false
           restartPolicy: OnFailure
           # vault ns는 PSA restricted(namespace.yaml) + Kyverno baseline-workload-security로
           # runAsNonRoot·seccompProfile·capabilities.drop 등을 강제한다(코드 리뷰로 발견 — 이게
@@ -29,6 +38,14 @@ spec:
           volumes:
             - name: snapshot
               emptyDir: {}
+            # Vault 로그인 전용 projected SA 토큰. audience는 지정하지 않아 API server 기본값을 쓰며
+            # (기존 automount 토큰과 동일), 스냅샷 initContainer에만 마운트해 s3-upload와 분리한다.
+            - name: vault-token
+              projected:
+                sources:
+                  - serviceAccountToken:
+                      path: token
+                      expirationSeconds: 3600
             # 기존 ESO ClusterSecretStore(vault-backend)와 동일하게 vault-tls Secret의 실제 CA를 신뢰한다.
             - name: vault-ca
               secret:
@@ -59,12 +76,16 @@ spec:
                 - name: vault-ca
                   mountPath: /vault-ca
                   readOnly: true
+                # automount를 끈 대신 Vault 로그인용 projected 토큰을 이 컨테이너에만 준다.
+                - name: vault-token
+                  mountPath: /var/run/secrets/vault-token
+                  readOnly: true
               command: ["/bin/sh", "-c"]
               args:
                 - |
                   set -e
                   VAULT_TOKEN=$(vault write -field=token auth/kubernetes/login \
-                    role=vault-backup jwt=@/var/run/secrets/kubernetes.io/serviceaccount/token)
+                    role=vault-backup jwt=@/var/run/secrets/vault-token/token)
                   export VAULT_TOKEN
                   TS=$(date -u +%Y%m%dT%H%M%SZ)
                   vault operator raft snapshot save /snapshot/vault-raft-$TS.snap
