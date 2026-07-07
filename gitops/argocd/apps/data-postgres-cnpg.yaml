@@ -21,12 +21,12 @@ spec:
     server: https://kubernetes.default.svc
     namespace: postgres
 
-  # 이관 동안은 수동 sync(automated 없음). 자동 sync면 커밋 즉시 import가 실행돼
-  # write-freeze 전의 구 DB를 스냅샷하게 된다. cutover 검증 후 아래 automated 블록을 추가한다:
-  #   syncPolicy.automated: { prune: true, selfHeal: true }
-  # (Plan A Task 4 Step 10 — 런타임 `argocd app set`이 아니라 이 파일을 git으로 수정한다.
-  #  root-apps(selfHeal)가 자식 spec을 git과 강제 일치시켜 런타임 토글은 복원 시 되돌려지기 때문.)
+  # 이관 완료(2026-07-07, Plan A Task 4 Step 5~9 전부 통과: G1 row count 일치, G3 S3 백업 도달, api cutover 성공 확인) — automated로 전환
+  # 런타임 `argocd app set`이 아니라 이 파일을 git으로 수정한다.(root-apps의 selfHeal이 자식 spec을 git과 강제 일치시켜 런타임 토글은 복원 시 되돌려짐)
   syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
