@@ -45,12 +45,24 @@ variable "instance_type" {
 
 variable "ami_id" {
   description = <<-EOT
-    세션/프록시 인스턴스 AMI(ap-northeast-2). 빈 값이면 Canonical Ubuntu 22.04(amd64) '최신' AMI 를
-    자동 조회하는데(data.aws_ami.ubuntu, most_recent), 이 경우 신규 Ubuntu 릴리스가 나오면 apply
-    마다 AMI 가 바뀌어 **aws_instance.proxy 가 강제 교체**(destroy/create)되고 lab_session 런치
-    템플릿도 드리프트한다. 이를 막기 위해 현재 배포 AMI 로 pin 해 둔다(2026-07). 의도적으로 최신을
-    쓰려면 ""(빈 값)으로 되돌리거나, packer 로 구운 커스텀 AMI(SSM Agent·tailscale·code-server 프리베이크)
-    ID 로 교체한다. README 의 'AMI 전략' 참고.
+    세션(lab) 런치 템플릿 AMI(ap-northeast-2). 운영 tfvars 는 베이크된 lab-base 이미지로 설정한다
+    (EC2 오버플로우 세션 VM 이 code-server·tailscale 등 프리베이크를 쓰기 위함). 빈 값이면 Canonical
+    Ubuntu 22.04(amd64) '최신' 을 자동 조회하는데(data.aws_ami.ubuntu, most_recent), 신규 릴리스마다
+    lab_session 런치 템플릿이 드리프트하므로 현재 AMI 로 pin 한다(2026-07). **프록시는 이 값을 쓰지
+    않는다** — 경량 Caddy 프록시는 stock Ubuntu(var.proxy_ami_id)로 분리했다. lab-base 이미지 위에
+    프록시를 띄우면 lab 자체 cloud-init 과 충돌하거나 불필요하게 무겁다. README 의 'AMI 전략' 참고.
+  EOT
+  type        = string
+  default     = "ami-0afe1fd15675c3f15"
+}
+
+variable "proxy_ami_id" {
+  description = <<-EOT
+    tailnet 리버스프록시(Caddy) 전용 AMI(ap-northeast-2). 프록시는 경량 stock Ubuntu 로 충분하고
+    세션 VM 용 lab-base 이미지(var.ami_id)와 무관하므로 분리해 pin 한다. 기본값은 현재 프록시가
+    실행 중인 Canonical Ubuntu 22.04(amd64) — var.ami_id 를 lab-base 로 바꿔도 프록시는 이 값을
+    유지해 강제 교체·잘못된 이미지(lab cloud-init 충돌) 부팅을 막는다. 최신 stock 으로 갱신하려면
+    이 값을 새 Ubuntu AMI 로 교체한다.
   EOT
   type        = string
   default     = "ami-0afe1fd15675c3f15"
