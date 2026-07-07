@@ -11,6 +11,9 @@ metadata:
 spec:
   schedule: "0 */6 * * *"   # 6시간마다 (RPO 1~24h 목표 충족)
   concurrencyPolicy: Forbid
+  # 스냅샷은 Vault 전체 시크릿이다. 끝난 Job/Pod(스냅샷 볼륨 보유)가 오래 남지 않게 이력을 최소화한다.
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
       # 외부 의존성(Vault API·S3 업로드)이 무응답이면 Job이 Active로 고착되는데, concurrencyPolicy:
@@ -18,6 +21,8 @@ spec:
       # 스케줄 고착을 막는다(레포의 다른 CronJob 관례와 동일).
       activeDeadlineSeconds: 300
       backoffLimit: 2
+      # 끝난 Job을 10분 뒤 GC해 스냅샷을 담은 Pod/볼륨의 잔존 시간을 제한한다(로그 확인 여유는 유지).
+      ttlSecondsAfterFinished: 600
       template:
         spec:
           serviceAccountName: vault-backup
@@ -37,7 +42,11 @@ spec:
               type: RuntimeDefault
           volumes:
             - name: snapshot
-              emptyDir: {}
+              # 스냅샷(Vault 전체 시크릿)을 노드 로컬 디스크에 남기지 않도록 tmpfs(RAM)에 둔다. 업로드
+              # 실패 시에도 디스크에 민감 파일이 잔존하지 않고, Pod 종료 시 tmpfs가 즉시 회수된다.
+              emptyDir:
+                medium: Memory
+                sizeLimit: 128Mi
             # Vault 로그인 전용 projected SA 토큰. audience는 지정하지 않아 API server 기본값을 쓰며
             # (기존 automount 토큰과 동일), 스냅샷 initContainer에만 마운트해 s3-upload와 분리한다.
             - name: vault-token
@@ -120,6 +129,8 @@ spec:
               args:
                 - |
                   set -e
+                  # 성공·실패 어느 경로로 끝나도 tmpfs의 스냅샷(전체 시크릿)을 즉시 제거한다.
+                  trap 'rm -f /snapshot/*.snap' EXIT
                   for f in /snapshot/*.snap; do
                     aws s3 cp "$f" "s3://cledyu-lab-dr-backups/vault/$(basename "$f")"
                   done
