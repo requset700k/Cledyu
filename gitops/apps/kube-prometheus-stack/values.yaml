@@ -418,6 +418,20 @@ additionalPrometheusRulesMap:
             annotations:
               summary: "lab 프로비저닝 카나리가 최근 성공하지 못함"
               description: "base 이미지 클론(=세션 디스크 프로비저닝) 카나리가 45분 내 성공 기록이 없다. 프로비저닝 경로 장애 가능성."
+      - name: dr-backup
+        rules:
+          # DR 오프사이트 백업(vault raft 스냅샷 → S3)이 조용히 끊기는 걸 감지한다. Vault role/Secret/
+          # S3 권한 오류로 CronJob이 계속 실패해도 배포만으론 티가 안 나므로 last-success 부재로 경보한다.
+          # 6h 주기 → 단일 miss(최대 12h gap)는 무시하고 2회 연속 실패(13h)부터 발화. absent는 미배포/메트릭 부재.
+          - alert: VaultRaftSnapshotFailing
+            expr: |
+              (time() - max(kube_cronjob_status_last_successful_time{namespace="vault", cronjob="vault-raft-snapshot"})) > 46800
+              or absent(kube_cronjob_status_last_successful_time{namespace="vault", cronjob="vault-raft-snapshot"})
+            for: 30m
+            labels: { severity: critical }
+            annotations:
+              summary: "Vault raft 스냅샷 백업이 최근 성공하지 못함"
+              description: "vault-raft-snapshot CronJob(6h 주기)이 13시간 내 성공 기록이 없다(2회 연속 실패). Vault role/Secret/S3 권한 오류로 오프사이트 백업이 끊겨 RPO 위반 가능성. absent는 CronJob 미배포/메트릭 부재를 의미."
       - name: longhorn-health
         rules:
           - alert: LonghornNodeUnschedulable
