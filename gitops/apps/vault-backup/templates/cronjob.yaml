@@ -129,8 +129,11 @@ spec:
               args:
                 - |
                   set -e
-                  # 성공·실패 어느 경로로 끝나도 tmpfs의 스냅샷(전체 시크릿)을 즉시 제거한다.
-                  trap 'rm -f /snapshot/*.snap' EXIT
                   for f in /snapshot/*.snap; do
                     aws s3 cp "$f" "s3://cledyu-lab-dr-backups/vault/$(basename "$f")"
                   done
+                  # 업로드가 모두 성공한 경우에만(set -e 로 실패 시 여기 도달 못 함) tmpfs 스냅샷을 제거한다.
+                  # 실패 시엔 남겨야 restartPolicy: OnFailure 재시도가 같은 Pod에서(initContainer는 재실행
+                  # 안 됨) 스냅샷을 다시 업로드할 수 있다. 실패 경로 잔존은 tmpfs(비-디스크) +
+                  # ttlSecondsAfterFinished + history limit 로 이미 제한된다.
+                  rm -f /snapshot/*.snap
