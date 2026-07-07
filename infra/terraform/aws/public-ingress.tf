@@ -19,6 +19,13 @@
 
 locals {
   pub = var.enable_public_ingress ? 1 : 0
+
+  # 공개 노출 3-host. 전부 같은 ALB(alias)로 보내고 호스트 분기는 Traefik이 담당한다.
+  public_hosts = var.enable_public_ingress ? {
+    auth = var.public_keycloak_host
+    app  = var.public_app_host
+    api  = var.public_api_host
+  } : {}
 }
 
 # ── Route53 공개 hosted zone (기존 것 참조) ───────────────────────────────
@@ -32,22 +39,31 @@ data "aws_route53_zone" "public" {
 
 # ── ACM 인증서(auth.cledyu.com, DNS 검증) ──────────────────────────────────
 resource "aws_acm_certificate" "auth" {
-  count             = local.pub
-  domain_name       = var.public_keycloak_host
-  validation_method = "DNS"
+  count                     = local.pub
+  domain_name               = "*.${var.public_domain}"
+  subject_alternative_names = [var.public_domain]
+  validation_method         = "DNS"
 
   lifecycle {
     create_before_destroy = true
   }
 }
 
+# 와일드카드(*.cledyu.com)와 apex(cledyu.com) SAN 은 ACM 이 **동일한 검증 CNAME** 을 돌려준다.
+# for_each 키를 resource_record_name(=동일값·apply 후 결정) 으로 잡으면 Duplicate object key
+# +unknown-key 로 plan 이 깨진다. 그렇다고 domain_name 으로 잡아 두 도메인 모두 레코드를 만들면
+# 하나의 CNAME 을 두 리소스가 중복 소유해 교체/철거 시 한 리소스가 공유 레코드를 지워 drift/검증
+# 실패가 난다. 따라서 정적·고유한 domain_name 을 키로 쓰되 **apex(=public_domain) 는 제외**해
+# 와일드카드용 레코드 하나만 만든다 — 이 CNAME 하나가 두 도메인을 모두 검증한다(AWS ACM DNS
+# validation). 만약 apex 만 노출하고 와일드카드가 없는 구성이 되면 아래 필터를 조정해야 한다.
 resource "aws_route53_record" "acm_validation" {
   for_each = var.enable_public_ingress ? {
-    for dvo in aws_acm_certificate.auth[0].domain_validation_options : dvo.domain_name => {
+    for dvo in aws_acm_certificate.auth[0].domain_validation_options :
+    dvo.domain_name => {
       name   = dvo.resource_record_name
       type   = dvo.resource_record_type
       record = dvo.resource_record_value
-    }
+    } if dvo.domain_name != var.public_domain
   } : {}
 
   zone_id         = data.aws_route53_zone.public[0].zone_id
@@ -123,10 +139,13 @@ resource "aws_lb_target_group" "keycloak_proxy" {
   target_type = "instance"
 
   health_check {
-    path     = "/realms/cledyu-learn"
-    port     = "traffic-port"
-    protocol = "HTTP"
-    matcher  = "200-399"
+    path                = "/healthz"
+    port                = "traffic-port"
+    protocol            = "HTTP"
+    matcher             = "200"
+    interval            = 30
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
   }
 
   tags = { Name = "${var.name_prefix}-kc-proxy" }
@@ -212,12 +231,18 @@ resource "aws_instance" "proxy" {
   user_data = base64encode(templatefile("${path.module}/cloud-init/keycloak-proxy.yaml.tftpl", {
     tailscale_auth_key = var.tailscale_auth_key
     upstream_url       = var.keycloak_upstream_url
-    public_host        = var.public_keycloak_host
     hostname           = "${var.name_prefix}-kc-proxy"
-    # tls_* 옵션은 upstream 스킴과 무관하게 Caddy 의 backend TLS 를 켜므로, https
-    # upstream 일 때만 transport 블록을 렌더한다(http upstream 평문 502 방지).
+    # Caddy host 매처 allowlist — 이 공개 Host 만 Traefik 으로 전달하고 나머지는 404
+    # (내부 .local Ingress 로의 Host 주입 차단).
+    allowed_hosts = join(" ", [var.public_keycloak_host, var.public_app_host, var.public_api_host])
+    # tls transport 블록은 https upstream 일 때만 렌더(http upstream 평문 502 방지).
     upstream_tls = startswith(var.keycloak_upstream_url, "https://")
   }))
+
+  # user_data(cloud-init)는 최초 launch 때만 실행되고, aws_instance 는 user_data 변경 시
+  # 기본적으로 stop/start 만 해 기존 인스턴스에 새 Caddyfile/헬스체크가 반영되지 않는다.
+  # 강제 교체로 cloud-init 을 새로 돌려 변경분을 실제 적용한다(그렇지 않으면 타깃그룹 unhealthy).
+  user_data_replace_on_change = true
 
   tags = { Name = "${var.name_prefix}-kc-proxy" }
 }
@@ -229,11 +254,12 @@ resource "aws_lb_target_group_attachment" "proxy" {
   port             = 80
 }
 
-# ── Route53 A(ALIAS) → ALB ────────────────────────────────────────────────
-resource "aws_route53_record" "auth" {
-  count   = local.pub
+# ── Route53 A(ALIAS) → ALB (auth/app/api 3-host) ──────────────────────────
+resource "aws_route53_record" "public" {
+  for_each = local.public_hosts
+
   zone_id = data.aws_route53_zone.public[0].zone_id
-  name    = var.public_keycloak_host
+  name    = each.value
   type    = "A"
 
   alias {
@@ -241,4 +267,10 @@ resource "aws_route53_record" "auth" {
     zone_id                = aws_lb.public[0].zone_id
     evaluate_target_health = true
   }
+}
+
+# 기존 단일 auth 레코드를 파괴/재생성 없이 map 키 auth 로 이관.
+moved {
+  from = aws_route53_record.auth[0]
+  to   = aws_route53_record.public["auth"]
 }

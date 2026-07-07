@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/requset700k/cledyu/api/internal/config"
 	"github.com/requset700k/cledyu/api/internal/ec2"
 	"github.com/requset700k/cledyu/api/internal/session"
 	"go.uber.org/zap"
@@ -61,19 +63,32 @@ func parseResizeFrame(data []byte) (cols, rows int, ok bool) {
 // 구간(새 웹↔옛 API, 옛 웹↔새 API)에서 제어 JSON 이 셸 입력으로 주입되거나 화면에 출력되는 걸 막는다.
 const terminalSubprotocolV2 = "cledyu-term-v2"
 
-// wsUpgrader는 브라우저 WebSocket 업그레이드를 처리한다.
+// browserOriginAllowed는 브라우저 origin 하나를 허용할지 판정한다. ws CheckOrigin(아래)과
+// router.go 의 CORS AllowOrigins 가 이 판정을 공유해, "허용 origin 집합"의 단일 소스가
+// cfg.FrontendURL(운영 app.cledyu.com, 개발 app.cledyu.local) 하나가 되도록 한다.
+// 빈 origin(비브라우저/서버-투-서버 호출, 브라우저는 same-origin 이어도 Origin 헤더를 보낸다)과
+// 로컬 dev 서버는 환경 불문 항상 허용한다. FrontendURL 끝의 슬래시는 비교 전에 제거한다.
+func browserOriginAllowed(cfg *config.Config, origin string) bool {
+	if origin == "" || origin == "http://localhost:3000" {
+		return true
+	}
+	frontendURL := ""
+	if cfg != nil {
+		frontendURL = strings.TrimSuffix(cfg.FrontendURL, "/")
+	}
+	return frontendURL != "" && origin == frontendURL
+}
+
+// wsUpgrader는 h.cfg 를 closure 로 캡처한 CheckOrigin 을 가진 업그레이더를 만든다.
 // WS Upgrade는 CORS 미들웨어를 타지 않으므로 여기서 Origin을 직접 검사한다.
 // Subprotocols 를 광고하면 gorilla 가 클라이언트 요청과 일치할 때 응답 헤더로 echo 한다(미요청 시 빈 값).
-var wsUpgrader = websocket.Upgrader{
-	Subprotocols: []string{terminalSubprotocolV2},
-	CheckOrigin: func(r *http.Request) bool {
-		switch r.Header.Get("Origin") {
-		case "", "http://localhost:3000", "https://app.cledyu.local":
-			return true
-		default:
-			return false
-		}
-	},
+func (h *Handler) wsUpgrader() websocket.Upgrader {
+	return websocket.Upgrader{
+		Subprotocols: []string{terminalSubprotocolV2},
+		CheckOrigin: func(r *http.Request) bool {
+			return browserOriginAllowed(h.cfg, r.Header.Get("Origin"))
+		},
+	}
 }
 
 // Console은 세션 VM의 라이브 터미널을 브라우저 xterm.js에 양방향 프록시한다.
@@ -115,7 +130,8 @@ func (h *Handler) kubevirtConsole(c *gin.Context, sessionID string) {
 	}
 	ns, vm := "lab-"+sessionID, "session-vm"
 
-	ws, err := wsUpgrader.Upgrade(c.Writer, c.Request, nil)
+	upgrader := h.wsUpgrader()
+	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		h.log.Warn("ws upgrade failed", zap.Error(err))
 		return
@@ -162,7 +178,8 @@ func (h *Handler) ec2Console(c *gin.Context, sessionID string) {
 		return
 	}
 
-	ws, err := wsUpgrader.Upgrade(c.Writer, c.Request, nil)
+	upgrader := h.wsUpgrader()
+	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		h.log.Warn("ws upgrade failed", zap.Error(err))
 		return

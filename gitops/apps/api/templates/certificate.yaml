@@ -7,9 +7,11 @@ spec:
   secretName: {{ .Values.ingress.tlsSecret }}
   duration: "2160h"
   renewBefore: "720h"
-  commonName: {{ .Values.ingress.host }}
+  commonName: {{ index .Values.ingress.hosts 0 }}
   dnsNames:
-    - {{ .Values.ingress.host }}
+    {{- range .Values.ingress.hosts }}
+    - {{ . }}
+    {{- end }}
   privateKey:
     algorithm: RSA
     size: 2048

@@ -146,3 +146,24 @@ variable "github_repo" {
   type        = string
   default     = "requset700k/Cledyu"
 }
+
+variable "public_app_host" {
+  description = "학습자 web 앱 공개 FQDN(ALB→프록시→Traefik→web). 와일드카드 ACM(*.public_domain)로 커버."
+  type        = string
+  default     = "app.cledyu.com"
+}
+
+variable "public_api_host" {
+  description = <<-EOT
+    학습자 api(BFF) 공개 FQDN. 브라우저는 OAuth 콜백(api.cledyu.com/api/v1/auth/callback)에서만
+    직접 도달하고, 일반 데이터 호출은 web 이 in-cluster(http://api.api.svc.cluster.local)로 프록시한다.
+  EOT
+  type        = string
+  default     = "api.cledyu.com"
+}
+
+variable "waf_rate_limit" {
+  description = "WAF rate-based 룰의 IP당 5분(기본 평가창) 요청 상한. 초과 시 block. 데모 부하 기준 2000."
+  type        = number
+  default     = 2000
+}
