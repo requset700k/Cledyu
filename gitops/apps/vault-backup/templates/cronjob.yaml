@@ -1,0 +1,139 @@
+# hashicorp/vault:1.21.2 는 Alpine 베이스지만 aws CLI 가 없다(확인 완료: apk info aws-cli 는
+# 있으나 기본 이미지엔 미설치). vault·aws 두 바이너리를 한 컨테이너에 넣는 대신, 순차 실행이
+# 보장되는 initContainer(스냅샷) → 메인 컨테이너(S3 업로드) 로 분리해 각자 공식 이미지를 그대로
+# 쓴다(커스텀 이미지 빌드/유지보수 불필요). 두 컨테이너는 emptyDir 로만 스냅샷 파일을 주고받고,
+# 업로드 컨테이너는 Vault 토큰을, 스냅샷 컨테이너는 AWS 자격증명을 각각 갖지 않는다(최소권한).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: vault-raft-snapshot
+  namespace: {{ .Release.Namespace }}
+spec:
+  schedule: "0 */6 * * *"   # 6시간마다 (RPO 1~24h 목표 충족)
+  concurrencyPolicy: Forbid
+  # 스냅샷은 Vault 전체 시크릿이다. 끝난 Job/Pod(스냅샷 볼륨 보유)가 오래 남지 않게 이력을 최소화한다.
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      # 외부 의존성(Vault API·S3 업로드)이 무응답이면 Job이 Active로 고착되는데, concurrencyPolicy:
+      # Forbid 때문에 이후 6h 스냅샷이 전부 skip돼 RPO가 무한정 깨진다. 데드라인으로 fail-fast 시켜
+      # 스케줄 고착을 막는다(레포의 다른 CronJob 관례와 동일).
+      activeDeadlineSeconds: 300
+      backoffLimit: 2
+      # 끝난 Job을 10분 뒤 GC해 스냅샷을 담은 Pod/볼륨의 잔존 시간을 제한한다(로그 확인 여유는 유지).
+      ttlSecondsAfterFinished: 600
+      template:
+        spec:
+          serviceAccountName: vault-backup
+          # 기본 automount는 두 컨테이너 모두에 SA 토큰을 붙여, s3-upload도 auth/kubernetes/login으로
+          # vault-backup role 토큰을 발급받을 수 있다(위 최소권한 주석 위반). 자동 마운트를 끄고,
+          # Vault 로그인용 projected 토큰을 스냅샷 initContainer에만 마운트해 분리한다.
+          automountServiceAccountToken: false
+          restartPolicy: OnFailure
+          # vault ns는 PSA restricted(namespace.yaml) + Kyverno baseline-workload-security로
+          # runAsNonRoot·seccompProfile·capabilities.drop 등을 강제한다(코드 리뷰로 발견 — 이게
+          # 없으면 admission에서 거부돼 스냅샷 Pod 자체가 안 뜬다). fsGroup은 두 컨테이너(다른 UID)가
+          # 공유하는 snapshot emptyDir에 그룹 쓰기 권한을 준다.
+          securityContext:
+            runAsNonRoot: true
+            fsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          volumes:
+            - name: snapshot
+              # 스냅샷(Vault 전체 시크릿)을 노드 로컬 디스크에 남기지 않도록 tmpfs(RAM)에 둔다. 업로드
+              # 실패 시에도 디스크에 민감 파일이 잔존하지 않고, Pod 종료 시 tmpfs가 즉시 회수된다.
+              emptyDir:
+                medium: Memory
+                sizeLimit: 128Mi
+            # Vault 로그인 전용 projected SA 토큰. audience는 지정하지 않아 API server 기본값을 쓰며
+            # (기존 automount 토큰과 동일), 스냅샷 initContainer에만 마운트해 s3-upload와 분리한다.
+            - name: vault-token
+              projected:
+                sources:
+                  - serviceAccountToken:
+                      path: token
+                      expirationSeconds: 3600
+            # 기존 ESO ClusterSecretStore(vault-backend)와 동일하게 vault-tls Secret의 실제 CA를 신뢰한다.
+            - name: vault-ca
+              secret:
+                secretName: vault-tls
+                items:
+                  - key: ca.crt
+                    path: ca.crt
+          initContainers:
+            - name: vault-snapshot
+              image: hashicorp/vault:1.21.2
+              # 기존 vault StatefulSet(gitops/apps/vault/values.yaml)과 동일하게 UID 100 —
+              # 이 클러스터에서 vault 바이너리가 이 UID로 정상 동작함이 이미 검증돼 있다.
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 100
+                runAsGroup: 1000
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: [ALL]
+              env:
+                - name: VAULT_ADDR
+                  value: "https://vault-active.vault.svc:8200"
+                - name: VAULT_CACERT
+                  value: "/vault-ca/ca.crt"
+              volumeMounts:
+                - name: snapshot
+                  mountPath: /snapshot
+                - name: vault-ca
+                  mountPath: /vault-ca
+                  readOnly: true
+                # automount를 끈 대신 Vault 로그인용 projected 토큰을 이 컨테이너에만 준다.
+                - name: vault-token
+                  mountPath: /var/run/secrets/vault-token
+                  readOnly: true
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -e
+                  VAULT_TOKEN=$(vault write -field=token auth/kubernetes/login \
+                    role=vault-backup jwt=@/var/run/secrets/vault-token/token)
+                  export VAULT_TOKEN
+                  TS=$(date -u +%Y%m%dT%H%M%SZ)
+                  vault operator raft snapshot save /snapshot/vault-raft-$TS.snap
+                  # 스냅샷은 0600(owner-only)로 생성돼 그룹 읽기 비트가 없다. fsGroup·runAsGroup으로
+                  # 두 컨테이너가 그룹 1000을 공유해도 0600이면 s3-upload(UID 1000)가 못 읽는다
+                  # (런타임 실측: "File/Directory is not readable"). 0640으로 그룹 읽기만 부여한다
+                  # (other는 계속 차단 — 스냅샷은 Vault 전체 시크릿이라 world-read 금지).
+                  chmod 0640 /snapshot/vault-raft-$TS.snap
+          containers:
+            - name: s3-upload
+              image: amazon/aws-cli:2.32.7
+              # 이미지 기본 유저는 root(확인됨)라 임의의 비-root UID를 강제한다. aws CLI는 자격증명을
+              # 전부 env var로 받아(HOME 의존 없음) 임의 UID로도 정상 동작한다.
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                runAsGroup: 1000
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: [ALL]
+              env:
+                - name: AWS_DEFAULT_REGION
+                  value: "ap-northeast-2"
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom: { secretKeyRef: { name: cledyu-backup-s3, key: ACCESS_KEY_ID } }
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom: { secretKeyRef: { name: cledyu-backup-s3, key: ACCESS_SECRET_KEY } }
+              volumeMounts:
+                - name: snapshot
+                  mountPath: /snapshot
+              command: ["/bin/sh", "-c"]
+              args:
+                - |
+                  set -e
+                  for f in /snapshot/*.snap; do
+                    aws s3 cp "$f" "s3://cledyu-lab-dr-backups/vault/$(basename "$f")"
+                  done
+                  # 업로드가 모두 성공한 경우에만(set -e 로 실패 시 여기 도달 못 함) tmpfs 스냅샷을 제거한다.
+                  # 실패 시엔 남겨야 restartPolicy: OnFailure 재시도가 같은 Pod에서(initContainer는 재실행
+                  # 안 됨) 스냅샷을 다시 업로드할 수 있다. 실패 경로 잔존은 tmpfs(비-디스크) +
+                  # ttlSecondsAfterFinished + history limit 로 이미 제한된다.
+                  rm -f /snapshot/*.snap

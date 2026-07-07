@@ -4,14 +4,14 @@
 
 **Goal:** 온프렘 durable 데이터(cledyu Postgres, Vault, 범용 PVC)를 S3로 오프사이트 백업하고, Postgres는 CloudNativePG로 이관해 WAL 연속 아카이빙·PITR을 확보한다.
 
-**Architecture:** S3 백업 버킷 + 전용 IAM 키(Terraform) → Vault→ESO로 클러스터에 자격증명 주입 → (1) cledyu Postgres를 CNPG Cluster로 이관해 barman S3 백업, (2) Vault raft 스냅샷 CronJob, (3) Longhorn backup target+RecurringJob. 마지막에 PITR 복원 드릴로 RPO 실측.
+**Architecture:** S3 백업 버킷 + 전용 IAM 키(Terraform) → Vault→ESO로 클러스터에 자격증명 주입 → (1) cledyu Postgres를 CNPG Cluster로 이관해 barman S3 백업, (2) Vault raft 스냅샷 CronJob. 마지막에 PITR 복원 드릴로 RPO 실측.
 
 **Tech Stack:** Terraform(AWS S3/IAM), External Secrets Operator, CloudNativePG operator, HashiCorp Vault(raft), Longhorn, ArgoCD(App-of-Apps).
 
 ## Global Constraints
 
 - 리전: `ap-northeast-2` (기존 EC2 오버플로우와 동일, `docs/RUNBOOK/ec2-overflow.md`)
-- 백업 버킷(단일): `cledyu-lab-dr-backups`, 프리픽스 `postgres/`, `vault/`, `longhorn/`, `velero/`
+- 백업 버킷(단일): `cledyu-lab-dr-backups`, 프리픽스 `postgres/`, `vault/`, `velero/`
 - S3 자격증명은 정적 IAM 키 → Vault kv → ESO(온프렘이라 IRSA 불가). 기존 ESO 패턴: ClusterSecretStore `vault-backend`, `remoteRef.key` 상대경로
 - ArgoCD 앱 등록 패턴: `gitops/argocd/apps/<name>.yaml`(Application) + `gitops/apps/<name>/`(내용). repoURL `https://github.com/requset700k/Cledyu.git`, targetRevision `main`
 - 커밋만 실행자가 하고, **사용자 확인 전 커밋 금지 규칙은 실행 단계에서 사용자 지시에 따른다**
@@ -98,7 +98,7 @@ git commit -m "feat(dr): S3 백업 버킷·백업 전용 IAM 사용자 추가"
 **Interfaces:**
 - Consumes: Task 1의 프리픽스별 IAM 사용자 2개(`cledyu-lab-backup-writer-postgres`/`-vault`, 콘솔/CLI로 수동 발급한 액세스 키)
 - Produces: 네임스페이스 `postgres`/`vault` 각각에 Secret `cledyu-backup-s3`
-  (키: `ACCESS_KEY_ID`, `ACCESS_SECRET_KEY`) — 각 ns는 자기 프리픽스 키만 참조. Task 4·5가 사용. (Longhorn은 키명 규격이 달라 Task 6 전용 ES)
+  (키: `ACCESS_KEY_ID`, `ACCESS_SECRET_KEY`) — 각 ns는 자기 프리픽스 키만 참조. Task 4·5가 사용.
 
 - [ ] **Step 1: 액세스 키 수동 발급 + Vault kv 등록 (수동 사전작업)**
 
@@ -698,104 +698,6 @@ git commit -m "feat(dr): Vault raft 스냅샷 CronJob S3 백업"
 
 ---
 
-### Task 6: Longhorn backup target + RecurringJob (범용 PVC)
-
-**Files:**
-- Create: `gitops/apps/kubevirt/longhorn-backuptarget.yaml`
-- Create: `gitops/apps/kubevirt/longhorn-recurringjob.yaml`
-
-> Longhorn 리소스는 기존 `gitops/apps/kubevirt/`(storageclass-longhorn-r2.yaml 등)와 동거.
-
-> **⚠️ 버킷 분리 필요(Object Lock 충돌)**: DR 백업 버킷(`cledyu-lab-dr-backups`)은 Object Lock
-> GOVERNANCE 30일이 걸려 있다. Longhorn 은 매시 백업(retain 24 = ~1일)이라 30일 락이 걸리면 24개가
-> 아니라 720개가 삭제 불가로 누적된다(볼륨 단위라 용량도 큼). Longhorn 백업은 온프렘 로컬 복구용
-> (비-DR)이므로, **Object Lock 없는 별도 버킷**(예: `cledyu-lab-longhorn-backups`)을 만들어 거기로
-> 보낸다. 이 경우 backup.tf 에 락 없는 버킷·해당 프리픽스 IAM 을 추가하고, 아래 backupTargetURL 을
-> 그 버킷으로 바꾼다. (실행 단계에서 확정)
-
-**Interfaces:**
-- Consumes: Secret `cledyu-backup-s3`(Task 2, `longhorn-system` ns)
-- Produces: Longhorn backupTarget = `s3://cledyu-lab-dr-backups/longhorn`, 백업 RecurringJob
-
-- [ ] **Step 1: Longhorn S3 secret 키 이름 정합화**
-
-Longhorn은 `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` 키를 요구한다. Task 2의 Secret 키
-(`ACCESS_KEY_ID`/`ACCESS_SECRET_KEY`)와 다르므로, longhorn-system 전용 ExternalSecret 키를
-Longhorn 규격으로 매핑 추가한다.
-
-`gitops/apps/kubevirt/longhorn-backuptarget.yaml`:
-```yaml
-apiVersion: external-secrets.io/v1beta1
-kind: ExternalSecret
-metadata:
-  name: cledyu-backup-s3-longhorn
-  namespace: longhorn-system
-spec:
-  refreshInterval: 1h
-  secretStoreRef:
-    name: vault-backend
-    kind: ClusterSecretStore
-  target:
-    name: longhorn-s3-backup
-    creationPolicy: Owner
-  data:
-    # Longhorn 은 별도 무-락 버킷 + 전용 IAM 사용자를 쓴다(dr_backups 프리픽스 분리와 무관).
-    - secretKey: AWS_ACCESS_KEY_ID
-      remoteRef: { key: aws/backup-longhorn, property: access_key_id }
-    - secretKey: AWS_SECRET_ACCESS_KEY
-      remoteRef: { key: aws/backup-longhorn, property: secret_access_key }
----
-apiVersion: longhorn.io/v1beta2
-kind: BackupTarget
-metadata:
-  name: default
-  namespace: longhorn-system
-spec:
-  backupTargetURL: "s3://cledyu-lab-dr-backups@ap-northeast-2/longhorn"
-  credentialSecret: longhorn-s3-backup
-  pollInterval: "5m"
-```
-
-- [ ] **Step 2: RecurringJob 작성**
-
-`gitops/apps/kubevirt/longhorn-recurringjob.yaml`:
-```yaml
-apiVersion: longhorn.io/v1beta2
-kind: RecurringJob
-metadata:
-  name: backup-hourly
-  namespace: longhorn-system
-spec:
-  cron: "0 * * * *"     # 매시 backup
-  task: "backup"
-  groups: ["default"]   # default 그룹 볼륨 전체
-  retain: 24
-  concurrency: 2
-```
-
-- [ ] **Step 3: 검증**
-
-Run: `kubeconform -strict -ignore-missing-schemas gitops/apps/kubevirt/longhorn-backuptarget.yaml gitops/apps/kubevirt/longhorn-recurringjob.yaml`
-Expected: 통과(Longhorn CRD 스키마는 ignore-missing).
-
-- [ ] **Step 4: Sync 후 backupTarget Available 확인**
-
-Run:
-```bash
-argocd app sync platform-kubevirt   # 기존 앱이 kubevirt 경로 포함 시. 아니면 해당 앱 sync
-kubectl -n longhorn-system get backuptarget default -o jsonpath='{.status.available}'
-```
-Expected: `true`. `false`면 자격증명/URL 점검.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add gitops/apps/kubevirt/longhorn-backuptarget.yaml gitops/apps/kubevirt/longhorn-recurringjob.yaml
-git commit -m "feat(dr): Longhorn S3 backup target·시간별 RecurringJob"
-```
-
----
-
 ### Task 7: PITR 복원 드릴 (RPO 실측·검증)
 
 > 백업이 실제로 복원 가능한지 증명한다. 임시 네임스페이스에서 CNPG PITR 복원 후 폐기.
@@ -1019,7 +921,6 @@ git commit -m "feat(dr): Velero 클러스터 상태 백업(S3 직행, 컨트롤�
 **Spec coverage (스펙 §백업 계층 대비):**
 - Postgres wal-g/PITR → Task 3·4 (CNPG로 실현, 스펙의 wal-g를 CNPG barman으로 구체화 — 브레인스토밍서 사용자 승인) ✓
 - Vault raft 스냅샷 → Task 5 ✓
-- 범용 PVC Longhorn → Task 6 ✓
 - 클러스터 상태(Velero, 2차 추가) → Task 8 (오브젝트만·PV 스냅샷 끔, selective) ✓
 - S3 버킷/자격증명(버전ing, Vault→ESO) → Task 1·2 ✓
 - Keycloak DB → **본 플랜 범위 밖(Plan A-2)**, 스펙·메모리에 분리 근거 명시 ✓
@@ -1028,7 +929,7 @@ git commit -m "feat(dr): Velero 클러스터 상태 백업(S3 직행, 컨트롤�
 
 **Placeholder scan:** Task 7 Step 1의 `targetTime`은 드릴 실행 시각 의존이라 런타임 값(플레이스홀더 아님, 실행자가 5분 전 UTC 삽입). 그 외 TODO/TBD 없음.
 
-**Type consistency:** Secret `cledyu-backup-s3` 키명은 `ACCESS_KEY_ID`/`ACCESS_SECRET_KEY`로 Task 2·4·5 일관. Longhorn만 `AWS_ACCESS_KEY_ID` 규격이 달라 Task 6에서 별도 매핑 Secret(`longhorn-s3-backup`)으로 분리 — 의도적. CNPG 서비스명 `cledyu-pg-rw`는 Task 4 cutover와 일치.
+**Type consistency:** Secret `cledyu-backup-s3` 키명은 `ACCESS_KEY_ID`/`ACCESS_SECRET_KEY`로 Task 2·4·5 일관. CNPG 서비스명 `cledyu-pg-rw`는 Task 4 cutover와 일치.
 
 **미해결/실행 중 확인 필요:**
 - CNPG 오퍼레이터 차트 버전(0.22.1)·barman in-tree 지원 여부는 실행 시 최신 확인
