@@ -42,6 +42,7 @@
 ### 플랫폼 / DR — 김용균
 
 - [x] `ec2-overflow.md`
+- [x] `dr-restore-drill.md`
 - [ ] `k8s-drain-node.md`
 - [ ] `velero-restore.md`
 - [ ] `dr-drill-gke-autopilot.md`
