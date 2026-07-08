@@ -16,6 +16,7 @@ import (
 	"github.com/requset700k/cledyu/api/internal/session"
 	"github.com/requset700k/cledyu/api/internal/validation"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
 	"go.uber.org/zap"
 )
 
@@ -635,6 +636,11 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 		attribute.String("validation.trace_id", traceID),
 		attribute.String("session.provider", sess.Provider),
 	)
+	// W3C traceparent를 메시지에 전파한다. validation-engine이 이를 이어받으면 검증 결과·Kafka/Loki
+	// 로그의 trace_id(요청별 고유)와 별개로, 같은 OTel 분산 trace로 Tempo에서 통합 조회된다.
+	carrier := propagation.MapCarrier{}
+	propagation.TraceContext{}.Inject(publishCtx, carrier)
+	msg.Traceparent = carrier.Get("traceparent")
 	if err := h.validator.PublishRequest(publishCtx, msg); err != nil {
 		recordSpanError(publishSpan, err)
 		publishSpan.End()

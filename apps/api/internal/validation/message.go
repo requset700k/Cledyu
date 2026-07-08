@@ -53,11 +53,17 @@ type Check struct {
 
 // ValidationRequest is published to the validation-requests Kafka topic.
 type ValidationRequest struct {
-	TraceID   string  `json:"trace_id,omitempty"`
-	SessionID string  `json:"session_id"`
-	StepID    int     `json:"step_id"`
-	VM        VMSpec  `json:"vm"`
-	Checks    []Check `json:"checks"`
+	// TraceID는 요청별 고유 ID다(Redis 시작시간 키·결과 상관관계용). 하나의 W3C trace로 여러 검증을
+	// 묶어도 요청마다 달라야 하므로 OTel trace ID가 아니라 요청별 랜덤값을 쓴다.
+	TraceID string `json:"trace_id,omitempty"`
+	// Traceparent는 이 요청의 W3C trace context(00-traceID-spanID-flags)다. validation-engine이 이를
+	// 이어받아 자신의 span을 같은 분산 trace의 자식으로 만들면, 운영자가 결과에서 Tempo trace로
+	// 직접 이동할 수 있다(TraceID는 상관관계용 고유 ID로 유지).
+	Traceparent string  `json:"traceparent,omitempty"`
+	SessionID   string  `json:"session_id"`
+	StepID      int     `json:"step_id"`
+	VM          VMSpec  `json:"vm"`
+	Checks      []Check `json:"checks"`
 }
 
 // CheckResult is one check's outcome (aligned with validation-engine model.CheckResult).
