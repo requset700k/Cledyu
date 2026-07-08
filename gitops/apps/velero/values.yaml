@@ -21,7 +21,7 @@ velero:
         config:
           region: ap-northeast-2
           # s3Url 생략 = AWS S3 직행(MinIO 없음). 로컬 사본 필요 시 BSL 추가로 확장
-    # PV 스냅샷 미사용 — 데이터는 wal-g/raft(Task 4·5)가 담당. Velero는 오브젝트만 백업.
+    # PV 스냅샷 미사용 — 데이터는 CNPG PITR(barman)/Vault raft(Task 4·5)가 담당. Velero는 오브젝트만 백업.
     volumeSnapshotLocation: []
 
   snapshotsEnabled: false
@@ -82,13 +82,13 @@ velero:
           - cdi
         # cluster-scoped 리소스는 allowlist 로만 담는다. includeClusterResources:true 로 전체를 담으면
         # Longhorn StorageClass/PV·온프렘 CRD 까지 백업돼 EKS 복원 시 PVC 바인딩 실패·드리프트가 난다
-        # (Plan C 는 기본 velero restore 를 호출). CRD·StorageClass 는 EKS 에서 GitOps 오퍼레이터가
-        # 재설치하므로 백업 대상이 아니고, PV 도 온프렘 스토리지 종속이라 제외한다. GitOps 가 재현 못 하는
-        # out-of-band cluster-scoped 상태(ClusterIssuer/RBAC/ClusterSecretStore)만 명시적으로 담는다.
-        # (복원 드릴에서 빠진 타입이 확인되면 이 목록에 추가 — 온프렘 종속 리소스 유입보다 안전한 방향)
+        # (Plan C 는 기본 velero restore 를 호출). CRD·StorageClass·ClusterRole 은 EKS 에서 GitOps
+        # 오퍼레이터가 재설치하고(ClusterRole 은 162개 전부 재현분, Velero 는 기존 리소스 skip), PV 는
+        # 온프렘 스토리지 종속이라 제외한다. GitOps 가 재현 못 하는 out-of-band cluster-scoped 상태만
+        # 담는다: ClusterIssuer(pki-bootstrap)·ClusterRoleBinding·ClusterSecretStore(ESO)·PriorityClass.
+        # (복원 드릴에서 빠진 타입이 확인되면 추가 — 온프렘 종속 리소스 유입보다 안전한 방향)
         includedClusterScopedResources:
           - clusterissuers.cert-manager.io
-          - clusterroles.rbac.authorization.k8s.io
           - clusterrolebindings.rbac.authorization.k8s.io
           - clustersecretstores.external-secrets.io
           - priorityclasses.scheduling.k8s.io
