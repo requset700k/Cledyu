@@ -1,0 +1,3 @@
+# 서브차트 tarball 은 커밋하지 않는다. Chart.lock 에 velero 8.0.0 이 핀되어 있어 ArgoCD
+# repo-server 가 sync 시 helm dependency build 로 vmware-tanzu 리포에서 내려받아 재현한다.
+charts/
