@@ -58,22 +58,33 @@ echo "$TARGET_TIME"
 ```
 
 **저트래픽/idle DB(예: 새벽)라면** 드릴 전에 target 앞뒤로 마커를 심어 PITR 정밀도까지 검증한다.
-아래 3줄로 marker1 → (target은 이 둘 사이) → marker2 를 만든 뒤, `pg_switch_wal()` 로 즉시 S3 아카이빙한다:
+아래 순서로 marker1 → (간격) → marker2 를 심고 `pg_switch_wal()` 로 즉시 S3 아카이빙한 **뒤에**,
+두 마커의 실제 커밋 시각 사이로 `TARGET_TIME` 을 잡는다. **target 을 marker2 보다 먼저 정하지 말 것** —
+두 마커가 모두 커밋된 다음 기록된 시각(A, B) 사이로 골라야 `marker1 < target < marker2` 가 보장된다.
+(target 을 미리 `marker1+20초` 로 못 박고 곧장 marker2 를 복붙하면, marker2 가 marker1 직후에 커밋돼
+`marker2 < target` 이 되어 정밀도 검증이 어긋나거나 idle 구간에서 복원이 FATAL 로 죽는다.)
 
 ```bash
-# marker1: target 이전 시점 (복원 후 이 행은 살아있어야 함)
+# marker1: 복원 후 살아있어야 할 행. 출력된 커밋 시각 A 를 기록해 둔다.
 kubectl -n postgres exec cledyu-pg-1 -- psql -d cledyu -tAc \
   "create table if not exists _dr_drill(t timestamptz); insert into _dr_drill values(now()) returning t;"
-# marker1 커밋 시각을 확인해 그보다 뒤(예: +20초)를 TARGET_TIME 으로 잡는다. 예:
-# TARGET_TIME="2026-07-07 17:25:00+00:00"
 
-# marker2: target 이후 시점 (복원 후 이 행은 없어야 함 = PITR 이 정확히 잘랐다는 증거)
+# marker1 과 marker2 사이에 target 을 끼워넣을 여유(최소 30초~1분)를 둔다.
+# 이 간격이 없으면(복붙으로 곧장 marker2 를 넣으면) 두 마커가 거의 동시각이라
+# marker1 < target < marker2 를 만들 수 없다.
+sleep 60
+
+# marker2: 복원 후 잘려나가야 할 행. 출력된 커밋 시각 B 를 기록한다 (B > A).
 kubectl -n postgres exec cledyu-pg-1 -- psql -d cledyu -tAc \
   "insert into _dr_drill values(now()) returning t;"
 # 두 마커가 담긴 WAL 을 즉시 S3 로 강제 아카이빙
 kubectl -n postgres exec cledyu-pg-1 -- psql -d cledyu -tAc "select pg_switch_wal()"
 # 새 WAL 이 S3 에 올라왔는지 확인(목록 끝 번호가 늘어야 함)
 aws s3 ls s3://cledyu-lab-dr-backups/postgres/cledyu-pg/wals/0000000100000000/ | tail -3
+
+# 이제 TARGET_TIME 을 A 와 B 사이 값으로 잡는다 — 두 마커가 모두 커밋된 뒤
+# 실제 기록된 시각으로 고르므로 marker1 < target < marker2 가 항상 성립한다. 예:
+# A=17:24:39, B=17:25:45 → TARGET_TIME="2026-07-07 17:25:00+00:00"
 ```
 
 > `psql` 은 소켓 peer auth 라 컨테이너 OS 유저(`postgres`)로 붙는다 — `-U cledyu` 를 주면
@@ -156,15 +167,40 @@ kubectl -n postgres exec cledyu-pg-drill-1 -- psql -d cledyu -tAc \
 
 **(B) 트래픽 있는 시간대에 `session_progress` 로 RPO 실측한 경우:**
 
+RPO 는 "지금 장애가 나면 몇 초/분어치 쓰기를 잃는가" = **원본의 최신 쓰기 − 복원 가능한 최신 커밋** 이며,
+이 격차는 WAL 아카이빙 지연(`archive_timeout`, 최대 5분)이 결정한다. 따라서 RPO 드릴에서는
+**임의의 과거 target 으로 복원하지 말고 최신(WAL 끝)까지 복원**한 뒤 원본과 비교한다. (임의 target 으로 복원해
+`targetTime − max(updated_at)` 을 재면 그건 아카이빙 지연이 아니라 내가 고른 target 과 그 직전 마지막 쓰기
+사이의 무의미한 간격일 뿐이다 — target 까지는 이미 복원에 성공했으니 그 지점 기준 손실은 정의상 0 이다.)
+
+1. 드릴 매니페스트에서 `recoveryTarget` 블록을 **통째로 생략**해 최신까지 복원한다(2단계 YAML 의
+   `recoveryTarget:` ~ `targetTime:` 줄 제거 — target 없으면 CNPG 는 아카이빙된 WAL 끝까지 재생한다).
+2. `kubectl apply`(3단계) **직전**에 원본의 최신 쓰기 시각을 기록한다(= 이 순간 장애가 났다고 가정):
+
+   ```bash
+   kubectl -n postgres exec cledyu-pg-1 -- psql -d cledyu -tAc \
+     "select max(updated_at) from session_progress"   # = W_primary
+   ```
+3. 복원된 드릴 클러스터에서 최신 쓰기 시각을 확인한다:
+
+   ```bash
+   kubectl -n postgres exec cledyu-pg-drill-1 -- psql -d cledyu -tAc \
+     "select max(updated_at) from session_progress"   # = W_restored
+   ```
+
+**실측 RPO = W_primary − W_restored** — 원본엔 있었으나 아직 S3 에 아카이빙되지 않아 복원본에서 빠진 쓰기 구간이다.
+
+교차 확인(빠른 근사): 원본에서 아카이빙 지연을 직접 본다 —
+
 ```bash
-kubectl -n postgres exec cledyu-pg-drill-1 -- psql -d cledyu -tAc \
-  "select max(updated_at) from session_progress"
+kubectl -n postgres exec cledyu-pg-1 -- psql -tAxc \
+  "select last_archived_time, now()-last_archived_time as archive_lag from pg_stat_archiver"
 ```
 
-`targetTime` 과 실측 `max(updated_at)` 의 차이가 곧 이번 드릴에서 실측한 RPO다(목표 5~15분 이내).
+`archive_lag` 가 위 실측 RPO 와 대체로 일치해야 한다(WAL 세그먼트 단위라 약간의 차이는 정상).
 
-**실측값 기록:** `<쿼리 출력값>`
-**실측 RPO:** `<targetTime - 위 값, 분 단위>` (목표 5~15분 이내인지 판정: `<판정 결과>`)
+**실측값 기록:** `W_primary=<값>, W_restored=<값>`
+**실측 RPO:** `<W_primary − W_restored, 초/분 단위>` (목표 5~15분 이내인지 판정: `<판정 결과>`)
 
 ### 5. 드릴 정리
 
