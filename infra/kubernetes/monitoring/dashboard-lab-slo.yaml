@@ -11,7 +11,7 @@ metadata:
 data:
   dashboard-lab-slo-overview.json: |
     {
-      "title": "Lab SLO Overview",
+      "title": "Lab SLO Dashboard",
       "uid": "lab-slo-overview-cledyu",
       "schemaVersion": 36,
       "version": 1,

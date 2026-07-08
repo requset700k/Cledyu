@@ -11,7 +11,7 @@ metadata:
 data:
   dashboard-slo-burndown.json: |
     {
-      "title": "SLO Burndown Dashboard",
+      "title": "Platform SLO Burndown",
       "uid": "slo-burndown-cledyu",
       "schemaVersion": 36,
       "version": 5,
