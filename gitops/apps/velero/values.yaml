@@ -43,7 +43,8 @@ velero:
         # ttl 을 lifecycle 창(30일)보다 길게 둬 lifecycle 이 먼저 지우게 하고(delete marker 는 Object
         # Lock 에 막히지 않음) Velero 는 gc 시점에 이미 사라진 객체를 BSL 동기화로 정리만 하게 한다
         # → self-delete 시도 자체가 없어 AccessDenied 루프가 사라진다.
-        ttl: 840h # 35일 (lifecycle 30일 + 락 경합 여유, postgres/ 35일 규칙과 동일한 버퍼)
+        # 35일 (lifecycle 30일 + 락 경합 여유, postgres/ 35일 규칙과 동일한 버퍼).
+        ttl: 840h0m0s
         # selective: includedNamespaces 는 allowlist 다. 여기 없는 ns(세션 lab-*, KubeVirt 등)는
         # 자동으로 백업 대상에서 빠진다 — "세션은 버림" 결정(스펙 §비목표)과 정합. excludedNamespaces
         # 는 그중 KubeVirt 계열만 방어적으로 다시 못박는 belt-and-suspenders 다.
