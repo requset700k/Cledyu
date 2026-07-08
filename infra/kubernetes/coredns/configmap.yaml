@@ -49,6 +49,7 @@ data:
         template IN AAAA cledyu.local {
             match ^([a-zA-Z0-9_-]+\.)+cledyu\.local\.$
             rcode NOERROR
+            fallthrough
         }
         prometheus :9153
         forward . /etc/resolv.conf {
