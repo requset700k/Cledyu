@@ -80,4 +80,8 @@ velero:
         excludedNamespaces:
           - kubevirt
           - cdi
+        # namespace 필터(includedNamespaces)를 켜면 Velero 는 cluster-scoped 리소스를 기본 제외한다
+        # 그러면 ClusterIssuer(cert-manager)·ClusterRole(Binding)·CRD·ClusterSecretStore(ESO vault-backend)
+        # 같은 out-of-band 클러스터 상태가 빠져 DR 복원이 불완전해진다
+        includeClusterResources: true
         snapshotVolumes: false
