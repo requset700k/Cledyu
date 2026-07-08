@@ -27,9 +27,14 @@ api (Session API)
 > `vault policy write cledyu-eso-reader <파일>` 적용.
 
 ```bash
-# 1) DB 유저 자격증명 → Vault (CNPG 가 ESO 로 Secret postgres-credentials-cnpg 주입)
-#    username 키도 함께 둔다 — scheduledbackup.yaml 의 ESO 가 username+password 를 읽는다.
+# 1) DB 유저 자격증명 (Vault → ESO → Secret postgres-credentials-cnpg. username+password 두 키).
+#    ⚠ 아래 랜덤 생성은 "신규 클러스터 최초 1회"만. 이미 존재하는 cledyu-pg 에서 이 줄로 새
+#      비밀번호를 쓰면 Vault/Secret 만 바뀌고 DB role(cledyu)은 그대로라 연결이 깨진다.
+#      → 기존 클러스터 비밀번호 회전은 §4(ALTER USER 먼저), 단순 재등록은 값을 유지한다.
+# [최초 1회 · 신규 클러스터만]
 vault kv put cledyu/db/postgres username=cledyu password=$(openssl rand -hex 24)
+# [재등록 · 기존 클러스터] 위 줄 대신 기존 값 유지 확인만 (새로 만들지 말 것):
+#   vault kv get cledyu/db/postgres
 
 # 2) api 접속 DSN 등록 (비밀번호 포함 — 값 전체가 시크릿)
 #    ★ host = CNPG rw 서비스(cledyu-pg-rw). 구 postgres.postgres.svc 는 폐기됨 — 쓰지 말 것.
@@ -45,8 +50,8 @@ kubectl -n api logs deploy/api | grep "db 연결"
 #   "db 연결 — 유저/진행 상태 영속화 활성" 이 보여야 한다
 ```
 
-> DB 는 이미 CNPG(`cledyu-pg`)로 cutover 되어 라이브 상태다. 위 절차는 재등록/자격증명 갱신 시의
-> 배선 참조다. `infra/kubernetes/external-secrets/cledyu-api-db-externalsecret.yaml`(Secret
+> DB 는 이미 CNPG(`cledyu-pg`)로 cutover 되어 라이브 상태다. 위 절차는 신규 활성화·재등록 시의
+> 배선 참조다 — **비밀번호 회전은 여기서 새 값을 만들지 말고 §4(ALTER USER 먼저)로** 한다. `infra/kubernetes/external-secrets/cledyu-api-db-externalsecret.yaml`(Secret
 > `cledyu-api-db`) 은 다른 ESO 매니페스트와 같은 방식으로 적용한다(kubectl apply).
 
 ## 3. 스키마 개요
