@@ -36,7 +36,7 @@ type AnalyticsConfig struct {
 // DSN 이 비면 영속화 비활성 — 진행 상태는 in-memory 전용으로 동작한다(로컬/CI).
 // DSN 에 비밀번호가 포함되므로 값 전체를 Secret(ESO: cledyu-api-db)으로 주입한다.
 type DBConfig struct {
-	DSN string `mapstructure:"dsn"` // 예: postgres://cledyu:***@postgres.postgres.svc:5432/cledyu
+	DSN string `mapstructure:"dsn"` // 예: postgres://cledyu:***@cledyu-pg-rw.postgres.svc:5432/cledyu?sslmode=require
 }
 
 // AIConfig는 AI 학습 도우미 BFF(apps/ai-tutor) 연동 설정이다.
