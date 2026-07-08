@@ -1,0 +1,126 @@
+# Velero — 클러스터 상태(오브젝트)만 S3로 백업한다. PV 스냅샷은 쓰지 않는다(Longhorn 스냅샷은
+# EKS/EBS에서 복원 불가 + Postgres/Vault는 각자 PITR/raft 스냅샷으로 데이터를 이미 커버).
+velero:
+  # velero ns 는 kyverno baseline-workload-security(Enforce) 예외가 아니므로 pod/container/init
+  # 모두 runAsNonRoot·no-privilege-escalation 을 선언해야 admission 을 통과한다(미선언 시 Deployment
+  # 거부 → 백업 스케줄 자체가 안 뜬다). velero 는 host 권한이 불필요해 예외 추가 대신 준수로 간다.
+  # 65534(nobody)로 실행하고 fsGroup 로 plugins emptyDir(init 가 /target 에 플러그인 복사, main 이
+  # /plugins 에서 로드)를 그룹 쓰기 가능하게 한다.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    fsGroup: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    runAsNonRoot: true
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
+  initContainers:
+    - name: velero-plugin-for-aws
+      image: velero/velero-plugin-for-aws:v1.11.0
+      volumeMounts:
+        - { name: plugins, mountPath: /target }
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        capabilities:
+          drop: ["ALL"]
+        seccompProfile:
+          type: RuntimeDefault
+
+  # Step 1 ExternalSecret(cledyu-backup-s3-velero)이 렌더한 [default] 프로파일 형식 시크릿.
+  credentials:
+    existingSecret: velero-s3-credentials
+
+  configuration:
+    backupStorageLocation:
+      - name: default
+        default: true # 명시적 기본 BSL. 이름이 default라 서버 플래그와 우연히 맞는 것에 기대지 않는다.
+        provider: aws
+        bucket: cledyu-lab-dr-backups
+        prefix: velero # 버킷 경로 분리(스펙 § 버킷 프리픽스), backup.tf writer는 velero/* 로만 스코프
+        config:
+          region: ap-northeast-2
+          # s3Url 생략 = AWS S3 직행(MinIO 없음). 로컬 사본 필요 시 BSL 추가로 확장
+    # PV 스냅샷 미사용 — 데이터는 CNPG PITR(barman)/Vault raft(Task 4·5)가 담당. Velero는 오브젝트만 백업.
+    volumeSnapshotLocation: []
+
+  snapshotsEnabled: false
+  deployNodeAgent: false # 파일시스템 백업(restic/kopia) 미사용
+
+  # CRD는 chart crds/ 디렉토리로 배포되고 ArgoCD(--include-crds, skipCrds 기본 false)가 sync마다
+  # 재적용해 갱신까지 담당한다. upgradeCRDs Job(Helm hook)은 이와 순수 중복이라 끈다 — Job+전용
+  # SA/ClusterRole/Binding이 사라져 매니페스트가 깔끔해진다.
+  upgradeCRDs: false
+
+  schedules:
+    cluster-state:
+      schedule: "0 */6 * * *" # 6시간 주기(클러스터 상태 RPO)
+      template:
+        # retention 관리는 전적으로 S3 lifecycle(backup.tf의 expire-velero, velero/ 30일)에 맡긴다.
+        # Velero ttl 을 짧게 두면(예: 7일) gc-controller 가 만료 백업을 S3 에서 직접 지우려 하는데,
+        # velero writer IAM 엔 s3:DeleteObject 가 없고(무-delete 정책) 버킷엔 Object Lock GOVERNANCE
+        # 30일이 걸려 있어 매번 AccessDenied 로 실패한다(CNPG retentionPolicy 제거와 동일한 이유).
+        # ttl 을 lifecycle 창(30일)보다 길게 둬 lifecycle 이 먼저 지우게 하고(delete marker 는 Object
+        # Lock 에 막히지 않음) Velero 는 gc 시점에 이미 사라진 객체를 BSL 동기화로 정리만 하게 한다
+        # → self-delete 시도 자체가 없어 AccessDenied 루프가 사라진다.
+        # 35일 (lifecycle 30일 + 락 경합 여유, postgres/ 35일 규칙과 동일한 버퍼).
+        ttl: 840h0m0s
+        # selective: includedNamespaces 는 allowlist 다. 여기 없는 ns(세션 lab-*, KubeVirt 등)는
+        # 자동으로 백업 대상에서 빠진다 — "세션은 버림" 결정(스펙 §비목표)과 정합. excludedNamespaces
+        # 는 그중 KubeVirt 계열만 방어적으로 다시 못박는 belt-and-suspenders 다.
+        # longhorn-system·metallb-system도 포함하지 않는다 — 둘 다 온프렘 베어메탈 전용(Longhorn
+        # 스냅샷/스토리지클래스, MetalLB L2 IP풀)이라 EKS(EBS/ALB·NLB)엔 대응 개념이 없어 복원해도
+        # 무의미하다(backup.tf의 Longhorn 비-DR 판단과 동일 근거).
+        includedNamespaces:
+          - ai-tutor
+          - airflow
+          - api
+          - argocd
+          - cert-manager
+          - cnpg-system
+          - external-secrets
+          - falco
+          - kafka
+          - keycloak
+          - keycloak-learn
+          - kyverno
+          - loki
+          - monitoring
+          - postgres
+          - redis
+          - sloth
+          - strimzi-system
+          - traefik
+          - trust-manager
+          - validation-engine
+          - vault
+          - web
+        # 세션 ns(lab-*)는 위 allowlist 에서 이미 빠진다. 여기엔 KubeVirt 계열만 명시(kubevirt=런타임,
+        # cdi=디스크 임포트) — 실존 ns 이름과 정확히 일치시킨다.
+        excludedNamespaces:
+          - kubevirt
+          - cdi
+        # cluster-scoped 리소스는 allowlist 로만 담는다. includeClusterResources:true 로 전체를 담으면
+        # Longhorn StorageClass/PV·온프렘 CRD 까지 백업돼 EKS 복원 시 PVC 바인딩 실패·드리프트가 난다
+        # (Plan C 는 기본 velero restore 를 호출). CRD·StorageClass·ClusterRole 은 EKS 에서 GitOps
+        # 오퍼레이터가 재설치하고(ClusterRole 은 162개 전부 재현분, Velero 는 기존 리소스 skip), PV 는
+        # 온프렘 스토리지 종속이라 제외한다. GitOps 가 재현 못 하는 out-of-band cluster-scoped 상태만
+        # 담는다: ClusterIssuer(pki-bootstrap)·ClusterRoleBinding·ClusterSecretStore(ESO)·PriorityClass.
+        # (복원 드릴에서 빠진 타입이 확인되면 추가 — 온프렘 종속 리소스 유입보다 안전한 방향)
+        includedClusterScopedResources:
+          - clusterissuers.cert-manager.io
+          - clusterrolebindings.rbac.authorization.k8s.io
+          - clustersecretstores.external-secrets.io
+          - priorityclasses.scheduling.k8s.io
+        snapshotVolumes: false
+        # snapshotVolumes:false 는 PV 데이터 스냅샷만 끌 뿐 PVC API 객체는 여전히 백업/복원된다.
+        # 온프렘 PVC(longhorn SC 참조)를 EKS로 복원하면 바인딩 실패하거나, CNPG/Strimzi 등 오퍼레이터·GitOps가 새로 만들 PVC 와 충돌한다.
+        # 데이터는 CNPG PITR/각 백업이 담당하고 PVC 는 대상 클러스터의 오퍼레이터가 재생성하므로 PVC 객체 자체를 백업에서 제외한다.
+        excludedNamespaceScopedResources:
+          - persistentvolumeclaims

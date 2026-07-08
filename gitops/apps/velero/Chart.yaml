@@ -1,0 +1,8 @@
+apiVersion: v2
+name: velero
+description: Cledyu 클러스터 상태(오브젝트) 백업 — Velero, S3 직행, PV 스냅샷 없음
+version: 0.1.0
+dependencies:
+  - name: velero
+    version: "8.0.0"
+    repository: https://vmware-tanzu.github.io/helm-charts

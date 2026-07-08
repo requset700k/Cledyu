@@ -289,6 +289,16 @@ git commit -m "feat(dr): EventBridge 규칙·SNS 알림·Step Functions 트리�
 ```
 복원 내부 순서(스펙 § 백업 우선순위 기술 순서): **Vault 복원→unseal(AWS KMS)→ESO 정상화 → Postgres PITR/Keycloak**. Vault가 먼저 열려야 나머지가 시크릿을 받는다.
 
+> **복원 순서 의존성 — velero 오브젝트 복원은 CRD/오퍼레이터 뒤에 (필수).** Velero 백업은 CRD·StorageClass·PVC를
+> 의도적으로 제외한다(`gitops/apps/velero/values.yaml`: CRD/StorageClass는 GitOps 오퍼레이터가 재설치, PVC는
+> 온프렘 스토리지 종속). 따라서 `velero restore`로 namespaced CR(Certificate·ExternalSecret·Kafka `Kafka`·CNPG
+> `Cluster` 등)을 되살리려면 **해당 CRD·오퍼레이터가 먼저 설치·Established 되어 있어야** 한다 — 아니면 CR 복원이
+> `no matches for kind` 로 실패한다. DAG의 `ArgoBootstrap → Restore` 순서가 이를 담보하지만, **`ArgoBootstrap`은
+> App-of-Apps sync를 트리거만 하고 반환하면 안 되고 CRD가 Established 될 때까지 대기(wait)** 해야 한다
+> (예: `kubectl wait --for condition=Established crd/...` 게이트). 스토리지는 velero가 PVC를 복원하지 않으므로
+> 각 오퍼레이터(CNPG/Strimzi 등)가 대상 클러스터 StorageClass로 PVC를 재생성한다 — velero는 오브젝트만 되살린다.
+> (velero PR 리뷰 지적: 복원 순서 문서화 — cluster-scoped allowlist·CRD 제외 결정의 운영상 귀결)
+
 - [ ] **Step 2: 단계별 Lambda 스켈레톤**
 
 각 Lambda는 실패 시 Step Functions `Retry`/`Catch`로 재시도. `Restore`는 CNPG `Cluster`(bootstrap.recovery, targetTime=최신) + `velero restore` + Vault 스냅샷 복원을 호출. (구체 매니페스트는 Plan A Task 7 PITR 드릴 재사용)

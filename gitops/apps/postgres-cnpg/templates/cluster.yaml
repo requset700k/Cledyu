@@ -17,16 +17,18 @@ spec:
   # 오퍼레이터 상향 등으로 CNPG 호환 Postgres 버전이 바뀌면 이 digest도 같이 갱신해야 한다.
   imageName: "ghcr.io/cloudnative-pg/postgresql:16.4@sha256:99be063781d171d3971089b49c992706bdab9ccbd2b57cdf126c7542773aedfe"
   storage:
-    size: {{ .Values.storage.size }}
+    size: {{ .Values.storage.size | quote }}
     storageClass: {{ .Values.storage.className }}
   # 구 StatefulSet과 동등한 QoS 보장(BestEffort 방지) — 코드 리뷰로 발견, 값은 values.yaml 참조.
+  # 수량(cpu/memory/size)은 반드시 quote — 미quote 시 "1"이 bare 1(int)로 렌더돼 k8s 저장형(문자열)과
+  # 타입이 어긋나 ArgoCD가 영구 OutOfSync 가 된다(ServerSideDiff 로도 못 지움, 소스에서 문자열로 고정).
   resources:
     requests:
-      cpu: {{ .Values.resources.requests.cpu }}
-      memory: {{ .Values.resources.requests.memory }}
+      cpu: {{ .Values.resources.requests.cpu | quote }}
+      memory: {{ .Values.resources.requests.memory | quote }}
     limits:
-      cpu: {{ .Values.resources.limits.cpu }}
-      memory: {{ .Values.resources.limits.memory }}
+      cpu: {{ .Values.resources.limits.cpu | quote }}
+      memory: {{ .Values.resources.limits.memory | quote }}
   bootstrap:
     # 최초 이관: 구 postgres(old-postgres)에서 논리 import(microservice)로 완료됨(2026-07-07, Task 4).
     # 운영 중 cledyu-pg 는 이미 부트스트랩이 끝나 이 블록은 무시된다(bootstrap 은 생성 시 1회만 실행).
