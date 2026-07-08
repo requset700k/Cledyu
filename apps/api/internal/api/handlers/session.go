@@ -616,10 +616,7 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 	)
 	contentSpan.End()
 
-	traceID := span.SpanContext().TraceID().String()
-	if !span.SpanContext().TraceID().IsValid() {
-		traceID = newTraceID()
-	}
+	traceID := newTraceID()
 	msg := validation.ValidationRequest{
 		TraceID:   traceID,
 		SessionID: sessionID,
@@ -628,6 +625,9 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 		Checks:    toValidationChecks(step.Checks),
 	}
 	span.SetAttributes(attribute.String("validation.trace_id", traceID))
+	if otelTraceID := span.SpanContext().TraceID(); otelTraceID.IsValid() {
+		span.SetAttributes(attribute.String("otel.trace_id", otelTraceID.String()))
+	}
 
 	publishCtx, publishSpan := startHandlerSpan(ctx, "api.validation.publish_kafka",
 		attribute.String("session.id", sessionID),
