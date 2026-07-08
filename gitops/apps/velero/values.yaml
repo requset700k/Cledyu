@@ -62,6 +62,16 @@ velero:
     cluster-state:
       schedule: "0 */6 * * *" # 6시간 주기(클러스터 상태 RPO)
       template:
+        # template.metadata.labels 를 반드시 명시
+        # 비워두면 velero 는 fallback 으로 Schedule 자신의 라벨을 생성되는 Backup CR 에 복사하는데,
+        # 그 라벨엔 ArgoCD 가 붙인 argocd.argoproj.io/instance: platform-velero 가 포함된다.
+        # 그러면 platform-velero(automated prune+selfHeal)가 그 Backup을 "git 에 없는 잉여 리소스"로 보고
+        # 생성 직후 삭제 → velero 는 인메모리로 백업을 끝내 S3에 데이터는 올리지만
+        # 마지막 상태 patch 시 CR 이 없어(not found) S3 메타가 Finalizing 에 고착된다.
+        # argocd 추적 라벨이 없는 라벨을 하나 박아 이 복사 자체를 원천 차단
+        metadata:
+          labels:
+            velero.io/backup-source: cluster-state-schedule
         # retention 관리는 전적으로 S3 lifecycle(backup.tf의 expire-velero, velero/ 30일)에 맡긴다.
         # Velero ttl 을 짧게 두면(예: 7일) gc-controller 가 만료 백업을 S3 에서 직접 지우려 하는데,
         # velero writer IAM 엔 s3:DeleteObject 가 없고(무-delete 정책) 버킷엔 Object Lock GOVERNANCE
