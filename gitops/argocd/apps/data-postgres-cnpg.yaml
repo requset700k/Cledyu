@@ -6,12 +6,14 @@ metadata:
   annotations:
     # 오퍼레이터(data-cnpg-operator, wave 0) 이후에 Cluster CR이 서도록 wave 1.
     argocd.argoproj.io/sync-wave: "1"
-    # CNPG 오퍼레이터가 Cluster spec에 채우는 기본값(postgresql.parameters, affinity,
-    # replicationSlots, enablePDB, *Delay, storage.resizeInUseVolumes 등)은 git엔 없어서
+    # CNPG defaulting(mutating) webhook이 Cluster spec에 채우는 기본값(postgresql.parameters,
+    # affinity, replicationSlots, enablePDB, *Delay, storage.resizeInUseVolumes 등)은 git엔 없어서
     # client-side diff가 이를 drift로 잡아 영구 OutOfSync가 된다(selfHeal도 못 지움 — 재-defaulting).
-    # ServerSideDiff는 dry-run SSA로 diff를 계산해 오퍼레이터 소유 기본값을 정규화 제거한다.
+    # ServerSideDiff는 dry-run SSA로 diff를 계산해 그 기본값을 정규화 제거한다. 단 ArgoCD는 기본적으로
+    # mutation webhook이 주입한 변경을 diff에서 제외하므로, webhook이 채운 이 값들까지 상쇄하려면
+    # IncludeMutationWebhook=true 를 함께 켜야 한다(안 켜면 predicted에 기본값이 빠져 여전히 OutOfSync).
     # (ArgoCD 2.10+ 필요. ServerSideApply=true 와 짝.)
-    argocd.argoproj.io/compare-options: ServerSideDiff=true
+    argocd.argoproj.io/compare-options: ServerSideDiff=true,IncludeMutationWebhook=true
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 
