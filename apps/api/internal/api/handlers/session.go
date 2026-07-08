@@ -617,7 +617,10 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 	)
 	contentSpan.End()
 
-	traceID := newTraceID()
+	traceID := span.SpanContext().TraceID().String()
+	if !span.SpanContext().TraceID().IsValid() {
+		traceID = newTraceID()
+	}
 	msg := validation.ValidationRequest{
 		TraceID:   traceID,
 		SessionID: sessionID,
