@@ -318,6 +318,9 @@ func TestVMBootSuccessRecordedOnce_EC2(t *testing.T) {
 	if got := testutil.ToFloat64(met.Collector().WithLabelValues(vmmetrics.ResultSuccess, session.ProviderEC2)); got != 1 {
 		t.Errorf("success{env=ec2} = %v, want 1", got)
 	}
+	if got := testutil.ToFloat64(met.LabStartCollector().WithLabelValues(vmmetrics.ResultSuccess, vmmetrics.LabEnvEC2, vmmetrics.LabReasonReady)); got != 1 {
+		t.Errorf("lab_start_total success{env=ec2} = %v, want 1", got)
+	}
 
 	// 반복 폴링 — 중복 집계되면 안 된다.
 	if _, err := p.Get(ctx, "s1"); err != nil {
@@ -325,6 +328,9 @@ func TestVMBootSuccessRecordedOnce_EC2(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(met.Collector().WithLabelValues(vmmetrics.ResultSuccess, session.ProviderEC2)); got != 1 {
 		t.Errorf("중복 기록됨: success{env=ec2} = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(met.LabStartCollector().WithLabelValues(vmmetrics.ResultSuccess, vmmetrics.LabEnvEC2, vmmetrics.LabReasonReady)); got != 1 {
+		t.Errorf("중복 기록됨: lab_start_total success{env=ec2} = %v, want 1", got)
 	}
 }
 
@@ -364,6 +370,9 @@ func TestReapStuckSessions_RecordsBootFailure_EC2(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(met.Collector().WithLabelValues(vmmetrics.ResultFailed, session.ProviderEC2)); got != 1 {
 		t.Errorf("failed{env=ec2} = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(met.LabStartCollector().WithLabelValues(vmmetrics.ResultFailed, vmmetrics.LabEnvEC2, vmmetrics.LabReasonTimeout)); got != 1 {
+		t.Errorf("lab_start_total failed{env=ec2,reason=timeout} = %v, want 1", got)
 	}
 }
 

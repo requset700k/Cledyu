@@ -43,6 +43,18 @@ func newHandlerMetrics(reg prometheus.Registerer) *handlerMetrics {
 		[]string{"result"}, // success | fallback | rate_limited | error
 	)
 	reg.MustRegister(wsConnectionsEstablished, wsConnectionDrops, validationDuration, aiHintDuration)
+	for _, provider := range []string{"kubevirt", "ec2"} {
+		wsConnectionsEstablished.WithLabelValues(provider)
+		for _, result := range []string{"normal", "error"} {
+			wsConnectionDrops.WithLabelValues(provider, result)
+		}
+	}
+	for _, result := range []string{"passed", "failed"} {
+		validationDuration.WithLabelValues(result)
+	}
+	for _, result := range []string{"success", "fallback", "rate_limited", "error"} {
+		aiHintDuration.WithLabelValues(result)
+	}
 	return &handlerMetrics{
 		wsConnectionsEstablished: wsConnectionsEstablished,
 		wsConnectionDrops:        wsConnectionDrops,

@@ -2,6 +2,7 @@ package kubevirt
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -201,6 +203,8 @@ func TestGetReportsVMStartingProvisioningStage(t *testing.T) {
 }
 
 func TestReapStuckSessions(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	met := vmmetrics.New(reg)
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
 		runtime.NewScheme(),
 		map[schema.GroupVersionResource]string{vmiGVR: "VirtualMachineInstanceList"},
@@ -214,6 +218,7 @@ func TestReapStuckSessions(t *testing.T) {
 			reapNS("young", 1*time.Minute),  // 유예 시간 내 → 보존
 		),
 		dyn: dyn,
+		met: met,
 	}
 
 	reaped, err := m.ReapStuckSessions(context.Background(), 10*time.Minute)
@@ -222,6 +227,9 @@ func TestReapStuckSessions(t *testing.T) {
 	}
 	if len(reaped) != 1 || reaped[0] != "stuck" {
 		t.Fatalf("reaped = %v, want [stuck]", reaped)
+	}
+	if got := testutil.ToFloat64(met.LabStartCollector().WithLabelValues(vmmetrics.ResultFailed, vmmetrics.LabEnvOnprem, vmmetrics.LabReasonTimeout)); got != 1 {
+		t.Errorf("lab_start_total timeout = %v, want 1", got)
 	}
 	// stuck namespace는 삭제됐어야 한다.
 	if _, err := m.core.CoreV1().Namespaces().Get(context.Background(), "lab-stuck", metav1.GetOptions{}); !k8serr.IsNotFound(err) {
@@ -232,6 +240,47 @@ func TestReapStuckSessions(t *testing.T) {
 		if _, err := m.core.CoreV1().Namespaces().Get(context.Background(), keep, metav1.GetOptions{}); err != nil {
 			t.Errorf("%s should remain, got err=%v", keep, err)
 		}
+	}
+}
+
+func TestReapStuckSessionsDoesNotDuplicateMetricsAfterDeleteRetry(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	met := vmmetrics.New(reg)
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{vmiGVR: "VirtualMachineInstanceList"},
+	)
+	core := fake.NewSimpleClientset(reapNS("stuck", 20*time.Minute))
+	deleteAttempts := 0
+	core.PrependReactor("delete", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		deleteAttempts++
+		if deleteAttempts == 1 {
+			return true, nil, errors.New("temporary delete failure")
+		}
+		return false, nil, nil
+	})
+	m := &Manager{core: core, dyn: dyn, met: met}
+
+	reaped, err := m.ReapStuckSessions(context.Background(), 10*time.Minute)
+	if err != nil {
+		t.Fatalf("ReapStuckSessions(first): %v", err)
+	}
+	if len(reaped) != 0 {
+		t.Fatalf("first reaped = %v, want []", reaped)
+	}
+	if got := testutil.ToFloat64(met.LabStartCollector().WithLabelValues(vmmetrics.ResultFailed, vmmetrics.LabEnvOnprem, vmmetrics.LabReasonTimeout)); got != 1 {
+		t.Fatalf("first lab_start_total timeout = %v, want 1", got)
+	}
+
+	reaped, err = m.ReapStuckSessions(context.Background(), 10*time.Minute)
+	if err != nil {
+		t.Fatalf("ReapStuckSessions(second): %v", err)
+	}
+	if len(reaped) != 1 || reaped[0] != "stuck" {
+		t.Fatalf("second reaped = %v, want [stuck]", reaped)
+	}
+	if got := testutil.ToFloat64(met.LabStartCollector().WithLabelValues(vmmetrics.ResultFailed, vmmetrics.LabEnvOnprem, vmmetrics.LabReasonTimeout)); got != 1 {
+		t.Errorf("retry duplicated lab_start_total timeout = %v, want 1", got)
 	}
 }
 
@@ -316,9 +365,15 @@ func TestVMBootFailedRecordedOnce(t *testing.T) {
 	if got := testutil.ToFloat64(met.Collector().WithLabelValues(vmmetrics.ResultFailed, "kubevirt")); got != 1 {
 		t.Errorf("실패 메트릭 = %v, want 1", got)
 	}
+	if got := testutil.ToFloat64(met.LabStartCollector().WithLabelValues(vmmetrics.ResultFailed, vmmetrics.LabEnvOnprem, vmmetrics.LabReasonVMFailed)); got != 1 {
+		t.Errorf("lab start 실패 메트릭 = %v, want 1", got)
+	}
 
 	m.Get(context.Background(), "sess2")
 	if got := testutil.ToFloat64(met.Collector().WithLabelValues(vmmetrics.ResultFailed, "kubevirt")); got != 1 {
 		t.Errorf("중복 기록됨: 실패 메트릭 = %v, want 1", got)
+	}
+	if got := testutil.ToFloat64(met.LabStartCollector().WithLabelValues(vmmetrics.ResultFailed, vmmetrics.LabEnvOnprem, vmmetrics.LabReasonVMFailed)); got != 1 {
+		t.Errorf("중복 기록됨: lab start 실패 메트릭 = %v, want 1", got)
 	}
 }

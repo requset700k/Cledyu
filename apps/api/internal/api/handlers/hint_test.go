@@ -244,7 +244,7 @@ func TestRequestHint_AIMetricsRecorded(t *testing.T) {
 
 	postHint(r, "s1", map[string]any{"step_id": 1})
 
-	if c := testutil.CollectAndCount(met.aiHintDuration); c != 1 {
-		t.Errorf("ai hint duration 샘플 수 = %d, want 1", c)
+	if c := testutil.CollectAndCount(met.aiHintDuration); c != 4 {
+		t.Errorf("ai hint duration 샘플 수 = %d, want 4", c)
 	}
 }
