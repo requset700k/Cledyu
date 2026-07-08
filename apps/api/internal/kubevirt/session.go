@@ -311,8 +311,17 @@ func (m *Manager) ReapStuckSessions(ctx context.Context, timeout time.Duration) 
 		if now.Sub(started) < timeout {
 			continue // 아직 프로비저닝 유예 시간 내
 		}
-		if m.vmiPhase(ctx, ns.Name) == "Running" {
+		phase := m.vmiPhase(ctx, ns.Name)
+		if phase == "Running" {
 			continue // ready 상태면 정상 세션 — 회수 금지
+		}
+		recordPhase := "TimedOut"
+		if phase == "Failed" || phase == "Succeeded" {
+			recordPhase = phase
+		}
+		if err := m.syncBootStatus(ctx, ns.Name, recordPhase); err != nil {
+			fmt.Printf("boot status sync failed (reaper path): ns=%s phase=%s err=%v\n", ns.Name, recordPhase, err)
+			continue // 다음 reaper 주기에 기록과 삭제를 다시 시도한다.
 		}
 		if err := m.core.CoreV1().Namespaces().Delete(ctx, ns.Name, metav1.DeleteOptions{}); err != nil && !k8serr.IsNotFound(err) {
 			continue // best-effort — 다음 주기에 재시도
