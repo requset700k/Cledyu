@@ -28,16 +28,27 @@ spec:
       cpu: {{ .Values.resources.limits.cpu }}
       memory: {{ .Values.resources.limits.memory }}
   bootstrap:
+    # 최초 이관: 구 postgres(old-postgres)에서 논리 import(microservice)로 완료됨(2026-07-07, Task 4).
+    # 운영 중 cledyu-pg 는 이미 부트스트랩이 끝나 이 블록은 무시된다(bootstrap 은 생성 시 1회만 실행).
+    #
+    # ⚠ 재생성 시 fail-safe(의도됨): 구 DB 폐기 후 이 매니페스트로 CR 을 다시 만들면 import 소스
+    #    (postgres.postgres.svc)가 없어 bootstrap 이 실패한다. 이는 버그가 아니라 안전장치다 —
+    #    stateful DB 를 자동으로 빈 상태/잘못된 소스로 재생성하지 않게 막고, 수동 DR 을 강제한다.
+    #    (운영 매니페스트에 S3 recovery 를 직접 넣지 않는 이유: 복구 클러스터가 원본 아카이브
+    #     serverName=cledyu-pg 에 WAL 을 쓰려다 CNPG "Expected empty archive" 로 Setting up primary
+    #     에서 멈춘다. → 아카이브 충돌.)
+    # ▶ 실제 DR 복구는 이 운영 매니페스트가 아니라 별도 복구 매니페스트로 수행한다:
+    #    - 복원 메커니즘(S3 barman → CNPG bootstrap.recovery)은 docs/RUNBOOK/dr-restore-drill.md
+    #      드릴에서 검증됨(임시 cledyu-pg-drill 로 복원·확인 후 폐기 = 절차가 아니라 복원성 증명).
+    #    - 전체-사이트 DR(온프렘 손실): Plan C 오케스트레이션이 그 매니페스트를 EKS 에 재사용해 복원.
+    #    - 인플레이스 복구(cledyu-pg 만 손실): recovery + 고유 backup serverName 매니페스트 적용 후
+    #      GitOps 재정렬. 구체 절차 런북은 아직 미작성(TBD, Plan C 계열 후속).
     initdb:
+      # 계약: owner 는 아래 secret(postgres-credentials-cnpg)의 username 과 일치해야 한다(CNPG 검증).
       database: cledyu
-      # 계약: owner는 아래 secret(postgres-credentials-cnpg)의 username과 반드시 일치해야 bootstrap이 성공한다(CNPG가 두 값을 검증)
-      # 이 username은 scheduledbackup.yaml의 ESO가 Vault db/postgres:username에서 가져온다
-      #owner를 바꾸면 그 Vault 값도 같이 바꿔야 한다
       owner: cledyu
-      # 신 클러스터 app 유저 자격증명(basic-auth) — scheduledbackup.yaml의 ESO가 생성.
       secret:
         name: postgres-credentials-cnpg
-      # 구 DB를 논리 복제(microservice = 단일 DB import). write-freeze 상태에서 실행해야 무손실.
       import:
         type: microservice
         databases:
@@ -45,14 +56,14 @@ spec:
         source:
           externalCluster: old-postgres
   externalClusters:
+    # 구 DB import 소스(폐기됨). 위 fail-safe 설명 참조 — 재생성 시 여기서 연결 실패로 멈춘다.
     - name: old-postgres
       connectionParameters:
         host: postgres.postgres.svc
         user: cledyu
         dbname: cledyu
-      # 구 DB는 TLS 미설정이라 libpq 기본(prefer)이 plaintext로 폴백. import 소스 비번은 기존 Secret 재사용.
       password:
-        name: postgres-credentials
+        name: postgres-credentials-cnpg
         key: password
   backup:
     barmanObjectStore:
