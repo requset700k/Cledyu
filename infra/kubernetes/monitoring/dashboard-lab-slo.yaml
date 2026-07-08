@@ -316,6 +316,15 @@ data:
           },
           "fieldConfig": {
             "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 8,
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 8,
+                "showPoints": "always",
+                "spanNulls": true
+              },
               "unit": "s",
               "thresholds": {
                 "mode": "absolute",
@@ -375,6 +384,15 @@ data:
           },
           "fieldConfig": {
             "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 8,
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 8,
+                "showPoints": "always",
+                "spanNulls": true
+              },
               "unit": "ops",
               "thresholds": {
                 "mode": "absolute",
@@ -436,6 +454,15 @@ data:
           },
           "fieldConfig": {
             "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 8,
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 8,
+                "showPoints": "always",
+                "spanNulls": true
+              },
               "unit": "percentunit",
               "min": 0,
               "thresholds": {
@@ -494,6 +521,15 @@ data:
           },
           "fieldConfig": {
             "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 8,
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 8,
+                "showPoints": "always",
+                "spanNulls": true
+              },
               "unit": "s",
               "thresholds": {
                 "mode": "absolute",
@@ -556,6 +592,15 @@ data:
           },
           "fieldConfig": {
             "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 8,
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 8,
+                "showPoints": "always",
+                "spanNulls": true
+              },
               "unit": "s",
               "thresholds": {
                 "mode": "absolute",
@@ -664,7 +709,7 @@ data:
           },
           "targets": [
             {
-              "expr": "avg by (sloth_slo) (slo:period_error_budget_remaining:ratio{sloth_service=\"lab\"})",
+              "expr": "avg by (sloth_slo) (slo:period_error_budget_remaining:ratio{sloth_service=\"lab\",sloth_slo=~\"lab-startup-onprem|lab-startup-ec2|lab-start-success-rate|vm-boot-success-rate|websocket-stability|validation-latency|ai-hint-latency\"} unless slo:period_error_budget_remaining:ratio{sloth_service=\"lab\",sloth_slo=~\"lab-startup-onprem|lab-startup-ec2|lab-start-success-rate|vm-boot-success-rate|websocket-stability|validation-latency|ai-hint-latency\"} != slo:period_error_budget_remaining:ratio{sloth_service=\"lab\",sloth_slo=~\"lab-startup-onprem|lab-startup-ec2|lab-start-success-rate|vm-boot-success-rate|websocket-stability|validation-latency|ai-hint-latency\"})",
               "legendFormat": "{{sloth_slo}}",
               "refId": "A"
             }
@@ -686,6 +731,15 @@ data:
           },
           "fieldConfig": {
             "defaults": {
+              "custom": {
+                "drawStyle": "line",
+                "fillOpacity": 8,
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "pointSize": 8,
+                "showPoints": "always",
+                "spanNulls": true
+              },
               "unit": "short",
               "thresholds": {
                 "mode": "absolute",
@@ -721,7 +775,7 @@ data:
           },
           "targets": [
             {
-              "expr": "avg by (sloth_slo) (slo:current_burn_rate:ratio{sloth_service=\"lab\"})",
+              "expr": "avg by (sloth_slo) (slo:current_burn_rate:ratio{sloth_service=\"lab\",sloth_slo=~\"lab-startup-onprem|lab-startup-ec2|lab-start-success-rate|vm-boot-success-rate|websocket-stability|validation-latency|ai-hint-latency\"} unless slo:current_burn_rate:ratio{sloth_service=\"lab\",sloth_slo=~\"lab-startup-onprem|lab-startup-ec2|lab-start-success-rate|vm-boot-success-rate|websocket-stability|validation-latency|ai-hint-latency\"} != slo:current_burn_rate:ratio{sloth_service=\"lab\",sloth_slo=~\"lab-startup-onprem|lab-startup-ec2|lab-start-success-rate|vm-boot-success-rate|websocket-stability|validation-latency|ai-hint-latency\"})",
               "legendFormat": "{{sloth_slo}}",
               "refId": "A"
             }
