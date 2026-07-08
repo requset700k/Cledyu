@@ -20,8 +20,13 @@ metadata:
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "0"
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
+  # cascade finalizer(resources-finalizer.argocd.argoproj.io) 의도적 생략.
+  # 이유: 본 앱은 root-apps 가 prune 하는 gitops/argocd/apps/ 아래에 있어,
+  #   파일 rename/제거·부트스트랩 재정리·실수로 Application 이 삭제될 수 있다.
+  #   cascade finalizer 가 있으면 그 삭제가 kube-system/coredns ConfigMap 까지
+  #   전파되어 클러스터 DNS 가 중단된다(syncPolicy.prune:false 로는 못 막음).
+  #   finalizer 를 생략하면 Application 만 사라지고 CoreDNS 리소스는 orphan 보존.
+  #   platform-argocd 와 동일 컨벤션(kubeadm 소유 공유 인프라 보호).
 spec:
   project: default
   source:
