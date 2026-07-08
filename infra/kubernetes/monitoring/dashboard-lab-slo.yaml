@@ -9,10 +9,10 @@ metadata:
   annotations:
     argocd.argoproj.io/sync-wave: "5"
 data:
-  dashboard-lab-slo.json: |
+  dashboard-lab-slo-overview.json: |
     {
       "title": "Lab SLO Overview",
-      "uid": "lab-slo-cledyu",
+      "uid": "lab-slo-overview-cledyu",
       "schemaVersion": 36,
       "version": 1,
       "refresh": "1m",
