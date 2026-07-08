@@ -28,32 +28,31 @@ spec:
       cpu: {{ .Values.resources.limits.cpu }}
       memory: {{ .Values.resources.limits.memory }}
   bootstrap:
-    initdb:
-      database: cledyu
-      # 계약: owner는 아래 secret(postgres-credentials-cnpg)의 username과 반드시 일치해야 bootstrap이 성공한다(CNPG가 두 값을 검증)
-      # 이 username은 scheduledbackup.yaml의 ESO가 Vault db/postgres:username에서 가져온다
-      #owner를 바꾸면 그 Vault 값도 같이 바꿔야 한다
-      owner: cledyu
-      # 신 클러스터 app 유저 자격증명(basic-auth) — scheduledbackup.yaml의 ESO가 생성.
-      secret:
-        name: postgres-credentials-cnpg
-      # 구 DB를 논리 복제(microservice = 단일 DB import). write-freeze 상태에서 실행해야 무손실.
-      import:
-        type: microservice
-        databases:
-          - cledyu
-        source:
-          externalCluster: old-postgres
+    # 최초 이관은 구 postgres(old-postgres)에서 논리 import(microservice)로 완료됨(2026-07-07, Task 4).
+    # 구 DB 폐기에 맞춰, 재생성/DR 부트스트랩 소스를 구 DB → 자기 S3 barman 백업으로 전환한다.
+    #   - 운영 중 cledyu-pg 는 이미 부트스트랩이 끝나 이 변경에 영향 없음(bootstrap 은 생성 시 1회만 실행).
+    #   - CR 삭제 후 GitOps 재생성/전체 DR 시에만 이 recovery 경로를 탄다.
+    #   - 구 import 방식을 남겨두면 폐기된 postgres.postgres.svc 를 import 하려다 재생성이 막히므로 전환 필수.
+    # 이 S3 recovery 경로는 Task 7 PITR 드릴(#266)에서 복원 가능함을 실측 검증(다른 이름으로 복원).
+    # recovery 는 백업에서 롤 포함 전체를 복원하므로 initdb(database/owner/secret) 불필요.
+    recovery:
+      source: cledyu-pg-s3
   externalClusters:
-    - name: old-postgres
-      connectionParameters:
-        host: postgres.postgres.svc
-        user: cledyu
-        dbname: cledyu
-      # 구 DB는 TLS 미설정이라 libpq 기본(prefer)이 plaintext로 폴백. import 소스 비번은 기존 Secret 재사용.
-      password:
-        name: postgres-credentials
-        key: password
+    # 자기 자신의 S3 백업에서 복원. serverName = 원 클러스터명(cledyu-pg) = 기존 백업이 쌓인 경로.
+    - name: cledyu-pg-s3
+      barmanObjectStore:
+        destinationPath: "s3://cledyu-lab-dr-backups/postgres"
+        endpointURL: "https://s3.ap-northeast-2.amazonaws.com"
+        serverName: cledyu-pg
+        s3Credentials:
+          accessKeyId:
+            name: cledyu-backup-s3
+            key: ACCESS_KEY_ID
+          secretAccessKey:
+            name: cledyu-backup-s3
+            key: ACCESS_SECRET_KEY
+        wal:
+          compression: gzip
   backup:
     barmanObjectStore:
       destinationPath: "s3://cledyu-lab-dr-backups/postgres"
