@@ -93,3 +93,8 @@ velero:
           - clustersecretstores.external-secrets.io
           - priorityclasses.scheduling.k8s.io
         snapshotVolumes: false
+        # snapshotVolumes:false 는 PV 데이터 스냅샷만 끌 뿐 PVC API 객체는 여전히 백업/복원된다.
+        # 온프렘 PVC(longhorn SC 참조)를 EKS로 복원하면 바인딩 실패하거나, CNPG/Strimzi 등 오퍼레이터·GitOps가 새로 만들 PVC 와 충돌한다.
+        # 데이터는 CNPG PITR/각 백업이 담당하고 PVC 는 대상 클러스터의 오퍼레이터가 재생성하므로 PVC 객체 자체를 백업에서 제외한다.
+        excludedNamespaceScopedResources:
+          - persistentvolumeclaims
