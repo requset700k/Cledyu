@@ -11,6 +11,7 @@ import (
 
 	"github.com/requset700k/cledyu/validation-engine/internal/model"
 	"github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel/propagation"
 	"go.uber.org/zap"
 )
 
@@ -101,8 +102,9 @@ func (c *Consumer) Run(ctx context.Context, handler HandleFunc) error {
 		}
 
 		// handler는 shutdown 신호(ctx)와 무관하게 완료까지 실행한다.
-		// SIGTERM이 와도 현재 검증을 끝낸 뒤 종료하기 위해 별도 context를 쓴다.
-		handlerCtx, cancel := context.WithTimeout(context.Background(), handlerTimeout)
+		// SIGTERM이 와도 현재 검증을 끝낸 뒤 종료하기 위해 별도 context를 쓰되,
+		// API가 보낸 W3C traceparent는 parent context로 이어받는다.
+		handlerCtx, cancel := context.WithTimeout(traceContextFromRequest(req), handlerTimeout)
 		err = handler(handlerCtx, req)
 		cancel()
 
@@ -129,6 +131,16 @@ func (c *Consumer) Run(ctx context.Context, handler HandleFunc) error {
 			c.log.Error("커밋 실패", zap.Error(err))
 		}
 	}
+}
+
+func traceContextFromRequest(req model.ValidationRequest) context.Context {
+	ctx := context.Background()
+	if req.Traceparent == "" {
+		return ctx
+	}
+	return propagation.TraceContext{}.Extract(ctx, propagation.MapCarrier{
+		"traceparent": req.Traceparent,
+	})
 }
 
 // 재시도 횟수 (3번)

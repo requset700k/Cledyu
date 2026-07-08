@@ -15,6 +15,8 @@ import (
 	"github.com/requset700k/cledyu/api/internal/events"
 	"github.com/requset700k/cledyu/api/internal/session"
 	"github.com/requset700k/cledyu/api/internal/validation"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/propagation"
 	"go.uber.org/zap"
 )
 
@@ -190,13 +192,23 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	}
 	userID, _ := c.Get("user_id")
 	uid, _ := userID.(string)
+	ctx := c.Request.Context()
+	ctx, span := startHandlerSpan(ctx, "api.session.create",
+		attribute.String("lab.id", req.LabID),
+		attribute.Bool("user.authenticated", uid != ""),
+	)
+	defer span.End()
 
 	// 한 유저당 활성 세션 1개로 제한한다. uid가 있으면 유저별 락으로 동시요청을 직렬화하고
 	// (락은 생성 완료까지 유지), 이미 활성 세션이 있으면 409로 거부한다.
 	if uid != "" {
-		release, ok := h.locks.Acquire(c.Request.Context(), "session-create:"+uid)
+		lockCtx, lockSpan := startHandlerSpan(ctx, "api.session.acquire_lock", attribute.String("lab.id", req.LabID))
+		release, ok := h.locks.Acquire(lockCtx, "session-create:"+uid)
+		lockSpan.SetAttributes(attribute.Bool("lock.acquired", ok))
+		lockSpan.End()
 		if !ok {
 			// 분산 락 경합(다른 생성 요청 진행 중) 또는 Redis 오류 — 잠시 후 재시도 유도.
+			span.SetAttributes(attribute.String("session.create.result", "locked"))
 			c.JSON(http.StatusConflict, gin.H{
 				"error": "session operation in progress, try again",
 				"code":  "session_locked",
@@ -205,8 +217,16 @@ func (h *Handler) CreateSession(c *gin.Context) {
 		}
 		defer release()
 
-		existing, cleaned, err := prepareSessionCreation(c.Request.Context(), h.sessions, uid)
+		prepareCtx, prepareSpan := startHandlerSpan(ctx, "api.session.prepare_creation", attribute.String("lab.id", req.LabID))
+		existing, cleaned, err := prepareSessionCreation(prepareCtx, h.sessions, uid)
+		recordSpanError(prepareSpan, err)
+		prepareSpan.SetAttributes(
+			attribute.Bool("session.existing", existing != ""),
+			attribute.Bool("session.cleaned_failed", cleaned != ""),
+		)
+		prepareSpan.End()
 		if err != nil {
+			recordSpanError(span, err)
 			h.log.Error("prepare session creation", zap.Error(err))
 			h.err(c, http.StatusInternalServerError, "check active session failed")
 			return
@@ -215,6 +235,7 @@ func (h *Handler) CreateSession(c *gin.Context) {
 			h.steps.remove(cleaned)
 		}
 		if existing != "" {
+			span.SetAttributes(attribute.String("session.create.result", "existing_session"))
 			c.JSON(http.StatusConflict, gin.H{
 				"error":      "active session already exists",
 				"code":       "session_exists",
@@ -229,13 +250,23 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	// (프로비저너 init 실패 등) 살아있는 프로바이더를 초과 허용한다. 디스패처는 두 cap 합을, 단일
 	// 프로바이더는 자기 cap 을 돌려주고, CountActiveSessions 도 같은 범위를 세므로 정합적이다.
 	if max := h.sessions.Capacity(); max > 0 {
-		active, err := h.sessions.CountActiveSessions(c.Request.Context())
+		capacityCtx, capacitySpan := startHandlerSpan(ctx, "api.session.check_capacity", attribute.Int("session.capacity", max))
+		active, err := h.sessions.CountActiveSessions(capacityCtx)
+		recordSpanError(capacitySpan, err)
+		capacitySpan.SetAttributes(attribute.Int("session.active_count", active))
+		capacitySpan.End()
 		if err != nil {
+			recordSpanError(span, err)
 			h.log.Error("count active sessions", zap.Error(err))
 			h.err(c, http.StatusInternalServerError, "check session capacity failed")
 			return
 		}
 		if active >= max {
+			span.SetAttributes(
+				attribute.String("session.create.result", "capacity_reached"),
+				attribute.Int("session.capacity", max),
+				attribute.Int("session.active_count", active),
+			)
 			c.JSON(http.StatusTooManyRequests, gin.H{
 				"error": "session capacity reached, try again later",
 				"code":  "capacity_reached",
@@ -245,17 +276,35 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	}
 
 	// 랩별 초기화(init)는 cloud-init 으로 VM 부팅 시 실행된다(도구 설치 등).
-	sess, err := h.sessions.Create(c.Request.Context(), newSessionID(), req.LabID, uid, session.BootInit{
+	createCtx, createSpan := startHandlerSpan(ctx, "api.session.create_provider_session", attribute.String("lab.id", req.LabID))
+	sess, err := h.sessions.Create(createCtx, newSessionID(), req.LabID, uid, session.BootInit{
 		Packages: lc.Init.Packages,
 		Runcmd:   lc.Init.Runcmd,
 	})
+	recordSpanError(createSpan, err)
 	if err != nil {
+		createSpan.End()
+		recordSpanError(span, err)
 		h.log.Error("create session", zap.Error(err))
 		h.err(c, http.StatusInternalServerError, "create session failed")
 		return
 	}
+	createSpan.SetAttributes(
+		attribute.String("session.id", sess.ID),
+		attribute.String("session.provider", sess.Provider),
+	)
+	createSpan.End()
+	span.SetAttributes(
+		attribute.String("session.id", sess.ID),
+		attribute.String("session.provider", sess.Provider),
+	)
 
 	// 스텝 진행 상태 초기화 — 첫 스텝 active, 나머지 pending.
+	_, stepsSpan := startHandlerSpan(ctx, "api.session.initialize_steps",
+		attribute.String("lab.id", req.LabID),
+		attribute.String("session.id", sess.ID),
+		attribute.Int("lab.step_count", len(lc.Steps)),
+	)
 	ss := &sessionSteps{LabID: req.LabID, UserID: uid}
 	for i, st := range lc.Steps {
 		status := "pending"
@@ -268,12 +317,20 @@ func (h *Handler) CreateSession(c *gin.Context) {
 		ss.CurrentStep = ss.Steps[0].StepID
 	}
 	h.steps.put(sess.ID, ss)
+	stepsSpan.End()
 
 	// 학습 분석: vm_provisioned_source 로 온프렘/EC2 분포를 집계한다 — 실제 프로비저닝된 프로바이더를 채운다.
+	_, eventSpan := startHandlerSpan(ctx, "api.session.emit_lab_started",
+		attribute.String("lab.id", req.LabID),
+		attribute.String("session.id", sess.ID),
+		attribute.String("session.provider", sess.Provider),
+	)
 	h.emitEvent(events.Event{
 		Type: events.LabStarted, UserID: uid, SessionID: sess.ID, LabID: req.LabID,
 		VMProvider: sess.Provider,
 	})
+	eventSpan.End()
+	span.SetAttributes(attribute.String("session.create.result", "success"))
 
 	c.JSON(http.StatusCreated, h.sessionResponse(sess))
 }
@@ -444,14 +501,30 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 	}
 
 	sessionID := c.Param("id")
+	ctx := c.Request.Context()
+	ctx, span := startHandlerSpan(ctx, "api.validation.request",
+		attribute.String("session.id", sessionID),
+		attribute.Int("step.id", req.StepID),
+	)
+	defer span.End()
+
 	if h.denyIfNotStoreOwner(c, sessionID) {
+		span.SetAttributes(attribute.String("validation.request.result", "forbidden"))
 		return
 	}
 	// 검증엔진 요청을 발행하기 전에 서버가 step 순서를 먼저 확인한다.
 	// Web UI의 disabled 상태는 사용자가 직접 API를 호출하면 우회할 수 있으므로,
 	// 이전 단계가 통과되지 않은 요청은 여기서 409로 끊어야 한다.
+	_, precheckSpan := startHandlerSpan(ctx, "api.validation.precheck_step",
+		attribute.String("session.id", sessionID),
+		attribute.Int("step.id", req.StepID),
+	)
 	idx, err := h.findValidatableStepIndex(sessionID, req.StepID)
+	recordSpanError(precheckSpan, err)
+	precheckSpan.SetAttributes(attribute.Int("step.index", idx))
+	precheckSpan.End()
 	if err != nil {
+		recordSpanError(span, err)
 		switch {
 		case errors.Is(err, errStepSessionNotFound):
 			h.err(c, http.StatusNotFound, "session not found")
@@ -466,17 +539,30 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 	}
 
 	if h.validator == nil {
+		_, mockSpan := startHandlerSpan(ctx, "api.validation.mock_pass",
+			attribute.String("session.id", sessionID),
+			attribute.Int("step.id", req.StepID),
+		)
 		h.markStepPassed(sessionID, idx)
+		mockSpan.End()
+		span.SetAttributes(attribute.String("validation.request.result", "mock_passed"))
 		c.JSON(http.StatusOK, gin.H{"status": "passed", "message": "검증을 통과했습니다 (mock)"})
 		return
 	}
 	if h.sessions == nil {
+		span.SetAttributes(attribute.String("validation.request.result", "sessions_not_configured"))
 		h.err(c, http.StatusServiceUnavailable, "kubevirt not configured")
 		return
 	}
 
-	sess, err := h.sessions.Get(c.Request.Context(), sessionID)
+	sessionCtx, sessionSpan := startHandlerSpan(ctx, "api.validation.load_session",
+		attribute.String("session.id", sessionID),
+	)
+	sess, err := h.sessions.Get(sessionCtx, sessionID)
+	recordSpanError(sessionSpan, err)
 	if err != nil {
+		sessionSpan.End()
+		recordSpanError(span, err)
 		if errors.Is(err, session.ErrNotFound) {
 			h.err(c, http.StatusNotFound, "session not found")
 			return
@@ -485,21 +571,51 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 		h.err(c, http.StatusInternalServerError, "get session failed")
 		return
 	}
+	sessionSpan.SetAttributes(
+		attribute.String("lab.id", sess.LabID),
+		attribute.String("session.provider", sess.Provider),
+	)
+	sessionSpan.End()
+	span.SetAttributes(
+		attribute.String("lab.id", sess.LabID),
+		attribute.String("session.provider", sess.Provider),
+	)
 
+	_, contentSpan := startHandlerSpan(ctx, "api.validation.load_step_content",
+		attribute.String("lab.id", sess.LabID),
+		attribute.Int("step.id", req.StepID),
+	)
 	lc, ok := h.labs[sess.LabID]
 	if !ok {
+		contentSpan.SetAttributes(attribute.String("validation.content.result", "lab_not_found"))
+		contentSpan.End()
+		span.SetAttributes(attribute.String("validation.request.result", "lab_not_found"))
 		h.err(c, http.StatusNotFound, "lab content not found")
 		return
 	}
 	step, ok := findContentStep(lc, req.StepID)
 	if !ok {
+		contentSpan.SetAttributes(attribute.String("validation.content.result", "step_not_found"))
+		contentSpan.End()
+		span.SetAttributes(attribute.String("validation.request.result", "step_not_found"))
 		h.err(c, http.StatusNotFound, "step content not found")
 		return
 	}
 	if len(step.Checks) == 0 {
+		contentSpan.SetAttributes(
+			attribute.String("validation.content.result", "no_checks"),
+			attribute.Int("validation.check_count", 0),
+		)
+		contentSpan.End()
+		span.SetAttributes(attribute.String("validation.request.result", "no_checks"))
 		h.err(c, http.StatusBadRequest, "step has no validation checks")
 		return
 	}
+	contentSpan.SetAttributes(
+		attribute.String("validation.content.result", "ok"),
+		attribute.Int("validation.check_count", len(step.Checks)),
+	)
+	contentSpan.End()
 
 	traceID := newTraceID()
 	msg := validation.ValidationRequest{
@@ -509,21 +625,51 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 		VM:        vmSpecForSession(sess, sessionID),
 		Checks:    toValidationChecks(step.Checks),
 	}
+	span.SetAttributes(attribute.String("validation.trace_id", traceID))
+	if otelTraceID := span.SpanContext().TraceID(); otelTraceID.IsValid() {
+		span.SetAttributes(attribute.String("otel.trace_id", otelTraceID.String()))
+	}
 
-	if err := h.validator.PublishRequest(c.Request.Context(), msg); err != nil {
+	publishCtx, publishSpan := startHandlerSpan(ctx, "api.validation.publish_kafka",
+		attribute.String("session.id", sessionID),
+		attribute.Int("step.id", req.StepID),
+		attribute.String("validation.trace_id", traceID),
+		attribute.String("session.provider", sess.Provider),
+	)
+	// W3C traceparent를 메시지에 전파한다. validation-engine이 이를 이어받으면 검증 결과·Kafka/Loki
+	// 로그의 trace_id(요청별 고유)와 별개로, 같은 OTel 분산 trace로 Tempo에서 통합 조회된다.
+	carrier := propagation.MapCarrier{}
+	propagation.TraceContext{}.Inject(publishCtx, carrier)
+	msg.Traceparent = carrier.Get("traceparent")
+	if err := h.validator.PublishRequest(publishCtx, msg); err != nil {
+		recordSpanError(publishSpan, err)
+		publishSpan.End()
+		recordSpanError(span, err)
 		h.log.Error("publish validation request", zap.Error(err), zap.String("session_id", sessionID), zap.Int("step_id", req.StepID))
 		h.err(c, http.StatusBadGateway, "publish validation request failed")
 		return
 	}
+	publishSpan.End()
 
 	// 검증 시작 시간 기록
 	if h.redis != nil {
-		if err := h.redis.Set(c.Request.Context(), "validation:start:"+traceID, time.Now().UnixMilli(), 5*time.Minute).Err(); err != nil {
+		redisCtx, redisSpan := startHandlerSpan(ctx, "api.validation.store_start_time",
+			attribute.String("validation.trace_id", traceID),
+		)
+		if err := h.redis.Set(redisCtx, "validation:start:"+traceID, time.Now().UnixMilli(), 5*time.Minute).Err(); err != nil {
+			recordSpanError(redisSpan, err)
 			h.log.Warn("failed to set validation start time in redis", zap.Error(err))
 		}
+		redisSpan.End()
 	}
 
+	_, stateSpan := startHandlerSpan(ctx, "api.validation.mark_validating",
+		attribute.String("session.id", sessionID),
+		attribute.Int("step.id", req.StepID),
+	)
 	h.markStepValidating(sessionID, idx)
+	stateSpan.End()
+	span.SetAttributes(attribute.String("validation.request.result", "accepted"))
 	c.JSON(http.StatusAccepted, gin.H{
 		"status":   "validating",
 		"message":  "검증 요청을 접수했습니다",

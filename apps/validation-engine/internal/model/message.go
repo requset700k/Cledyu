@@ -97,6 +97,10 @@ type ValidationRequest struct {
 	// 없으면 빈 문자열로 처리하며 session_id + step_id로 추적 가능
 	TraceID string `json:"trace_id,omitempty"`
 
+	// Traceparent: API가 전파한 W3C trace context. Validation Engine은 이 값을
+	// parent context로 추출해 Tempo에서 같은 분산 trace로 이어지게 한다.
+	Traceparent string `json:"traceparent,omitempty"`
+
 	// SessionID: 어느 수강생 세션인지 (예: "sess-abc123")
 	SessionID string `json:"session_id"`
 

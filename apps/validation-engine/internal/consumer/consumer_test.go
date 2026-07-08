@@ -10,6 +10,7 @@ import (
 
 	"github.com/requset700k/cledyu/validation-engine/internal/model"
 	"github.com/segmentio/kafka-go"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 	"go.uber.org/zap/zaptest/observer"
@@ -71,6 +72,16 @@ func validMsg(t *testing.T, sessionID string, stepID int) kafka.Message {
 	b, _ := json.Marshal(model.ValidationRequest{
 		SessionID: sessionID,
 		StepID:    stepID,
+	})
+	return kafka.Message{Topic: "validation-requests", Value: b}
+}
+
+func validMsgWithTraceparent(t *testing.T, sessionID string, stepID int, traceparent string) kafka.Message {
+	t.Helper()
+	b, _ := json.Marshal(model.ValidationRequest{
+		SessionID:   sessionID,
+		StepID:      stepID,
+		Traceparent: traceparent,
 	})
 	return kafka.Message{Topic: "validation-requests", Value: b}
 }
@@ -200,6 +211,24 @@ func TestDLQ_ContinuesAfterFailure(t *testing.T) {
 	}
 	if len(handledSessions) != 1 || handledSessions[0] != "sess-ok" {
 		t.Errorf("두 번째 메시지(sess-ok)가 처리되지 않았다")
+	}
+}
+
+func TestRun_ExtractsTraceparentIntoHandlerContext(t *testing.T) {
+	const traceparent = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+	reader := &mockReader{msgs: []kafka.Message{validMsgWithTraceparent(t, "sess-trace", 1, traceparent)}}
+	log := zaptest.NewLogger(t)
+	c := newTestConsumer(reader, &mockDLQ{}, log)
+
+	var gotTraceID string
+	handler := func(ctx context.Context, _ model.ValidationRequest) error {
+		gotTraceID = trace.SpanContextFromContext(ctx).TraceID().String()
+		return nil
+	}
+	runConsumerOnce(t, c, handler)
+
+	if gotTraceID != "4bf92f3577b34da6a3ce929d0e0e4736" {
+		t.Fatalf("handler context trace id = %q, want propagated trace id", gotTraceID)
 	}
 }
 
