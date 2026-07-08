@@ -104,6 +104,10 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "dr_backups" {
 #  vault/    : 6시간마다 고유 키 .snap 이 쌓이며 삭제 주체가 없다 → 현재 버전까지 만료시킨다.
 #              non-current 정리는 Object Lock(30일)에 막혀 그 전엔 삭제 불가하므로 30일로 맞춘다
 #              (7일로 두면 락에 걸려 실질 30일이 되어 의도와 실제가 어긋난다).
+#  velero/   : 6시간마다 클러스터 상태 백업이 쌓이며(Task 8) writer 에 DeleteObject 가 없어 정리
+#              주체가 없다 → current 를 30일로 만료한다(Object Lock 30일보다 짧으면 락에 걸려 무의미
+#              하므로 동일하게 맞춤). Velero ttl(35일)을 이 창보다 길게 둬 gc 가 S3 자체 삭제(무-delete
+#              정책상 AccessDenied)를 시도하지 않고 lifecycle 이 먼저 지우게 한다 — values.yaml 참조.
 #  전체      : 실패한 multipart 업로드의 미완료 part 를 자동 중단해 과금 누수를 막는다.
 resource "aws_s3_bucket_lifecycle_configuration" "dr_backups" {
   bucket = aws_s3_bucket.dr_backups.id
@@ -137,6 +141,20 @@ resource "aws_s3_bucket_lifecycle_configuration" "dr_backups" {
   }
 
   rule {
+    id     = "expire-velero"
+    status = "Enabled"
+    filter {
+      prefix = "velero/"
+    }
+    expiration {
+      days = 30
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+  }
+
+  rule {
     id     = "abort-incomplete-multipart"
     status = "Enabled"
     filter {}
@@ -157,8 +175,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "dr_backups" {
 #   읽지 못하게 한다(최소권한, blast radius 축소). 액세스 키는 apply 후 콘솔/CLI 로 수동 발급해
 #   Vault(cledyu/aws/backup-<프리픽스>)에 보관하고 ESO 가 해당 네임스페이스로만 뿌린다.
 locals {
-  # 프리픽스명 = IAM 사용자 suffix. velero/ 는 Task 8 에서 자체 스코프 사용자로 추가.
-  backup_writers = toset(["postgres", "vault"])
+  # 프리픽스명 = IAM 사용자 suffix. 각 writer 는 자기 프리픽스만 read/write(교차 프리픽스 차단).
+  backup_writers = toset(["postgres", "vault", "velero"])
 }
 
 resource "aws_iam_user" "backup" {
