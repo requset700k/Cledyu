@@ -252,7 +252,7 @@ func TestReapStuckSessionsDoesNotDuplicateMetricsAfterDeleteRetry(t *testing.T) 
 	)
 	core := fake.NewSimpleClientset(reapNS("stuck", 20*time.Minute))
 	deleteAttempts := 0
-	core.Fake.PrependReactor("delete", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+	core.PrependReactor("delete", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		deleteAttempts++
 		if deleteAttempts == 1 {
 			return true, nil, errors.New("temporary delete failure")
