@@ -1,11 +1,37 @@
 # Velero — 클러스터 상태(오브젝트)만 S3로 백업한다. PV 스냅샷은 쓰지 않는다(Longhorn 스냅샷은
 # EKS/EBS에서 복원 불가 + Postgres/Vault는 각자 PITR/raft 스냅샷으로 데이터를 이미 커버).
 velero:
+  # velero ns 는 kyverno baseline-workload-security(Enforce) 예외가 아니므로 pod/container/init
+  # 모두 runAsNonRoot·no-privilege-escalation 을 선언해야 admission 을 통과한다(미선언 시 Deployment
+  # 거부 → 백업 스케줄 자체가 안 뜬다). velero 는 host 권한이 불필요해 예외 추가 대신 준수로 간다.
+  # 65534(nobody)로 실행하고 fsGroup 로 plugins emptyDir(init 가 /target 에 플러그인 복사, main 이
+  # /plugins 에서 로드)를 그룹 쓰기 가능하게 한다.
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    fsGroup: 65534
+    seccompProfile:
+      type: RuntimeDefault
+  containerSecurityContext:
+    allowPrivilegeEscalation: false
+    runAsNonRoot: true
+    capabilities:
+      drop: ["ALL"]
+    seccompProfile:
+      type: RuntimeDefault
   initContainers:
     - name: velero-plugin-for-aws
       image: velero/velero-plugin-for-aws:v1.11.0
       volumeMounts:
         - { name: plugins, mountPath: /target }
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        capabilities:
+          drop: ["ALL"]
+        seccompProfile:
+          type: RuntimeDefault
 
   # Step 1 ExternalSecret(cledyu-backup-s3-velero)이 렌더한 [default] 프로파일 형식 시크릿.
   credentials:
