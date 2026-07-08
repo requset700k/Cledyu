@@ -1,0 +1,53 @@
+---
+# CoreDNS Corefile(및 외부 노출 Service)을 ArgoCD self-heal 대상으로 편입.
+# 이유:
+#   *.cledyu.local 와일드카드 template 은 kubeadm 이 install/upgrade 시 만드는
+#   기본 CoreDNS ConfigMap 위에 얹는 형태라, kubeadm upgrade·수동 편집으로
+#   손쉽게 드리프트한다. 실제로 template 의 fallthrough 및 AAAA NODATA 응답이
+#   라이브에서 유실되어 musl/Go 리졸버의 *.cledyu.local 해석이 깨지고
+#   Grafana OAuth back-channel(token exchange) 이 "no such host" 로 실패했다.
+#   selfHeal 로 git 의 Corefile 을 지속 강제해 재발을 차단한다.
+#
+# 안전장치:
+#   - prune: false  → kube-system 내 리소스를 ArgoCD 가 절대 삭제하지 않음.
+#   - ServerSideApply=true → kubeadm 의 field manager 와 공존(필드 소유 분리).
+#   - CoreDNS Deployment/이미지는 그대로 kubeadm 소유로 두고, 본 앱은
+#     Corefile ConfigMap 과 coredns-external Service 만 관리한다.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: platform-coredns
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  # cascade finalizer(resources-finalizer.argocd.argoproj.io) 의도적 생략.
+  # 이유: 본 앱은 root-apps 가 prune 하는 gitops/argocd/apps/ 아래에 있어,
+  #   파일 rename/제거·부트스트랩 재정리·실수로 Application 이 삭제될 수 있다.
+  #   cascade finalizer 가 있으면 그 삭제가 kube-system/coredns ConfigMap 까지
+  #   전파되어 클러스터 DNS 가 중단된다(syncPolicy.prune:false 로는 못 막음).
+  #   finalizer 를 생략하면 Application 만 사라지고 CoreDNS 리소스는 orphan 보존.
+  #   platform-argocd 와 동일 컨벤션(kubeadm 소유 공유 인프라 보호).
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/requset700k/Cledyu.git
+    targetRevision: main
+    path: infra/kubernetes/coredns
+    directory:
+      include: "*.yaml"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
