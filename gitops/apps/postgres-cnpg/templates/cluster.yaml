@@ -63,7 +63,7 @@ spec:
         user: cledyu
         dbname: cledyu
       password:
-        name: postgres-credentials
+        name: postgres-credentials-cnpg
         key: password
   backup:
     barmanObjectStore:
