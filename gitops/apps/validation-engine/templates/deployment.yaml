@@ -45,6 +45,9 @@ spec:
             # main.go의 getEnv("KAFKA_BROKERS", ...) 가 읽어가는 값
             - name: KAFKA_BROKERS
               value: {{ .Values.env.KAFKA_BROKERS | quote }}
+            # OpenTelemetry trace export — Alloy OTLP gRPC receiver
+            - name: OTEL_ENDPOINT
+              value: {{ .Values.env.OTEL_ENDPOINT | quote }}
             # main.go의 loadTLS()가 읽어가는 인증서 경로들
             - name: KAFKA_TLS_CERT
               value: /etc/kafka-certs/tls.crt
