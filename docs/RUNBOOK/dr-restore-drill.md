@@ -256,11 +256,32 @@ kubectl -n postgres exec cledyu-pg-1 -- psql -d cledyu -tAc "drop table if exist
   in-tree 필드가 deprecated 될 수 있다(`gitops/apps/postgres-cnpg/templates/cluster.yaml` 상단
   주석 참고) — 그 경우 이 런북의 매니페스트도 플러그인 방식으로 갱신해야 한다.
 
+## 변형: keycloak-pg 드릴 (Keycloak DB)
+
+`keycloak-pg`(CNPG, `gitops/apps/keycloak-pg` — Plan A-2 로 구 Bitnami 에서 이관) 도 동일한
+절차로 드릴한다. cledyu-pg 절차 대비 **치환할 값만** 다르다:
+
+| 항목 | cledyu-pg | keycloak-pg |
+|---|---|---|
+| 네임스페이스 | `postgres` | `keycloak` |
+| 드릴 클러스터명 | `cledyu-pg-drill` | `keycloak-pg-drill` |
+| S3 destinationPath | `s3://cledyu-lab-dr-backups/postgres` | `s3://cledyu-lab-dr-backups/keycloak` |
+| DB / 검증 테이블 | `cledyu` / `session_progress` | `keycloak` / `user_entity` (라이브 count 와 대조) |
+| 이미지 핀 | 원본 `cledyu-pg` 와 동일 digest | 원본 `keycloak-pg` 와 동일 digest (`kubectl -n keycloak get cluster keycloak-pg -o jsonpath='{.spec.imageName}'`) |
+| 마커 테이블 | `_dr_drill` | `pitr_drill_marker` (드릴 후 원본에서 drop) |
+
+**스토리지 주의(2026-07-09 실측)**: 원본과 같은 20Gi × replica 3(기본 longhorn SC)는 노드
+가용량(스케줄 여유 1~11Gi)에 안 들어가 볼륨이 `faulted` 로 죽는다 — 드릴은 폐기용이므로
+**임시 StorageClass(numberOfReplicas=1) + 2Gi** 로 돌리고, 드릴 정리 시 SC 도 함께 삭제한다.
+psql 은 cledyu-pg 와 동일하게 소켓 peer auth 라 `-U postgres`(또는 `-U` 생략) + `-c postgres`
+컨테이너 지정으로 접속한다.
+
 ## 결과 기록 (실행할 때마다 아래에 이어서 기입)
 
-| 실행일시 | targetTime(UTC) | 실측 RTO | 실측 RPO | 목표(5~15분) 충족 | 비고 |
-|---|---|---|---|---|---|
-| 2026-07-08 02:48 KST | 2026-07-07 17:25:00+00 | ~60초 | N/A | N/A (idle) | 최초 드릴. 마커 방식(marker1 17:24:39 복원·marker2 17:47:47 정확히 제외)으로 **복원 가능성+PITR 정밀도** 검증. 새벽 idle 구간이라 honest RPO 는 미측정(트래픽 시간대 정기 드릴에서 측정 예정). 실행 중 `Z` 형식 거부 + idle target FATAL 두 버그 발견해 매니페스트·절차 수정. |
+| 실행일시 | 대상 | targetTime(UTC) | 실측 RTO | 실측 RPO | 목표(5~15분) 충족 | 비고 |
+|---|---|---|---|---|---|---|
+| 2026-07-08 02:48 KST | cledyu-pg | 2026-07-07 17:25:00+00 | ~60초 | N/A | N/A (idle) | 최초 드릴. 마커 방식(marker1 17:24:39 복원·marker2 17:47:47 정확히 제외)으로 **복원 가능성+PITR 정밀도** 검증. 새벽 idle 구간이라 honest RPO 는 미측정(트래픽 시간대 정기 드릴에서 측정 예정). 실행 중 `Z` 형식 거부 + idle target FATAL 두 버그 발견해 매니페스트·절차 수정. |
+| 2026-07-09 17:47 KST | keycloak-pg | 2026-07-09 08:22:43+00 | **72초** (08:45:39 apply → 08:46:51 Ready) | N/A | N/A (마커 검증) | Plan A-2 Task 5 — 이관(Task 4) 당일 최초 드릴. `user_entity` 19 = 라이브와 일치, target 이후 커밋한 `pitr_drill_marker` 테이블 정확히 제외(PITR 정밀도). 20Gi×3 replica 가 노드 여유 부족으로 `faulted` → 임시 SC(replica 1)+2Gi 로 재시도해 성공("변형" 절 스토리지 주의 참고). |
 
 > 이 문서는 실측치가 쌓이는 살아있는 기록이다. RTO 는 실측이 유의미하나, 위 최초 드릴의 RPO 는
 > 트래픽 없는 새벽에 마커로 돌린 파이프라인 검증이라 N/A 로 둔다 — honest RPO 는 트래픽 있는
