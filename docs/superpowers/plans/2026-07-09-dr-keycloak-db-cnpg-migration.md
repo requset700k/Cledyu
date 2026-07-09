@@ -65,15 +65,22 @@ locals {
 Run: `cd infra/terraform/aws && terraform init -backend=false && terraform validate && terraform fmt -check backup.tf`
 Expected: `Success! The configuration is valid.` + fmt 통과(출력 없음).
 
-- [ ] **Step 4: apply (AWS 자격증명 단독 — `AWS_PROFILE=cledyu`)**
+- [ ] **Step 4: apply — `-target`으로 backup.tf 변경분만 좁힘**
 
-Run: `cd infra/terraform/aws && terraform init && terraform plan`
-Expected: `Plan: 3 to add, 0 to change, 0 to destroy` (keycloak writer user + user_policy + lifecycle 규칙 갱신). **기존 리소스 change/destroy가 0인지 확인 후** `terraform apply`.
+이 디렉토리는 EC2·image-baker 등 다른 리소스가 많아 전체 apply는 무관한 drift를 딸려올 수 있으니 변경 리소스 3개만 타깃한다.
+
+```bash
+cd infra/terraform/aws && terraform init
+terraform plan \
+  -target='aws_iam_user.backup["keycloak"]' \
+  -target='aws_iam_user_policy.backup["keycloak"]' \
+  -target='aws_s3_bucket_lifecycle_configuration.dr_backups'
+```
+Expected: `Plan: 2 to add, 1 to change, 0 to destroy`(IAM user·policy 신규 + lifecycle in-place). lifecycle diff가 `abort-incomplete-multipart`→`expire-keycloak-backups` in-place + abort 재추가로 보이는 건 terraform의 **위치 기준 diff 렌더**일 뿐, 최종 상태는 5개 rule 전부 유지(atomic 교체). **0 destroy 확인 후** 동일 `-target`으로 `terraform apply`.
 확인: `terraform output backup_iam_users` → 맵에 `keycloak = "cledyu-lab-backup-writer-keycloak"` 포함.
 
-- [ ] **Step 5: 액세스 키 수동 발급 + Vault 등록 (수동)**
+- [ ] **Step 5: 액세스 키 발급 + Vault 등록**
 
-Run:
 ```bash
 aws iam create-access-key --user-name cledyu-lab-backup-writer-keycloak
 vault kv put cledyu/aws/backup-keycloak \
