@@ -12,15 +12,16 @@ metadata:
 data:
   dashboard-bottleneck.json: |
     {
-      "title": "Cledyu API Tempo Bottleneck",
+      "title": "Cledyu API & Validation Tempo Bottleneck",
       "uid": "cledyu-bottleneck-overview",
       "schemaVersion": 36,
-      "version": 4,
+      "version": 5,
       "refresh": "30s",
       "style": "dark",
       "tags": [
         "cledyu",
         "api",
+        "validation-engine",
         "bottleneck",
         "tempo"
       ],
@@ -69,6 +70,14 @@ data:
           "title": "Open Tempo Explore",
           "type": "link",
           "url": "/explore?left={\"datasource\":\"tempo\",\"queries\":[{\"queryType\":\"nativeSearch\",\"serviceName\":\"cledyu-api\"}],\"range\":{\"from\":\"now-3h\",\"to\":\"now\"}}",
+          "targetBlank": true,
+          "includeVars": false,
+          "keepTime": true
+        },
+        {
+          "title": "Open validation-engine traces",
+          "type": "link",
+          "url": "/explore?left={\"datasource\":\"tempo\",\"queries\":[{\"queryType\":\"traceql\",\"query\":\"{ resource.service.name = \\\"validation-engine\\\" }\"}],\"range\":{\"from\":\"now-3h\",\"to\":\"now\"}}",
           "targetBlank": true,
           "includeVars": false,
           "keepTime": true
@@ -651,6 +660,49 @@ data:
               "expr": "sum by (result) (increase(ai_hint_latency_seconds_count[15m]))",
               "legendFormat": "{{result}}",
               "refId": "A"
+            }
+          ]
+        },
+        {
+          "type": "row",
+          "title": "Validation Engine Tempo",
+          "collapsed": false,
+          "id": 15,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 37
+          }
+        },
+        {
+          "type": "table",
+          "title": "최근 validation-engine trace",
+          "description": "Validation SLO나 latency 패널에서 병목이 보이면 여기서 최근 validation-engine trace를 연다.",
+          "id": 16,
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 38
+          },
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "fieldConfig": {
+            "defaults": {}
+          },
+          "options": {
+            "showHeader": true
+          },
+          "targets": [
+            {
+              "query": "{ resource.service.name = \"validation-engine\" }",
+              "queryType": "traceql",
+              "refId": "A",
+              "limit": 20,
+              "tableType": "traces"
             }
           ]
         }
