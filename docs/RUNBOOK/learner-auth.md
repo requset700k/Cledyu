@@ -102,9 +102,11 @@ export AWS_PROFILE=cledyu
 #      public_domain         = "cledyu.com"
 #      public_keycloak_host  = "auth.cledyu.com"
 #      keycloak_upstream_url = "https://10.10.0.101"   # 기본값(Traefik LB, 실측 완료)
-#      proxy_instance_type   = "t3.nano"
-#    프록시 tailnet 가입 키(state 평문 회피 위해 env 로만):
-export TF_VAR_tailscale_auth_key='<tailscale reusable/ephemeral authkey>'
+#      proxy_instance_type   = "t3.micro"   # t3.nano 금지 — 0.5G RAM OOM 재발(2026-07-09 인시던트)
+#      alert_email           = "<알람 수신 이메일>"
+#    프록시 tailnet 가입 키(state 평문 회피 위해 env 로만). 반드시 non-ephemeral + reusable
+#    — ephemeral 이면 오프라인 시 노드 GC 삭제로 재부팅 후 재가입 실패(502):
+export TF_VAR_tailscale_auth_key='<tailscale non-ephemeral reusable authkey>'
 
 # 2) 한 번에 apply (ACM DNS 검증은 registrar=Route53 라 자동 전파 → ALB → 프록시 → A ALIAS).
 #    NS 위임·zone 생성 단계 불필요.
@@ -407,11 +409,11 @@ app/api/auth.cledyu.com 공개 접속은 단일 EC2 프록시(Caddy+Tailscale, A
 - 인스턴스: t3.micro + 2G swap, unattended-upgrades 제거(OOM 방지). SSM instance profile 로 Session Manager 셸 접근 가능.
 - Tailscale authkey 는 반드시 non-ephemeral + reusable — ephemeral 이면 오프라인 시 노드가 GC 삭제돼 재부팅 후 tailnet 재가입 실패(502). `TF_VAR_tailscale_auth_key` 로 주입.
 - Caddyfile 은 `@public host` allowlist(app|api|auth)만 프록시하고 나머지 404 — 내부 .local Host 주입 차단(보안 필수, 삭제 금지).
-- ALB 헬스체크는 Caddy 로컬 `/healthz`(얕은 liveness). upstream(tailnet→traefik) 장애는 ELB 5XX 알람이 탐지.
+- ALB 헬스체크는 Caddy 로컬 `/healthz`(얕은 liveness). upstream(tailnet→traefik) 장애는 target 5XX 알람(HTTPCode_Target_5XX_Count)이 탐지 — Caddy 502 는 target 기원이라 ELB 5XX 로는 안 잡힘.
 
 ### 자동복구·알람
 - `StatusCheckFailed_Instance` → EC2 자동 리부트(impaired 시 약 5분 내 자동복구).
-- `UnHealthyHostCount`, `HTTPCode_ELB_5XX` → SNS 이메일(`alert_email`).
+- `UnHealthyHostCount`, `HTTPCode_Target_5XX_Count` → SNS 이메일(`alert_email`).
 
 ### 장애 진단 순서
 1. `aws elbv2 describe-target-health` — TG 타겟 healthy 여부
