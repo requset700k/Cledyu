@@ -38,8 +38,18 @@ data "aws_route53_zone" "public" {
 }
 
 # ── ACM 와일드카드 인증서 (기존 발급, terraform 이 재발급하지 않도록) ───────────────
-# 라이브는 별도 발급한 와일드카드 *.cledyu.com cert(app+auth 공통)를 쓴다.
-# terraform 이 cert 를 재발급/교체하지 않도록 기존 cert 를 data 로 읽기만 한다.
+# 라이브는 별도 발급한 와일드카드 *.cledyu.com cert(app+auth 공통)를 쓴다. 인증서와
+# 그 DNS validation CNAME 은 이 모듈 밖에서 관리하며, terraform 은 data 로 읽기만 한다.
+#
+# 마이그레이션 주의(기존 state): 이전 버전은 auth.cledyu.com 전용 cert 를 관리했다
+# (aws_acm_certificate.auth / aws_acm_certificate_validation.auth /
+#  aws_route53_record.acm_validation). 그 리소스들이 config 에서 사라지면 apply 가
+# validation CNAME 까지 destroy 하려 하는데, 이 CNAME 은 ACM 와일드카드 인증서의
+# managed renewal 검증에 계속 쓰이므로 삭제되면 갱신 실패로 공개 TLS 가 만료된다.
+# 따라서 destroy 가 아니라 state 에서만 제거해 AWS 리소스(cert+CNAME)를 보존한다:
+#   terraform state rm 'aws_route53_record.acm_validation["*.cledyu.com"]' \
+#     'aws_acm_certificate_validation.auth[0]' 'aws_acm_certificate.auth[0]'
+# (본 배포는 2026-07-09 위 절차로 정리 완료 — cert ISSUED, CNAME 보존 확인.)
 data "aws_acm_certificate" "wildcard" {
   count       = local.pub
   domain      = "*.${var.public_domain}"
