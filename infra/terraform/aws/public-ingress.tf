@@ -42,7 +42,7 @@ data "aws_route53_zone" "public" {
 # terraform 이 cert 를 재발급/교체하지 않도록 기존 cert 를 data 로 읽기만 한다.
 data "aws_acm_certificate" "wildcard" {
   count       = local.pub
-  domain      = "*.cledyu.com"
+  domain      = "*.${var.public_domain}"
   statuses    = ["ISSUED"]
   most_recent = true
 }

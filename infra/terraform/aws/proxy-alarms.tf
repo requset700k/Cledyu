@@ -46,6 +46,7 @@ resource "aws_cloudwatch_metric_alarm" "proxy_unhealthy" {
   comparison_operator = "GreaterThanOrEqualToThreshold"
   alarm_actions       = [aws_sns_topic.public_alerts[0].arn]
   ok_actions          = [aws_sns_topic.public_alerts[0].arn]
+  treat_missing_data  = "breaching"
 }
 
 # ── upstream 장애(502 등 5XX) → 알림 ───────────────────────────────────────

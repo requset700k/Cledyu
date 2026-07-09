@@ -181,7 +181,7 @@ variable "waf_rate_limit" {
 }
 
 variable "alert_email" {
-  description = "공개진입점 CloudWatch 알람 수신 이메일(SNS 구독)."
+  description = "공개진입점 CloudWatch 알람 수신 이메일(SNS 구독). enable_public_ingress=true 면 TF_VAR_alert_email 또는 tfvars 로 반드시 지정(빈 값이면 SNS 구독 apply 실패)."
   type        = string
-  default     = "kylekim1223@gmail.com"
+  default     = ""
 }
