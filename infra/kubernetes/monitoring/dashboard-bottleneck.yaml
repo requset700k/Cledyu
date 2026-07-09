@@ -894,12 +894,12 @@ data:
           },
           "targets": [
             {
-              "expr": "sum(kafka_consumergroup_lag{topic=\"validation-requests\",consumergroup=\"validation-engine\"}) or vector(0)",
+              "expr": "sum(kafka_consumergroup_lag{topic=\"validation-requests\",consumergroup=\"validation-engine\"})",
               "legendFormat": "engine",
               "refId": "A"
             },
             {
-              "expr": "sum(kafka_consumergroup_lag{topic=\"validation-results\",consumergroup=\"cledyu-api-validation-results\"}) or vector(0)",
+              "expr": "sum(kafka_consumergroup_lag{topic=\"validation-results\",consumergroup=\"cledyu-api-validation-results\"})",
               "legendFormat": "api",
               "refId": "B"
             }
