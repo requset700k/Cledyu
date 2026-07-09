@@ -11,6 +11,13 @@
 # 운영에서는 만료 짧은 ephemeral/재사용 키 권장.
 
 package_update: true
+
+# t3.micro 여도 apt/부팅 순간 메모리 스파이크 완충용 2G swap. OOM 재발 방지.
+swap:
+  filename: /swapfile
+  size: "2G"
+  maxsize: "2G"
+
 packages:
   - curl
   - debian-keyring
@@ -61,6 +68,10 @@ write_files:
       }
 
 runcmd:
+  # 이번 인시던트 근본원인: unattended-upgrades 가 0.5G RAM 을 소진해 OOM.
+  # 재생성형 프록시라 자동패치 이득보다 OOM 리스크가 크므로 제거한다.
+  - systemctl disable --now unattended-upgrades apt-daily.timer apt-daily-upgrade.timer || true
+  - DEBIAN_FRONTEND=noninteractive apt-get purge -y unattended-upgrades || true
   # 호스트네임(태그와 정렬, tailnet 식별 용이).
   - hostnamectl set-hostname ${hostname} || true
   # Tailscale 설치 + tailnet 가입(authkey 주입). --accept-routes 필수 —
