@@ -104,9 +104,12 @@ export AWS_PROFILE=cledyu
 #      keycloak_upstream_url = "https://10.10.0.101"   # 기본값(Traefik LB, 실측 완료)
 #      proxy_instance_type   = "t3.micro"   # t3.nano 금지 — 0.5G RAM OOM 재발(2026-07-09 인시던트)
 #      alert_email           = "<알람 수신 이메일>"
-#    프록시 tailnet 가입 키(state 평문 회피 위해 env 로만). 반드시 non-ephemeral + reusable
-#    — ephemeral 이면 오프라인 시 노드 GC 삭제로 재부팅 후 재가입 실패(502):
-export TF_VAR_tailscale_auth_key='<tailscale non-ephemeral reusable authkey>'
+#    프록시 tailnet 가입 키(state/user-data 에 평문 잔존하므로 env 로만 주입).
+#    non-ephemeral 필수 — ephemeral 이면 오프라인 시 노드 GC 삭제로 재부팅 후 재가입
+#    실패(502). reusable 은 재부팅 생존에 불필요(non-ephemeral 로 충분)하고, 누출 시
+#    반복 노드 등록이 가능한 장기 권한이 되므로 지양한다. one-off 키를 쓰고 apply 직후
+#    revoke 하거나, 재생성 때마다 새 키를 주입하는 편이 안전:
+export TF_VAR_tailscale_auth_key='<tailscale non-ephemeral authkey (one-off 권장, apply 후 revoke)>'
 
 # 2) 한 번에 apply (ACM DNS 검증은 registrar=Route53 라 자동 전파 → ALB → 프록시 → A ALIAS).
 #    NS 위임·zone 생성 단계 불필요.

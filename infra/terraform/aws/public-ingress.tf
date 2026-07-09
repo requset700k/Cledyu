@@ -194,6 +194,12 @@ resource "aws_instance" "proxy" {
   vpc_security_group_ids = [aws_security_group.proxy[0].id]
   iam_instance_profile   = aws_iam_instance_profile.proxy_ssm[0].name
 
+  # SSM 정책 attachment 를 명시적 의존으로 묶는다. instance profile 만 참조하면
+  # role 에 붙는 attachment 는 숨은 의존이라, 운영자가 -target=aws_instance.proxy[0]
+  # 로 재생성할 때 attachment 가 빠져 SSM 접속이 안 될 수 있다. depends_on 으로
+  # -target 이 attachment 까지 함께 끌어오게 한다.
+  depends_on = [aws_iam_role_policy_attachment.proxy_ssm_core]
+
   metadata_options {
     http_tokens   = "required"
     http_endpoint = "enabled"
