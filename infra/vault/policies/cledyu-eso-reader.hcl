@@ -75,6 +75,17 @@ path "cledyu/metadata/db/api" {
   capabilities = ["read"]
 }
 
+# Keycloak DB CNPG 이관(Plan A-2) — keycloak-pg-credentials ExternalSecret 이 읽는다.
+# CNPG bootstrap 이 요구하는 basic-auth(username/password). owner=keycloak 와 username 일치 계약.
+# (cledyu-keycloak-db.hcl 는 Keycloak SA 전용이라 ESO 엔 미적용 — 여기 별도 부여 필요)
+path "cledyu/data/keycloak/postgres" {
+  capabilities = ["read"]
+}
+
+path "cledyu/metadata/keycloak/postgres" {
+  capabilities = ["read"]
+}
+
 # 세션 VM 읽기전용 파일 목록 전용 SSH keypair — api-file-list-ssh ExternalSecret 이 읽는다.
 # 공개키는 새 세션 VM cloud-init forced command 로, private key 는 api Pod 에 read-only mount.
 path "cledyu/data/api/file-list-ssh" {
