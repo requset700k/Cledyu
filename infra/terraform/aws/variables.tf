@@ -179,3 +179,9 @@ variable "waf_rate_limit" {
   type        = number
   default     = 2000
 }
+
+variable "alert_email" {
+  description = "공개진입점 CloudWatch 알람 수신 이메일(SNS 구독)."
+  type        = string
+  default     = "kylekim1223@gmail.com"
+}
