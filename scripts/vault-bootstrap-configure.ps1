@@ -220,15 +220,42 @@ Write-VaultJson -Path "cledyu/data/keycloak/admin" -Data @{
   source = "kubernetes:keycloak/cledyu-keycloak-initial-admin"
 }
 
-$dbData = @{
-  username = Get-SecretValue -Namespace keycloak -Name keycloak-db-credentials -Key username
-  password = Get-SecretValue -Namespace keycloak -Name keycloak-db-credentials -Key password
-  database = Get-SecretValue -Namespace keycloak -Name keycloak-db-credentials -Key database
-  host = Get-SecretValue -Namespace keycloak -Name keycloak-db-credentials -Key host
-  port = Get-SecretValue -Namespace keycloak -Name keycloak-db-credentials -Key port
-  source = "kubernetes:keycloak/keycloak-db-credentials"
+# keycloak DB 자격증명 시드 — CNPG 이관(Plan A-2) 후 이 Vault 경로가 소스 오브 트루스다
+# (ESO keycloak-pg-credentials가 여기서 읽어 CNPG bootstrap owner + Keycloak CR 자격증명이 됨).
+# 우선순위: ① Vault에 이미 있으면 보존(재실행·DR raft 복원 시 덮어쓰기 = 라이브 DB 비번과 어긋남)
+#          ② 구 Bitnami secret이 있으면 이관(하위호환) ③ 둘 다 없으면 난수 생성(신규/DR 리빌드).
+$vaultDbCheck = Invoke-VaultCommand `
+  -Command "vault kv get cledyu/keycloak/postgres >/dev/null 2>&1 && echo EXISTS || echo MISSING"
+if ("$vaultDbCheck".Trim() -eq "EXISTS") {
+  Write-Host "cledyu/keycloak/postgres already seeded - keeping existing value."
 }
-Write-VaultJson -Path "cledyu/data/keycloak/postgres" -Data $dbData
+else {
+  $legacyDbPassword = Get-SecretValue -Namespace keycloak -Name keycloak-db-credentials -Key password -Optional
+  if ($null -ne $legacyDbPassword) {
+    $dbData = @{
+      username = Get-SecretValue -Namespace keycloak -Name keycloak-db-credentials -Key username
+      password = $legacyDbPassword
+      database = Get-SecretValue -Namespace keycloak -Name keycloak-db-credentials -Key database
+      host = Get-SecretValue -Namespace keycloak -Name keycloak-db-credentials -Key host
+      port = Get-SecretValue -Namespace keycloak -Name keycloak-db-credentials -Key port
+      source = "kubernetes:keycloak/keycloak-db-credentials"
+    }
+  }
+  else {
+    # 신규 환경: 구 secret 생성자(postgres_single)가 플레이북에서 제거돼 존재하지 않는다.
+    # 영숫자만 사용(32자) — DSN 등에 embed 될 때 URL 인코딩 이슈를 원천 차단.
+    $generatedPassword = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 32 | ForEach-Object { [char]$_ })
+    $dbData = @{
+      username = "keycloak"
+      password = $generatedPassword
+      database = "keycloak"
+      host = "keycloak-pg-rw"
+      port = "5432"
+      source = "generated:vault-bootstrap-configure"
+    }
+  }
+  Write-VaultJson -Path "cledyu/data/keycloak/postgres" -Data $dbData
+}
 
 $argocdClientSecret = Get-SecretValue -Namespace argocd -Name argocd-secret -Key "oidc.keycloak.clientSecret"
 Write-VaultJson -Path "cledyu/data/oidc/argocd" -Data @{
