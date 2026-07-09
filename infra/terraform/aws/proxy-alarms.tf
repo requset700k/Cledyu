@@ -26,7 +26,9 @@ resource "aws_cloudwatch_metric_alarm" "proxy_impaired_reboot" {
   threshold           = 1
   comparison_operator = "GreaterThanOrEqualToThreshold"
   alarm_actions       = ["arn:aws:automate:${var.region}:ec2:reboot", aws_sns_topic.public_alerts[0].arn]
-  treat_missing_data  = "breaching"
+  # missing 필수 — 리부트 액션 알람이라, 인스턴스 기동 직후 메트릭 공백을 breaching 으로
+  # 잡으면 정상 인스턴스를 오리부트한다. 실제 StatusCheckFailed_Instance=1 일 때만 리부트.
+  treat_missing_data = "missing"
 }
 
 # ── ALB 타겟 unhealthy → 알림 ──────────────────────────────────────────────
@@ -46,7 +48,8 @@ resource "aws_cloudwatch_metric_alarm" "proxy_unhealthy" {
   comparison_operator = "GreaterThanOrEqualToThreshold"
   alarm_actions       = [aws_sns_topic.public_alerts[0].arn]
   ok_actions          = [aws_sns_topic.public_alerts[0].arn]
-  treat_missing_data  = "breaching"
+  # 타겟 등록 공백/롤아웃 순간을 오탐하지 않도록 missing 은 정상 취급.
+  treat_missing_data = "notBreaching"
 }
 
 # ── upstream 장애(502 등 5XX) → 알림 ───────────────────────────────────────
