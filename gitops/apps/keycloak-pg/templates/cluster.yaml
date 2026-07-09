@@ -1,0 +1,83 @@
+## CNPG Cluster — 구 Bitnami keycloak-db(keycloak ns, PostgreSQL 18)를 논리 import(microservice)로
+## 이관하고, barman으로 S3(keycloak/ 프리픽스)에 WAL 연속 아카이빙 + base backup을 남긴다.
+##
+## 버전 주의: 오퍼레이터 = cnpg chart 0.26.1 = 1.27.1(Task 0에서 1.25.0→1.27.1 상향;
+## 구 Bitnami가 PG 18이라 논리 import(target≥source)에 PG 18 지원 필요)
+## in-tree spec.backup.barmanObjectStore는 1.26부터 deprecated이나 1.27에서도 기본·정상 동작
+## → 1.28.0 제거 전까지 유효(후속 barman-cloud 이관).
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: keycloak-pg
+  namespace: {{ .Release.Namespace }}
+spec:
+  instances: {{ .Values.instances }}
+  # 구 Bitnami major(18)와 동일.
+  # in-tree barmanObjectStore는 barman-cloud CLI가 이미지에 있어야 동작하는데,
+  # 신 포맷 이미지 중 barman-cloud를 포함하는 건 **system 플레이버뿐**(minimal/standard엔 없음).
+  # 따라서 반드시 -system- 이미지를 쓴다.
+  # bare `18.2`도 system이지만 deprecated 태그 + bullseye(EOL 임박)라, 명시 태그 `18.2-system-trixie`(현행 Debian) + digest 고정.
+  # system 플레이버는 in-tree barman 폐기(1.28)와 함께 제거 예정 → 그때 barman-cloud 플러그인 + standard 이미지로 이관
+  imageName: "ghcr.io/cloudnative-pg/postgresql:18.2-system-trixie@sha256:3f44daf4c2ddea3481b018b3b004f91a439b93fc995a387f9aff69058bef19ac"
+  storage:
+    size: {{ .Values.storage.size | quote }}
+    storageClass: {{ .Values.storage.className }}
+  # 수량은 반드시 quote — 미quote 시 "1"이 bare int로 렌더돼 k8s 저장형(문자열)과 어긋나 ArgoCD 영구 OutOfSync.
+  resources:
+    requests:
+      cpu: {{ .Values.resources.requests.cpu | quote }}
+      memory: {{ .Values.resources.requests.memory | quote }}
+    limits:
+      cpu: {{ .Values.resources.limits.cpu | quote }}
+      memory: {{ .Values.resources.limits.memory | quote }}
+  bootstrap:
+    # 최초 이관: 구 Bitnami(old-keycloak-db)에서 논리 import(microservice). bootstrap은 생성 시 1회만 실행.
+    #
+    # ⚠ 재생성 시 fail-safe(의도됨): 구 DB 폐기 후 이 매니페스트로 CR을 다시 만들면 import 소스
+    #    (keycloak-db-postgresql)가 없어 bootstrap이 실패한다. 버그가 아니라 안전장치다.
+    #    stateful DB를 자동으로 빈 상태/잘못된 소스로 재생성하지 않게 막고 수동 DR을 강제한다.
+    # ▶ 실제 DR 복구는 이 운영 매니페스트가 아니라 별도 recovery 매니페스트로 수행
+    #    (docs/RUNBOOK/dr-restore-drill.md, keycloak-pg 케이스). 전체-사이트 DR은 Plan C가 이를 EKS에 재사용.
+    initdb:
+      # 계약: owner는 아래 secret(keycloak-pg-credentials)의 username과 일치해야 한다(CNPG 검증).
+      database: keycloak
+      owner: keycloak
+      secret:
+        name: keycloak-pg-credentials
+      import:
+        type: microservice
+        databases:
+          - keycloak
+        source:
+          externalCluster: old-keycloak-db
+  externalClusters:
+    # 구 Bitnami import 소스. 재생성 시 여기 연결 실패로 멈춘다(위 fail-safe).
+    - name: old-keycloak-db
+      connectionParameters:
+        host: keycloak-db-postgresql.keycloak.svc
+        user: keycloak
+        dbname: keycloak
+      password:
+        name: keycloak-pg-credentials
+        key: password
+  backup:
+    barmanObjectStore:
+      destinationPath: "s3://cledyu-lab-dr-backups/keycloak"
+      endpointURL: "https://s3.ap-northeast-2.amazonaws.com"
+      # keycloak ns에 뿌린 Secret(프리픽스 keycloak/ 한정 IAM 키).
+      s3Credentials:
+        accessKeyId:
+          name: cledyu-backup-s3
+          key: ACCESS_KEY_ID
+        secretAccessKey:
+          name: cledyu-backup-s3
+          key: ACCESS_SECRET_KEY
+      wal:
+        compression: gzip
+    # retentionPolicy 의도적으로 미설정 — backup-writer-keycloak IAM에 s3:DeleteObject 없음(무-delete)
+    # + 버킷 Object Lock GOVERNANCE 30일. 설정 시 barman이 만료분 직접 삭제 시도→매번 AccessDenied.
+    # 삭제는 전적으로 S3 lifecycle(backup.tf의 keycloak/ 프리픽스 규칙)이 담당한다.
+  monitoring:
+    # CNPG 1.27에서 deprecated지만 존속·동작. 향후(1.28+) 수동 PodMonitor로 교체 필요(R4).
+    enablePodMonitor: true
