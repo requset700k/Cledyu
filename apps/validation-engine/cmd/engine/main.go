@@ -44,6 +44,10 @@ type publisher interface {
 }
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	// Uber의 zap 라이브러리를 사용하여 로그를 출력할 수 있게 고성능 로거를 초기화
 	log, _ := zap.NewProduction()
 	defer log.Sync() //nolint:errcheck
@@ -76,7 +80,8 @@ func main() {
 		getEnv("KAFKA_CA_CERT", "/etc/kafka-certs/ca.crt"),
 	)
 	if err != nil {
-		log.Fatal("TLS 인증서 로드 실패", zap.Error(err))
+		log.Error("TLS 인증서 로드 실패", zap.Error(err))
+		return 1
 	}
 
 	// consumer: Kafka 토픽에서 검증 요청 메시지를 읽어오는 인스턴스
@@ -99,8 +104,9 @@ func main() {
 	// 종료 신호가 오거나 오류가 발생하면 여기서 멈춘다
 	if err := cons.Run(ctx, handle(prod, executor.New, log)); err != nil {
 		log.Error("consumer 오류", zap.Error(err))
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
 
 // handle은 Kafka로부터 받은 각 메시지를 어떻게 처리할지 정의
