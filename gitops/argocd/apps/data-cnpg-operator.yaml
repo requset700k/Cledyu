@@ -13,10 +13,17 @@ metadata:
 spec:
   project: default
   sources:
-    # 1) cloudnative-pg 공식 Helm 차트 (버전 고정 — apply 전 최신 stable 확인해 핀)
+    # 1) cloudnative-pg 공식 Helm 차트 (버전 고정).
+    #    chart 0.26.1 = operator 1.27.1. 0.23.0(=1.25.0)에서 상향한 이유:
+    #    Keycloak DB(Bitnami)가 PostgreSQL 18이라 CNPG 논리 import(target≥source)에 PG 18 지원이
+    #    필요한데, PG 18은 operator 1.25.4/1.26.2/1.27.1(2025-10 배치)부터다. 공식 차트가 1.25.2~1.25.4·
+    #    1.26.2를 안 내서, PG 18 지원 + 차트 존재하는 최소 버전이 1.27.1(chart 0.26.1)이다.
+    #    in-tree spec.backup.barmanObjectStore는 1.26부터 deprecated이나 1.27에서도 기본·정상 동작 →
+    #    cledyu-pg/keycloak-pg 백업 설정 그대로 유지(barman-cloud 플러그인 이관 불필요, 후속 과제).
+    #    Cluster의 monitoring.enablePodMonitor도 1.27에서 deprecated지만 존재·동작(수동 PodMonitor 이관은 후속).
     - repoURL: https://cloudnative-pg.github.io/charts
       chart: cloudnative-pg
-      targetRevision: 0.23.0
+      targetRevision: 0.26.1
       helm:
         releaseName: cnpg
         valueFiles:
