@@ -15,7 +15,9 @@ keycloak_foundation_cr_version_fallbacks:
 keycloak_foundation_cr_version_override: ""
 
 keycloak_foundation_instances: 1
-keycloak_foundation_db_service_name: keycloak-db-postgresql
+# CNPG 이관(Plan A-2 Task 4) cutover 반영 — 구 Bitnami(keycloak-db-postgresql)가 아닌
+# CNPG rw 서비스를 가리킨다. 되돌리면 다음 플레이북 실행이 cutover 를 붕괴시키니 주의.
+keycloak_foundation_db_service_name: keycloak-pg-rw
 keycloak_foundation_db_secret_name: keycloak-db-credentials
 keycloak_foundation_service_name: "{{ keycloak_foundation_name }}-service"
 keycloak_foundation_service_account_name: cledyu-keycloak
