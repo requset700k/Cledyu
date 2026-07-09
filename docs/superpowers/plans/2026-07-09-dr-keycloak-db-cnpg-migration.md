@@ -6,12 +6,12 @@
 
 **Architecture:** cledyu-pg(Plan A Task 4)와 동일 패턴 — 신 CNPG 클러스터를 구 Bitnami와 공존 생성 → write-freeze(Keycloak `instances:0`) 하에 논리 import → row 검증 → Keycloak CR `db.host`를 `keycloak-pg-rw`로 cutover → 유예기간 후 Bitnami 폐기. cledyu-pg와의 결정적 차이: freeze/폐기 대상이 GitOps가 아닌 **Ansible 소유**라 root-apps 정비 창은 불필요하나 "정비 창 중 keycloak 플레이북 재실행 금지" 제약이 생기고, cutover는 CR `db.host` live patch 후 Ansible 기본값 커밋으로 정합화한다.
 
-**Tech Stack:** Terraform(AWS S3/IAM/KMS), External Secrets Operator, CloudNativePG 1.25.0(in-tree barman), HashiCorp Vault, Ansible(Keycloak Operator v26.6.1 · Bitnami PostgreSQL), ArgoCD.
+**Tech Stack:** Terraform(AWS S3/IAM/KMS), External Secrets Operator, CloudNativePG **1.27.1**(in-tree barman, PG 18 지원), HashiCorp Vault, Ansible(Keycloak Operator v26.6.1 · Bitnami PostgreSQL **18**), ArgoCD.
 
 ## Global Constraints
 
 - 리전: `ap-northeast-2` / 백업 버킷: `cledyu-lab-dr-backups`, 신규 프리픽스 `keycloak/`
-- CNPG 오퍼레이터는 chart **0.23.0(=1.25.0)** 핀 고정 — in-tree `barmanObjectStore` 정상 동작(≥1.26 상향 시 barman-cloud 플러그인 이관)
+- CNPG 오퍼레이터는 chart **0.26.1(=1.27.1)** 핀 고정 (Task 0에서 1.25.0→1.27.1 상향) — 구 Bitnami가 **PG 18**이라 논리 import(target≥source)에 PG 18 지원 필요(1.25.4/1.26.2/1.27.1부터). in-tree `barmanObjectStore`는 1.27에서도 정상 동작하나 **1.28.0에서 제거** → 후속 barman-cloud 플러그인 이관 필요(R3)
 - `retentionPolicy`는 **설정하지 않는다** — writer IAM에 `s3:DeleteObject` 없음 + Object Lock GOVERNANCE 30일. retention은 S3 lifecycle이 전담
 - 수량(cpu/memory/size)은 **반드시 `| quote`** — 미quote 시 ArgoCD 영구 OutOfSync
 - ArgoCD 앱 등록: `gitops/argocd/apps/<name>.yaml`(Application) + `gitops/apps/<name>/`(내용). repoURL `https://github.com/requset700k/Cledyu.git`, targetRevision `main`
@@ -19,6 +19,56 @@
 - 정비 창(임포트~cutover) 동안 **keycloak 플레이북(`70-keycloak-foundation.yml`) 재실행 금지**
 - 매니페스트 검증: `helm template | kubeconform -strict -ignore-missing-schemas` / `terraform validate` + `terraform fmt`
 - 상위 설계: `docs/superpowers/specs/2026-07-09-keycloak-db-cnpg-migration-design.md`
+
+---
+
+### Task 0: CNPG 오퍼레이터 1.25.0 → 1.27.1 상향 (선행, 별도 PR)
+
+> **착수 후 발견(실측)**: 구 Bitnami DB가 **PostgreSQL 18**이다(`PG_VERSION` 파일 실측 — 계획 초안의 "PG 17" 가정은 틀림). 논리 import는 target major ≥ source여야 하므로 CNPG 타깃도 PG 18이어야 하는데, 배포된 오퍼레이터 **1.25.0은 PG 18 미지원**(1.25.4/1.26.2/1.27.1부터). 공식 helm 차트가 1.25.2~1.25.4·1.26.2를 안 내서, **PG 18 지원 + 차트 존재하는 최소 버전 = 1.27.1(chart 0.26.1)**. → keycloak-pg 생성 전 오퍼레이터 상향이 필수 선행.
+>
+> **공유 오퍼레이터라 cledyu-pg에도 영향** → blast radius 격리 위해 **별도 브랜치/PR**(`chore/dr-cnpg-operator-1.27`)로 먼저 병합·검증 후 Task 1~ 진행.
+
+**Files:**
+- Modify: `gitops/argocd/apps/data-cnpg-operator.yaml` (`targetRevision: 0.23.0` → `0.26.1`)
+
+**적대적 리뷰 결과(1.27.1 상향이 cledyu-pg를 깨는가):**
+- ✅ cledyu-pg가 쓰는 모든 필드(barmanObjectStore·initdb.import(microservice)·externalClusters·wal.compression·enablePodMonitor) 1.27 CRD에 **존재**(렌더 CRD 대조). `postgresql.cnpg.io/v1` 유지
+- ✅ in-tree barman **WAL/serverName 동작 변경 없음**(1.26 릴리스노트) → cledyu-pg 백업 연속성 유지
+- ✅ k8s v1.31.0 요건 충족
+- 🔴 **R1**: 오퍼레이터 상향은 관리 클러스터를 새 instance manager로 롤링 → cledyu-pg(`instances:1`, `unsupervised`)가 **재시작 → api DB 순단**. **실이용자 0이라 수용**(HA/정비창/INPLACE 완화책 불필요)
+- 🟠 **R2**: 1.25→1.27 마이너 건너뛰기는 "권장 안 함"이나 "대부분 직접 가능" → 직접 점프, 병합 직후 cledyu-pg 정상 확인 조건
+- 🟡 **R3(후속 추적)**: in-tree barman **1.28.0 제거** → 1.28 상향 전 cledyu-pg·keycloak-pg 둘 다 **barman-cloud 플러그인 이관 필수**
+- 🟡 **R4(후속 추적)**: `enablePodMonitor` deprecated(존속) → 향후 수동 PodMonitor 교체(cledyu-pg·keycloak-pg 공통)
+
+- [ ] **Step 1: targetRevision bump**
+
+`gitops/argocd/apps/data-cnpg-operator.yaml`의 chart 소스 `targetRevision: 0.23.0` → `0.26.1`(주석에 상향 근거·in-tree barman 1.28 제거·enablePodMonitor 명시).
+
+- [ ] **Step 2: 렌더 검증(오퍼레이터 이미지 1.27.1 + values 유효)**
+
+Run: `helm repo add cnpg https://cloudnative-pg.github.io/charts && helm template cnpg cnpg/cloudnative-pg --version 0.26.1 -f gitops/apps/cnpg-operator/values.yaml --namespace cnpg-system | grep 'ghcr.io/cloudnative-pg/cloudnative-pg'`
+Expected: `image: "ghcr.io/cloudnative-pg/cloudnative-pg:1.27.1"`, 렌더 에러 없음(values 유효).
+
+- [ ] **Step 3: Commit + 별도 PR**
+
+```bash
+git add gitops/argocd/apps/data-cnpg-operator.yaml
+git commit -m "chore(dr): CNPG 오퍼레이터 1.25.0→1.27.1 (PG 18 지원, in-tree barman 유지)"
+git push -u origin chore/dr-cnpg-operator-1.27
+```
+PR 제목: `chore(dr): CNPG 오퍼레이터 1.25.0→1.27.1 (PG 18 지원)`.
+
+- [ ] **Step 4: 병합 후 cledyu-pg 정상 검증(R1/R2/R4 확인)**
+
+Run:
+```bash
+kubectl -n cnpg-system get deploy cnpg-cloudnative-pg -o jsonpath='{..image}'   # 1.27.1
+kubectl -n postgres get cluster cledyu-pg                                       # Cluster in healthy state
+kubectl -n postgres get backup -l cnpg.io/cluster=cledyu-pg | tail -2           # 백업 지속
+kubectl -n argocd get application data-cnpg-operator data-postgres-cnpg         # Synced/Healthy
+kubectl -n api rollout status deploy/api                                        # api DB 재연결
+```
+Expected: 오퍼레이터 1.27.1, cledyu-pg Healthy, 백업 지속, 두 앱 Synced/Healthy, api 재연결. **이 검증 통과가 Task 1~ 착수 조건.**
 
 ---
 
@@ -208,15 +258,14 @@ resources:
 
 - [ ] **Step 3: PG 메이저 실측 + 이미지 digest 확정**
 
-CNPG 타깃 major는 구 Bitnami의 major와 같거나 그 이상이어야 안전하다(논리 import는 target ≥ source). 라이브에서 major를 실측하고, 그 major의 CNPG 이미지 digest를 구한다:
+CNPG 타깃 major는 구 Bitnami의 major와 같거나 그 이상이어야 안전하다(논리 import는 target ≥ source). **구 Bitnami는 PG 18로 실측 확정**(`PG_VERSION` 파일), 오퍼레이터 1.27.1(Task 0)이 PG 18 지원. 재확인 + 이미지 digest 확정:
 ```bash
-# 구 Bitnami major 실측
-kubectl -n keycloak exec sts/keycloak-db-postgresql -- \
-  psql -U keycloak -d keycloak -tAc "show server_version_num"   # 예: 170004 → major 17
-# 대상 CNPG 이미지 digest 확정(major는 위 실측값에 맞춤; 예시는 17)
-docker buildx imagetools inspect ghcr.io/cloudnative-pg/postgresql:17.4 --format '{{.Manifest.Digest}}'
+# 구 Bitnami major 실측(인증 불필요 — PG_VERSION 파일). 이미지 태그가 :latest라 태그로는 못 봄.
+kubectl -n keycloak exec sts/keycloak-db-postgresql -- cat /bitnami/postgresql/data/PG_VERSION   # → 18
+# 대상 CNPG PG 18 이미지 digest 확정(최신 18.x stable 태그 확인 후):
+docker buildx imagetools inspect ghcr.io/cloudnative-pg/postgresql:18.0 --format '{{.Manifest.Digest}}'
 ```
-Expected: major 정수(예 17), `sha256:...` digest. 이 digest를 다음 Step의 `imageName`에 박는다.
+Expected: `18`, `sha256:...` digest. 이 digest를 다음 Step의 `imageName`(`<major>`=18)에 박는다.
 
 - [ ] **Step 4: cluster.yaml 작성 (barman S3 + 구 DB import)**
 
