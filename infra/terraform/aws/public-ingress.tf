@@ -37,48 +37,14 @@ data "aws_route53_zone" "public" {
   name  = "${var.public_domain}."
 }
 
-# ── ACM 인증서(auth.cledyu.com, DNS 검증) ──────────────────────────────────
-resource "aws_acm_certificate" "auth" {
-  count                     = local.pub
-  domain_name               = "*.${var.public_domain}"
-  subject_alternative_names = [var.public_domain]
-  validation_method         = "DNS"
-
-  lifecycle {
-    create_before_destroy = true
-  }
-}
-
-# 와일드카드(*.cledyu.com)와 apex(cledyu.com) SAN 은 ACM 이 **동일한 검증 CNAME** 을 돌려준다.
-# for_each 키를 resource_record_name(=동일값·apply 후 결정) 으로 잡으면 Duplicate object key
-# +unknown-key 로 plan 이 깨진다. 그렇다고 domain_name 으로 잡아 두 도메인 모두 레코드를 만들면
-# 하나의 CNAME 을 두 리소스가 중복 소유해 교체/철거 시 한 리소스가 공유 레코드를 지워 drift/검증
-# 실패가 난다. 따라서 정적·고유한 domain_name 을 키로 쓰되 **apex(=public_domain) 는 제외**해
-# 와일드카드용 레코드 하나만 만든다 — 이 CNAME 하나가 두 도메인을 모두 검증한다(AWS ACM DNS
-# validation). 만약 apex 만 노출하고 와일드카드가 없는 구성이 되면 아래 필터를 조정해야 한다.
-resource "aws_route53_record" "acm_validation" {
-  for_each = var.enable_public_ingress ? {
-    for dvo in aws_acm_certificate.auth[0].domain_validation_options :
-    dvo.domain_name => {
-      name   = dvo.resource_record_name
-      type   = dvo.resource_record_type
-      record = dvo.resource_record_value
-    } if dvo.domain_name != var.public_domain
-  } : {}
-
-  zone_id         = data.aws_route53_zone.public[0].zone_id
-  name            = each.value.name
-  type            = each.value.type
-  records         = [each.value.record]
-  ttl             = 60
-  allow_overwrite = true
-}
-
-# registrar=Route53 라 NS 가 hosted zone 에 자동 연결돼 DNS 검증이 바로 전파된다.
-resource "aws_acm_certificate_validation" "auth" {
-  count                   = local.pub
-  certificate_arn         = aws_acm_certificate.auth[0].arn
-  validation_record_fqdns = [for r in aws_route53_record.acm_validation : r.fqdn]
+# ── ACM 와일드카드 인증서 (기존 발급, terraform 이 재발급하지 않도록) ───────────────
+# 라이브는 별도 발급한 와일드카드 *.cledyu.com cert(app+auth 공통)를 쓴다.
+# terraform 이 cert 를 재발급/교체하지 않도록 기존 cert 를 data 로 읽기만 한다.
+data "aws_acm_certificate" "wildcard" {
+  count       = local.pub
+  domain      = "*.cledyu.com"
+  statuses    = ["ISSUED"]
+  most_recent = true
 }
 
 # ── ALB 보안그룹(공개 443/80 인바운드) ────────────────────────────────────
@@ -157,7 +123,7 @@ resource "aws_lb_listener" "https" {
   port              = 443
   protocol          = "HTTPS"
   ssl_policy        = "ELBSecurityPolicy-TLS13-1-2-2021-06"
-  certificate_arn   = aws_acm_certificate_validation.auth[0].certificate_arn
+  certificate_arn   = data.aws_acm_certificate.wildcard[0].arn
 
   default_action {
     type             = "forward"
