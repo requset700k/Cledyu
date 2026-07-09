@@ -5,7 +5,9 @@ resource "aws_sns_topic" "public_alerts" {
 }
 
 resource "aws_sns_topic_subscription" "public_alerts_email" {
-  count     = local.pub
+  # alert_email 이 비면 구독을 만들지 않는다 — 빈 endpoint 로 apply 가 실패해 프록시 교체·
+  # 알람 생성 전체가 중단되는 것을 막는다. 알람은 topic 을 참조하므로 이메일 미설정이어도 동작.
+  count     = local.pub == 1 && var.alert_email != "" ? 1 : 0
   topic_arn = aws_sns_topic.public_alerts[0].arn
   protocol  = "email"
   endpoint  = var.alert_email
@@ -52,14 +54,19 @@ resource "aws_cloudwatch_metric_alarm" "proxy_unhealthy" {
   treat_missing_data = "notBreaching"
 }
 
-# ── upstream 장애(502 등 5XX) → 알림 ───────────────────────────────────────
-# 얕은 HC 로는 tailnet drop 을 못 잡으므로, ELB 5XX 로 upstream 이상을 탐지.
+# ── upstream 장애(Caddy 502 등 target 5XX) → 알림 ──────────────────────────
+# 얕은 HC 로는 tailnet drop 을 못 잡는다. tailnet 이 끊기면 Caddy 가 502 를 반환하는데
+# 이는 target 기원 5XX 이므로 HTTPCode_Target_5XX_Count(TG 차원)로 잡아야 한다.
+# HTTPCode_ELB_5XX_Count 는 LB 자체 기원 5XX 만 세고 target 응답은 제외하므로 부적합.
 resource "aws_cloudwatch_metric_alarm" "proxy_5xx" {
-  count               = local.pub
-  alarm_name          = "${var.name_prefix}-kc-proxy-elb-5xx"
-  namespace           = "AWS/ApplicationELB"
-  metric_name         = "HTTPCode_ELB_5XX_Count"
-  dimensions          = { LoadBalancer = aws_lb.public[0].arn_suffix }
+  count       = local.pub
+  alarm_name  = "${var.name_prefix}-kc-proxy-target-5xx"
+  namespace   = "AWS/ApplicationELB"
+  metric_name = "HTTPCode_Target_5XX_Count"
+  dimensions = {
+    LoadBalancer = aws_lb.public[0].arn_suffix
+    TargetGroup  = aws_lb_target_group.keycloak_proxy[0].arn_suffix
+  }
   statistic           = "Sum"
   period              = 300
   evaluation_periods  = 1
