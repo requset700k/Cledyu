@@ -23,7 +23,9 @@ spec:
     namespace: keycloak
   # 이관 완료(Task 4 cutover·G1·G2·G3 통과) — automated 전환. 이관 중에는 수동 sync였다:
   # 자동 sync면 커밋 즉시 ArgoCD가 Cluster를 만들어 아직 안 멈춘 구 DB를 import → write-freeze 무의미.
-  # bootstrap.initdb.import는 이미 생성된 Cluster에 재실행되지 않으므로 automated로 되돌려도 안전.
+  # selfHeal 안전 조건: Cluster 삭제→재생성 시 initdb.import가 재실행될 수 있으나, 소스인 구 Bitnami
+  # DB(keycloak-db-postgresql)를 replicas 0으로 정지해 접속 불가 → stale 데이터 조용한 부활 대신
+  # 시끄러운 실패(fail-safe). 구 DB 폐기(Task 6) 전까지 이 정지 상태를 되돌리지 말 것.
   syncPolicy:
     automated:
       prune: true
