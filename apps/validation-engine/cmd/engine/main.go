@@ -18,10 +18,24 @@ import (
 	"github.com/requset700k/cledyu/validation-engine/internal/executor"
 	"github.com/requset700k/cledyu/validation-engine/internal/model"
 	"github.com/requset700k/cledyu/validation-engine/internal/producer"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 )
 
-const maxChecks = 20
+const (
+	maxChecks       = 20
+	otelSampleRatio = 0.1
+)
+
+var validationTracer = otel.Tracer("github.com/requset700k/cledyu/validation-engine/cmd/engine")
 
 // publisher는 검증 결과를 Kafka에 발행하는 인터페이스.
 // 실제 코드에서는 *producer.Producer가 쓰이고, 테스트에서는 mock으로 교체한다.
@@ -30,6 +44,10 @@ type publisher interface {
 }
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	// Uber의 zap 라이브러리를 사용하여 로그를 출력할 수 있게 고성능 로거를 초기화
 	log, _ := zap.NewProduction()
 	defer log.Sync() //nolint:errcheck
@@ -62,7 +80,8 @@ func main() {
 		getEnv("KAFKA_CA_CERT", "/etc/kafka-certs/ca.crt"),
 	)
 	if err != nil {
-		log.Fatal("TLS 인증서 로드 실패", zap.Error(err))
+		log.Error("TLS 인증서 로드 실패", zap.Error(err))
+		return 1
 	}
 
 	// consumer: Kafka 토픽에서 검증 요청 메시지를 읽어오는 인스턴스
@@ -76,14 +95,18 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	shutdownTracing := initTracing(ctx, getEnv("OTEL_ENDPOINT", "alloy.loki.svc.cluster.local:4317"), log)
+	defer shutdownTracing()
+
 	log.Info("validation engine 시작", zap.Strings("brokers", brokers))
 
 	// Kafka를 계속 바라보면서 요청이 오면 handle()을 실행(컨슈머)
 	// 종료 신호가 오거나 오류가 발생하면 여기서 멈춘다
 	if err := cons.Run(ctx, handle(prod, executor.New, log)); err != nil {
 		log.Error("consumer 오류", zap.Error(err))
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
 
 // handle은 Kafka로부터 받은 각 메시지를 어떻게 처리할지 정의
@@ -94,6 +117,16 @@ func main() {
 func handle(pub publisher, newExec func(model.VMSpec) (executor.VMExecutor, error), log *zap.Logger) consumer.HandleFunc {
 	return func(ctx context.Context, req model.ValidationRequest) error {
 		start := time.Now()
+		ctx, span := validationTracer.Start(ctx, "validation_engine.handle",
+			trace.WithAttributes(
+				attribute.String("validation.trace_id", req.TraceID),
+				attribute.String("session.id", req.SessionID),
+				attribute.Int("step.id", req.StepID),
+				attribute.String("vm.type", string(req.VM.Type)),
+				attribute.Int("validation.check_count", len(req.Checks)),
+			),
+		)
+		defer span.End()
 
 		// 어떤 요청이 들어왔는지 로그로 남김
 		log.Info("검증 시작",
@@ -107,6 +140,11 @@ func handle(pub publisher, newExec func(model.VMSpec) (executor.VMExecutor, erro
 		// 실패 결과를 Kafka에 발행해 Session API에 알리고 nil을 반환해 오프셋을 커밋한다.
 		// 발행 자체가 실패하면 FatalError로 감싸 consumer를 종료 — 파드 재시작 후 재시도한다.
 		publishFailed := func(reason string) error {
+			span.SetAttributes(
+				attribute.String("validation.result", "request_error"),
+				attribute.String("validation.error_reason", reason),
+			)
+			span.SetStatus(codes.Error, reason)
 			log.Warn("요청 오류 — 실패 결과 발행",
 				zap.String("trace_id", req.TraceID),
 				zap.String("session_id", req.SessionID),
@@ -123,6 +161,7 @@ func handle(pub publisher, newExec func(model.VMSpec) (executor.VMExecutor, erro
 				},
 				DurationMS: time.Since(start).Milliseconds(),
 			}); err != nil {
+				recordSpanError(span, err)
 				return &consumer.FatalError{Err: err}
 			}
 			return nil
@@ -171,8 +210,14 @@ func handle(pub publisher, newExec func(model.VMSpec) (executor.VMExecutor, erro
 		// 검증 결과를 Kafka의 결과 토픽으로 발행
 		// 실패하면 FatalError로 감싸 consumer를 종료 — Kafka 장애 등 일시적 오류이므로 파드 재시작 후 재시도
 		if err := pub.Publish(ctx, result); err != nil {
+			recordSpanError(span, err)
 			return &consumer.FatalError{Err: err}
 		}
+		span.SetAttributes(
+			attribute.Bool("validation.passed", allPassed),
+			attribute.Int64("validation.duration_ms", result.DurationMS),
+		)
+		span.SetStatus(codes.Ok, "")
 
 		log.Info("검증 완료",
 			zap.String("trace_id", req.TraceID),
@@ -184,6 +229,46 @@ func handle(pub publisher, newExec func(model.VMSpec) (executor.VMExecutor, erro
 
 		return nil
 	}
+}
+
+func initTracing(ctx context.Context, endpoint string, log *zap.Logger) func() {
+	otlpExp, err := otlptracegrpc.New(ctx,
+		otlptracegrpc.WithEndpoint(endpoint),
+		otlptracegrpc.WithInsecure(),
+	)
+	if err != nil {
+		log.Warn("OTel exporter 초기화 실패 — trace 비활성", zap.Error(err))
+		return func() {}
+	}
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithSampler(sdktrace.ParentBased(sdktrace.TraceIDRatioBased(otelSampleRatio))),
+		sdktrace.WithBatcher(otlpExp),
+		sdktrace.WithResource(resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceNameKey.String("validation-engine"),
+		)),
+	)
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(
+		propagation.TraceContext{},
+		propagation.Baggage{},
+	))
+
+	log.Info("OTel TracerProvider 초기화 완료", zap.String("endpoint", endpoint))
+	return func() {
+		if err := tp.Shutdown(context.Background()); err != nil {
+			log.Error("OTel shutdown error", zap.Error(err))
+		}
+	}
+}
+
+func recordSpanError(span trace.Span, err error) {
+	if err == nil {
+		return
+	}
+	span.RecordError(err)
+	span.SetStatus(codes.Error, err.Error())
 }
 
 // loadTLS는 cert-manager가 발급한 클라이언트 인증서, 개인키, CA 인증서를 읽어 mTLS 설정을 구성
