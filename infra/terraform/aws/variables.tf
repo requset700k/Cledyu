@@ -142,7 +142,7 @@ variable "tailscale_auth_key" {
 variable "proxy_instance_type" {
   description = "tailnet 리버스프록시 인스턴스 타입. 경량 프록시이므로 작게(비용 절감)."
   type        = string
-  default     = "t3.nano"
+  default     = "t3.micro"
 }
 
 variable "public_ingress_allowed_cidrs" {

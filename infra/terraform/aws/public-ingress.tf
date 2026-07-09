@@ -182,6 +182,7 @@ resource "aws_instance" "proxy" {
   instance_type          = var.proxy_instance_type
   subnet_id              = local.subnet_id
   vpc_security_group_ids = [aws_security_group.proxy[0].id]
+  iam_instance_profile   = aws_iam_instance_profile.proxy_ssm[0].name
 
   metadata_options {
     http_tokens   = "required"
