@@ -398,3 +398,32 @@ Keycloak 그룹 "/org-<이름>"  ──(groups 클레임)──►  api JWT 미�
 | 소셜 버튼 클릭 시 `Identity Provider not found` | web 은 켰는데 terraform `enabled_social_idps` 에 IdP 미생성. 둘을 정렬. |
 | 구글 콜백 `redirect_uri_mismatch` | 구글 콘솔 redirect URI 가 `https://auth.cledyu.com/realms/cledyu-learn/broker/google/endpoint` 와 불일치, 또는 Keycloak hostname 이 공개 도메인으로 안 바뀜(§4.1 strict=false). |
 | 학습자가 ArgoCD 접근됨 | **격리 실패** — 학습자가 `cledyu`(운영) realm 에 생성되었는지 확인. learn realm 이어야 함. |
+
+## 공개진입점(kc-proxy) 하드닝·인시던트 대응
+
+app/api/auth.cledyu.com 공개 접속은 단일 EC2 프록시(Caddy+Tailscale, ALB `cledyu-lab-public` / TG `cledyu-lab-kc-proxy`)를 경유한다. 2026-07-09 이 프록시가 OOM 으로 다운돼 504 가 발생했다(t3.nano 0.5G RAM 에서 unattended-upgrades 가 메모리 소진 → OS 행 → impaired).
+
+### 아키텍처·하드닝
+- 인스턴스: t3.micro + 2G swap, unattended-upgrades 제거(OOM 방지). SSM instance profile 로 Session Manager 셸 접근 가능.
+- Tailscale authkey 는 반드시 non-ephemeral + reusable — ephemeral 이면 오프라인 시 노드가 GC 삭제돼 재부팅 후 tailnet 재가입 실패(502). `TF_VAR_tailscale_auth_key` 로 주입.
+- Caddyfile 은 `@public host` allowlist(app|api|auth)만 프록시하고 나머지 404 — 내부 .local Host 주입 차단(보안 필수, 삭제 금지).
+- ALB 헬스체크는 Caddy 로컬 `/healthz`(얕은 liveness). upstream(tailnet→traefik) 장애는 ELB 5XX 알람이 탐지.
+
+### 자동복구·알람
+- `StatusCheckFailed_Instance` → EC2 자동 리부트(impaired 시 약 5분 내 자동복구).
+- `UnHealthyHostCount`, `HTTPCode_ELB_5XX` → SNS 이메일(`alert_email`).
+
+### 장애 진단 순서
+1. `aws elbv2 describe-target-health` — TG 타겟 healthy 여부
+2. `aws ec2 describe-instance-status` — InstanceStatus impaired(OS 행) 여부
+3. `aws ec2 get-console-output --latest` — OOM/panic 로그
+4. `tailscale status | grep kc-proxy` — 프록시 노드가 tailnet 에 있는지(없으면 authkey ephemeral 문제)
+5. 502(server:Caddy)면 upstream 도달 실패 — tailnet 재가입 필요
+
+### 복구
+- OS 행(impaired): stop/start(auto-reboot 알람이 자동 처리하기도 함).
+- tailnet 탈락(502): non-ephemeral 키로 프록시 terraform 재생성 — 반드시 `-target` 스코프 apply(`aws_instance.proxy[0]` 등)로, `aws_launch_template.lab_session`·`aws_iam_user.backup` 은 건드리지 말 것.
+
+### apply 주의
+- 이 aws 모듈은 state 드리프트가 있어 비타겟 `terraform apply` 금지(backup IAM user 파괴·세션 AMI 리버트 위험). 프록시 변경은 `-target` 으로 프록시 리소스만.
+- `terraform.tfvars`(gitignore)에 `enable_public_ingress = true` 와 `alert_email` 이 있어야 한다.
