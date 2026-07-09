@@ -10,7 +10,9 @@
 
   roles:
     - role: keycloak_operator
-    # Default for this project scope: single Postgres.
-    # Keep postgres_ha role for later expansion when HA is required.
-    - role: postgres_single
+    # postgres_single(구 Bitnami keycloak DB) 호출 제거 — Plan A-2 Task 4에서 DB를 CNPG
+    # keycloak-pg(GitOps 소유)로 cutover 완료. 여기 남겨두면 재실행 시 helm upgrade가
+    # replicas 0으로 정지해둔 구 DB(fail-safe)를 되살려 stale import 경로가 다시 열린다.
+    # 구 릴리스/PVC의 최종 폐기(helm uninstall)는 유예기간 후 Task 6에서 수동 진행.
+    # (postgres_ha role은 HA 확장 대비용으로 레포에 유지)
     - role: keycloak_foundation
