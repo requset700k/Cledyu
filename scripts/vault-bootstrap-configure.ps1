@@ -223,15 +223,30 @@ Write-VaultJson -Path "cledyu/data/keycloak/admin" -Data @{
 # keycloak DB 자격증명 시드 — CNPG 이관(Plan A-2) 후 이 Vault 경로가 소스 오브 트루스다
 # (ESO keycloak-pg-credentials가 여기서 읽어 CNPG bootstrap owner + Keycloak CR 자격증명이 됨).
 # 우선순위: ① Vault에 이미 있으면 보존(재실행·DR raft 복원 시 덮어쓰기 = 라이브 DB 비번과 어긋남)
-#          ② 구 Bitnami secret이 있으면 이관(하위호환) ③ 둘 다 없으면 난수 생성(신규/DR 리빌드).
+#          ② 라이브 keycloak-pg-credentials가 있으면 역시드(Vault만 유실된 경우 — 라이브 진실 우선)
+#          ③ 구 Bitnami secret이 있으면 이관(하위호환) ④ 전부 없으면 난수 생성(순수 신규 환경만).
 $vaultDbCheck = Invoke-VaultCommand `
   -Command "vault kv get cledyu/keycloak/postgres >/dev/null 2>&1 && echo EXISTS || echo MISSING"
 if ("$vaultDbCheck".Trim() -eq "EXISTS") {
   Write-Host "cledyu/keycloak/postgres already seeded - keeping existing value."
 }
 else {
+  $liveDbPassword = Get-SecretValue -Namespace keycloak -Name keycloak-pg-credentials -Key password -Optional
   $legacyDbPassword = Get-SecretValue -Namespace keycloak -Name keycloak-db-credentials -Key password -Optional
-  if ($null -ne $legacyDbPassword) {
+  if ($null -ne $liveDbPassword) {
+    # 라이브 CNPG 세계의 Secret이 존재 = keycloak-pg DB가 이 값으로 돌고 있(었)다.
+    # Vault만 유실/구버전 복구된 경우이므로, 새로 만들지 말고 라이브 진실을 Vault로 역시드한다
+    # (생성값으로 덮으면 ESO→Secret 갱신 후 실제 DB role 비번과 어긋나 Keycloak 인증이 깨진다).
+    $dbData = @{
+      username = Get-SecretValue -Namespace keycloak -Name keycloak-pg-credentials -Key username
+      password = $liveDbPassword
+      database = "keycloak"
+      host = "keycloak-pg-rw"
+      port = "5432"
+      source = "kubernetes:keycloak/keycloak-pg-credentials (reseed)"
+    }
+  }
+  elseif ($null -ne $legacyDbPassword) {
     $dbData = @{
       username = Get-SecretValue -Namespace keycloak -Name keycloak-db-credentials -Key username
       password = $legacyDbPassword
