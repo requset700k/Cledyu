@@ -1,9 +1,9 @@
 ---
-# Phase 7: Keycloak Operator + Postgres foundation
+# Phase 7: Keycloak foundation (DB는 CNPG keycloak-pg — GitOps 소유, 여기서 배포하지 않음)
 # run: make keycloak-foundation-up
 # prerequisite: cert-manager-up completed
 
-- name: Keycloak foundation (operator + postgres single + internal keycloak)
+- name: Keycloak foundation (operator + internal keycloak)
   hosts: control_plane[0]
   become: true
   gather_facts: true

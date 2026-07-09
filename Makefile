@@ -80,7 +80,7 @@ argocd-url: ## ArgoCD LB IP 출력 (http://<ip> 로 접속)
 cert-manager-up: ## cert-manager install + Cledyu internal CA bootstrap
 	ansible-playbook $(ANSIBLE_DIR)/playbooks/31-cert-manager.yml
 
-keycloak-foundation-up: ## keycloak operator + postgres foundation (single default, vault secrets required)
+keycloak-foundation-up: ## keycloak operator + internal keycloak (DB는 CNPG keycloak-pg/GitOps, vault secrets required)
 	@test -n "$(KEYCLOAK_SECRETS_FILE)" || (echo "KEYCLOAK_SECRETS_FILE=<vault-vars.yml> 를 지정하세요"; exit 1)
 	@test -f "$(KEYCLOAK_SECRETS_FILE)" || (echo "secret vars file not found: $(KEYCLOAK_SECRETS_FILE)"; exit 1)
 	@if [ -n "$(ANSIBLE_VAULT_PASSWORD_FILE)" ] && [ ! -f "$(ANSIBLE_VAULT_PASSWORD_FILE)" ]; then echo "vault password file not found: $(ANSIBLE_VAULT_PASSWORD_FILE)"; exit 1; fi
