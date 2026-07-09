@@ -101,6 +101,9 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "dr_backups" {
 #              retention 관리는 전적으로 여기 lifecycle이 담당한다. 30일이 아니라 35일인 이유는
 #              Object Lock 기본보존(30일)과 정확히 같은 날짜로 맞추면 락 해제와 lifecycle 만료
 #              평가가 같은 날 경합할 수 있어서다(vault 규칙과 같은 여유 두기 원칙).
+#  keycloak/ : Keycloak DB(CNPG) WAL/base. postgres/ 와 동일 논리 — CNPG PITR 창 30d 에 맞춰
+#              current 만료 35일(Object Lock 30일 경합 방지 5일 여유). barman 은 삭제 권한이 없어
+#              retentionPolicy 미설정, 정리는 여기 lifecycle 이 담당(Plan A-2, keycloak-pg).
 #  vault/    : 6시간마다 고유 키 .snap 이 쌓이며 삭제 주체가 없다 → 현재 버전까지 만료시킨다.
 #              non-current 정리는 Object Lock(30일)에 막혀 그 전엔 삭제 불가하므로 30일로 맞춘다
 #              (7일로 두면 락에 걸려 실질 30일이 되어 의도와 실제가 어긋난다).
@@ -155,6 +158,20 @@ resource "aws_s3_bucket_lifecycle_configuration" "dr_backups" {
   }
 
   rule {
+    id     = "expire-keycloak-backups"
+    status = "Enabled"
+    filter {
+      prefix = "keycloak/"
+    }
+    expiration {
+      days = 35
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+  }
+
+  rule {
     id     = "abort-incomplete-multipart"
     status = "Enabled"
     filter {}
@@ -176,7 +193,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "dr_backups" {
 #   Vault(cledyu/aws/backup-<프리픽스>)에 보관하고 ESO 가 해당 네임스페이스로만 뿌린다.
 locals {
   # 프리픽스명 = IAM 사용자 suffix. 각 writer 는 자기 프리픽스만 read/write(교차 프리픽스 차단).
-  backup_writers = toset(["postgres", "vault", "velero"])
+  backup_writers = toset(["postgres", "vault", "velero", "keycloak"])
 }
 
 resource "aws_iam_user" "backup" {

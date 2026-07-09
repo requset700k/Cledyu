@@ -1,0 +1,20 @@
+# Keycloak DB → CNPG 이관 차트 values
+# 백업 대상 = 학습자 신원 원본(계정·크레덴셜·소셜 연동). RPO 5~15분(WAL 연속 + 일 base backup).
+# 소비자는 Keycloak 서버 하나(Ansible 소유 CR의 db.host → keycloak-pg-rw).
+
+# 단일 인스턴스 — DR 목적은 백업이지 HA가 아니다(구 Bitnami도 standalone이었음).
+instances: 1
+
+storage:
+  # 구 Bitnami와 동일 규격(Longhorn 20Gi). 데이터 durability는 barman S3가 담당.
+  className: longhorn
+  size: 20Gi
+
+# QoS 보장(BestEffort 방지). 구 Bitnami primary.resources와 정렬.
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 2Gi
