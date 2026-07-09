@@ -98,9 +98,11 @@ configs:
         - '.spec.data[].remoteRef.metadataPolicy'
         - '.spec.target.creationPolicy'
         - '.spec.target.deletionPolicy'
-    # resource.exclusions 는 문자열(블록 스칼라)이라 여기서 지정하면 argo-cd 차트 기본값을 통째로
-    # 덮어쓴다(병합 아님). 차트 기본값에 있던 cilium CiliumIdentity 제외를 반드시 같이 실어야
-    # ArgoCD 가 대량의 CiliumIdentity 를 추적하지 않는다 — 아래 첫 블록이 그 보존분이다.
+    # resource.exclusions 는 문자열(블록 스칼라)이라 여기서 지정하면 이 키를 통째로 정의한다(병합 아님).
+    # 라이브 argocd-cm 엔 cilium CiliumIdentity 제외가 이미 있으나 git 엔 없는 out-of-band 값이다
+    # (argo-cd 7.7.10 은 resource.exclusions 기본값이 없음 — helm template 로 실측 확인). 이 키를
+    # git 으로 정의하는 순간 그 값이 덮여 cilium 제외가 사라지면 ArgoCD 가 대량의 CiliumIdentity 를
+    # 추적하게 된다. 그래서 첫 블록에 cilium 제외를 명시해 현행 동작을 보존·성문화한다.
     # 둘째 블록: velero 가 런타임에 만들어내는 종류를 ArgoCD 추적에서 제외한다. 스케줄이 만든
     # Backup 은 velero 가 Schedule 라벨(argocd.argoproj.io/instance 포함)을 복사해 붙일 수 있고,
     # 그러면 automated prune+selfHeal 이 이를 "git 에 없는 잉여 리소스"로 보고 삭제해 백업이
