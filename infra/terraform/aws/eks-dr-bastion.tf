@@ -89,6 +89,16 @@ data "aws_iam_policy_document" "eks_dr_bastion_vault_restore" {
     actions   = ["kms:Decrypt", "kms:DescribeKey"]
     resources = [aws_kms_key.dr_backups.arn]
   }
+  # force restore 후 원본 root/recovery 토큰(런북 §4)을 DR 부트스트랩 시크릿에서 취득한다.
+  # 정확한 이름은 cledyu/vault/bootstrap(Vault seal 마이그레이션 스택이 관리, terraform 밖).
+  # Secrets Manager ARN 은 6자 접미사가 붙어 와일드카드로 매칭하고, vault 프리픽스로 한정한다.
+  # 이 시크릿이 기본 aws/secretsmanager 관리형 키로 암호화됐다면 추가 kms 권한 불필요하나,
+  # CMK 라면 그 키에 kms:Decrypt 를 별도 부여해야 한다(키 ARN 은 그 스택에서 확인).
+  statement {
+    sid       = "ReadVaultBootstrapSecret"
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = ["arn:aws:secretsmanager:${var.region}:${data.aws_caller_identity.current.account_id}:secret:cledyu/vault/*"]
+  }
 }
 
 resource "aws_iam_role_policy" "eks_dr_bastion_vault_restore" {
@@ -128,7 +138,10 @@ resource "aws_instance" "eks_dr_bastion" {
   }
 
   # 드릴 발판을 kubectl/awscli 로 준비. NAT egress 로 패키지 취득.
-  user_data = base64encode(<<-EOT
+  # user_data 에는 raw 텍스트를 넣는다 — provider 가 EC2 로 보낼 때 base64 인코딩하므로
+  # base64encode() 로 감싸면 이중 인코딩돼 cloud-init 이 스크립트 대신 base64 문자열을 받아
+  # 실행하지 않는다(kubectl 미설치 → bastion kubectl 경로 붕괴). 이미 인코딩된 값은 user_data_base64 로.
+  user_data = <<-EOT
     #!/bin/bash
     set -euxo pipefail
     dnf install -y unzip
@@ -138,7 +151,6 @@ resource "aws_instance" "eks_dr_bastion" {
     unzip -q /tmp/awscliv2.zip -d /tmp
     /tmp/aws/install
   EOT
-  )
 
   tags = merge(local.eks_dr_tags, { Name = "${local.eks_dr_name}-bastion" })
 }
