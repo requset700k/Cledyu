@@ -1,0 +1,86 @@
+---
+apiVersion: sloth.slok.dev/v1
+kind: PrometheusServiceLevel
+metadata:
+  name: api-slo
+  namespace: monitoring
+  labels:
+    app: api
+    team: service
+spec:
+  service: api
+  labels:
+    app: api
+    team: service
+  slos:
+    # ───────────────────────────────────────────
+    # API 요청 가용성 SLO: 99.5% 요청이 5xx 없이 응답
+    # ───────────────────────────────────────────
+    - name: requests-availability
+      objective: 99.5
+      description: "API 요청 중 99.5% 이상은 5xx 없이 응답해야 한다."
+      sli:
+        events:
+          errorQuery: |
+            sum(rate(http_requests_total{status=~"5.."}[{{.window}}])) or vector(0)
+          totalQuery: |
+            sum(rate(http_requests_total[{{.window}}]))
+      alerting:
+        name: APIAvailabilitySLO
+        labels:
+          service: api
+          slo: requests-availability
+        pageAlert:
+          labels:
+            severity: critical
+        ticketAlert:
+          labels:
+            severity: warning
+    # ───────────────────────────────────────────
+    # API 요청 지연 SLO: 99.5% 요청이 1초 이내 응답
+    # ───────────────────────────────────────────
+    - name: requests-latency
+      objective: 99.5
+      description: "API 요청 중 99.5%는 1초 이내에 응답해야 한다."
+      sli:
+        events:
+          errorQuery: |
+            (sum(rate(http_request_duration_seconds_count[{{.window}}])) or vector(0))
+            -
+            (sum(rate(http_request_duration_seconds_bucket{le="1"}[{{.window}}])) or vector(0))
+          totalQuery: |
+            sum(rate(http_request_duration_seconds_count[{{.window}}]))
+      alerting:
+        name: APILatencySLO
+        labels:
+          service: api
+          slo: requests-latency
+        pageAlert:
+          labels:
+            severity: critical
+        ticketAlert:
+          labels:
+            severity: warning
+    # ───────────────────────────────────────────
+    # 세션 생성 API SLO: 99.5% 요청이 서버 오류 없이 처리
+    # ───────────────────────────────────────────
+    - name: session-creation-availability
+      objective: 99.5
+      description: "세션 생성 API 요청 중 99.5% 이상은 5xx 없이 처리되어야 한다."
+      sli:
+        events:
+          errorQuery: |
+            sum(rate(http_requests_total{method="POST",path="/api/v1/sessions",status=~"5.."}[{{.window}}])) or vector(0)
+          totalQuery: |
+            sum(rate(http_requests_total{method="POST",path="/api/v1/sessions"}[{{.window}}]))
+      alerting:
+        name: APISessionCreationSLO
+        labels:
+          service: api
+          slo: session-creation-availability
+        pageAlert:
+          labels:
+            severity: critical
+        ticketAlert:
+          labels:
+            severity: warning
