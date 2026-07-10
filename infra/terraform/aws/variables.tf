@@ -198,17 +198,19 @@ variable "enable_eks_dr" {
 }
 
 variable "eks_dr_cluster_version" {
-  type    = string
-  default = "1.31"
+  description = "DR EKS 컨트롤플레인 쿠버네티스 버전."
+  type        = string
+  default     = "1.31"
 }
 
 variable "eks_dr_node_instance_type" {
-  # CNPG(postgres+keycloak-pg) + Vault + api/web/keycloak/argocd/eso 수용. 드릴 신뢰성 위해 on-demand.
-  type    = string
-  default = "m6i.xlarge"
+  description = "DR EKS 워커 노드 EC2 타입. CNPG(postgres·keycloak-pg)+Vault+api/web/keycloak/argocd/eso 수용, 드릴 신뢰성 위해 on-demand로 고정."
+  type        = string
+  default     = "m6i.xlarge"
 }
 
 variable "eks_dr_node_desired" {
-  type    = number
-  default = 3
+  description = "DR EKS 워커 노드 개수(고정 크기, min=max=desired)."
+  type        = number
+  default     = 3
 }
