@@ -1,0 +1,35 @@
+---
+# ESO 배선 — 온프렘 매니페스트 재사용(directory include). vault-backend store 는 k8s auth 로 Vault 인증
+# (런북에서 EKS 용 재설정). cledyu-web-oidc ES 는 namespace api 라 api ns(service-api) 선행 필요 —
+# SkipDryRunOnMissingResource + retry 로 흡수.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eks-data-eso-store
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/requset700k/Cledyu.git
+    targetRevision: feat/dr-eks-overlay   # 드릴 검증 후 main
+    path: infra/kubernetes/external-secrets
+    directory:
+      include: "{clustersecretstore.yaml,cledyu-web-oidc-externalsecret.yaml}"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: external-secrets
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+    retry:
+      limit: 10
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
