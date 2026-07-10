@@ -106,9 +106,54 @@ kubectl -n vault exec -it vault-0 -- rm -f /tmp/vault-raft.snap
 ## (T9 잔여) 나머지 부트스트랩 스텝
 
 - [ ] terraform apply (`enable_eks_dr=true`) + `<<...>>` 치환값(`terraform output`) 수집
+
+### apps-eks 부트스트랩 (bastion 에서)
+
+```bash
+# 0) values-eks 의 <<WILDCARD_ACM_ARN>> 치환 (계정 고정값)
+ARN=$(aws acm list-certificates --region ap-northeast-2 \
+  --query "CertificateSummaryList[?DomainName=='*.cledyu.com'].CertificateArn" --output text)
+# gitops/apps/{api,web}/values-eks.yaml 의 <<WILDCARD_ACM_ARN>> 를 $ARN 으로 치환해 커밋(드릴 브랜치)
+
+# 1) root-app 적용 — 이후 ArgoCD 가 wave 순서(cert-manager -10 → pki -8 → ... → api/web 0)로 sync
+kubectl apply -f gitops/argocd/root-app-eks.yaml
+
+# 2) 플랫폼 Ready 대기: cert-manager·cledyu-ca(ClusterIssuer)·Bundle(ConfigMap) 확인
+kubectl -n cert-manager wait --for=condition=Available deploy/cert-manager --timeout=300s
+kubectl get clusterissuer cledyu-ca
+kubectl -n api get configmap cledyu-root-ca-bundle   # trust-manager Bundle 분배 확인
+```
+
 - [ ] apps-eks root-app 적용 → 플랫폼(cert-manager·ALB·gp3·ESO·CNPG operator) Ready
 - [ ] **Vault 스냅샷 복원**(위 섹션)
 - [ ] CNPG 복원 차트 sync → `cledyu-pg-rw`·`keycloak-pg-rw` Ready(자동 S3 복원)
 - [ ] Keycloak·api·web Ready + ALB/ACM 종단 확인
 - [ ] 검증(로컬 테스트유저 로그인·복원 데이터 서빙) + RTO 실측
-- [ ] destroy (`enable_eks_dr=false` apply) + 잔존 0 확인
+- [ ] destroy — **고아 방지 순서 필수** (아래)
+
+### destroy (고아 방지)
+
+DR ALB(aws-load-balancer-controller 가 Ingress 보고 out-of-band 생성)와 gp3 EBS(reclaim=Delete)는
+terraform 밖이다. 클러스터를 먼저 부수면 ALB·target group·`k8s-*` SG·ENI·EBS 가 고아로 남고,
+남은 ENI 가 서브넷/VPC 삭제를 `DependencyViolation` 으로 막는다. 반드시 in-cluster 부터 정리한다.
+
+```bash
+# 1) Ingress 삭제 → 컨트롤러가 ALB/TG/SG 정리 (완료까지 대기)
+kubectl delete ingress -A --all
+aws elbv2 describe-load-balancers --region ap-northeast-2 \
+  --query "LoadBalancers[?VpcId=='<dr-vpc-id>'].LoadBalancerArn" --output text   # 빈 값 될 때까지 확인
+
+# 2) PVC 삭제 → EBS CSI 가 gp3 볼륨 삭제 (드릴 데이터는 S3 백업에 있으니 폐기 가능)
+kubectl delete pvc -A --all
+
+# 3) LoadBalancer 타입 Service 없음(traefik 은 DR 앱셋 미포함) — skip
+
+# 4) terraform destroy
+cd infra/terraform/aws && terraform apply -var enable_eks_dr=false
+
+# 5) 고아 검증(전부 0/비어야 함)
+aws elbv2 describe-load-balancers --region ap-northeast-2 --query "LoadBalancers[?VpcId=='<dr-vpc-id>']" --output text
+aws ec2 describe-volumes --region ap-northeast-2 --filters "Name=tag:kubernetes.io/cluster/<dr-cluster-name>,Values=owned" --query "Volumes[].VolumeId" --output text
+aws ec2 describe-network-interfaces --region ap-northeast-2 --filters "Name=vpc-id,Values=<dr-vpc-id>" --query "NetworkInterfaces[].NetworkInterfaceId" --output text
+aws ec2 describe-security-groups --region ap-northeast-2 --query "SecurityGroups[?starts_with(GroupName,'k8s-')].GroupId" --output text
+```
