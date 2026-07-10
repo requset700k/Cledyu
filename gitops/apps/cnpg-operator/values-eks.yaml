@@ -1,4 +1,7 @@
 ---
-# EKS DR overlay (Task 5) — 오퍼레이터 자체는 클러스터 무관. onprem values.yaml 대비 델타 없음.
+# EKS DR overlay (Task 5) — 오퍼레이터 설정은 대체로 클러스터 무관하나 PodMonitor 는 예외.
+# CNPG 차트가 monitoring.coreos.com/v1 PodMonitor 를 렌더하는데 EKS DR 엔 Prometheus Operator CRD 가
+# 없어 data-cnpg-operator sync 가 깨진다(api ServiceMonitor·B3 와 동일 계열) → 끈다.
 # Cluster CR(postgres-cnpg/keycloak-pg)은 Task 7 범위.
-{}
+monitoring:
+  podMonitorEnabled: false
