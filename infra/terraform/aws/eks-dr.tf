@@ -98,6 +98,26 @@ module "eks_dr_alb_irsa" {
   tags = local.eks_dr_tags
 }
 
+# 인터페이스 엔드포인트(KMS/STS) 전용 SG — VPC 내부에서 443 인바운드 허용.
+# 노드 SG를 그대로 쓰면 self-443 ingress 규칙이 없어(ephemeral 1025-65535·coredns 53만 self 허용)
+# 노드가 엔드포인트 ENI:443 에 도달 못 해 KMS/STS 호출이 막힌다 → Vault unseal·IRSA 실패.
+resource "aws_security_group" "eks_dr_endpoints" {
+  count       = local.eks_dr_enabled
+  name_prefix = "${local.eks_dr_name}-vpce-"
+  description = "EKS DR interface endpoints - 443 inbound from VPC"
+  vpc_id      = module.eks_dr_vpc[0].vpc_id
+
+  ingress {
+    description = "HTTPS from VPC (nodes to KMS/STS interface endpoints)"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = [module.eks_dr_vpc[0].vpc_cidr_block]
+  }
+
+  tags = local.eks_dr_tags
+}
+
 # 프라이빗 서브넷 S3/KMS/STS 엔드포인트. github/ghcr(이미지)는 NAT 로 egress(ECR 미사용, 자격 불필요 — Plan B 스펙 F5).
 module "eks_dr_endpoints" {
   source  = "terraform-aws-modules/vpc/aws//modules/vpc-endpoints"
@@ -115,13 +135,13 @@ module "eks_dr_endpoints" {
       service             = "kms"
       private_dns_enabled = true
       subnet_ids          = module.eks_dr_vpc[0].private_subnets
-      security_group_ids  = [module.eks_dr[0].node_security_group_id]
+      security_group_ids  = [aws_security_group.eks_dr_endpoints[0].id]
     }
     sts = {
       service             = "sts"
       private_dns_enabled = true
       subnet_ids          = module.eks_dr_vpc[0].private_subnets
-      security_group_ids  = [module.eks_dr[0].node_security_group_id]
+      security_group_ids  = [aws_security_group.eks_dr_endpoints[0].id]
     }
   }
   tags = local.eks_dr_tags
