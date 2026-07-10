@@ -60,16 +60,26 @@ kubectl -n vault exec -it vault-0 -- vault operator init
 aws s3 ls s3://cledyu-lab-dr-backups/vault/ | sort | tail -1     # 최신 파일명 확인
 aws s3 cp s3://cledyu-lab-dr-backups/vault/vault-raft-<TS>.snap ./vault-raft.snap
 
-# 3) 파드로 복사 후 restore. EKS·온프렘이 동일 KMS seal 키(e29e3ec2...)를 쓰므로
-#    seal config 가 일치 → -force 불필요. (키가 다르면 -force + 원본 recovery 키 필요.)
+# 3) 파드로 복사 후 restore. 스냅샷은 다른 클러스터(온프렘)에서 왔고 방금 init 한 EKS Vault 는
+#    recovery/shamir 키가 달라, 일반 restore 는 seal 일관성 검사에서 거부된다 → -force 필수.
+#    (HashiCorp API: /sys/storage/raft/snapshot-force = "Autounseal/shamir 키 일관성 검사를
+#    우회, 다른 클러스터 스냅샷·다른 seal 설정 복원용". CLI 의 -force 가 이 엔드포인트.)
+#    동일 KMS seal 키(e29e3ec2...)를 쓰는 것은 -force 를 건너뛰는 근거가 아니라, force 복원 후
+#    복원된 barrier 키링이 같은 KMS 키로 auto-unseal 되게 하는 조건이다(키가 다르면 force 로
+#    복원해도 unseal 불가 → Vault 가 봉인된 채 남는다. 그래서 이 키는 DR-durable, 삭제 금지).
 kubectl -n vault cp ./vault-raft.snap vault-0:/tmp/vault-raft.snap
 kubectl -n vault exec -it vault-0 -- sh -c \
-  'VAULT_TOKEN=<INIT_ROOT> vault operator raft snapshot restore /tmp/vault-raft.snap'
+  'VAULT_TOKEN=<INIT_ROOT> vault operator raft snapshot restore -force /tmp/vault-raft.snap'
 
-# 4) restore 후에는 스냅샷(원본 클러스터)의 루트토큰·recovery 키가 유효해지고
-#    init(2단계) 때 받은 <INIT_ROOT> 는 무효화된다. 시크릿이 복원됐는지 확인.
+# 4) force restore 후에는 스냅샷(원본 클러스터)의 recovery 키·루트토큰이 유효해지고
+#    init(1단계) 때 받은 <INIT_ROOT> 는 무효화된다. 따라서 이후 인증은 원본 자격으로 한다:
+#    원본 root token / recovery keys 는 DR 부트스트랩 시크릿(AWS Secrets Manager
+#    `cledyu/vault/bootstrap`)에 보관 — 이걸로 인증하거나 recovery 키로 새 root 를 생성한다.
+#      vault operator generate-root  (원본 recovery 키 threshold 로)
+#    ⚠️ 이 시크릿 취득엔 secretsmanager:GetSecretValue 가 필요하다. 현재 bastion 롤엔 없으므로
+#       운영자 자신의 자격으로 읽거나, 필요 시 롤에 최소권한을 추가한다(vault/ S3 read 와 동일 패턴).
 kubectl -n vault exec -it vault-0 -- sh -c \
-  'VAULT_TOKEN=<원본 루트토큰> vault secrets list'
+  'VAULT_TOKEN=<원본 루트토큰> vault secrets list'   # 복원 확인
 ```
 
 **복원 후 정합성 체크(다음 스텝의 선행조건):**
