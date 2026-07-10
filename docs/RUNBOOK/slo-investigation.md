@@ -123,7 +123,7 @@ LabStartupOnpremSLO	critical	lab	startup-onprem
 
 | 알림/증상 | 먼저 볼 대시보드 | 이어서 볼 대시보드 |
 |---|---|---|
-| `LabStartup*`, `LabVMBootSuccessRateSLO` | `Lab SLO Dashboard` | `Cilium Network Overview`, KubeVirt 로그 |
+| `LabStartupOnpremSLO`, `LabStartupEC2SLO`, `LabStartSuccessRateSLO`, `LabVMBootSuccessRateSLO` | `Lab SLO Dashboard` | `Cilium Network Overview`, KubeVirt 로그 |
 | `LabValidationLatencySLO` | `Lab SLO Dashboard` | `Cledyu API & Validation Tempo Bottleneck`, `Platform SLO Burndown`의 Kafka |
 | `LabAIHintLatencySLO` | `Lab SLO Dashboard` | `Cledyu API & Validation Tempo Bottleneck`, ai-tutor 로그 |
 | `LabWebSocketStabilitySLO` | `Lab SLO Dashboard` | `Cilium Network Overview`, Traefik 로그 |
@@ -215,8 +215,8 @@ kubectl -n kube-system get pods -l k8s-app=cilium
 
 판단 기준:
 
-- `LabAvailabilitySLO`, `LabLatencySLO`, `LabSessionCreationSLO`: `api` 로그, readiness, 최근 배포를 먼저 본다.
-- `LabStartup*`, `LabVMBootSuccessRateSLO`: KubeVirt, EC2 overflow, PVC/DataVolume, 이미지 pull, namespace quota를 확인한다.
+- `LabStartupOnpremSLO`, `LabStartupEC2SLO`: KubeVirt/EC2 overflow, PVC/DataVolume, 이미지 pull, namespace quota를 확인한다.
+- `LabStartSuccessRateSLO`, `LabVMBootSuccessRateSLO`: `api` 로그, VM 생성/부팅 이벤트, provider별 실패 라벨, 최근 배포를 확인한다.
 - `LabValidationLatencySLO`: `validation-engine`, Kafka lag, VM SSH/exec 실패를 확인한다.
 - `LabAIHintLatencySLO`: `ai-tutor`, Gemini quota/rate limit, ChromaDB/RAG 검색 지연을 확인한다.
 - `LabWebSocketStabilitySLO`: Traefik idle timeout, browser reconnect, VM SSH 연결, provider별 drop 라벨을 확인한다.
