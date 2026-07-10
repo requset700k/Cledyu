@@ -9,3 +9,4 @@ volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: true
 parameters:
   type: gp3
+  encrypted: "true"   # Vault 시크릿·복원 DB 가 놓이는 볼륨 — 계정 기본 암호화에 의존하지 않고 강제(SSE-EBS).
