@@ -128,9 +128,11 @@ spec:
               value: {{ printf "%s/%s" .Values.analytics.credentialsMountPath .Values.analytics.secretKey | quote }}
             {{- end }}
           volumeMounts:
+            {{- if .Values.kafka.enabled }}
             - name: kafka-certs
               mountPath: /etc/kafka-certs
               readOnly: true
+            {{- end }}
             - name: cledyu-ca
               mountPath: /etc/ssl/cledyu
               readOnly: true
@@ -164,9 +166,11 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
       volumes:
+        {{- if .Values.kafka.enabled }}
         - name: kafka-certs
           secret:
             secretName: api-kafka-client-tls
+        {{- end }}
         - name: cledyu-ca
           configMap:
             name: cledyu-root-ca-bundle  # trust-manager 가 ns 라벨 기준으로 배포(키: ca.crt)

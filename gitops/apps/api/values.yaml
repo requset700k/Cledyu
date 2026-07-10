@@ -92,6 +92,11 @@ kubevirt:
     publicKeyPath: "/etc/vm-file-ssh/public_key"
     privateKeyPath: "/etc/vm-file-ssh/id_ed25519"
 
+# Kafka(Strimzi) 커플링 — 온프렘 기본 활성. EKS DR 는 values-eks 에서 false(Strimzi/KafkaUser CRD 미배포 →
+# kafka.yaml·kafka-certs 볼륨 미렌더). false 여야 EKS 에서 api Application sync 가 통과한다(F2/F7).
+kafka:
+  enabled: true
+
 # AWS EC2 오버플로우 — 온프렘 KubeVirt 풀이 가득 차면 세션을 EC2로 버스트한다(Phase 13).
 # enabled=false 가 기본 — EC2 비활성(KubeVirt 전용, 현행 동작 보존). 활성화 절차:
 #   1) infra/terraform/aws apply → launchTemplateId/region 확보
