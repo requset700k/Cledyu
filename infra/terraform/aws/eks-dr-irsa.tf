@@ -36,22 +36,22 @@ data "aws_iam_policy_document" "eks_dr_cnpg_restore" {
   statement {
     sid       = "ListBucket"
     actions   = ["s3:ListBucket", "s3:GetBucketLocation"]
-    resources = ["arn:aws:s3:::cledyu-lab-dr-backups"]
+    resources = [aws_s3_bucket.dr_backups.arn]
   }
   statement {
     sid     = "ReadSource"
     actions = ["s3:GetObject"]
     resources = [
-      "arn:aws:s3:::cledyu-lab-dr-backups/postgres/*",
-      "arn:aws:s3:::cledyu-lab-dr-backups/keycloak/*",
+      "${aws_s3_bucket.dr_backups.arn}/postgres/*",
+      "${aws_s3_bucket.dr_backups.arn}/keycloak/*",
     ]
   }
   statement {
     sid     = "WriteDrPrefix"
     actions = ["s3:PutObject", "s3:GetObject"]
     resources = [
-      "arn:aws:s3:::cledyu-lab-dr-backups/postgres-dr/*",
-      "arn:aws:s3:::cledyu-lab-dr-backups/keycloak-dr/*",
+      "${aws_s3_bucket.dr_backups.arn}/postgres-dr/*",
+      "${aws_s3_bucket.dr_backups.arn}/keycloak-dr/*",
     ]
   }
   # 버킷이 SSE-KMS(aws_kms_key.dr_backups)라 객체 read엔 Decrypt, write엔 GenerateDataKey가 필요.
