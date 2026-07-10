@@ -90,6 +90,31 @@ kubectl -n vault exec -it vault-0 -- sh -c \
 - Vault 가 비어 있으면(복원 누락) api 는 in-memory 폴백으로 뜨고 keycloak-pg 자격이
   없어 Keycloak 이 기동 실패한다 → **드릴 실패로 판정**(자동 통과처럼 보이지 않게 주의).
 
+### Vault k8s auth 를 EKS 용으로 재설정 (복원·unseal 후, ESO 인증 직전) — T6
+
+복원 스냅샷의 `auth/kubernetes/config` 는 온프렘 `kubernetes_ca_cert`·`token_reviewer_jwt` 라 EKS API 검증이
+실패한다. **vault 파드 안에서 재실행**하면 `@`경로가 EKS 파드의 SA CA·토큰을 읽어 교정된다(role
+`external-secrets-operator` 는 스냅샷에 이미 있어 재설정 불요).
+
+```bash
+# bastion. VAULT_ADDR/VAULT_CACERT 는 파드 env 에 있음.
+kubectl -n vault exec -it vault-0 -- sh -c \
+  'VAULT_TOKEN=<원본 루트토큰> vault write auth/kubernetes/config \
+     kubernetes_host=https://kubernetes.default.svc:443 \
+     kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt \
+     token_reviewer_jwt=@/var/run/secrets/kubernetes.io/serviceaccount/token'
+
+# 검증: ESO 가 store 인증 → 시크릿 생성 → api 기동
+kubectl -n api get externalsecret cledyu-web-oidc-client-secret   # STATUS: SecretSynced
+kubectl -n api get secret cledyu-api-oidc                          # 생성 확인
+```
+
+주: `token_reviewer_jwt` 는 파드 projected 토큰(~1h 만료). 재설정 직후 1회 sync 로 `cledyu-api-oidc`(Retain)
+생성되므로 드릴엔 무해(이후 만료로 재-sync 가 막혀도 시크릿은 잔존). 장기 운영이면 비만료 Secret 기반
+reviewer 토큰 필요(`vault-bootstrap.md` 2026-07-04 인시던트).
+
+> vault-tls 는 cert-manager(cledyu-ca)가 `certificate.yaml` 로 자동 발급 — 수동 self-signed 불요.
+
 ### tmpfs / 잔존 주의
 
 스냅샷은 Vault 전체 시크릿이다. 취득·복사한 로컬 파일(`./vault-raft.snap`,
