@@ -275,7 +275,7 @@ service-api	Synced	Healthy	2026-07-08T10:20:11Z
 
 ```bash
 curl -G -s http://127.0.0.1:9090/api/v1/query \
-  --data-urlencode 'query={__name__=~"sloth_slo:.*:error_budget_remaining:ratio"}' \
+  --data-urlencode 'query=slo:period_error_budget_remaining:ratio' \
   | jq -r '.data.result[] | [.metric.sloth_service,.metric.sloth_slo,.value[1]] | @tsv'
 ```
 
