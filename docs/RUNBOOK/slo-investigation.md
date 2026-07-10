@@ -49,8 +49,8 @@ traefik-slo      1d
 
 | 영역 | SLO | SLI 소스 |
 |---|---|---|
-| API 요청 가용성 | 99.5% | `http_requests_total{path=~"/api/v1/.*", path!="/api/v1/sessions/:id/ws", path!="/api/v1/sessions/:id/ide/*idepath", status=~"5.."}` / `http_requests_total{path=~"/api/v1/.*", path!="/api/v1/sessions/:id/ws", path!="/api/v1/sessions/:id/ide/*idepath"}` |
-| API 요청 지연 | 99.5% 요청 1초 이내 | `http_request_duration_seconds_bucket{path=~"/api/v1/.*", path!="/api/v1/sessions/:id/ws", path!="/api/v1/sessions/:id/ide/*idepath", le="1"}` |
+| API 요청 가용성 | 99.5% | `http_requests_total{path=~"/api/v1/.*", path!~"/api/v1/sessions/:id/(ws|ide/.*)", status=~"5.."}` / `http_requests_total{path=~"/api/v1/.*", path!~"/api/v1/sessions/:id/(ws|ide/.*)"}` |
+| API 요청 지연 | 99.5% 요청 1초 이내 | `http_request_duration_seconds_bucket{path=~"/api/v1/.*", path!~"/api/v1/sessions/:id/(ws|ide/.*)", le="1"}` |
 | 세션 생성 API 가용성 | 99.5% | `http_requests_total{method="POST", path="/api/v1/sessions", status=~"5.."}` / `http_requests_total{method="POST", path="/api/v1/sessions"}` |
 | 온프렘 Lab 시작 | 99.0% 세션 7분 이내 Ready | `lab_start_total`, `lab_startup_duration_seconds_bucket{env="onprem", le="420"}` |
 | EC2 Lab 시작 | 99.0% 세션 10분 이내 running | `lab_start_total`, `lab_startup_duration_seconds_bucket{env="ec2", le="600"}` |
@@ -85,14 +85,14 @@ SLO 알림이나 사용자 제보가 들어오면 아래 네 대시보드를 증
 | 대시보드 | 파일 | 먼저 볼 때 | 핵심 확인 |
 |---|---|---|---|
 | `Lab SLO Dashboard` | `infra/kubernetes/monitoring/dashboard-lab-slo.yaml` | Lab 시작, VM 부팅, WebSocket, Validation, AI 힌트 SLO가 흔들릴 때 | SLO Summary, Startup Details, Interactive Paths, Validation Latency, AI Hint Latency, Sloth Error Budgets |
-| `Platform SLO Burndown` | `infra/kubernetes/monitoring/dashboard-slo-burndown.yaml` | error budget 소모 속도와 플랫폼 공통 SLO 영향을 볼 때 | Traefik, KubeVirt, Kafka의 error budget remaining, current burn rate, 7일 burndown |
+| `Platform SLO Burndown` | `infra/kubernetes/monitoring/dashboard-slo-burndown.yaml` | error budget 소모 속도와 공통 SLO 영향을 볼 때 | API, Traefik, KubeVirt, Kafka의 error budget remaining, current burn rate, 7일 burndown |
 | `Cilium Network Overview` | `infra/kubernetes/monitoring/dashboard-cilium-metrics.yaml` | API/VM/Kafka/validation-engine 간 통신이 느리거나 끊기는 의심이 있을 때 | 현재 드롭률, 총 드롭, 이벤트 유실, 정책 차단, reason별 drop rate, verdict별 흐름 |
 | `Cledyu API & Validation Tempo Bottleneck` | `infra/kubernetes/monitoring/dashboard-bottleneck.yaml` | API 병목, Validation 지연, Kafka 검증 흐름, validation-engine trace를 이어서 볼 때 | API Overview, API Internal Operations, Kafka Validation Flow, Validation Engine Tempo |
 
 대시보드별 역할:
 
 - `Lab SLO Dashboard`: 사용자 체감 SLO의 현재 상태를 먼저 본다. Lab 시작/VM 부팅/WebSocket/Validation/AI 힌트가 어느 축에서 깨지는지 분리한다.
-- `Platform SLO Burndown`: 특정 순간값보다 error budget 소모 추세가 중요한 경우 본다. Traefik, KubeVirt, Kafka 중 어떤 플랫폼 계층이 SLO budget을 태우는지 확인한다.
+- `Platform SLO Burndown`: 특정 순간값보다 error budget 소모 추세가 중요한 경우 본다. API, Traefik, KubeVirt, Kafka 중 어떤 계층이 SLO budget을 태우는지 확인한다.
 - `Cilium Network Overview`: 서비스 자체 로그가 깨끗한데 timeout, reconnect, Kafka lag, VM 접근 실패가 같이 보이면 본다. 정책 차단과 Hubble 이벤트 유실을 구분한다.
 - `Cledyu API & Validation Tempo Bottleneck`: API 요청량/지연, validation 왕복 지연, Kafka 요청/결과/DLQ 흐름, Tempo trace를 한 화면에서 연결해 본다.
 
@@ -141,7 +141,7 @@ LabStartupOnpremSLO	critical	lab	startup-onprem
 
 | 알림/증상 | 먼저 볼 대시보드 | 이어서 볼 대시보드 |
 |---|---|---|
-| `APIAvailabilitySLO`, `APILatencySLO`, `APISessionCreationSLO` | `Cledyu API & Validation Tempo Bottleneck` | `Lab SLO Dashboard`, API 로그 |
+| `APIAvailabilitySLO`, `APILatencySLO`, `APISessionCreationSLO` | `Platform SLO Burndown`의 API SLO | `Cledyu API & Validation Tempo Bottleneck`, API 로그 |
 | `LabStartupOnpremSLO`, `LabStartupEC2SLO`, `LabStartSuccessRateSLO`, `LabVMBootSuccessRateSLO` | `Lab SLO Dashboard` | `Cilium Network Overview`, KubeVirt 로그 |
 | `LabValidationLatencySLO` | `Lab SLO Dashboard` | `Cledyu API & Validation Tempo Bottleneck`, `Platform SLO Burndown`의 Kafka |
 | `LabAIHintLatencySLO` | `Lab SLO Dashboard` | `Cledyu API & Validation Tempo Bottleneck`, ai-tutor 로그 |
@@ -163,7 +163,7 @@ API 5xx 비율:
 
 ```bash
 curl -G -s http://127.0.0.1:9090/api/v1/query \
-  --data-urlencode 'query=sum(rate(http_requests_total{path=~"/api/v1/.*",path!="/api/v1/sessions/:id/ws",path!="/api/v1/sessions/:id/ide/*idepath",status=~"5.."}[30m])) / sum(rate(http_requests_total{path=~"/api/v1/.*",path!="/api/v1/sessions/:id/ws",path!="/api/v1/sessions/:id/ide/*idepath"}[30m]))' \
+  --data-urlencode 'query=sum(rate(http_requests_total{path=~"/api/v1/.*",path!~"/api/v1/sessions/:id/(ws|ide/.*)",status=~"5.."}[30m])) / sum(rate(http_requests_total{path=~"/api/v1/.*",path!~"/api/v1/sessions/:id/(ws|ide/.*)"}[30m]))' \
   | jq '.data.result'
 ```
 

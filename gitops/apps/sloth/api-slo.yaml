@@ -22,9 +22,9 @@ spec:
       sli:
         events:
           errorQuery: |
-            sum(rate(http_requests_total{status=~"5..",path=~"/api/v1/.*",path!="/api/v1/sessions/:id/ws",path!="/api/v1/sessions/:id/ide/*idepath"}[{{.window}}])) or vector(0)
+            sum(rate(http_requests_total{status=~"5..",path=~"/api/v1/.*",path!~"/api/v1/sessions/:id/(ws|ide/.*)"}[{{.window}}])) or vector(0)
           totalQuery: |
-            sum(rate(http_requests_total{path=~"/api/v1/.*",path!="/api/v1/sessions/:id/ws",path!="/api/v1/sessions/:id/ide/*idepath"}[{{.window}}]))
+            sum(rate(http_requests_total{path=~"/api/v1/.*",path!~"/api/v1/sessions/:id/(ws|ide/.*)"}[{{.window}}]))
       alerting:
         name: APIAvailabilitySLO
         labels:
@@ -45,11 +45,11 @@ spec:
       sli:
         events:
           errorQuery: |
-            (sum(rate(http_request_duration_seconds_count{path=~"/api/v1/.*",path!="/api/v1/sessions/:id/ws",path!="/api/v1/sessions/:id/ide/*idepath"}[{{.window}}])) or vector(0))
+            (sum(rate(http_request_duration_seconds_count{path=~"/api/v1/.*",path!~"/api/v1/sessions/:id/(ws|ide/.*)"}[{{.window}}])) or vector(0))
             -
-            (sum(rate(http_request_duration_seconds_bucket{path=~"/api/v1/.*",path!="/api/v1/sessions/:id/ws",path!="/api/v1/sessions/:id/ide/*idepath",le="1"}[{{.window}}])) or vector(0))
+            (sum(rate(http_request_duration_seconds_bucket{path=~"/api/v1/.*",path!~"/api/v1/sessions/:id/(ws|ide/.*)",le="1"}[{{.window}}])) or vector(0))
           totalQuery: |
-            sum(rate(http_request_duration_seconds_count{path=~"/api/v1/.*",path!="/api/v1/sessions/:id/ws",path!="/api/v1/sessions/:id/ide/*idepath"}[{{.window}}]))
+            sum(rate(http_request_duration_seconds_count{path=~"/api/v1/.*",path!~"/api/v1/sessions/:id/(ws|ide/.*)"}[{{.window}}]))
       alerting:
         name: APILatencySLO
         labels:
