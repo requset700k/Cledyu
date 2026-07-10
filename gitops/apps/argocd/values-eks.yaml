@@ -1,0 +1,4 @@
+---
+# EKS DR overlay (Task 5) — EKS 는 별도 ArgoCD 인스턴스(self-managed)를 구동.
+# OIDC(Keycloak)/Ingress(host) 는 Task 8(Keycloak) 이후 확정 — 그 전까지 델타 없음.
+{}
