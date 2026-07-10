@@ -55,6 +55,9 @@ aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2
 # TLS 자체서명(cledyu-ca)이라 CA 를 명시 안 하면 x509 실패 → 모든 vault 명령에 VAULT_CACERT=/vault/tls/ca.crt.
 kubectl -n vault exec -it vault-0 -- sh -c 'VAULT_CACERT=/vault/tls/ca.crt vault operator init'
 #    → 출력된 Initial Root Token 을 <INIT_ROOT> 로 보관(restore 실행에만 임시 사용).
+#    vault-0 init·unseal 후 vault-1/2 가 retry_join 으로 자동 합류 → 3-node(스냅샷 3-peer 와 동일 토폴로지) 형성 대기:
+kubectl -n vault exec -it vault-0 -- sh -c \
+  'VAULT_CACERT=/vault/tls/ca.crt VAULT_TOKEN=<INIT_ROOT> vault operator raft list-peers'   # vault-0/1/2 3 peers 확인
 
 # 2) 최신 스냅샷을 S3 에서 취득 — bastion instance profile 자격으로(정적 키 불필요).
 #    이 롤에 vault/ 프리픽스 read + 백업키 Decrypt 가 붙어 있다(eks-dr-bastion.tf
@@ -84,6 +87,10 @@ kubectl -n vault exec -it vault-0 -- sh -c \
 #    (그 시크릿이 CMK 로 암호화됐다면 롤에 해당 kms:Decrypt 추가 필요 — 코드 주석 참조.)
 kubectl -n vault exec -it vault-0 -- sh -c \
   'VAULT_CACERT=/vault/tls/ca.crt VAULT_TOKEN=<원본 루트토큰> vault secrets list'   # 복원 확인
+# 복원 후 quorum 재확인 — 3 peers·leader 있어야 ESO 인증 진행. 없으면(leader 없음) quorum 실패 →
+# HashiCorp lost-quorum peers.json 복구 필요(3-node 로 복원했으니 정상적으론 재선출됨).
+kubectl -n vault exec -it vault-0 -- sh -c \
+  'VAULT_CACERT=/vault/tls/ca.crt VAULT_TOKEN=<원본 루트토큰> vault operator raft list-peers'
 ```
 
 **복원 후 정합성 체크(다음 스텝의 선행조건):**
@@ -137,6 +144,12 @@ kubectl -n vault exec -it vault-0 -- rm -f /tmp/vault-raft.snap
 ### apps-eks 부트스트랩 (bastion 에서)
 
 ```bash
+# -1) bastion 준비 — user_data 는 kubectl/awscli 만 깐다. seed/apply 에 git·helm·repo 가 필요하니 여기서 설치.
+sudo dnf install -y git
+curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+git clone https://github.com/requset700k/Cledyu.git ~/Cledyu && cd ~/Cledyu
+aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2   # (Vault 복원 때 이미 했으면 생략)
+
 # 0) 사전 확인 — apps-eks 앱은 targetRevision=main 을 sync 하므로 드릴-타임 git 치환은 쓰지 않는다.
 #    IRSA 롤 ARN(vault/alb)은 role_name 고정→결정적이라 values-eks 에 하드코딩됨. vpcId 는 ALB 컨트롤러
 #    auto-discover 로 제거됨. 남은 건 ACM 와일드카드 ARN 하나 — 이 PR 병합 전 하드코딩(→ main)했어야 한다.
