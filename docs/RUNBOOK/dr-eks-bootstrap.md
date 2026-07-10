@@ -135,10 +135,20 @@ kubectl -n vault exec -it vault-0 -- rm -f /tmp/vault-raft.snap
 ### apps-eks 부트스트랩 (bastion 에서)
 
 ```bash
-# 0) values-eks 의 <<WILDCARD_ACM_ARN>> 치환 (계정 고정값)
-ARN=$(aws acm list-certificates --region ap-northeast-2 \
-  --query "CertificateSummaryList[?DomainName=='*.cledyu.com'].CertificateArn" --output text)
-# gitops/apps/{api,web}/values-eks.yaml 의 <<WILDCARD_ACM_ARN>> 를 $ARN 으로 치환해 커밋(드릴 브랜치)
+# 0) 모든 <<...>> 플레이스홀더를 치환 후 드릴 브랜치에 커밋.
+#    남기면 부트스트랩이 막힌다: ALB Controller 가 role-arn/vpcId 없이는 ALB 를 못 만들고(api/web 도달 불가),
+#    Vault SA 가 role-arn 없이는 IRSA unseal 실패로 봉인된 채 남는다.
+cd infra/terraform/aws
+# (a) ACM 와일드카드 — api/web values-eks (계정 고정값)
+aws acm list-certificates --region ap-northeast-2 \
+  --query "CertificateSummaryList[?DomainName=='*.cledyu.com'].CertificateArn" --output text   # → <<WILDCARD_ACM_ARN>>
+# (b) Vault unseal IRSA — gitops/apps/vault/values-eks.yaml
+terraform output -raw eks_dr_vault_unseal_role_arn        # → <<VAULT_UNSEAL_ROLE_ARN>>
+# (c) ALB Controller IRSA + VPC id — gitops/apps/alb-controller/values.yaml
+terraform output -raw eks_dr_alb_controller_role_arn      # → <<T2 eks_dr_alb_controller_role_arn>>
+aws eks describe-cluster --name "$(terraform output -raw eks_dr_cluster_name)" --region ap-northeast-2 \
+  --query cluster.resourcesVpcConfig.vpcId --output text  # → <<T1 vpc id>> (vpc id 출력이 없어 describe-cluster 로 취득)
+# 위 값들로 해당 파일의 <<...>> 를 치환 → 커밋(드릴 브랜치)
 
 # 1) root-app 적용 — 이후 ArgoCD 가 wave 순서(cert-manager -10 → pki -8 → ... → api/web 0)로 sync
 kubectl apply -f gitops/argocd/root-app-eks.yaml
