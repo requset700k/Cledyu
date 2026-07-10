@@ -45,6 +45,29 @@
 
 ---
 
+## EKS 이전 브레이크 목록 · 스코프 교정 (2026-07-10, codex + 전수감사)
+
+**중대 스코프 교정:** 최소경로 앱(api·web·vault)이 온프렘 스택(cert-manager·Kafka·Traefik·monitoring·`.local`·ESO)에 **깊게 커플링**돼, 바로 EKS로 옮기면 파드 기동/sync가 막힌다. **cert-manager를 DR 스코프에 추가**(api/web/vault Certificate·Root CA의 하드 의존성)하고, 온프렘 전용 기능은 values-eks에서 끈다. 아래 B1~B8이 T5·T6·T7의 하드계약.
+
+| # | 앱 | 문제(EKS서 깨짐) | 조치 | 차트 수술 |
+|---|---|---|---|---|
+| **B1** | api·web·vault | cert-manager Certificate 발급(cledyu-ca ClusterIssuer+cledyu-root-ca) 필요, cert-manager는 gitops 앱 아님 | **cert-manager + self-signed cledyu-ca ClusterIssuer + cledyu-root-ca를 apps-eks에 추가**(Keycloak처럼 부트스트랩 표현). Vault TLS도 이걸로(수동 self-signed 대체) | 없음 |
+| **B2** | api | Kafka(KafkaUser·api-kafka-client cert·**non-optional kafka-certs 볼륨**) — Kafka/Strimzi 미스코프 | values-eks `kafka.enabled=false`(과금경로 불필요) | ⚠️ **kafka.yaml + deployment kafka-certs 볼륨에 `{{ if .Values.kafka.enabled }}` 조건 추가** |
+| **B3** | api | ServiceMonitor(kube-prometheus CRD 없음) | values-eks `metrics.serviceMonitor.enabled=false` | 없음(이미 gated) |
+| **B4** | postgres/keycloak-pg DR | `monitoring.enablePodMonitor: true`(PodMonitor CRD 없음) | **DR 복원차트에서 `enablePodMonitor: false`** | 없음(DR차트 신규) |
+| **B5** | vault | Traefik `Ingress`+`ServersTransport`(Traefik CRD 없음→`no matches for kind`) | values-eks `ingress.enabled=false`, serverstransport 제외(Vault는 DR서 내부 접근/port-forward) | ⚠️ **serverstransport.yaml 조건/제외** |
+| **B6** | api·web·argocd | 하드코딩 `.local` 호스트(Tailscale/Traefik) | values-eks: ALB 호스트·`publicExposure` 조정(내부 svc DNS `api.api.svc`는 EKS서 정상) | 없음 |
+| **B7** | api | ExternalSecret(bq-reader=GCP·vm-file-ssh=KubeVirt) + ec2·bq·kubevirt 기능 enabled | values-eks: `ec2.enabled=false`·`bq.enabled=false` 등 온프렘 전용 기능 off, ES는 Vault 경로 없을 때 파드 안 막게 optional 확인 | 확인 |
+| **B8** | vault·CNPG | storageClass longhorn→gp3 | values-eks(F4) | 없음 |
+| **B9** | keycloak(T8) | 오퍼레이터 v26.6.1 + Keycloak CR이 **cert-manager TLS 시크릿 요구**, theme/naver ConfigMap 필요 | B1 cert-manager가 **keycloak-tls도 발급**; T8 차트가 theme(`infra/keycloak-theme/`)·naver-idp.jar 임베드. **realm import CR 없음→복원 DB의 realm 사용(재import 충돌 없음, DR 유리)** | 없음(신규 T8 차트) |
+| **B10** | 전 앱(PSA) | 네임스페이스 PSA 라벨(vault=`restricted`, web=`baseline`)이 앱과 함께 감 | 앱들이 securityContext 자체설정으로 이미 준수 → EKS서 통과. 드릴서 전 파드 준수 재확인 | 없음 |
+| **B11** | api(Kyverno) | Kyverno가 generate하던 `api-session-access-rolebinding`이 DR엔 없음 | 세션(KubeVirt) 접근 RBAC 부재 — **세션은 DR 범위 밖이라 과금경로 무관**(api 기동 영향 없음) | 없음 |
+| **B12** | api·web(arch) | 이미지 아키텍처 | CI default `linux/amd64` = 노드 m6i.xlarge(amd64) 호환. 문제 없음 | 없음 |
+
+**cert-manager DR 부트스트랩(B1)**: cert-manager(gitops 앱 신설 or 부트스트랩 설치) + **self-signed `cledyu-ca` ClusterIssuer**(운영과 다른 신규 CA 무방 — DR 내부용) → **api-tls·web-tls·vault-tls·keycloak-tls(B9)** 발급 + CA root를 `cledyu-root-ca` Secret으로 → trust-manager Bundle이 분배. keycloak↔api TLS 신뢰도 이 CA로 통일.
+
+---
+
 ## File Structure
 
 **Phase 1 — Terraform (`infra/terraform/aws/`):**
@@ -427,9 +450,10 @@ git commit -m "feat(dr): EKS DR VPC 엔드포인트 S3/KMS/STS"
 
 **Files:**
 - Create: `gitops/argocd/root-app-eks.yaml`
-- Create: `gitops/argocd/apps-eks/{platform-argocd,platform-external-secrets,data-cnpg-operator,platform-trust-manager,platform-alb-controller,platform-storage,service-api,service-web}.yaml`
-- Create: `gitops/apps/{api,web,external-secrets,cnpg-operator,argocd,trust-manager}/values-eks.yaml`
-- Create: `gitops/apps/alb-controller/` (신설 앱), `gitops/apps/storage/` (gp3 StorageClass)
+- Create: `gitops/argocd/apps-eks/{platform-argocd,platform-external-secrets,data-cnpg-operator,platform-trust-manager,platform-cert-manager,platform-alb-controller,platform-storage,service-api,service-web}.yaml`
+- Create: `gitops/apps/{api,web,external-secrets,cnpg-operator,argocd,trust-manager}/values-eks.yaml` — **B1~B8 계약대로 온프렘 전용 기능 off**(api: kafka·serviceMonitor·ec2·bq·kubevirt disable + `.local`→ALB host; vault는 T6).
+- Create: `gitops/apps/alb-controller/` (신설 앱), `gitops/apps/storage/` (gp3 StorageClass), **`gitops/apps/cert-manager/`**(신설 — cert-manager + self-signed `cledyu-ca` ClusterIssuer + `cledyu-root-ca`, B1).
+- **차트 수술(B2·B5)**: `gitops/apps/api/templates/kafka.yaml`+`deployment.yaml`(kafka-certs 볼륨)에 `{{ if .Values.kafka.enabled }}` 조건 추가, `gitops/apps/vault/serverstransport.yaml`(+ingress)를 `ingress.enabled` 조건화. 온프렘 기본값(true)은 보존.
 
 **Interfaces:**
 - Consumes: Task 2 outputs(`eks_dr_alb_controller_role_arn`), ACM ARN(`aws_acm_certificate_validation.auth`).
