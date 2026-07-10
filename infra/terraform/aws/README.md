@@ -222,7 +222,7 @@ terraform init
 | <a name="input_assign_public_ip"></a> [assign\_public\_ip](#input\_assign\_public\_ip) | 세션 인스턴스에 퍼블릭 IP 를 할당할지. Launch Template 이 network\_interfaces 를 명시하면<br/>subnet 의 MapPublicIpOnLaunch 가 무시되어 기본 미할당이 되므로, default VPC(IGW) 환경에서는<br/>true 여야 인스턴스가 인터넷(tailscale 가입·SSM·패키지 설치)에 도달한다.<br/>private subnet + NAT 구성이면 false 로 둔다. | `bool` | `true` | no |
 | <a name="input_budget_limit_usd"></a> [budget\_limit\_usd](#input\_budget\_limit\_usd) | EC2 오버플로우 월 예산(USD). 0이면 예산 알람을 만들지 않는다. | `number` | `0` | no |
 | <a name="input_budget_notification_emails"></a> [budget\_notification\_emails](#input\_budget\_notification\_emails) | 예산 임계 도달 시 알림 받을 이메일 목록(budget\_limit\_usd>0 일 때 사용). | `list(string)` | `[]` | no |
-| <a name="input_eks_dr_cluster_version"></a> [eks\_dr\_cluster\_version](#input\_eks\_dr\_cluster\_version) | DR EKS 컨트롤플레인 쿠버네티스 버전. | `string` | `"1.31"` | no |
+| <a name="input_eks_dr_cluster_version"></a> [eks\_dr\_cluster\_version](#input\_eks\_dr\_cluster\_version) | DR EKS 컨트롤플레인 쿠버네티스 버전. 온디맨드로 생성하는 DR 클러스터라 반드시 standard support<br/>범위로 유지한다 — extended support 버전은 컨트롤플레인 비용이 약 6배로 뛰고, extended 마저 끝나면<br/>해당 버전 신규 클러스터 생성이 막혀 DR 기동 자체가 실패한다. EKS 버전 캘린더 기준 주기적으로<br/>최신 standard 버전으로 갱신할 것. | `string` | `"1.34"` | no |
 | <a name="input_eks_dr_node_desired"></a> [eks\_dr\_node\_desired](#input\_eks\_dr\_node\_desired) | DR EKS 워커 노드 개수(고정 크기, min=max=desired). | `number` | `3` | no |
 | <a name="input_eks_dr_node_instance_type"></a> [eks\_dr\_node\_instance\_type](#input\_eks\_dr\_node\_instance\_type) | DR EKS 워커 노드 EC2 타입. CNPG(postgres·keycloak-pg)+Vault+api/web/keycloak/argocd/eso 수용, 드릴 신뢰성 위해 on-demand로 고정. | `string` | `"m6i.xlarge"` | no |
 | <a name="input_enable_eks_dr"></a> [enable\_eks\_dr](#input\_enable\_eks\_dr) | DR 드릴/재해 시에만 true. 평시 false 로 EKS 리소스 0. | `bool` | `false` | no |
@@ -256,7 +256,7 @@ terraform init
 | <a name="output_baker_instance_profile"></a> [baker\_instance\_profile](#output\_baker\_instance\_profile) | metal 베이커 인스턴스 프로파일명. |
 | <a name="output_eks_dr_alb_controller_role_arn"></a> [eks\_dr\_alb\_controller\_role\_arn](#output\_eks\_dr\_alb\_controller\_role\_arn) | AWS Load Balancer Controller IRSA 롤 ARN |
 | <a name="output_eks_dr_cluster_name"></a> [eks\_dr\_cluster\_name](#output\_eks\_dr\_cluster\_name) | DR EKS 클러스터명(kubectl/드릴 스크립트 참고용). |
-| <a name="output_eks_dr_cnpg_restore_role_arn"></a> [eks\_dr\_cnpg\_restore\_role\_arn](#output\_eks\_dr\_cnpg\_restore\_role\_arn) | CNPG restore(S3 barman) IRSA 롤 ARN |
+| <a name="output_eks_dr_cnpg_restore_role_arns"></a> [eks\_dr\_cnpg\_restore\_role\_arns](#output\_eks\_dr\_cnpg\_restore\_role\_arns) | CNPG restore IRSA 롤 ARN 맵(DB별: postgres·keycloak) |
 | <a name="output_eks_dr_oidc_provider"></a> [eks\_dr\_oidc\_provider](#output\_eks\_dr\_oidc\_provider) | DR EKS OIDC provider issuer(호스트 부분) — IRSA role trust policy가 소비. |
 | <a name="output_eks_dr_oidc_provider_arn"></a> [eks\_dr\_oidc\_provider\_arn](#output\_eks\_dr\_oidc\_provider\_arn) | DR EKS OIDC provider ARN — IRSA role trust policy가 소비. |
 | <a name="output_eks_dr_vault_unseal_role_arn"></a> [eks\_dr\_vault\_unseal\_role\_arn](#output\_eks\_dr\_vault\_unseal\_role\_arn) | Vault unseal(awskms) IRSA 롤 ARN |
