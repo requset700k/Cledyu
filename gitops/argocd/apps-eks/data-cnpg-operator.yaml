@@ -23,7 +23,7 @@ spec:
           - $values/gitops/apps/cnpg-operator/values.yaml
           - $values/gitops/apps/cnpg-operator/values-eks.yaml
     - repoURL: https://github.com/requset700k/Cledyu.git
-      targetRevision: feat/dr-eks-overlay   # 드릴 검증 후 main
+      targetRevision: main
       ref: values
   destination:
     server: https://kubernetes.default.svc
