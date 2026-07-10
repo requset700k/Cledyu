@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- **전제(§0 스펙)**: A-2가 main에 랜딩된 상태 전제. **keycloak-pg 관련 태스크(T7-b, T8 런타임)는 A-2 머지 전 착수 금지.** 나머지는 지금 진행 가능.
+- **전제(§0 스펙)**: A-2 **머지 완료(2026-07-10, origin/main d0ca5cf — keycloak-pg 차트·data-keycloak-pg 존재)** → T7-b·T8·T10 게이트 해소. 전 태스크 착수 가능.
 - **리전/계정**: `ap-northeast-2` / account `504284203153` (고정값, verbatim 사용).
 - **KMS unseal 키**: `alias/cledyu-vault-unseal` = `arn:aws:kms:ap-northeast-2:504284203153:key/e29e3ec2-f5e0-4308-af6f-5b576cc99f52` — **DR-durable, 삭제 금지**.
 - **백업 버킷**: `s3://cledyu-lab-dr-backups` (프리픽스: `postgres/`, `keycloak/`, `vault/`, `velero/`).
@@ -19,6 +19,29 @@
 - **비용 게이트**: EKS는 평시 `enable_eks_dr=false`(0 리소스). 드릴(T10)에서만 apply→destroy. 그 외 모든 태스크는 **정적 검증만**(apply 금지).
 - **오버레이 원칙**: 비즈값은 공유 `values.yaml`, `values-eks.yaml`엔 인프라 델타만. **예외 CNPG = 별도 DR 차트 경로**.
 - **CNPG barman in-tree**: 오퍼레이터 1.25.x 기준 `spec.backup.barmanObjectStore` 정상(≥1.26 deprecated). DR 차트도 in-tree 유지.
+
+---
+
+## Phase 1 적대적 재검증 결과 · Phase 2 하드 계약 (2026-07-10)
+
+코드리뷰(codex)+자체 적대적 검증에서 나온, plan/validate가 못 잡는 런타임·연관 계약. Phase 2 착수 시 반드시 준수.
+
+**검증 완료(OK):** KMS 키 정책(vault-unseal `e29e3ec2`·`dr_backups`) 모두 `Enable IAM User Permissions`(root→IAM 위임) → IRSA의 KMS Decrypt/GenerateDataKey 통과. / 운영 barman serverName·프리픽스(cledyu-pg→`postgres/`, keycloak-pg→`keycloak/`, serverName=클러스터명 기본값)가 내 recovery·IRSA·lifecycle과 일치. / EC2·ELB·오토스케일 API는 NAT egress로 도달(엔드포인트는 S3/KMS/STS 최적화용).
+
+**Phase 2 하드 계약:**
+- **[N-1] PG 메이저가 DB별로 다름**: `cledyu-pg = PG 16.4`, `keycloak-pg = PG 18.2`(`sha256:3f44daf4c2ddea3481b018b3b004f91a439b93fc995a387f9aff69058bef19ac`). CNPG recovery는 target major ≥ source 필수 → **DR 복원 차트는 DB별 정확한 이미지**(postgres-cnpg-dr=PG16.4, keycloak-pg-dr=PG18.2). 섞으면 복원 실패.
+- **[F-C] IRSA SA 계약**: DR 복원 CNPG 클러스터는 SA명 `cledyu-pg`(ns postgres)·`keycloak-pg`(ns keycloak) 유지 + serviceAccountTemplate에 **DB별** role-arn(`eks_dr_cnpg_restore_role_arns["postgres"|"keycloak"]`). 이름·롤 하나만 어긋나도 IRSA 무음 실패.
+- **[프리픽스 경로]** recovery externalCluster는 원본(`postgres/`·`keycloak/`, serverName=클러스터명)에서 read, DR 클러스터 backup은 `-dr` 프리픽스(`postgres-dr/`·`keycloak-dr/`)로 write. IRSA(prefix 격리)·lifecycle(-dr 만료)이 이 경로를 전제.
+- **[F4] Vault values-eks**: SA에 `eks_dr_vault_unseal_role_arn` annotation + **AWS 크레드 env 주입 블록 제거**(env 존재 시 IRSA web identity를 덮음), dataStorage·auditStorage 둘 다 gp3.
+- **[F2] 드릴 검증**: api가 in-memory 폴백 아닌 **DB 모드**로 붙었는지 + 복원된 특정 학습자 수료/진도 값 대조(HTTP 200만으론 불충분).
+- **[F3] 드릴 로그인**: 소셜 아닌 **로컬 테스트유저**로 서빙 검증(소셜=라이브 DNS 필요 → Plan C 통합드릴).
+
+**Plan C로 이월(Plan B 범위 밖):**
+- **[F-B]** 복원 Lambda 롤에 `vault/` S3 read + `dr_backups` KMS Decrypt(스냅샷 자동복원). Plan B 드릴은 운영자 수동 자격으로 대체.
+- **[N-2] CNPG recovery 방식 재조정**: Plan C가 "recovery Cluster 먼저 생성 → GitOps가 인수(adopt)"로 확정(PR #279). 내 "별도 -dr 차트"와 정합화 필요 — **T7 착수 전 §5.1 재조정 선행.**
+
+**하드닝(선택, 보안 리뷰어 판단):**
+- **[F-D]** EKS `cluster_endpoint_public_access_cidrs`를 운영자 IP로 좁히기(현재 0.0.0.0/0 개방).
 
 ---
 
