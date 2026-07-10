@@ -1,8 +1,8 @@
 ---
 # AWS Load Balancer Controller — onprem 의 다른 3rd-party 앱과 동일하게
 # multi-source(upstream chart + $values ref)로 배선(EKS 신설 앱).
-# IRSA(role-arn)/vpcId 는 gitops/apps/alb-controller/values.yaml 에 <<...>> 로 남겨두고
-# 부트스트랩(T9 런북)에서 terraform output 값으로 치환한다.
+# IRSA role-arn 은 role_name 고정→결정적이라 gitops/apps/alb-controller/values.yaml 에 하드코딩,
+# vpcId 는 미지정(컨트롤러가 노드 IMDS 로 auto-discover). certificate-arn 도 미지정(host 기반 ACM 자동발견).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
