@@ -90,8 +90,10 @@ variable "enable_eks_dr" {
 }
 
 variable "eks_dr_cluster_version" {
+  # 1.34 = standard support 유지(1.31은 extended support라 비용 6배·종료 후 생성 불가, P2-1).
+  # 실제 코드엔 "캘린더 기준 최신 standard로 갱신" 유지보수 주석 포함.
   type    = string
-  default = "1.31"
+  default = "1.34"
 }
 
 variable "eks_dr_node_instance_type" {
@@ -334,63 +336,11 @@ resource "aws_iam_policy" "eks_dr_vault_unseal" {
 
 - [ ] **Step 2: CNPG restore 롤(S3 read + `-dr` write)**
 
-`eks-dr-irsa.tf` 에 추가:
-```hcl
-# CNPG DR 클러스터 SA 가 barman inheritFromIAMRole 로 S3 접근.
-# recovery = 원본 프리픽스 read, backup = -dr 프리픽스 write. 원본 삭제 권한 없음.
-data "aws_iam_policy_document" "eks_dr_cnpg_restore" {
-  count = local.eks_dr_enabled
-  statement {
-    sid       = "ListBucket"
-    actions   = ["s3:ListBucket", "s3:GetBucketLocation"]
-    resources = ["arn:aws:s3:::cledyu-lab-dr-backups"]
-  }
-  statement {
-    sid       = "ReadSource"
-    actions   = ["s3:GetObject"]
-    resources = [
-      "arn:aws:s3:::cledyu-lab-dr-backups/postgres/*",
-      "arn:aws:s3:::cledyu-lab-dr-backups/keycloak/*",
-    ]
-  }
-  statement {
-    sid       = "WriteDrPrefix"
-    actions   = ["s3:PutObject", "s3:GetObject"]
-    resources = [
-      "arn:aws:s3:::cledyu-lab-dr-backups/postgres-dr/*",
-      "arn:aws:s3:::cledyu-lab-dr-backups/keycloak-dr/*",
-    ]
-  }
-}
-
-resource "aws_iam_policy" "eks_dr_cnpg_restore" {
-  count  = local.eks_dr_enabled
-  name   = "${local.eks_dr_name}-cnpg-restore"
-  policy = data.aws_iam_policy_document.eks_dr_cnpg_restore[0].json
-}
-
-# CNPG 클러스터별 SA: postgres 네임스페이스의 cledyu-pg, keycloak 의 keycloak-pg.
-module "eks_dr_cnpg_restore_irsa" {
-  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
-  version = "~> 5.44"
-  count   = local.eks_dr_enabled
-
-  role_name        = "${local.eks_dr_name}-cnpg-restore"
-  role_policy_arns = { restore = aws_iam_policy.eks_dr_cnpg_restore[0].arn }
-  oidc_providers = {
-    main = {
-      provider_arn = module.eks_dr[0].oidc_provider_arn
-      namespace_service_accounts = [
-        "postgres:cledyu-pg",
-        "keycloak:keycloak-pg",
-      ]
-    }
-  }
-  tags = local.eks_dr_tags
-}
-```
-
-> **serverName 프리픽스 주의:** DR 백업 write 를 원본과 다른 프리픽스(`postgres-dr/`,`keycloak-dr/`)로 완전 분리한다(§5.1 의 "-dr 접미"를 프리픽스로 구현 → IAM 으로도 원본 write 차단). recovery 는 원본 프리픽스에서 read.
+> **⚠️ 아래 초안 HCL은 codex 리뷰 4건으로 대체됨 — 실제 구현 = `infra/terraform/aws/eks-dr-irsa.tf`(커밋됨) 참조.** 초안 그대로 복사하면 단일 롤·나이브 정책으로 회귀해 KMS 복원 실패·교차 열람이 재발한다. **최종 설계:**
+> - **DB별 분리(P2-2)**: `for_each`(locals `eks_dr_cnpg_restore` = {postgres, keycloak})로 정책·롤을 DB별 생성(`cledyu-dr-cnpg-restore-{postgres,keycloak}`). 각 롤은 **자기 SA만 신뢰**(postgres롤→`postgres:cledyu-pg`, keycloak롤→`keycloak:keycloak-pg`) + **자기 프리픽스만** 접근. 한 롤이 두 DB를 묶지 않음(교차 백업 열람 차단).
+> - **SSE-KMS(1차 리뷰)**: 각 정책에 `aws_kms_key.dr_backups.arn`의 `kms:Decrypt`(원본 read)·`kms:GenerateDataKey`·`kms:DescribeKey`. 없으면 recovery GetObject·-dr 재백업 PutObject가 KMS 거부로 실패.
+> - **ListBucket prefix 격리(P2-4)**: `ListBucket`을 자기 프리픽스(원본 `${prefix}/*` + `${prefix}-dr/*`)로 StringLike 제한 + HeadBucket(s3:prefix Null=true) 예외 + 빈/남의 prefix Deny — backup.tf writer 패턴 복제. `-dr` write에 multipart 액션 포함.
+> - **경로**: read = 원본(`postgres/`·`keycloak/`), write = `-dr`(`postgres-dr/`·`keycloak-dr/`). **DeleteObject 없음**(정리는 backup.tf lifecycle의 `-dr` 규칙, P2-3). 모든 ARN은 `aws_s3_bucket.dr_backups.arn` 참조(F-E).
 
 - [ ] **Step 3: outputs**
 
@@ -428,36 +378,30 @@ git commit -m "feat(dr): 복원 IRSA — vault unseal KMS + CNPG restore S3"
 
 - [ ] **Step 1: 엔드포인트 추가**
 
-`eks-dr.tf` 에 추가:
+> **⚠️ 아래 초안은 codex 리뷰(F-A)로 대체됨 — 실제 구현 = `infra/terraform/aws/eks-dr.tf`(커밋됨) 참조.** 최종 설계:
+> - S3 = **Gateway** 엔드포인트(`private_route_table_ids`), KMS·STS = **Interface** 엔드포인트(`private_dns_enabled=true`, `private_subnets`).
+> - **⚠️ 엔드포인트 SG는 노드 SG가 아니라 전용 SG(F-A)**: 노드 SG엔 self-443 ingress가 없어(self는 ephemeral 1025-65535·coredns 53만) 노드가 엔드포인트 ENI:443에 못 닿음 → private DNS가 KMS/STS를 엔드포인트로 강제하니 **Vault unseal(KMS)·IRSA(STS)가 443에서 막혀 드릴 붕괴.** 그래서 **VPC CIDR에서 443 인바운드 허용하는 `aws_security_group.eks_dr_endpoints`**를 만들어 KMS/STS 엔드포인트 `security_group_ids`에 붙인다(노드 SG 사용 금지).
+> - egress: github/ghcr(이미지)는 엔드포인트 없이 NAT(T1)로. ECR 미사용.
+
+<details><summary>초안 코드(참고용, 노드 SG는 F-A로 폐기됨)</summary>
+
 ```hcl
+# ⚠️ security_group_ids 는 실제로 aws_security_group.eks_dr_endpoints[0].id 로 교체됨(F-A). 아래는 초안.
 module "eks_dr_endpoints" {
   source  = "terraform-aws-modules/vpc/aws//modules/vpc-endpoints"
   version = "~> 5.13"
   count   = local.eks_dr_enabled
-
-  vpc_id = module.eks_dr_vpc[0].vpc_id
+  vpc_id  = module.eks_dr_vpc[0].vpc_id
   endpoints = {
-    s3 = {
-      service      = "s3"
-      service_type = "Gateway"
-      route_table_ids = module.eks_dr_vpc[0].private_route_table_ids
-    }
-    kms = {
-      service             = "kms"
-      private_dns_enabled = true
-      subnet_ids          = module.eks_dr_vpc[0].private_subnets
-      security_group_ids  = [module.eks_dr[0].node_security_group_id]
-    }
-    sts = {
-      service             = "sts"
-      private_dns_enabled = true
-      subnet_ids          = module.eks_dr_vpc[0].private_subnets
-      security_group_ids  = [module.eks_dr[0].node_security_group_id]
-    }
+    s3  = { service = "s3", service_type = "Gateway", route_table_ids = module.eks_dr_vpc[0].private_route_table_ids }
+    kms = { service = "kms", private_dns_enabled = true, subnet_ids = module.eks_dr_vpc[0].private_subnets, security_group_ids = [aws_security_group.eks_dr_endpoints[0].id] }
+    sts = { service = "sts", private_dns_enabled = true, subnet_ids = module.eks_dr_vpc[0].private_subnets, security_group_ids = [aws_security_group.eks_dr_endpoints[0].id] }
   }
   tags = local.eks_dr_tags
 }
 ```
+
+</details>
 
 - [ ] **Step 2: 검증 + egress 근거 확인**
 
