@@ -1,0 +1,29 @@
+---
+# EKS DR overlay (Task 5) — deltas only, layered on top of values.yaml.
+# Ingress: Traefik(onprem) -> ALB(EKS). ALB Ingress Controller merges all
+# Ingress resources sharing the same group.name into a single ALB, so
+# scheme/target-type must match across api+web (see web/values-eks.yaml).
+replicaCount: 1
+
+# 온프렘 전용 기능 off — 이 secret/CR 들이 EKS 엔 없어서 게이팅 안 하면 api 가 못 뜬다.
+kafka:
+  enabled: false   # Strimzi/KafkaUser 미배포 (B2/F7)
+aws:
+  enabled: false   # EC2 오버플로우 미사용 → 비-optional AWS 크레드(cledyu-api-aws) 주입 차단 (B7/F10)
+metrics:
+  serviceMonitor:
+    enabled: false   # EKS DR 엔 Prometheus Operator(ServiceMonitor CRD) 없음 → sync 블로커 제거 (B3)
+
+ingress:
+  className: alb
+  # Ingress host 를 .com 단일로 교정 — .local 은 internet-facing ALB 에서 죽은 규칙(B6).
+  # api.cledyu.com 은 와일드카드 *.cledyu.com ACM 과 매칭.
+  hosts:
+    - api.cledyu.com
+  annotations:
+    alb.ingress.kubernetes.io/scheme: internet-facing
+    alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/group.name: cledyu-dr
+    # 와일드카드 *.cledyu.com ACM(data.aws_acm_certificate.wildcard)의 ARN. 자동발견 대신 명시 지정(드릴 결정성, F3).
+    # 부트스트랩(T9 런북)에서 실제 ARN 으로 치환. 계정 고정값이라 확정 후 하드코딩 가능.
+    alb.ingress.kubernetes.io/certificate-arn: "<<WILDCARD_ACM_ARN>>"
