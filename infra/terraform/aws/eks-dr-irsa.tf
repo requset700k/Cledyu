@@ -54,6 +54,13 @@ data "aws_iam_policy_document" "eks_dr_cnpg_restore" {
       "arn:aws:s3:::cledyu-lab-dr-backups/keycloak-dr/*",
     ]
   }
+  # 버킷이 SSE-KMS(aws_kms_key.dr_backups)라 객체 read엔 Decrypt, write엔 GenerateDataKey가 필요.
+  # 없으면 recovery GetObject 시 KMS 거부로 PITR 실패, -dr 재백업 PutObject도 막힌다(backup.tf 주석 참조).
+  statement {
+    sid       = "BackupBucketKms"
+    actions   = ["kms:Decrypt", "kms:GenerateDataKey"]
+    resources = [aws_kms_key.dr_backups.arn]
+  }
 }
 
 resource "aws_iam_policy" "eks_dr_cnpg_restore" {
