@@ -15,7 +15,8 @@ spec:
   sources:
     - repoURL: https://cloudnative-pg.github.io/charts
       chart: cloudnative-pg
-      targetRevision: 0.23.0
+      # 온프렘과 동일 0.26.1 — keycloak-pg 가 PG 18(18.2) 이미지라 구버전 오퍼레이터는 reconcile 실패(T7 복원 막힘).
+      targetRevision: 0.26.1
       helm:
         releaseName: cnpg
         valueFiles:
