@@ -1,4 +1,9 @@
 ---
 # EKS DR overlay (Task 5) — EKS 는 별도 ArgoCD 인스턴스(self-managed)를 구동.
-# OIDC(Keycloak)/Ingress(host) 는 Task 8(Keycloak) 이후 확정 — 그 전까지 델타 없음.
-{}
+# OIDC(Keycloak)/Ingress(host) 는 Task 8(Keycloak) 이후 확정.
+# controller ServiceMonitor off — 차트가 capability 가드를 쓰긴 하나(monitoring CRD 없으면 skip),
+# self-managed ArgoCD 렌더 시점의 capability 불확실성을 없애고 api·cnpg 와 일관되게 명시적으로 끈다.
+controller:
+  metrics:
+    serviceMonitor:
+      enabled: false
