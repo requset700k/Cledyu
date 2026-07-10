@@ -38,6 +38,7 @@ kubectl -n monitoring get prometheusservicelevels
 yes
 yes
 NAME             AGE
+api-slo          1d
 lab-slo          1d
 kafka-slo        1d
 kubevirt-slo     1d
@@ -50,7 +51,7 @@ traefik-slo      1d
 |---|---|---|
 | API 요청 가용성 | 99.5% | `http_requests_total{status=~"5.."}` / `http_requests_total` |
 | API 요청 지연 | 99.5% 요청 1초 이내 | `http_request_duration_seconds_bucket{le="1"}` |
-| 세션 생성 성공률 | 99.5% | `http_requests_total{method="POST", path="/api/v1/sessions"}` |
+| 세션 생성 API 가용성 | 99.5% | `http_requests_total{method="POST", path="/api/v1/sessions", status=~"5.."}` / `http_requests_total{method="POST", path="/api/v1/sessions"}` |
 | 온프렘 Lab 시작 | 99.0% 세션 7분 이내 Ready | `lab_start_total`, `lab_startup_duration_seconds_bucket{env="onprem", le="420"}` |
 | EC2 Lab 시작 | 99.0% 세션 10분 이내 running | `lab_start_total`, `lab_startup_duration_seconds_bucket{env="ec2", le="600"}` |
 | Lab 시작 성공률 | 99.0% | `lab_start_total{result!="success"}` / `lab_start_total` |
@@ -58,15 +59,24 @@ traefik-slo      1d
 | WebSocket 안정성 | 99.0% | `ws_connection_drop_total{result="error"}` / `ws_connection_established_total` |
 | Validation 지연 | 99.0% 요청 10초 이내 | `validation_duration_seconds_bucket{le="10"}` |
 | AI 힌트 지연 | 99.0% 요청 5초 이내 | `ai_hint_latency_seconds_bucket{le="5"}` |
-| Validation Kafka 흐름 | 운영 확인용 | `kafka_server_brokertopicmetrics_messagesinpersec_oneminuterate{topic=~"validation-requests|validation-results|validation-requests-dlq"}`, `kafka_consumergroup_lag` |
 | Traefik 가용성 | 99.9% | `traefik_service_requests_total{code=~"5.."}` |
 | Traefik 지연 | 99.9% 요청 1.2초 이내 | `traefik_service_request_duration_seconds_bucket{le="1.2"}` |
 | KubeVirt 컴포넌트 가용성 | 99.9% | `up{job="kubevirt-prometheus-metrics", container=...}` |
 | Kafka 가용성 | 99.9% | `kafka_controller_offlinepartitionscount` / `kafka_controller_globalpartitioncount` |
 | Kafka Produce 지연 | 99.5% | `kafka_network_requestmetrics_totaltimems_50thpercentile{request="Produce"}` |
 
-정식 정의는 `gitops/apps/sloth/lab-slo.yaml`, `gitops/apps/sloth/traefik-slo.yaml`,
-`gitops/apps/sloth/kubevirt-slo.yaml`, `gitops/apps/sloth/kafka-slo.yaml`을 우선한다.
+정식 정의는 `gitops/apps/sloth/api-slo.yaml`, `gitops/apps/sloth/lab-slo.yaml`,
+`gitops/apps/sloth/traefik-slo.yaml`, `gitops/apps/sloth/kubevirt-slo.yaml`,
+`gitops/apps/sloth/kafka-slo.yaml`을 우선한다.
+
+## 주요 진단 지표
+
+아래 지표는 Grafana 병목 대시보드와 장애 조사에서 사용하지만, 현재 단일 SLO 알림으로
+정의되어 있지는 않다.
+
+| 영역 | 확인 목적 | 지표 |
+|---|---|---|
+| Validation Kafka 흐름 | 검증 요청/결과/DLQ 흐름과 consumer lag 확인 | `kafka_server_brokertopicmetrics_messagesinpersec_oneminuterate{topic=~"validation-requests|validation-results|validation-requests-dlq"}`, `kafka_consumergroup_lag` |
 
 ## 관측성 대시보드 맵
 
@@ -93,12 +103,13 @@ SLO 알림이나 사용자 제보가 들어오면 아래 네 대시보드를 증
 ```bash
 kubectl -n monitoring get prometheusrules | grep -E 'sloth|slo'
 kubectl -n monitoring get prometheusservicelevels
-kubectl -n monitoring get prometheusservicelevel lab-slo -o yaml | sed -n '1,220p'
+kubectl -n monitoring get prometheusservicelevels -o yaml | sed -n '1,260p'
 ```
 
 예상 출력:
 
 ```text
+api-slo
 lab-slo
 kafka-slo
 kubevirt-slo
@@ -130,6 +141,7 @@ LabStartupOnpremSLO	critical	lab	startup-onprem
 
 | 알림/증상 | 먼저 볼 대시보드 | 이어서 볼 대시보드 |
 |---|---|---|
+| `APIAvailabilitySLO`, `APILatencySLO`, `APISessionCreationSLO` | `Cledyu API & Validation Tempo Bottleneck` | `Lab SLO Dashboard`, API 로그 |
 | `LabStartupOnpremSLO`, `LabStartupEC2SLO`, `LabStartSuccessRateSLO`, `LabVMBootSuccessRateSLO` | `Lab SLO Dashboard` | `Cilium Network Overview`, KubeVirt 로그 |
 | `LabValidationLatencySLO` | `Lab SLO Dashboard` | `Cledyu API & Validation Tempo Bottleneck`, `Platform SLO Burndown`의 Kafka |
 | `LabAIHintLatencySLO` | `Lab SLO Dashboard` | `Cledyu API & Validation Tempo Bottleneck`, ai-tutor 로그 |
@@ -145,13 +157,6 @@ kubectl -n monitoring port-forward svc/kps-prometheus 9090:9090 >/tmp/cledyu-pro
 PROM_PF_PID=$!
 trap 'kill $PROM_PF_PID 2>/dev/null || true' EXIT
 until curl -sf http://127.0.0.1:9090/-/ready >/dev/null; do sleep 1; done
-```
-
-조사가 끝나면 port-forward를 정리한다.
-
-```bash
-kill $PROM_PF_PID 2>/dev/null || true
-trap - EXIT
 ```
 
 API 5xx 비율:
@@ -232,6 +237,7 @@ kubectl -n kube-system get pods -l k8s-app=cilium
 
 판단 기준:
 
+- `APIAvailabilitySLO`, `APILatencySLO`, `APISessionCreationSLO`: `api` 로그, readiness, API request/latency 패널, 최근 배포를 확인한다.
 - `LabStartupOnpremSLO`, `LabStartupEC2SLO`: KubeVirt/EC2 overflow, PVC/DataVolume, 이미지 pull, namespace quota를 확인한다.
 - `LabStartSuccessRateSLO`, `LabVMBootSuccessRateSLO`: `api` 로그, VM 생성/부팅 이벤트, provider별 실패 라벨, 최근 배포를 확인한다.
 - `LabValidationLatencySLO`: `validation-engine`, Kafka lag, VM SSH/exec 실패를 확인한다.
@@ -294,6 +300,13 @@ service-api	Synced	Healthy	2026-07-08T10:20:11Z
 curl -G -s http://127.0.0.1:9090/api/v1/query \
   --data-urlencode 'query=slo:period_error_budget_remaining:ratio' \
   | jq -r '.data.result[] | [.metric.sloth_service,.metric.sloth_slo,.value[1]] | @tsv'
+```
+
+조사가 끝나면 Prometheus port-forward를 정리한다.
+
+```bash
+kill $PROM_PF_PID 2>/dev/null || true
+trap - EXIT
 ```
 
 기록할 항목:
