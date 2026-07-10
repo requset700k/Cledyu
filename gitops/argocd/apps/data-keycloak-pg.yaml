@@ -21,9 +21,15 @@ spec:
   destination:
     server: https://kubernetes.default.svc
     namespace: keycloak
-  # 이관 중: automated 없음(수동 sync). 자동 sync면 커밋 즉시 ArgoCD가 Cluster를 만들어 아직 안 멈춘
-  # 구 DB를 import → write-freeze 무의미. cutover 검증 후 Task 4에서 git으로 automated 블록 추가.
+  # 이관 완료(Task 4 cutover·G1·G2·G3 통과) — automated 전환. 이관 중에는 수동 sync였다:
+  # 자동 sync면 커밋 즉시 ArgoCD가 Cluster를 만들어 아직 안 멈춘 구 DB를 import → write-freeze 무의미.
+  # selfHeal 안전 조건: Cluster 삭제→재생성 시 initdb.import가 재실행될 수 있으나, 소스인 구 Bitnami
+  # DB(keycloak-db-postgresql)를 replicas 0으로 정지해 접속 불가 → stale 데이터 조용한 부활 대신
+  # 시끄러운 실패(fail-safe). 구 DB 폐기(Task 6) 전까지 이 정지 상태를 되돌리지 말 것.
   syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true

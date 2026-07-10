@@ -289,6 +289,15 @@ git commit -m "feat(dr): EventBridge 규칙·SNS 알림·Step Functions 트리�
 ```
 복원 내부 순서(스펙 § 백업 우선순위 기술 순서): **Vault 복원→unseal(AWS KMS)→ESO 정상화 → Postgres PITR/Keycloak**. Vault가 먼저 열려야 나머지가 시크릿을 받는다.
 
+> **Postgres PITR = 두 CNPG 클러스터(cledyu-pg·keycloak-pg) 각각 복원 (Plan A-2 이관 완료, 2026-07-09).**
+> `cledyu-pg`(S3 `postgres/` 프리픽스)와 `keycloak-pg`(S3 `keycloak/` 프리픽스)를 동일한 CNPG
+> `bootstrap.recovery` 방식으로 복원한다(드릴 실측: keycloak-pg RTO 72초, `dr-restore-drill.md` "변형" 절).
+> 이후 Velero가 keycloak ns 오브젝트(Keycloak CR — `db.host=keycloak-pg-rw`, 자격증명 ESO
+> `keycloak-pg-credentials`)를 복원한다. **주의: 구 Bitnami `keycloak-db-postgresql` StatefulSet은
+> 이관 후 replicas 0 fail-safe 상태이므로, cutover(2026-07-09) 이전 시점 Velero 백업으로 keycloak ns를
+> 복원하면 구 STS가 replicas 1로 되살아나 stale import 경로가 열릴 수 있다 → 복원 시점은 반드시
+> cutover 이후 백업으로 선택**(구 STS는 Plan A-2 Task 6 폐기 후 자연 해소).
+
 > **복원 순서 의존성 — velero 오브젝트 복원은 CRD/오퍼레이터 뒤에 (필수).** Velero 백업은 CRD·StorageClass·PVC를
 > 의도적으로 제외한다(`gitops/apps/velero/values.yaml`: CRD/StorageClass는 GitOps 오퍼레이터가 재설치, PVC는
 > 온프렘 스토리지 종속). 따라서 `velero restore`로 namespaced CR(Certificate·ExternalSecret·Kafka `Kafka`·CNPG
@@ -299,9 +308,20 @@ git commit -m "feat(dr): EventBridge 규칙·SNS 알림·Step Functions 트리�
 > 각 오퍼레이터(CNPG/Strimzi 등)가 대상 클러스터 StorageClass로 PVC를 재생성한다 — velero는 오브젝트만 되살린다.
 > (velero PR 리뷰 지적: 복원 순서 문서화 — cluster-scoped allowlist·CRD 제외 결정의 운영상 귀결)
 
+> **CNPG 클러스터 앱은 recovery로 먼저 생성한 뒤 GitOps가 인수 (import-bootstrap vs recovery 충돌 회피).**
+> `data-postgres-cnpg`·`data-keycloak-pg`는 운영 매니페스트에 `bootstrap.initdb.import`(구 DB 소스)를
+> fail-safe로 유지한다(재생성 시 조용한 오복구 대신 시끄러운 실패 강제). DR 환경엔 구 DB가 없으므로,
+> ArgoBootstrap이 이 두 앱을 automated로 즉시 sync하면 import Cluster가 생성→실패하고, 같은 이름의
+> recovery Cluster와 충돌하며 selfHeal이 recovery를 import로 되돌린다. **해법: CNPG bootstrap은 클러스터
+> 생성 시 1회만 실행되므로, "recovery로 Cluster를 먼저 생성 → GitOps가 기존 Cluster 인수(bootstrap 무시)"
+> 순서를 강제한다.** 구체적으로 ArgoBootstrap은 오퍼레이터/CRD는 설치하되 **DB 클러스터 앱
+> (`data-postgres-cnpg`·`data-keycloak-pg`)은 automated sync를 보류**(sync-wave 게이트 또는 App-of-Apps에서
+> 일시 제외)하고, Restore가 recovery Cluster를 생성한 뒤에 이 앱들을 sync해 인수시킨다. **cledyu-pg·keycloak-pg
+> 공통 규칙** — 한쪽만 분기하면 DR 동작이 불일치한다. (PR #279 Codex P2 답변에서 이 순서로 통합 반영 명시)
+
 - [ ] **Step 2: 단계별 Lambda 스켈레톤**
 
-각 Lambda는 실패 시 Step Functions `Retry`/`Catch`로 재시도. `Restore`는 CNPG `Cluster`(bootstrap.recovery, targetTime=최신) + `velero restore` + Vault 스냅샷 복원을 호출. (구체 매니페스트는 Plan A Task 7 PITR 드릴 재사용)
+각 Lambda는 실패 시 Step Functions `Retry`/`Catch`로 재시도. `Restore`는 CNPG `Cluster`(bootstrap.recovery, targetTime=최신, **cledyu-pg·keycloak-pg 각각**) + `velero restore` + Vault 스냅샷 복원을 호출하며, 위 순서 규칙대로 recovery Cluster 생성 후 GitOps 인수를 담보한다. (구체 매니페스트는 Plan A Task 7 PITR 드릴 재사용 — keycloak-pg 케이스는 `docs/RUNBOOK/dr-restore-drill.md` "변형" 절)
 
 - [ ] **Step 3: 검증**
 
