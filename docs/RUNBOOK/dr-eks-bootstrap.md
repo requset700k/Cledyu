@@ -147,6 +147,7 @@ kubectl -n vault exec -it vault-0 -- rm -f /tmp/vault-raft.snap
 # -1) bastion 준비 — user_data 는 kubectl/awscli 만 깐다. seed/apply 에 git·helm·repo 가 필요하니 여기서 설치.
 sudo dnf install -y git
 curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+# repo 가 private 면 인증 필요: git clone https://<GITHUB_PAT>@github.com/requset700k/Cledyu.git ~/Cledyu
 git clone https://github.com/requset700k/Cledyu.git ~/Cledyu && cd ~/Cledyu
 aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2   # (Vault 복원 때 이미 했으면 생략)
 
@@ -225,20 +226,27 @@ terraform 밖이다. 클러스터를 먼저 부수면 ALB·target group·`k8s-*`
 kubectl -n argocd patch applications.argoproj.io --all --type=merge \
   -p '{"spec":{"syncPolicy":{"automated":null}}}'
 
-# 1) Ingress 삭제 → 컨트롤러가 ALB/TG/SG 정리 (selfHeal 꺼서 재생성 안 됨, 완료까지 대기)
+# 1) PVC 를 물고 있는 워크로드 먼저 종료 — vault StatefulSet + CNPG Cluster(T7). 파드가 PVC 를 마운트한 채
+#    delete pvc 하면 pvc-protection 으로 PVC 가 Terminating 에 묶여 EBS CSI 가 볼륨을 못 지우고 고아가 된다.
+kubectl -n vault delete statefulset vault --ignore-not-found
+kubectl delete clusters.postgresql.cnpg.io -A --all --ignore-not-found   # 오퍼레이터가 파드+PVC 정리
+kubectl wait --for=delete pod -n vault -l app.kubernetes.io/name=vault --timeout=300s 2>/dev/null || true
+
+# 2) Ingress 삭제 → 컨트롤러가 ALB/TG/SG 정리 (selfHeal 꺼서 재생성 안 됨, 완료까지 대기)
 kubectl delete ingress -A --all
 aws elbv2 describe-load-balancers --region ap-northeast-2 \
   --query "LoadBalancers[?VpcId=='<dr-vpc-id>'].LoadBalancerArn" --output text   # 빈 값 될 때까지 확인
 
-# 2) PVC 삭제 → EBS CSI 가 gp3 볼륨 삭제 (드릴 데이터는 S3 백업에 있으니 폐기 가능)
+# 3) PVC 삭제 → 이제 마운트 없어 즉시 삭제 → EBS CSI 가 gp3 볼륨 삭제. PV/EBS 삭제 완료까지 대기.
 kubectl delete pvc -A --all
+until [ -z "$(kubectl get pv -o name 2>/dev/null)" ]; do echo "PV/EBS 삭제 대기..."; sleep 10; done
 
-# 3) LoadBalancer 타입 Service 없음(traefik 은 DR 앱셋 미포함) — skip
+# 4) LoadBalancer 타입 Service 없음(traefik 은 DR 앱셋 미포함) — skip
 
-# 4) terraform destroy
+# 5) terraform destroy — in-cluster EBS/ALB 정리 완료 후에만
 cd "$(git rev-parse --show-toplevel)/infra/terraform/aws" && terraform apply -var enable_eks_dr=false
 
-# 5) 고아 검증(전부 0/비어야 함)
+# 6) 고아 검증(전부 0/비어야 함)
 aws elbv2 describe-load-balancers --region ap-northeast-2 --query "LoadBalancers[?VpcId=='<dr-vpc-id>']" --output text
 aws ec2 describe-volumes --region ap-northeast-2 --filters "Name=tag:kubernetes.io/cluster/<dr-cluster-name>,Values=owned" --query "Volumes[].VolumeId" --output text
 aws ec2 describe-network-interfaces --region ap-northeast-2 --filters "Name=vpc-id,Values=<dr-vpc-id>" --query "NetworkInterfaces[].NetworkInterfaceId" --output text
