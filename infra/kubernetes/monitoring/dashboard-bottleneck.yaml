@@ -12,15 +12,16 @@ metadata:
 data:
   dashboard-bottleneck.json: |
     {
-      "title": "Cledyu API Tempo Bottleneck",
+      "title": "Cledyu API & Validation Tempo Bottleneck",
       "uid": "cledyu-bottleneck-overview",
       "schemaVersion": 36,
-      "version": 4,
+      "version": 6,
       "refresh": "30s",
       "style": "dark",
       "tags": [
         "cledyu",
         "api",
+        "validation-engine",
         "bottleneck",
         "tempo"
       ],
@@ -69,6 +70,14 @@ data:
           "title": "Open Tempo Explore",
           "type": "link",
           "url": "/explore?left={\"datasource\":\"tempo\",\"queries\":[{\"queryType\":\"nativeSearch\",\"serviceName\":\"cledyu-api\"}],\"range\":{\"from\":\"now-3h\",\"to\":\"now\"}}",
+          "targetBlank": true,
+          "includeVars": false,
+          "keepTime": true
+        },
+        {
+          "title": "Open validation-engine traces",
+          "type": "link",
+          "url": "/explore?left={\"datasource\":\"tempo\",\"queries\":[{\"queryType\":\"traceql\",\"query\":\"{ resource.service.name = \\\"validation-engine\\\" }\"}],\"range\":{\"from\":\"now-3h\",\"to\":\"now\"}}",
           "targetBlank": true,
           "includeVars": false,
           "keepTime": true
@@ -651,6 +660,378 @@ data:
               "expr": "sum by (result) (increase(ai_hint_latency_seconds_count[15m]))",
               "legendFormat": "{{result}}",
               "refId": "A"
+            }
+          ]
+        },
+        {
+          "type": "row",
+          "title": "Kafka Validation Flow",
+          "collapsed": false,
+          "id": 17,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 37
+          }
+        },
+        {
+          "type": "stat",
+          "title": "validation-requests 유입",
+          "description": "Session API가 검증 요청을 Kafka에 넣는지 확인한다.",
+          "id": 18,
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 38
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "decimals": 2,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "gray",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 0.001
+                  }
+                ]
+              }
+            }
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "expr": "sum(kafka_server_brokertopicmetrics_messagesinpersec_oneminuterate{topic=\"validation-requests\"})",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "title": "validation-results 유입",
+          "description": "validation-engine이 검증 결과를 Kafka에 넣는지 확인한다.",
+          "id": 19,
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 38
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "decimals": 2,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "gray",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 0.001
+                  }
+                ]
+              }
+            }
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "expr": "sum(kafka_server_brokertopicmetrics_messagesinpersec_oneminuterate{topic=\"validation-results\"})",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "title": "validation DLQ 유입",
+          "description": "처리 실패한 검증 요청이 DLQ로 빠지는지 확인한다.",
+          "id": 20,
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 12,
+            "y": 38
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "decimals": 2,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "red",
+                    "value": 0.001
+                  }
+                ]
+              }
+            }
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "auto"
+          },
+          "targets": [
+            {
+              "expr": "sum(kafka_server_brokertopicmetrics_messagesinpersec_oneminuterate{topic=\"validation-requests-dlq\"})",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "type": "stat",
+          "title": "검증 consumer lag",
+          "description": "validation-engine과 API 결과 소비가 밀리는지 확인한다.",
+          "id": 21,
+          "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 18,
+            "y": 38
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "decimals": 0,
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "green",
+                    "value": null
+                  },
+                  {
+                    "color": "yellow",
+                    "value": 1
+                  },
+                  {
+                    "color": "red",
+                    "value": 10
+                  }
+                ]
+              }
+            }
+          },
+          "options": {
+            "colorMode": "background",
+            "graphMode": "area",
+            "justifyMode": "center",
+            "orientation": "horizontal",
+            "reduceOptions": {
+              "calcs": [
+                "lastNotNull"
+              ],
+              "fields": "",
+              "values": false
+            },
+            "textMode": "value_and_name"
+          },
+          "targets": [
+            {
+              "expr": "sum(kafka_consumergroup_lag{topic=\"validation-requests\",consumergroup=\"validation-engine\"})",
+              "legendFormat": "engine",
+              "refId": "A"
+            },
+            {
+              "expr": "sum(kafka_consumergroup_lag{topic=\"validation-results\",consumergroup=\"cledyu-api-validation-results\"})",
+              "legendFormat": "api",
+              "refId": "B"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Validation Kafka topic throughput",
+          "id": 22,
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 42
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops"
+            }
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum by (topic) (kafka_server_brokertopicmetrics_messagesinpersec_oneminuterate{topic=~\"validation-requests|validation-results|validation-requests-dlq\"})",
+              "legendFormat": "{{topic}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "type": "timeseries",
+          "title": "Validation Kafka consumer lag",
+          "id": 23,
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 42
+          },
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short"
+            }
+          },
+          "options": {
+            "legend": {
+              "displayMode": "table",
+              "placement": "bottom",
+              "calcs": [
+                "lastNotNull",
+                "max"
+              ]
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "targets": [
+            {
+              "expr": "sum(kafka_consumergroup_lag{topic=\"validation-requests\",consumergroup=\"validation-engine\"})",
+              "legendFormat": "validation-engine / validation-requests",
+              "refId": "A"
+            },
+            {
+              "expr": "sum(kafka_consumergroup_lag{topic=\"validation-results\",consumergroup=\"cledyu-api-validation-results\"})",
+              "legendFormat": "api / validation-results",
+              "refId": "B"
+            }
+          ]
+        },
+        {
+          "type": "row",
+          "title": "Validation Engine Tempo",
+          "collapsed": false,
+          "id": 15,
+          "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 49
+          }
+        },
+        {
+          "type": "table",
+          "title": "최근 validation-engine trace",
+          "description": "Validation SLO나 latency 패널에서 병목이 보이면 여기서 최근 validation-engine trace를 연다.",
+          "id": 16,
+          "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 50
+          },
+          "datasource": {
+            "type": "tempo",
+            "uid": "tempo"
+          },
+          "fieldConfig": {
+            "defaults": {}
+          },
+          "options": {
+            "showHeader": true
+          },
+          "targets": [
+            {
+              "query": "{ resource.service.name = \"validation-engine\" }",
+              "queryType": "traceql",
+              "refId": "A",
+              "limit": 20,
+              "tableType": "traces"
             }
           ]
         }
