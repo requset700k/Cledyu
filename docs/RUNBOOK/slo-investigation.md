@@ -108,9 +108,16 @@ traefik-slo
 2. 현재 firing 알림을 확인한다.
 
 ```bash
-kubectl -n monitoring port-forward svc/kps-alertmanager 9093:9093
+kubectl -n monitoring port-forward svc/kps-alertmanager 9093:9093 >/tmp/cledyu-alertmanager-pf.log 2>&1 &
+AM_PF_PID=$!
+trap 'kill $AM_PF_PID 2>/dev/null || true' EXIT
+until curl -sf http://127.0.0.1:9093/-/ready >/dev/null; do sleep 1; done
+
 curl -s http://127.0.0.1:9093/api/v2/alerts \
   | jq -r '.[] | select(.status.state=="active") | [.labels.alertname,.labels.severity,.labels.service,.labels.slo] | @tsv'
+
+kill $AM_PF_PID 2>/dev/null || true
+trap - EXIT
 ```
 
 예상 출력:
@@ -134,7 +141,17 @@ LabStartupOnpremSLO	critical	lab	startup-onprem
 4. Prometheus에서 SLI 원시값을 확인한다.
 
 ```bash
-kubectl -n monitoring port-forward svc/kps-prometheus 9090:9090
+kubectl -n monitoring port-forward svc/kps-prometheus 9090:9090 >/tmp/cledyu-prometheus-pf.log 2>&1 &
+PROM_PF_PID=$!
+trap 'kill $PROM_PF_PID 2>/dev/null || true' EXIT
+until curl -sf http://127.0.0.1:9090/-/ready >/dev/null; do sleep 1; done
+```
+
+조사가 끝나면 port-forward를 정리한다.
+
+```bash
+kill $PROM_PF_PID 2>/dev/null || true
+trap - EXIT
 ```
 
 API 5xx 비율:
@@ -292,6 +309,14 @@ curl -G -s http://127.0.0.1:9090/api/v1/query \
 아래를 모두 만족하면 일단 완화 완료로 본다.
 
 ```bash
+kubectl -n monitoring port-forward svc/kps-alertmanager 9093:9093 >/tmp/cledyu-alertmanager-pf.log 2>&1 &
+AM_PF_PID=$!
+kubectl -n monitoring port-forward svc/kps-prometheus 9090:9090 >/tmp/cledyu-prometheus-pf.log 2>&1 &
+PROM_PF_PID=$!
+trap 'kill $AM_PF_PID $PROM_PF_PID 2>/dev/null || true' EXIT
+until curl -sf http://127.0.0.1:9093/-/ready >/dev/null; do sleep 1; done
+until curl -sf http://127.0.0.1:9090/-/ready >/dev/null; do sleep 1; done
+
 curl -s http://127.0.0.1:9093/api/v2/alerts \
   | jq -r '.[] | select(.status.state=="active") | .labels.alertname' \
   | grep -E 'SLO' || true
@@ -299,6 +324,9 @@ curl -s http://127.0.0.1:9093/api/v2/alerts \
 curl -G -s http://127.0.0.1:9090/api/v1/query \
   --data-urlencode 'query=up{job=~"api|kubevirt-prometheus-metrics|kafka.*|traefik.*"}' \
   | jq '.data.result'
+
+kill $AM_PF_PID $PROM_PF_PID 2>/dev/null || true
+trap - EXIT
 ```
 
 성공 기준:
