@@ -68,6 +68,24 @@ traefik-slo      1d
 정식 정의는 `gitops/apps/sloth/lab-slo.yaml`, `gitops/apps/sloth/traefik-slo.yaml`,
 `gitops/apps/sloth/kubevirt-slo.yaml`, `gitops/apps/sloth/kafka-slo.yaml`을 우선한다.
 
+## 관측성 대시보드 맵
+
+SLO 알림이나 사용자 제보가 들어오면 아래 네 대시보드를 증상에 맞게 함께 본다.
+
+| 대시보드 | 파일 | 먼저 볼 때 | 핵심 확인 |
+|---|---|---|---|
+| `Lab SLO Dashboard` | `infra/kubernetes/monitoring/dashboard-lab-slo.yaml` | Lab 시작, VM 부팅, WebSocket, Validation, AI 힌트 SLO가 흔들릴 때 | SLO Summary, Startup Details, Interactive Paths, Validation Latency, AI Hint Latency, Sloth Error Budgets |
+| `Platform SLO Burndown` | `infra/kubernetes/monitoring/dashboard-slo-burndown.yaml` | error budget 소모 속도와 플랫폼 공통 SLO 영향을 볼 때 | Traefik, KubeVirt, Kafka의 error budget remaining, current burn rate, 7일 burndown |
+| `Cilium Network Overview` | `infra/kubernetes/monitoring/dashboard-cilium-metrics.yaml` | API/VM/Kafka/validation-engine 간 통신이 느리거나 끊기는 의심이 있을 때 | 현재 드롭률, 총 드롭, 이벤트 유실, 정책 차단, reason별 drop rate, verdict별 흐름 |
+| `Cledyu API & Validation Tempo Bottleneck` | `infra/kubernetes/monitoring/dashboard-bottleneck.yaml` | API 병목, Validation 지연, Kafka 검증 흐름, validation-engine trace를 이어서 볼 때 | API Overview, API Internal Operations, Kafka Validation Flow, Validation Engine Tempo |
+
+대시보드별 역할:
+
+- `Lab SLO Dashboard`: 사용자 체감 SLO의 현재 상태를 먼저 본다. Lab 시작/VM 부팅/WebSocket/Validation/AI 힌트가 어느 축에서 깨지는지 분리한다.
+- `Platform SLO Burndown`: 특정 순간값보다 error budget 소모 추세가 중요한 경우 본다. Traefik, KubeVirt, Kafka 중 어떤 플랫폼 계층이 SLO budget을 태우는지 확인한다.
+- `Cilium Network Overview`: 서비스 자체 로그가 깨끗한데 timeout, reconnect, Kafka lag, VM 접근 실패가 같이 보이면 본다. 정책 차단과 Hubble 이벤트 유실을 구분한다.
+- `Cledyu API & Validation Tempo Bottleneck`: API 요청량/지연, validation 왕복 지연, Kafka 요청/결과/DLQ 흐름, Tempo trace를 한 화면에서 연결해 본다.
+
 ## 절차
 
 1. 어떤 SLO가 타고 있는지 확인한다.
@@ -101,7 +119,19 @@ curl -s http://127.0.0.1:9093/api/v2/alerts \
 LabStartupOnpremSLO	critical	lab	startup-onprem
 ```
 
-3. Prometheus에서 SLI 원시값을 확인한다.
+3. Grafana 대시보드에서 범위를 먼저 좁힌다.
+
+| 알림/증상 | 먼저 볼 대시보드 | 이어서 볼 대시보드 |
+|---|---|---|
+| `LabStartup*`, `LabVMBootSuccessRateSLO` | `Lab SLO Dashboard` | `Cilium Network Overview`, KubeVirt 로그 |
+| `LabValidationLatencySLO` | `Lab SLO Dashboard` | `Cledyu API & Validation Tempo Bottleneck`, `Platform SLO Burndown`의 Kafka |
+| `LabAIHintLatencySLO` | `Lab SLO Dashboard` | `Cledyu API & Validation Tempo Bottleneck`, ai-tutor 로그 |
+| `LabWebSocketStabilitySLO` | `Lab SLO Dashboard` | `Cilium Network Overview`, Traefik 로그 |
+| `Kafka*SLO` | `Platform SLO Burndown` | `Cledyu API & Validation Tempo Bottleneck`의 Kafka Validation Flow |
+| `Traefik*SLO` | `Platform SLO Burndown` | `Cilium Network Overview`, Ingress/backend readiness |
+| 네트워크 drop, 정책 차단, pod 간 timeout | `Cilium Network Overview` | 해당 서비스 로그와 NetworkPolicy |
+
+4. Prometheus에서 SLI 원시값을 확인한다.
 
 ```bash
 kubectl -n monitoring port-forward svc/kps-prometheus 9090:9090
@@ -156,7 +186,23 @@ curl -G -s http://127.0.0.1:9090/api/v1/query \
 - `validation-requests`, `validation-results`, `validation-requests-dlq` 토픽 유입 패널은 no data를 `0`으로 보정하지 않는다.
 - 값이 `0`이면 해당 시점에 유입이 없는 것이고, no data면 Kafka JMX scrape, ServiceMonitor, metricsConfig, 토픽 MBean 생성 여부를 먼저 확인한다.
 
-4. 영향 범위를 분리한다.
+Cilium 네트워크 드롭:
+
+```bash
+curl -G -s http://127.0.0.1:9090/api/v1/query \
+  --data-urlencode 'query=sum(rate(hubble_drop_total[5m])) by (reason)' \
+  | jq '.data.result'
+```
+
+Hubble 이벤트 유실:
+
+```bash
+curl -G -s http://127.0.0.1:9090/api/v1/query \
+  --data-urlencode 'query=sum(increase(hubble_lost_events_total[1h]))' \
+  | jq '.data.result'
+```
+
+5. 영향 범위를 분리한다.
 
 ```bash
 kubectl -n api get deploy,pods
@@ -164,6 +210,7 @@ kubectl -n api logs deploy/api --since=30m --tail=300
 kubectl -n kubevirt get pods
 kubectl -n kafka get kafka,pods
 kubectl -n traefik get pods
+kubectl -n kube-system get pods -l k8s-app=cilium
 ```
 
 판단 기준:
@@ -176,6 +223,7 @@ kubectl -n traefik get pods
 - `Kafka*SLO`: Strimzi Kafka broker, offline partition, disk pressure, ISR shrink를 확인한다.
 - `KubeVirt*SLO`: `virt-api`, `virt-controller`, `virt-handler`, 노드 상태를 확인한다.
 - `Traefik*SLO`: upstream별 5xx, Ingress 경로, TLS/cert, backend readiness를 확인한다.
+- 네트워크 이상: Cilium drop reason, policy denied, Hubble lost events를 확인한다.
 
 ### Validation/Kafka 병목 대시보드 확인
 
@@ -208,7 +256,7 @@ Grafana의 `Cledyu API & Validation Tempo Bottleneck` 대시보드에서 아래 
 | Kafka topic 패널 no data | Kafka JMX scrape, `kafka-metrics` ServiceMonitor, metricsConfig, 토픽 MBean 생성 여부 |
 | consumer lag 증가 | validation-engine/API 레플리카 상태, Kafka broker 부하, consumer group 상태 |
 
-5. 최근 변경과 상관관계를 확인한다.
+6. 최근 변경과 상관관계를 확인한다.
 
 ```bash
 kubectl -n argocd get applications
@@ -223,7 +271,7 @@ git log --oneline --since='24 hours ago' -- gitops apps infra docs/RUNBOOK
 service-api	Synced	Healthy	2026-07-08T10:20:11Z
 ```
 
-6. 사용자 영향과 error budget 상태를 기록한다.
+7. 사용자 영향과 error budget 상태를 기록한다.
 
 ```bash
 curl -G -s http://127.0.0.1:9090/api/v1/query \
