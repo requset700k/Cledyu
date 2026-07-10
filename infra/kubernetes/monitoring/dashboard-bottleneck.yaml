@@ -725,7 +725,7 @@ data:
           },
           "targets": [
             {
-              "expr": "sum(kafka_server_brokertopicmetrics_messagesinpersec_oneminuterate{topic=\"validation-requests\"}) or vector(0)",
+              "expr": "sum(kafka_server_brokertopicmetrics_messagesinpersec_oneminuterate{topic=\"validation-requests\"})",
               "refId": "A"
             }
           ]
@@ -780,7 +780,7 @@ data:
           },
           "targets": [
             {
-              "expr": "sum(kafka_server_brokertopicmetrics_messagesinpersec_oneminuterate{topic=\"validation-results\"}) or vector(0)",
+              "expr": "sum(kafka_server_brokertopicmetrics_messagesinpersec_oneminuterate{topic=\"validation-results\"})",
               "refId": "A"
             }
           ]
@@ -835,7 +835,7 @@ data:
           },
           "targets": [
             {
-              "expr": "sum(kafka_server_brokertopicmetrics_messagesinpersec_oneminuterate{topic=\"validation-requests-dlq\"}) or vector(0)",
+              "expr": "sum(kafka_server_brokertopicmetrics_messagesinpersec_oneminuterate{topic=\"validation-requests-dlq\"})",
               "refId": "A"
             }
           ]
