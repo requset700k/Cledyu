@@ -1,0 +1,18 @@
+---
+# AWS Load Balancer Controller — EKS DR 전용 신설 앱 (Task 5).
+# 온프렘의 다른 3rd-party 앱(external-secrets/trust-manager/cnpg-operator)과 동일하게
+# ArgoCD multi-source(upstream chart + $values ref)로 배선한다
+# (gitops/argocd/apps-eks/platform-alb-controller.yaml 참조).
+#
+# SA 이름/네임스페이스(kube-system:aws-load-balancer-controller)는
+# infra/terraform/aws 의 eks_dr_alb_irsa 모듈 trust policy 와 반드시 일치해야 IRSA 성립.
+clusterName: cledyu-dr
+serviceAccount:
+  create: true
+  name: aws-load-balancer-controller
+  annotations:
+    # 부트스트랩(T9 런북)에서 terraform output(eks_dr_alb_controller_role_arn)으로 치환.
+    eks.amazonaws.com/role-arn: "<<T2 eks_dr_alb_controller_role_arn>>"
+region: ap-northeast-2
+# 부트스트랩(T9 런북)에서 terraform output(vpc id)으로 치환.
+vpcId: "<<T1 vpc id — 부트스트랩 시 주입>>"

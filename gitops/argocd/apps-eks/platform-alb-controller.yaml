@@ -1,0 +1,43 @@
+---
+# AWS Load Balancer Controller — onprem 의 다른 3rd-party 앱과 동일하게
+# multi-source(upstream chart + $values ref)로 배선(EKS 신설 앱).
+# IRSA(role-arn)/vpcId 는 gitops/apps/alb-controller/values.yaml 에 <<...>> 로 남겨두고
+# 부트스트랩(T9 런북)에서 terraform output 값으로 치환한다.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eks-platform-alb-controller
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://aws.github.io/eks-charts
+      chart: aws-load-balancer-controller
+      targetRevision: 3.4.1
+      helm:
+        releaseName: aws-load-balancer-controller
+        valueFiles:
+          - $values/gitops/apps/alb-controller/values.yaml
+    - repoURL: https://github.com/requset700k/Cledyu.git
+      targetRevision: feat/dr-eks-overlay   # 드릴 검증 후 main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
