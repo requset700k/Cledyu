@@ -54,7 +54,9 @@ aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2
 kubectl -n vault exec -it vault-0 -- vault operator init
 #    → 출력된 Initial Root Token 을 <INIT_ROOT> 로 보관(restore 실행에만 임시 사용).
 
-# 2) 최신 스냅샷을 S3 에서 취득 — 운영자/bastion AWS 자격으로(Vault SA IRSA 아님).
+# 2) 최신 스냅샷을 S3 에서 취득 — bastion instance profile 자격으로(정적 키 불필요).
+#    이 롤에 vault/ 프리픽스 read + 백업키 Decrypt 가 붙어 있다(eks-dr-bastion.tf
+#    aws_iam_role_policy.eks_dr_bastion_vault_restore). Vault SA IRSA(KMS seal 전용)와 별개.
 aws s3 ls s3://cledyu-lab-dr-backups/vault/ | sort | tail -1     # 최신 파일명 확인
 aws s3 cp s3://cledyu-lab-dr-backups/vault/vault-raft-<TS>.snap ./vault-raft.snap
 
