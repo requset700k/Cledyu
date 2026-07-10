@@ -13,5 +13,8 @@ ingress:
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/group.name: cledyu-dr
+    # web 은 프로브가 없고 AUTH_ENABLED 시 '/'가 로그인 리다이렉트(302)일 수 있어, 기본 200-only 헬스체크로는
+    # target 이 unhealthy 가 될 수 있다 → 2xx/3xx 를 healthy 로 인정(파드가 응답하면 up). 드릴서 실제 응답 코드 확인.
+    alb.ingress.kubernetes.io/success-codes: "200-399"
     # 와일드카드 *.cledyu.com ACM(data.aws_acm_certificate.wildcard)의 ARN. 부트스트랩(T9 런북)에서 치환.
     alb.ingress.kubernetes.io/certificate-arn: "<<WILDCARD_ACM_ARN>>"
