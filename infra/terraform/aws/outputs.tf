@@ -116,7 +116,7 @@ output "eks_dr_vault_unseal_role_arn" {
   value       = var.enable_eks_dr ? module.eks_dr_vault_unseal_irsa[0].iam_role_arn : null
 }
 
-output "eks_dr_cnpg_restore_role_arn" {
-  description = "CNPG restore(S3 barman) IRSA 롤 ARN"
-  value       = var.enable_eks_dr ? module.eks_dr_cnpg_restore_irsa[0].iam_role_arn : null
+output "eks_dr_cnpg_restore_role_arns" {
+  description = "CNPG restore IRSA 롤 ARN 맵(DB별: postgres·keycloak)"
+  value       = var.enable_eks_dr ? { for k, m in module.eks_dr_cnpg_restore_irsa : k => m.iam_role_arn } : null
 }
