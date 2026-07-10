@@ -480,6 +480,8 @@ volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: true
 parameters:
   type: gp3
+  encrypted: "true" # ★ DR PVC(Vault 시크릿·복원된 PII/계정 DB)를 평문 EBS로 두지 않게 강제(계정 기본암호화 off여도).
+  # 계정 기본 EBS KMS키(aws/ebs) 사용 — 표준 EBS CSI 관리형 정책이 커버. 별도 CMK 쓰려면 kmsKeyId 추가 + EBS CSI IRSA 롤에 그 키 kms 권한 부여.
 ```
 (디렉터리 앱이라 Chart 불필요 — Application 이 directory 로 sync)
 
@@ -572,7 +574,8 @@ Expected: `ingressClassName: alb` 렌더, kubeconform 통과.
 
 - [ ] **Step 7: Commit**
 ```bash
-git add gitops/argocd/root-app-eks.yaml gitops/argocd/apps-eks/ gitops/apps/api/values-eks.yaml gitops/apps/web/values-eks.yaml gitops/apps/external-secrets/values-eks.yaml gitops/apps/cnpg-operator/values-eks.yaml gitops/apps/argocd/values-eks.yaml gitops/apps/trust-manager/values-eks.yaml gitops/apps/alb-controller/ gitops/apps/storage/
+git status  # 신규 파일 누락 방지 확인
+git add gitops/argocd/root-app-eks.yaml gitops/argocd/apps-eks/ gitops/apps/api/values-eks.yaml gitops/apps/web/values-eks.yaml gitops/apps/external-secrets/values-eks.yaml gitops/apps/cnpg-operator/values-eks.yaml gitops/apps/argocd/values-eks.yaml gitops/apps/trust-manager/values-eks.yaml gitops/apps/alb-controller/ gitops/apps/cert-manager/ gitops/apps/storage/
 git commit -m "feat(dr): apps-eks app-of-apps + stateless values-eks + ALB/gp3"
 ```
 
