@@ -175,8 +175,34 @@ kubectl -n api get configmap cledyu-root-ca-bundle   # trust-manager Bundle 분�
 - [ ] **Vault 스냅샷 복원**(위 섹션)
 - [ ] CNPG 복원 차트 sync → `cledyu-pg-rw`·`keycloak-pg-rw` Ready(자동 S3 복원)
 - [ ] Keycloak·api·web Ready + ALB/ACM 종단 확인
+- [ ] **공개 DNS 를 DR EKS ALB 로 전환**(아래 섹션) — 안 하면 DNS 가 죽은 온프렘 프록시로 계속 보내 EKS 가 Healthy 여도 도달 불가
 - [ ] 검증(로컬 테스트유저 로그인·복원 데이터 서빙) + RTO 실측
 - [ ] destroy — **고아 방지 순서 필수** (아래)
+
+### 공개 DNS 를 DR EKS ALB 로 전환 (검증·서빙 전 필수)
+
+공개 DNS(`aws_route53_record.public`)는 온프렘 프록시 ALB 를 alias 로 가리킨다. 온프렘 장애 시에도 그대로면
+사용자·OIDC(auth.cledyu.com)가 죽은 온프렘으로 가서, EKS ALB target 이 Healthy 여도 도달하지 못한다. EKS ALB 로 돌린다.
+
+```bash
+# EKS ALB DNS 이름·zone 취득 (ALB Controller 가 api/web Ingress 로 생성)
+ALB=$(kubectl -n api get ingress api -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'); echo "$ALB"
+ALB_ZONE=$(aws elbv2 describe-load-balancers --region ap-northeast-2 \
+  --query "LoadBalancers[?DNSName=='$ALB'].CanonicalHostedZoneId" --output text)
+ZONE=$(aws route53 list-hosted-zones-by-name --dns-name cledyu.com --query "HostedZones[0].Id" --output text)
+
+# (A) 실제 페일오버 — api/app/auth.cledyu.com alias 를 EKS ALB 로 UPSERT
+for h in api app auth; do
+  aws route53 change-resource-record-sets --hosted-zone-id "$ZONE" --change-batch \
+    "{\"Changes\":[{\"Action\":\"UPSERT\",\"ResourceRecordSet\":{\"Name\":\"$h.cledyu.com\",\"Type\":\"A\",\"AliasTarget\":{\"HostedZoneId\":\"$ALB_ZONE\",\"DNSName\":\"$ALB\",\"EvaluateTargetHealth\":false}}}]}"
+done
+# ⚠️ 이 레코드는 terraform aws_route53_record.public 관리분 — 온프렘 복구 후 terraform apply 로 원복(failback).
+
+# (B) 라이브 DNS 미전환 로컬 드릴 검증(F3) — 운영자 머신에서만
+for h in api app auth; do
+  curl -sk --resolve $h.cledyu.com:443:$(dig +short $ALB|head -1) https://$h.cledyu.com/ -o /dev/null -w "%{http_code} $h\n"
+done
+```
 
 ### destroy (고아 방지)
 
