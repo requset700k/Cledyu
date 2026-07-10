@@ -1,0 +1,32 @@
+---
+# gp3 StorageClass — 디렉터리 앱(Chart 불필요). directory 로 sync.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eks-platform-storage
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/requset700k/Cledyu.git
+    targetRevision: feat/dr-eks-overlay   # 드릴 검증 후 main
+    path: gitops/apps/storage
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
