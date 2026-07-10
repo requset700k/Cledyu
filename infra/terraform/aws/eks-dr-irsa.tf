@@ -1,9 +1,24 @@
 # Vault SA(vault:vault)가 awskms seal 로 unseal — 정적 키 없이 IRSA.
+#
+# 이 롤에 S3 read 가 없는 것은 의도적이다(CNPG restore 롤과 대비). Vault 복원은 CNPG 처럼
+# 파드 부팅 시 S3 에서 자동 복원되지 않는다 — `vault operator raft snapshot restore` 는
+# 이미 기동·unseal 된 Vault 에 대한 일회성 명령형 작업이라 SA 에 S3 를 줘도 자동화되지 않는다.
+# 따라서 EKS Vault 는 KMS auto-unseal 로 "빈 raft" 로 뜨고, 운영자가 온프렘 vault-backup
+# CronJob 이 올려둔 스냅샷(s3://cledyu-lab-dr-backups/vault/)을 자신의(=bastion) 자격으로
+# 내려받아 수동 restore 한다. 절차: docs/RUNBOOK/dr-eks-bootstrap.md §Vault 스냅샷 복원.
+# seal 키는 별도 스택(vault-seal-migration-awskms)이 관리하는 안정 alias 를 참조한다.
+# ARN 하드코딩 대신 alias 로 해석해 키 로테이션/오타 드리프트를 방지(코드리뷰 반영).
+# 이 alias·키는 DR-durable(삭제 금지) — 복원된 Vault 가 동일 키로 스스로 unseal 한다.
+data "aws_kms_alias" "eks_dr_vault_unseal" {
+  count = local.eks_dr_enabled
+  name  = "alias/cledyu-vault-unseal"
+}
+
 data "aws_iam_policy_document" "eks_dr_vault_unseal" {
   count = local.eks_dr_enabled
   statement {
     actions   = ["kms:Encrypt", "kms:Decrypt", "kms:DescribeKey"]
-    resources = ["arn:aws:kms:ap-northeast-2:504284203153:key/e29e3ec2-f5e0-4308-af6f-5b576cc99f52"]
+    resources = [data.aws_kms_alias.eks_dr_vault_unseal[0].target_key_arn]
   }
 }
 
