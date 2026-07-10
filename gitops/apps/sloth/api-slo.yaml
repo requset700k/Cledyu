@@ -45,11 +45,11 @@ spec:
       sli:
         events:
           errorQuery: |
-            (sum(rate(http_request_duration_seconds_count[{{.window}}])) or vector(0))
+            (sum(rate(http_request_duration_seconds_count{path=~"/api/v1/.*"}[{{.window}}])) or vector(0))
             -
-            (sum(rate(http_request_duration_seconds_bucket{le="1"}[{{.window}}])) or vector(0))
+            (sum(rate(http_request_duration_seconds_bucket{path=~"/api/v1/.*",le="1"}[{{.window}}])) or vector(0))
           totalQuery: |
-            sum(rate(http_request_duration_seconds_count[{{.window}}]))
+            sum(rate(http_request_duration_seconds_count{path=~"/api/v1/.*"}[{{.window}}]))
       alerting:
         name: APILatencySLO
         labels:

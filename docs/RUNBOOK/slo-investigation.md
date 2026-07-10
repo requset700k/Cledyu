@@ -49,8 +49,8 @@ traefik-slo      1d
 
 | 영역 | SLO | SLI 소스 |
 |---|---|---|
-| API 요청 가용성 | 99.5% | `http_requests_total{status=~"5.."}` / `http_requests_total` |
-| API 요청 지연 | 99.5% 요청 1초 이내 | `http_request_duration_seconds_bucket{le="1"}` |
+| API 요청 가용성 | 99.5% | `http_requests_total{path=~"/api/v1/.*", status=~"5.."}` / `http_requests_total{path=~"/api/v1/.*"}` |
+| API 요청 지연 | 99.5% 요청 1초 이내 | `http_request_duration_seconds_bucket{path=~"/api/v1/.*", le="1"}` |
 | 세션 생성 API 가용성 | 99.5% | `http_requests_total{method="POST", path="/api/v1/sessions", status=~"5.."}` / `http_requests_total{method="POST", path="/api/v1/sessions"}` |
 | 온프렘 Lab 시작 | 99.0% 세션 7분 이내 Ready | `lab_start_total`, `lab_startup_duration_seconds_bucket{env="onprem", le="420"}` |
 | EC2 Lab 시작 | 99.0% 세션 10분 이내 running | `lab_start_total`, `lab_startup_duration_seconds_bucket{env="ec2", le="600"}` |
@@ -163,7 +163,7 @@ API 5xx 비율:
 
 ```bash
 curl -G -s http://127.0.0.1:9090/api/v1/query \
-  --data-urlencode 'query=sum(rate(http_requests_total{status=~"5.."}[30m])) / sum(rate(http_requests_total[30m]))' \
+  --data-urlencode 'query=sum(rate(http_requests_total{path=~"/api/v1/.*",status=~"5.."}[30m])) / sum(rate(http_requests_total{path=~"/api/v1/.*"}[30m]))' \
   | jq '.data.result'
 ```
 
