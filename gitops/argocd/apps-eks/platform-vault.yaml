@@ -1,0 +1,46 @@
+---
+# Vault — 온프렘 platform-vault.yaml 미러, 2곳 변경:
+#  (1) valueFiles 를 values-awskms.yaml → values-eks.yaml(정적 크레드 배제, IRSA)
+#  (2) directory include 에서 ingress.yaml/serverstransport.yaml 제외(Traefik CRD 없음, B5)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eks-platform-vault
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://helm.releases.hashicorp.com
+      chart: vault
+      targetRevision: 0.32.0
+      helm:
+        releaseName: vault
+        valueFiles:
+          - $values/gitops/apps/vault/values.yaml
+          - $values/gitops/apps/vault/values-eks.yaml
+    - repoURL: https://github.com/requset700k/Cledyu.git
+      targetRevision: feat/dr-eks-overlay   # 드릴 검증 후 main
+      ref: values
+    - repoURL: https://github.com/requset700k/Cledyu.git
+      targetRevision: feat/dr-eks-overlay   # 드릴 검증 후 main
+      path: gitops/apps/vault
+      directory:
+        include: "{namespace.yaml,admin-serviceaccount.yaml,certificate.yaml}"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vault
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m

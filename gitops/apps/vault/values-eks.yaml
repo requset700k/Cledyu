@@ -1,0 +1,46 @@
+---
+# EKS DR 오버레이 — 단일노드 raft + IRSA awskms unseal + gp3. 정적 크레드 env 없음.
+# raft.config 는 base(멀티노드 retry_join)를 통째로 대체 — tls/seal/service_registration 자기완결.
+server:
+  serviceAccount:
+    # IRSA: SA(vault)에 role-arn 만 추가(name/create 미지정 → 차트 기본 SA vault 유지).
+    annotations:
+      eks.amazonaws.com/role-arn: "<<VAULT_UNSEAL_ROLE_ARN>>"   # terraform output eks_dr_vault_unseal_role_arn
+  dataStorage:
+    storageClass: gp3
+  auditStorage:
+    storageClass: gp3
+  ha:
+    replicas: 1
+    raft:
+      config: |
+        ui = true
+        disable_mlock = true
+
+        listener "tcp" {
+          address = "[::]:8200"
+          cluster_address = "[::]:8201"
+          tls_disable = 0
+          tls_cert_file = "/vault/tls/tls.crt"
+          tls_key_file = "/vault/tls/tls.key"
+          tls_client_ca_file = "/vault/tls/ca.crt"
+          telemetry {
+            unauthenticated_metrics_access = true
+          }
+        }
+
+        storage "raft" {
+          path = "/vault/data"
+        }
+
+        seal "awskms" {
+          region     = "ap-northeast-2"
+          kms_key_id = "arn:aws:kms:ap-northeast-2:504284203153:key/e29e3ec2-f5e0-4308-af6f-5b576cc99f52"
+        }
+
+        service_registration "kubernetes" {}
+
+        telemetry {
+          prometheus_retention_time = "30s"
+          disable_hostname = true
+        }
