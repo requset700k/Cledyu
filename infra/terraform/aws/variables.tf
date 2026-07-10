@@ -185,3 +185,37 @@ variable "alert_email" {
   type        = string
   default     = ""
 }
+
+# ─────────────────────────────────────────────────────────────────────────
+# EKS Cold DR — 온프렘 전체 소실 시에만 기동하는 EKS 클러스터(eks-dr.tf).
+# enable_eks_dr=false(기본)면 VPC/EKS/노드그룹 리소스가 전혀 생성되지 않는다(평시 비용 0).
+# ─────────────────────────────────────────────────────────────────────────
+
+variable "enable_eks_dr" {
+  description = "DR 드릴/재해 시에만 true. 평시 false 로 EKS 리소스 0."
+  type        = bool
+  default     = false
+}
+
+variable "eks_dr_cluster_version" {
+  description = <<-EOT
+    DR EKS 컨트롤플레인 쿠버네티스 버전. 온디맨드로 생성하는 DR 클러스터라 반드시 standard support
+    범위로 유지한다 — extended support 버전은 컨트롤플레인 비용이 약 6배로 뛰고, extended 마저 끝나면
+    해당 버전 신규 클러스터 생성이 막혀 DR 기동 자체가 실패한다. EKS 버전 캘린더 기준 주기적으로
+    최신 standard 버전으로 갱신할 것.
+  EOT
+  type        = string
+  default     = "1.34"
+}
+
+variable "eks_dr_node_instance_type" {
+  description = "DR EKS 워커 노드 EC2 타입. CNPG(postgres·keycloak-pg)+Vault+api/web/keycloak/argocd/eso 수용, 드릴 신뢰성 위해 on-demand로 고정."
+  type        = string
+  default     = "m6i.xlarge"
+}
+
+variable "eks_dr_node_desired" {
+  description = "DR EKS 워커 노드 개수(고정 크기, min=max=desired)."
+  type        = number
+  default     = 3
+}

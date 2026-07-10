@@ -128,7 +128,15 @@ terraform init
 
 ## Modules
 
-No modules.
+| Name | Source | Version |
+| ---- | ------ | ------- |
+| <a name="module_eks_dr"></a> [eks\_dr](#module\_eks\_dr) | terraform-aws-modules/eks/aws | ~> 20.24 |
+| <a name="module_eks_dr_alb_irsa"></a> [eks\_dr\_alb\_irsa](#module\_eks\_dr\_alb\_irsa) | terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks | ~> 5.44 |
+| <a name="module_eks_dr_cnpg_restore_irsa"></a> [eks\_dr\_cnpg\_restore\_irsa](#module\_eks\_dr\_cnpg\_restore\_irsa) | terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks | ~> 5.44 |
+| <a name="module_eks_dr_ebs_csi_irsa"></a> [eks\_dr\_ebs\_csi\_irsa](#module\_eks\_dr\_ebs\_csi\_irsa) | terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks | ~> 5.44 |
+| <a name="module_eks_dr_endpoints"></a> [eks\_dr\_endpoints](#module\_eks\_dr\_endpoints) | terraform-aws-modules/vpc/aws//modules/vpc-endpoints | ~> 5.13 |
+| <a name="module_eks_dr_vault_unseal_irsa"></a> [eks\_dr\_vault\_unseal\_irsa](#module\_eks\_dr\_vault\_unseal\_irsa) | terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks | ~> 5.44 |
+| <a name="module_eks_dr_vpc"></a> [eks\_dr\_vpc](#module\_eks\_dr\_vpc) | terraform-aws-modules/vpc/aws | ~> 5.13 |
 
 ## Resources
 
@@ -139,17 +147,24 @@ No modules.
 | [aws_cloudwatch_metric_alarm.proxy_impaired_reboot](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm) | resource |
 | [aws_cloudwatch_metric_alarm.proxy_unhealthy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/cloudwatch_metric_alarm) | resource |
 | [aws_iam_instance_profile.baker_instance](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_instance_profile) | resource |
+| [aws_iam_instance_profile.eks_dr_bastion](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_instance_profile) | resource |
 | [aws_iam_instance_profile.lab_instance](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_instance_profile) | resource |
 | [aws_iam_instance_profile.proxy_ssm](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_instance_profile) | resource |
 | [aws_iam_openid_connect_provider.github](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_openid_connect_provider) | resource |
+| [aws_iam_policy.eks_dr_cnpg_restore](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
+| [aws_iam_policy.eks_dr_vault_unseal](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_policy) | resource |
 | [aws_iam_role.baker_instance](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
+| [aws_iam_role.eks_dr_bastion](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role.gha_baker](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role.lab_instance](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role.proxy_ssm](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role.vmimport](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role) | resource |
 | [aws_iam_role_policy.baker_instance](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
+| [aws_iam_role_policy.eks_dr_bastion_describe](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
+| [aws_iam_role_policy.eks_dr_bastion_vault_restore](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
 | [aws_iam_role_policy.gha_baker](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
 | [aws_iam_role_policy.vmimport](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy) | resource |
+| [aws_iam_role_policy_attachment.eks_dr_bastion_ssm](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_role_policy_attachment.proxy_ssm_core](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_role_policy_attachment.ssm_core](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_role_policy_attachment) | resource |
 | [aws_iam_user.api](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_user) | resource |
@@ -158,6 +173,7 @@ No modules.
 | [aws_iam_user_policy.api_ec2](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_user_policy) | resource |
 | [aws_iam_user_policy.backup](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_user_policy) | resource |
 | [aws_iam_user_policy.engine_ssm](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_user_policy) | resource |
+| [aws_instance.eks_dr_bastion](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/instance) | resource |
 | [aws_instance.proxy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/instance) | resource |
 | [aws_kms_alias.dr_backups](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_alias) | resource |
 | [aws_kms_key.dr_backups](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/kms_key) | resource |
@@ -176,6 +192,8 @@ No modules.
 | [aws_s3_bucket_server_side_encryption_configuration.dr_backups](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_server_side_encryption_configuration) | resource |
 | [aws_s3_bucket_versioning.dr_backups](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/s3_bucket_versioning) | resource |
 | [aws_security_group.alb](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
+| [aws_security_group.eks_dr_bastion](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
+| [aws_security_group.eks_dr_endpoints](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group.lab_session](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_security_group.proxy](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/security_group) | resource |
 | [aws_sns_topic.public_alerts](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/sns_topic) | resource |
@@ -190,13 +208,20 @@ No modules.
 | [aws_iam_policy_document.baker_assume](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.baker_instance](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.ec2_assume](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.eks_dr_bastion_assume](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.eks_dr_bastion_describe](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.eks_dr_bastion_vault_restore](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.eks_dr_cnpg_restore](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_iam_policy_document.eks_dr_vault_unseal](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.engine_ssm](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.gha_baker](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.gha_baker_assume](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.proxy_assume](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.vmimport](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
 | [aws_iam_policy_document.vmimport_assume](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy_document) | data source |
+| [aws_kms_alias.eks_dr_vault_unseal](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/kms_alias) | data source |
 | [aws_route53_zone.public](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/route53_zone) | data source |
+| [aws_ssm_parameter.eks_dr_bastion_ami](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ssm_parameter) | data source |
 | [aws_subnets.selected](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/subnets) | data source |
 | [aws_vpc.selected](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/vpc) | data source |
 
@@ -209,6 +234,10 @@ No modules.
 | <a name="input_assign_public_ip"></a> [assign\_public\_ip](#input\_assign\_public\_ip) | 세션 인스턴스에 퍼블릭 IP 를 할당할지. Launch Template 이 network\_interfaces 를 명시하면<br/>subnet 의 MapPublicIpOnLaunch 가 무시되어 기본 미할당이 되므로, default VPC(IGW) 환경에서는<br/>true 여야 인스턴스가 인터넷(tailscale 가입·SSM·패키지 설치)에 도달한다.<br/>private subnet + NAT 구성이면 false 로 둔다. | `bool` | `true` | no |
 | <a name="input_budget_limit_usd"></a> [budget\_limit\_usd](#input\_budget\_limit\_usd) | EC2 오버플로우 월 예산(USD). 0이면 예산 알람을 만들지 않는다. | `number` | `0` | no |
 | <a name="input_budget_notification_emails"></a> [budget\_notification\_emails](#input\_budget\_notification\_emails) | 예산 임계 도달 시 알림 받을 이메일 목록(budget\_limit\_usd>0 일 때 사용). | `list(string)` | `[]` | no |
+| <a name="input_eks_dr_cluster_version"></a> [eks\_dr\_cluster\_version](#input\_eks\_dr\_cluster\_version) | DR EKS 컨트롤플레인 쿠버네티스 버전. 온디맨드로 생성하는 DR 클러스터라 반드시 standard support<br/>범위로 유지한다 — extended support 버전은 컨트롤플레인 비용이 약 6배로 뛰고, extended 마저 끝나면<br/>해당 버전 신규 클러스터 생성이 막혀 DR 기동 자체가 실패한다. EKS 버전 캘린더 기준 주기적으로<br/>최신 standard 버전으로 갱신할 것. | `string` | `"1.34"` | no |
+| <a name="input_eks_dr_node_desired"></a> [eks\_dr\_node\_desired](#input\_eks\_dr\_node\_desired) | DR EKS 워커 노드 개수(고정 크기, min=max=desired). | `number` | `3` | no |
+| <a name="input_eks_dr_node_instance_type"></a> [eks\_dr\_node\_instance\_type](#input\_eks\_dr\_node\_instance\_type) | DR EKS 워커 노드 EC2 타입. CNPG(postgres·keycloak-pg)+Vault+api/web/keycloak/argocd/eso 수용, 드릴 신뢰성 위해 on-demand로 고정. | `string` | `"m6i.xlarge"` | no |
+| <a name="input_enable_eks_dr"></a> [enable\_eks\_dr](#input\_enable\_eks\_dr) | DR 드릴/재해 시에만 true. 평시 false 로 EKS 리소스 0. | `bool` | `false` | no |
 | <a name="input_enable_public_ingress"></a> [enable\_public\_ingress](#input\_enable\_public\_ingress) | 공개 진입점 스택(Route53/ACM/ALB/프록시) 생성 여부. 도메인 위임·tailscale authkey 준비 후 true. | `bool` | `false` | no |
 | <a name="input_github_repo"></a> [github\_repo](#input\_github\_repo) | 베이커 워크플로를 실행하는 GitHub 레포(owner/name). OIDC sub 제한에 사용. | `string` | `"requset700k/Cledyu"` | no |
 | <a name="input_instance_type"></a> [instance\_type](#input\_instance\_type) | 세션 인스턴스 타입. Launch Template 기본값이며 api 가 런타임에 오버라이드할 수 있다. | `string` | `"t3.medium"` | no |
@@ -237,6 +266,12 @@ No modules.
 | <a name="output_backup_iam_users"></a> [backup\_iam\_users](#output\_backup\_iam\_users) | 프리픽스별 백업 IAM 사용자명 맵(키: postgres, vault, velero) — 각 사용자의 액세스 키를 발급해 Vault 경로 cledyu/aws/backup-<키>(backup-postgres·backup-vault·backup-velero)에 보관한다. |
 | <a name="output_baker_bucket"></a> [baker\_bucket](#output\_baker\_bucket) | 이미지 베이커 S3 버킷명. |
 | <a name="output_baker_instance_profile"></a> [baker\_instance\_profile](#output\_baker\_instance\_profile) | metal 베이커 인스턴스 프로파일명. |
+| <a name="output_eks_dr_alb_controller_role_arn"></a> [eks\_dr\_alb\_controller\_role\_arn](#output\_eks\_dr\_alb\_controller\_role\_arn) | AWS Load Balancer Controller IRSA 롤 ARN |
+| <a name="output_eks_dr_cluster_name"></a> [eks\_dr\_cluster\_name](#output\_eks\_dr\_cluster\_name) | DR EKS 클러스터명(kubectl/드릴 스크립트 참고용). |
+| <a name="output_eks_dr_cnpg_restore_role_arns"></a> [eks\_dr\_cnpg\_restore\_role\_arns](#output\_eks\_dr\_cnpg\_restore\_role\_arns) | CNPG restore IRSA 롤 ARN 맵(DB별: postgres·keycloak) |
+| <a name="output_eks_dr_oidc_provider"></a> [eks\_dr\_oidc\_provider](#output\_eks\_dr\_oidc\_provider) | DR EKS OIDC provider issuer(호스트 부분) — IRSA role trust policy가 소비. |
+| <a name="output_eks_dr_oidc_provider_arn"></a> [eks\_dr\_oidc\_provider\_arn](#output\_eks\_dr\_oidc\_provider\_arn) | DR EKS OIDC provider ARN — IRSA role trust policy가 소비. |
+| <a name="output_eks_dr_vault_unseal_role_arn"></a> [eks\_dr\_vault\_unseal\_role\_arn](#output\_eks\_dr\_vault\_unseal\_role\_arn) | Vault unseal(awskms) IRSA 롤 ARN |
 | <a name="output_gha_baker_role_arn"></a> [gha\_baker\_role\_arn](#output\_gha\_baker\_role\_arn) | GitHub Action 이 assume 할 베이커 role ARN. |
 | <a name="output_instance_profile_arn"></a> [instance\_profile\_arn](#output\_instance\_profile\_arn) | 세션 인스턴스 IAM 인스턴스 프로파일 ARN(SSM Core). |
 | <a name="output_keycloak_proxy_instance_id"></a> [keycloak\_proxy\_instance\_id](#output\_keycloak\_proxy\_instance\_id) | tailnet Keycloak 프록시 인스턴스 ID(tailnet 가입·로그 확인용). |
