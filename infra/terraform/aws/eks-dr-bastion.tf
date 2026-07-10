@@ -54,6 +54,50 @@ resource "aws_iam_role_policy" "eks_dr_bastion_describe" {
   policy = data.aws_iam_policy_document.eks_dr_bastion_describe[0].json
 }
 
+# Vault raft 스냅샷 수동 복원(런북 §Vault 스냅샷 복원)용. 런북 절차가 bastion 에서
+# `aws s3 cp s3://cledyu-lab-dr-backups/vault/...` 를 실행하므로 instance profile 에
+# vault/ 프리픽스 read + SSE-KMS(dr_backups CMK) Decrypt 가 있어야 한다. 정적 키를 심지
+# 않고(no-static-key 계약) 복원하려면 이 권한을 롤로 줘야 한다. bastion 은 이미 EKS
+# ClusterAdmin(복원된 Vault 전체 시크릿 접근 가능)이라 vault/ 스냅샷 read 는 추가 blast
+# radius 를 만들지 않는다. vault/ 프리픽스로 한정해 다른 프리픽스(postgres/keycloak) read 는 차단.
+data "aws_iam_policy_document" "eks_dr_bastion_vault_restore" {
+  count = local.eks_dr_enabled
+  statement {
+    sid       = "ReadVaultSnapshots"
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.dr_backups.arn}/vault/*"]
+  }
+  # `aws s3 ls s3://.../vault/` 는 prefix=vault/ 로 ListObjectsV2 를 호출한다.
+  statement {
+    sid       = "ListVaultPrefix"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.dr_backups.arn]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["vault/*", "vault"]
+    }
+  }
+  statement {
+    sid       = "BucketLocation"
+    actions   = ["s3:GetBucketLocation"]
+    resources = [aws_s3_bucket.dr_backups.arn]
+  }
+  # SSE-KMS 버킷이라 객체 read 에 봉투 키 Decrypt 가 필요(없으면 GetObject 가 KMS 거부).
+  statement {
+    sid       = "DecryptBackups"
+    actions   = ["kms:Decrypt", "kms:DescribeKey"]
+    resources = [aws_kms_key.dr_backups.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "eks_dr_bastion_vault_restore" {
+  count  = local.eks_dr_enabled
+  name   = "vault-snapshot-read"
+  role   = aws_iam_role.eks_dr_bastion[0].id
+  policy = data.aws_iam_policy_document.eks_dr_bastion_vault_restore[0].json
+}
+
 resource "aws_iam_instance_profile" "eks_dr_bastion" {
   count = local.eks_dr_enabled
   name  = "${local.eks_dr_name}-bastion"
