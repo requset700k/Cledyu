@@ -91,8 +91,13 @@ alias 목록, 예 `["google"]`)와 web `CLEDYU_SOCIAL_LOGIN_PROVIDERS`(노출할
 terraform 은 `infra/terraform/aws`(profile `cledyu`, region `ap-northeast-2`)에 게이트된
 초안으로 들어있다(`public-ingress.tf`, `enable_public_ingress=false` 기본).
 
-# 전제: public_domain 을 Route53 Registrar 로 등록(hosted zone·NS 자동 연결, 수동 위임 불필요).
-#       모듈은 기존 zone 을 data 로 조회하므로 별도 zone 생성 단계가 없다.
+# 전제 1: public_domain 을 Route53 Registrar 로 등록(hosted zone·NS 자동 연결, 수동 위임 불필요).
+#         모듈은 기존 zone 을 data 로 조회하므로 별도 zone 생성 단계가 없다.
+# 전제 2: 와일드카드 ACM 인증서(*.cledyu.com, DNS 검증 ISSUED)를 사전 발급해 둔다. 이 모듈은
+#         인증서를 data 로 읽기만 하고 생성/검증하지 않으므로, 신규 계정/DR 복구 환경은 먼저
+#         발급해야 apply 가 통과한다. 발급: aws acm request-certificate --domain-name '*.cledyu.com'
+#         --validation-method DNS 후 검증 CNAME 을 Route53 에 등록하고 ISSUED 될 때까지 대기.
+#         (검증 CNAME 은 이후에도 삭제 금지 — ACM managed renewal 에 계속 쓰인다.)
 ```bash
 cd infra/terraform/aws
 export AWS_PROFILE=cledyu
@@ -111,8 +116,8 @@ export AWS_PROFILE=cledyu
 #    revoke 하거나, 재생성 때마다 새 키를 주입하는 편이 안전:
 export TF_VAR_tailscale_auth_key='<tailscale non-ephemeral authkey (one-off 권장, apply 후 revoke)>'
 
-# 2) 한 번에 apply (ACM DNS 검증은 registrar=Route53 라 자동 전파 → ALB → 프록시 → A ALIAS).
-#    NS 위임·zone 생성 단계 불필요.
+# 2) apply (전제 2의 기존 와일드카드 cert 를 data 로 조회 → ALB 리스너 연결 → 프록시 → A ALIAS).
+#    이 모듈은 ACM 을 생성/검증하지 않는다(전제 2에서 사전 발급). NS 위임·zone 생성 단계 불필요.
 terraform apply
 terraform output public_alb_dns_name        # 디버깅용
 ```
@@ -410,7 +415,7 @@ app/api/auth.cledyu.com 공개 접속은 단일 EC2 프록시(Caddy+Tailscale, A
 
 ### 아키텍처·하드닝
 - 인스턴스: t3.micro + 2G swap, unattended-upgrades 제거(OOM 방지). SSM instance profile 로 Session Manager 셸 접근 가능.
-- Tailscale authkey 는 반드시 non-ephemeral + reusable — ephemeral 이면 오프라인 시 노드가 GC 삭제돼 재부팅 후 tailnet 재가입 실패(502). `TF_VAR_tailscale_auth_key` 로 주입.
+- Tailscale authkey 는 non-ephemeral 필수 — ephemeral 이면 오프라인 시 노드가 GC 삭제돼 재부팅 후 tailnet 재가입 실패(502). reusable 은 불필요(누출 시 반복 노드 등록 위험)하므로 one-off 키 + apply 후 revoke 권장. `TF_VAR_tailscale_auth_key` 로 주입.
 - Caddyfile 은 `@public host` allowlist(app|api|auth)만 프록시하고 나머지 404 — 내부 .local Host 주입 차단(보안 필수, 삭제 금지).
 - ALB 헬스체크는 Caddy 로컬 `/healthz`(얕은 liveness). upstream(tailnet→traefik) 장애는 target 5XX 알람(HTTPCode_Target_5XX_Count)이 탐지 — Caddy 502 는 target 기원이라 ELB 5XX 로는 안 잡힘.
 
