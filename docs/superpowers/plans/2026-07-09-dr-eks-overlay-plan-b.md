@@ -294,7 +294,7 @@ git commit -m "feat(dr): EKS DR 애드온 EBS CSI + ALB Controller IRSA"
 
 **Interfaces:**
 - Consumes: `module.eks_dr` OIDC (T1).
-- Produces: outputs `eks_dr_vault_unseal_role_arn`, `eks_dr_cnpg_restore_role_arn` — Phase 2 vault/cnpg-dr values-eks 가 SA annotation 으로 소비.
+- Produces: outputs `eks_dr_vault_unseal_role_arn`, `eks_dr_cnpg_restore_role_arns`(**맵: `["postgres"]`·`["keycloak"]`**, 롤 `cledyu-dr-cnpg-restore-{postgres,keycloak}`) — Phase 2 vault/cnpg-dr values-eks 가 SA annotation 으로 소비.
 
 - [ ] **Step 1: Vault unseal 롤(KMS Decrypt)**
 
@@ -399,8 +399,8 @@ module "eks_dr_cnpg_restore_irsa" {
 output "eks_dr_vault_unseal_role_arn" {
   value = var.enable_eks_dr ? module.eks_dr_vault_unseal_irsa[0].iam_role_arn : null
 }
-output "eks_dr_cnpg_restore_role_arn" {
-  value = var.enable_eks_dr ? module.eks_dr_cnpg_restore_irsa[0].iam_role_arn : null
+output "eks_dr_cnpg_restore_role_arns" { # DB별 롤 맵(postgres·keycloak) — 실제 구현은 for_each per-DB
+  value = var.enable_eks_dr ? { for k, m in module.eks_dr_cnpg_restore_irsa : k => m.iam_role_arn } : null
 }
 ```
 
@@ -691,7 +691,7 @@ git commit -m "feat(dr): Vault values-eks — IRSA unseal + gp3, 정적 키 env 
 - Create: `gitops/argocd/apps-eks/{data-postgres-cnpg-dr,data-keycloak-pg-dr}.yaml`
 
 **Interfaces:**
-- Consumes: Task 3 `eks_dr_cnpg_restore_role_arn`(SA), S3 원본 백업(`postgres/`,`keycloak/`).
+- Consumes: Task 3 `eks_dr_cnpg_restore_role_arns`(맵, **DB별**: postgres 차트→`["postgres"]`=롤 `cledyu-dr-cnpg-restore-postgres`, keycloak 차트→`["keycloak"]`=롤 `cledyu-dr-cnpg-restore-keycloak`), S3 원본 백업(`postgres/`,`keycloak/`).
 - Produces: 서비스 `cledyu-pg-rw.postgres.svc`, `keycloak-pg-rw.keycloak.svc`(복원 완료 후). api/keycloak 가 소비.
 
 - [ ] **Step 1 (T7-a): postgres-cnpg-dr recovery Cluster 작성**
@@ -737,7 +737,7 @@ spec:
         inheritFromIAMRole: true
       wal: { compression: gzip }
 ```
-`values.yaml`: `storage: {size: 10Gi}`, `restoreRoleArn: ""`(부트스트랩서 주입). `Chart.yaml`: name `postgres-cnpg-dr`, version 0.1.0.
+`values.yaml`: `storage: {size: 10Gi}`, `restoreRoleArn: ""`(부트스트랩서 `terraform output -json eks_dr_cnpg_restore_role_arns`의 **`["postgres"]`**=롤 `cledyu-dr-cnpg-restore-postgres` 주입). `Chart.yaml`: name `postgres-cnpg-dr`, version 0.1.0.
 
 > 운영 `postgres-cnpg` 템플릿은 **건드리지 않는다**(import fail-safe 유지). 이 차트는 완전 별개 경로.
 
@@ -745,7 +745,7 @@ spec:
 
 Run:
 ```bash
-helm template pgdr gitops/apps/postgres-cnpg-dr -f gitops/apps/postgres-cnpg-dr/values.yaml --set restoreRoleArn=arn:aws:iam::504284203153:role/cledyu-dr-cnpg-restore \
+helm template pgdr gitops/apps/postgres-cnpg-dr -f gitops/apps/postgres-cnpg-dr/values.yaml --set restoreRoleArn=arn:aws:iam::504284203153:role/cledyu-dr-cnpg-restore-postgres \
   | grep -E "bootstrap:|recovery:|inheritFromIAMRole|serverName|role-arn|storageClass"
 helm template pgdr gitops/apps/postgres-cnpg-dr -f gitops/apps/postgres-cnpg-dr/values.yaml --set restoreRoleArn=x | kubeconform -strict -ignore-missing-schemas
 ```
@@ -757,8 +757,8 @@ A-2 의 `gitops/apps/keycloak-pg/templates/*.yaml`(main)을 기준으로, 위 po
 - name `keycloak-pg`, namespace `keycloak`
 - recovery source serverName = A-2 백업 serverName(원본), 프리픽스 `s3://cledyu-lab-dr-backups/keycloak`
 - backup 프리픽스 `keycloak-dr`, serverName `keycloak-pg-dr`
-- imageName = A-2 keycloak-pg 의 PG major digest(main 값 확인 후 복사)
-- serviceAccountTemplate role-arn = `eks_dr_cnpg_restore_role_arn`
+- imageName = **PG 18.2**(cledyu-pg의 16.4와 다름! CNPG recovery는 target major ≥ source 필수): `ghcr.io/cloudnative-pg/postgresql:18.2-system-trixie@sha256:3f44daf4c2ddea3481b018b3b004f91a439b93fc995a387f9aff69058bef19ac`
+- serviceAccountTemplate role-arn = `eks_dr_cnpg_restore_role_arns["keycloak"]`(롤 `cledyu-dr-cnpg-restore-keycloak`)
 
 > **A-2 머지 전 이 Step 착수 금지.** main 에 keycloak-pg 차트가 있어야 원본 serverName/이미지 digest 를 정확히 복사한다.
 
