@@ -75,9 +75,11 @@ kubectl -n vault exec -it vault-0 -- sh -c \
 #    init(1단계) 때 받은 <INIT_ROOT> 는 무효화된다. 따라서 이후 인증은 원본 자격으로 한다:
 #    원본 root token / recovery keys 는 DR 부트스트랩 시크릿(AWS Secrets Manager
 #    `cledyu/vault/bootstrap`)에 보관 — 이걸로 인증하거나 recovery 키로 새 root 를 생성한다.
+#      aws secretsmanager get-secret-value --secret-id cledyu/vault/bootstrap
 #      vault operator generate-root  (원본 recovery 키 threshold 로)
-#    ⚠️ 이 시크릿 취득엔 secretsmanager:GetSecretValue 가 필요하다. 현재 bastion 롤엔 없으므로
-#       운영자 자신의 자격으로 읽거나, 필요 시 롤에 최소권한을 추가한다(vault/ S3 read 와 동일 패턴).
+#    bastion instance profile 에 cledyu/vault/* GetSecretValue 가 있다(eks-dr-bastion.tf
+#    aws_iam_role_policy.eks_dr_bastion_vault_restore) — 정적 키 없이 취득 가능.
+#    (그 시크릿이 CMK 로 암호화됐다면 롤에 해당 kms:Decrypt 추가 필요 — 코드 주석 참조.)
 kubectl -n vault exec -it vault-0 -- sh -c \
   'VAULT_TOKEN=<원본 루트토큰> vault secrets list'   # 복원 확인
 ```
