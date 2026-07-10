@@ -24,6 +24,9 @@ ingress:
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/group.name: cledyu-dr
+    # ALB 기본 헬스체크 경로는 '/'(200 기대)인데 api 라우터는 /health·/ready 만 등록 → '/'는 404.
+    # 명시 안 하면 target group 이 계속 unhealthy 라 ALB 가 api 로 트래픽을 안 보낸다.
+    alb.ingress.kubernetes.io/healthcheck-path: /ready
     # 와일드카드 *.cledyu.com ACM(data.aws_acm_certificate.wildcard)의 ARN. 자동발견 대신 명시 지정(드릴 결정성, F3).
     # 부트스트랩(T9 런북)에서 실제 ARN 으로 치환. 계정 고정값이라 확정 후 하드코딩 가능.
     alb.ingress.kubernetes.io/certificate-arn: "<<WILDCARD_ACM_ARN>>"
