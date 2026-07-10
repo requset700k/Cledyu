@@ -34,8 +34,32 @@ module "eks_dr" {
   cluster_name    = local.eks_dr_name
   cluster_version = var.eks_dr_cluster_version
 
-  cluster_endpoint_public_access = true # 부트스트랩/드릴 운영자 kubectl 접근
-  enable_irsa                    = true
+  # 퍼블릭은 차단하고 프라이빗 엔드포인트만 활성화
+  cluster_endpoint_public_access  = false
+  cluster_endpoint_private_access = true
+
+  # Bastion 보안 그룹에서 오는 443(HTTPS) 트래픽을 EKS API 서버가 허용하도록 설정
+  cluster_security_group_additional_rules = {
+    ingress_bastion = {
+      description              = "Allow Bastion host to access K8s API server"
+      protocol                 = "tcp"
+      from_port                = 443
+      to_port                  = 443
+      type                     = "ingress"
+      source_security_group_id = aws_security_group.eks_dr_bastion[0].id
+    }
+  }
+
+  # 컨트롤 플레인 로깅 활성화
+  cluster_enabled_log_types = ["audit", "authenticator"]
+
+  # KMS Envelope 암호화 활성화 (Secret 자원 보호)
+  create_kms_key = true
+  cluster_encryption_config = {
+    resources = ["secrets"]
+  }
+
+  enable_irsa = true
 
   vpc_id     = module.eks_dr_vpc[0].vpc_id
   subnet_ids = module.eks_dr_vpc[0].private_subnets
@@ -50,9 +74,23 @@ module "eks_dr" {
     }
   }
 
-  # 부트스트랩 운영자가 관리자로 접근
+  # 부트스트랩 운영자(terraform apply principal)가 관리자로 접근.
   enable_cluster_creator_admin_permissions = true
-  tags                                     = local.eks_dr_tags
+
+  # private-only 엔드포인트라 kubectl 은 bastion(eks-dr-bastion.tf)에서만 가능하고,
+  # 그 kubectl 은 bastion instance profile 롤로 인증된다 → 이 롤을 cluster admin 에 매핑.
+  access_entries = {
+    bastion = {
+      principal_arn = aws_iam_role.eks_dr_bastion[0].arn
+      policy_associations = {
+        admin = {
+          policy_arn   = "arn:aws:iam::aws:policy/AmazonEKSClusterAdminPolicy"
+          access_scope = { type = "cluster" }
+        }
+      }
+    }
+  }
+  tags = local.eks_dr_tags
 
   cluster_addons = {
     aws-ebs-csi-driver = {
@@ -113,6 +151,26 @@ resource "aws_security_group" "eks_dr_endpoints" {
     to_port     = 443
     protocol    = "tcp"
     cidr_blocks = [module.eks_dr_vpc[0].vpc_cidr_block]
+  }
+
+  tags = local.eks_dr_tags
+}
+
+resource "aws_security_group" "eks_dr_bastion" {
+  count       = local.eks_dr_enabled
+  name        = "${local.eks_dr_name}-bastion-sg"
+  description = "Security group for EKS DR Bastion host"
+  vpc_id      = module.eks_dr_vpc[0].vpc_id
+
+  # AWS SSM Session Manager를 사용하면 인바운드 규칙(Port 22 등)을 모두 비워둬도 된다.
+  # 만약 특정 IP에서 SSH 접근을 해야 한다면 인바운드를 추가
+
+  egress {
+    description = "Allow all outbound traffic"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   tags = local.eks_dr_tags
