@@ -1,0 +1,4 @@
+---
+# EKS DR overlay (Task 5) — 오퍼레이터 자체는 클러스터 무관. onprem values.yaml 대비 델타 없음.
+# Cluster CR(postgres-cnpg/keycloak-pg)은 Task 7 범위.
+{}
