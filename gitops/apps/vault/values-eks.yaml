@@ -1,6 +1,8 @@
 ---
-# EKS DR 오버레이 — 단일노드 raft + IRSA awskms unseal + gp3. 정적 크레드 env 없음.
-# raft.config 는 base(멀티노드 retry_join)를 통째로 대체 — tls/seal/service_registration 자기완결.
+# EKS DR 오버레이 — 온프렘 동일 3-node raft + IRSA awskms unseal + gp3. 정적 크레드 env 없음.
+# 3-node 인 이유: 온프렘 3-peer raft 스냅샷을 동일 토폴로지로 복원해야 quorum 이 선다(setNodeId:true 라
+# EKS 파드 node ID(vault-0/1/2)가 스냅샷 peer 와 일치 → 복원 후 leader 재선출). 1-node 면 2/3 quorum 불가.
+# raft.config 는 base(retry_join) + seal awskms 를 통째로 재기술(base 에 seal 이 없어 override 불가피).
 server:
   serviceAccount:
     # IRSA: SA(vault)에 role-arn 만 추가(name/create 미지정 → 차트 기본 SA vault 유지).
@@ -11,7 +13,7 @@ server:
   auditStorage:
     storageClass: gp3
   ha:
-    replicas: 1
+    # replicas 는 base(3) 유지 — override 안 함(스냅샷 3-peer 와 동일 토폴로지).
     raft:
       config: |
         ui = true
@@ -31,6 +33,19 @@ server:
 
         storage "raft" {
           path = "/vault/data"
+
+          retry_join {
+            leader_api_addr = "https://vault-0.vault-internal:8200"
+            leader_ca_cert_file = "/vault/tls/ca.crt"
+          }
+          retry_join {
+            leader_api_addr = "https://vault-1.vault-internal:8200"
+            leader_ca_cert_file = "/vault/tls/ca.crt"
+          }
+          retry_join {
+            leader_api_addr = "https://vault-2.vault-internal:8200"
+            leader_ca_cert_file = "/vault/tls/ca.crt"
+          }
         }
 
         seal "awskms" {
