@@ -185,3 +185,30 @@ variable "alert_email" {
   type        = string
   default     = ""
 }
+
+# ─────────────────────────────────────────────────────────────────────────
+# EKS Cold DR — 온프렘 전체 소실 시에만 기동하는 EKS 클러스터(eks-dr.tf).
+# enable_eks_dr=false(기본)면 VPC/EKS/노드그룹 리소스가 전혀 생성되지 않는다(평시 비용 0).
+# ─────────────────────────────────────────────────────────────────────────
+
+variable "enable_eks_dr" {
+  description = "DR 드릴/재해 시에만 true. 평시 false 로 EKS 리소스 0."
+  type        = bool
+  default     = false
+}
+
+variable "eks_dr_cluster_version" {
+  type    = string
+  default = "1.31"
+}
+
+variable "eks_dr_node_instance_type" {
+  # CNPG(postgres+keycloak-pg) + Vault + api/web/keycloak/argocd/eso 수용. 드릴 신뢰성 위해 on-demand.
+  type    = string
+  default = "m6i.xlarge"
+}
+
+variable "eks_dr_node_desired" {
+  type    = number
+  default = 3
+}
