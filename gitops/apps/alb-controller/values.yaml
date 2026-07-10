@@ -11,8 +11,7 @@ serviceAccount:
   create: true
   name: aws-load-balancer-controller
   annotations:
-    # 부트스트랩(T9 런북)에서 terraform output(eks_dr_alb_controller_role_arn)으로 치환.
-    eks.amazonaws.com/role-arn: "<<T2 eks_dr_alb_controller_role_arn>>"
+    # role_name 고정→결정적, verbatim 하드코딩(KMS 키·계정과 동일 부류).
+    eks.amazonaws.com/role-arn: "arn:aws:iam::504284203153:role/cledyu-dr-alb-controller"
 region: ap-northeast-2
-# 부트스트랩(T9 런북)에서 terraform output(vpc id)으로 치환.
-vpcId: "<<T1 vpc id — 부트스트랩 시 주입>>"
+# vpcId 미지정 → 컨트롤러가 노드 IMDS 로 VPC 자동탐지. 드릴마다 새로 생기는 동적 vpc id 치환을 피한다.
