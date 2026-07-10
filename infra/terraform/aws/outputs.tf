@@ -89,3 +89,34 @@ output "backup_iam_users" {
   description = "프리픽스별 백업 IAM 사용자명 맵(키: postgres, vault, velero) — 각 사용자의 액세스 키를 발급해 Vault 경로 cledyu/aws/backup-<키>(backup-postgres·backup-vault·backup-velero)에 보관한다."
   value       = { for k, u in aws_iam_user.backup : k => u.name }
 }
+
+# ── EKS Cold DR (eks-dr.tf, enable_eks_dr=true 일 때만 값이 채워진다) ─────
+output "eks_dr_cluster_name" {
+  description = "DR EKS 클러스터명(kubectl/드릴 스크립트 참고용)."
+  value       = var.enable_eks_dr ? module.eks_dr[0].cluster_name : null
+}
+
+output "eks_dr_oidc_provider_arn" {
+  description = "DR EKS OIDC provider ARN — IRSA role trust policy가 소비."
+  value       = var.enable_eks_dr ? module.eks_dr[0].oidc_provider_arn : null
+}
+
+output "eks_dr_oidc_provider" {
+  description = "DR EKS OIDC provider issuer(호스트 부분) — IRSA role trust policy가 소비."
+  value       = var.enable_eks_dr ? module.eks_dr[0].oidc_provider : null
+}
+
+output "eks_dr_alb_controller_role_arn" {
+  description = "AWS Load Balancer Controller IRSA 롤 ARN"
+  value       = var.enable_eks_dr ? module.eks_dr_alb_irsa[0].iam_role_arn : null
+}
+
+output "eks_dr_vault_unseal_role_arn" {
+  description = "Vault unseal(awskms) IRSA 롤 ARN"
+  value       = var.enable_eks_dr ? module.eks_dr_vault_unseal_irsa[0].iam_role_arn : null
+}
+
+output "eks_dr_cnpg_restore_role_arn" {
+  description = "CNPG restore(S3 barman) IRSA 롤 ARN"
+  value       = var.enable_eks_dr ? module.eks_dr_cnpg_restore_irsa[0].iam_role_arn : null
+}
