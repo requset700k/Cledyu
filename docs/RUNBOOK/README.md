@@ -56,7 +56,7 @@
 
 ### 관측성 — 조승연
 
-- [ ] `slo-investigation.md`
+- [x] `slo-investigation.md`
 - [ ] `chaos-drill.md`
 
 ### 데이터 — 김찬영
