@@ -51,7 +51,9 @@ aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2
 
 # 1) Vault 는 KMS auto-unseal 로 "빈 raft" 로 떠 있다(T6). 최초 1회 init 으로 루트토큰 확보.
 #    (awskms seal 이라 unseal 키 입력은 불필요 — init 만 하면 자동 unseal 된다.)
-kubectl -n vault exec -it vault-0 -- vault operator init
+# in-pod vault CLI: VAULT_ADDR(https://127.0.0.1:8200)는 파드 env 에 있으나 VAULT_CACERT 는 없다.
+# TLS 자체서명(cledyu-ca)이라 CA 를 명시 안 하면 x509 실패 → 모든 vault 명령에 VAULT_CACERT=/vault/tls/ca.crt.
+kubectl -n vault exec -it vault-0 -- sh -c 'VAULT_CACERT=/vault/tls/ca.crt vault operator init'
 #    → 출력된 Initial Root Token 을 <INIT_ROOT> 로 보관(restore 실행에만 임시 사용).
 
 # 2) 최신 스냅샷을 S3 에서 취득 — bastion instance profile 자격으로(정적 키 불필요).
@@ -69,7 +71,7 @@ aws s3 cp s3://cledyu-lab-dr-backups/vault/vault-raft-<TS>.snap ./vault-raft.sna
 #    복원해도 unseal 불가 → Vault 가 봉인된 채 남는다. 그래서 이 키는 DR-durable, 삭제 금지).
 kubectl -n vault cp ./vault-raft.snap vault-0:/tmp/vault-raft.snap
 kubectl -n vault exec -it vault-0 -- sh -c \
-  'VAULT_TOKEN=<INIT_ROOT> vault operator raft snapshot restore -force /tmp/vault-raft.snap'
+  'VAULT_CACERT=/vault/tls/ca.crt VAULT_TOKEN=<INIT_ROOT> vault operator raft snapshot restore -force /tmp/vault-raft.snap'
 
 # 4) force restore 후에는 스냅샷(원본 클러스터)의 recovery 키·루트토큰이 유효해지고
 #    init(1단계) 때 받은 <INIT_ROOT> 는 무효화된다. 따라서 이후 인증은 원본 자격으로 한다:
@@ -81,7 +83,7 @@ kubectl -n vault exec -it vault-0 -- sh -c \
 #    aws_iam_role_policy.eks_dr_bastion_vault_restore) — 정적 키 없이 취득 가능.
 #    (그 시크릿이 CMK 로 암호화됐다면 롤에 해당 kms:Decrypt 추가 필요 — 코드 주석 참조.)
 kubectl -n vault exec -it vault-0 -- sh -c \
-  'VAULT_TOKEN=<원본 루트토큰> vault secrets list'   # 복원 확인
+  'VAULT_CACERT=/vault/tls/ca.crt VAULT_TOKEN=<원본 루트토큰> vault secrets list'   # 복원 확인
 ```
 
 **복원 후 정합성 체크(다음 스텝의 선행조건):**
@@ -97,9 +99,9 @@ kubectl -n vault exec -it vault-0 -- sh -c \
 `external-secrets-operator` 는 스냅샷에 이미 있어 재설정 불요).
 
 ```bash
-# bastion. VAULT_ADDR/VAULT_CACERT 는 파드 env 에 있음.
+# bastion. VAULT_ADDR 는 파드 env 에 있으나 VAULT_CACERT 는 없어(CA=/vault/tls/ca.crt 마운트) 명시한다.
 kubectl -n vault exec -it vault-0 -- sh -c \
-  'VAULT_TOKEN=<원본 루트토큰> vault write auth/kubernetes/config \
+  'VAULT_CACERT=/vault/tls/ca.crt VAULT_TOKEN=<원본 루트토큰> vault write auth/kubernetes/config \
      kubernetes_host=https://kubernetes.default.svc:443 \
      kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt \
      token_reviewer_jwt=@/var/run/secrets/kubernetes.io/serviceaccount/token'
@@ -135,23 +137,13 @@ kubectl -n vault exec -it vault-0 -- rm -f /tmp/vault-raft.snap
 ### apps-eks 부트스트랩 (bastion 에서)
 
 ```bash
-# 0) 모든 <<...>> 플레이스홀더를 치환 후 드릴 브랜치에 커밋.
-#    남기면 부트스트랩이 막힌다: ALB Controller 가 role-arn/vpcId 없이는 ALB 를 못 만들고(api/web 도달 불가),
-#    Vault SA 가 role-arn 없이는 IRSA unseal 실패로 봉인된 채 남는다.
-REPO_ROOT=$(git rev-parse --show-toplevel)   # 아래 seed/apply 의 gitops/ 상대경로 기준
-cd "$REPO_ROOT/infra/terraform/aws"
-# (a) ACM 와일드카드 — api/web values-eks (계정 고정값)
-aws acm list-certificates --region ap-northeast-2 \
-  --query "CertificateSummaryList[?DomainName=='*.cledyu.com'].CertificateArn" --output text   # → <<WILDCARD_ACM_ARN>>
-# (b) Vault unseal IRSA — gitops/apps/vault/values-eks.yaml
-terraform output -raw eks_dr_vault_unseal_role_arn        # → <<VAULT_UNSEAL_ROLE_ARN>>
-# (c) ALB Controller IRSA + VPC id — gitops/apps/alb-controller/values.yaml
-terraform output -raw eks_dr_alb_controller_role_arn      # → <<T2 eks_dr_alb_controller_role_arn>>
-aws eks describe-cluster --name "$(terraform output -raw eks_dr_cluster_name)" --region ap-northeast-2 \
-  --query cluster.resourcesVpcConfig.vpcId --output text  # → <<T1 vpc id>> (vpc id 출력이 없어 describe-cluster 로 취득)
-# 위 값들로 해당 파일의 <<...>> 를 치환 → 드릴 브랜치에 커밋·**push**
-#   (ArgoCD 앱은 targetRevision=feat/dr-eks-overlay 원격 git 을 sync 하므로 로컬 커밋만으론 반영 안 됨)
-cd "$REPO_ROOT"   # ↓ seed·apply 는 gitops/ 상대경로라 repo root 로 복귀(terraform 디렉터리 아님)
+# 0) 사전 확인 — apps-eks 앱은 targetRevision=main 을 sync 하므로 드릴-타임 git 치환은 쓰지 않는다.
+#    IRSA 롤 ARN(vault/alb)은 role_name 고정→결정적이라 values-eks 에 하드코딩됨. vpcId 는 ALB 컨트롤러
+#    auto-discover 로 제거됨. 남은 건 ACM 와일드카드 ARN 하나 — 이 PR 병합 전 하드코딩(→ main)했어야 한다.
+#    여기서는 placeholder 가 남아있지 않은지만 확인한다(남으면 ALB 에 TLS 리스너 미설정).
+REPO_ROOT=$(git rev-parse --show-toplevel); cd "$REPO_ROOT"
+grep -rn '<<' gitops/apps/*/values-eks.yaml gitops/apps/alb-controller/values.yaml \
+  && echo "⚠ placeholder 잔존 — 병합 전 ACM ARN 을 실제 값으로 하드코딩 필요" || echo "placeholder 없음 OK"
 
 # 0.5) ArgoCD seed 설치 — self-managed 이지만 빈 클러스터엔 ArgoCD(Application CRD·컨트롤러)가 없어
 #      root-app 을 적용·조정할 주체가 없다(치킨-에그). 최초 1회 helm 으로 seed 하면, 이후 platform-argocd
@@ -182,7 +174,9 @@ kubectl -n api get configmap cledyu-root-ca-bundle   # trust-manager Bundle 분�
 ### 공개 DNS 를 DR EKS ALB 로 전환 (검증·서빙 전 필수)
 
 공개 DNS(`aws_route53_record.public`)는 온프렘 프록시 ALB 를 alias 로 가리킨다. 온프렘 장애 시에도 그대로면
-사용자·OIDC(auth.cledyu.com)가 죽은 온프렘으로 가서, EKS ALB target 이 Healthy 여도 도달하지 못한다. EKS ALB 로 돌린다.
+EKS ALB target 이 Healthy 여도 사용자가 도달하지 못한다. **api/app 만** EKS ALB 로 돌린다.
+**주의: `auth.cledyu.com` 은 제외** — 이 PR 엔 Keycloak(T8) Ingress 가 없어 auth 를 EKS ALB 로 넘기면 매칭 규칙 없이
+404/503 이 된다. auth 전환은 **T8(Keycloak) 배포 후** 같은 방식으로 추가한다(그 전엔 로그인 검증도 T8 몫).
 
 ```bash
 # EKS ALB DNS 이름·zone 취득 (ALB Controller 가 api/web Ingress 로 생성)
@@ -191,15 +185,15 @@ ALB_ZONE=$(aws elbv2 describe-load-balancers --region ap-northeast-2 \
   --query "LoadBalancers[?DNSName=='$ALB'].CanonicalHostedZoneId" --output text)
 ZONE=$(aws route53 list-hosted-zones-by-name --dns-name cledyu.com --query "HostedZones[0].Id" --output text)
 
-# (A) 실제 페일오버 — api/app/auth.cledyu.com alias 를 EKS ALB 로 UPSERT
-for h in api app auth; do
+# (A) 실제 페일오버 — api/app.cledyu.com alias 를 EKS ALB 로 UPSERT (auth 는 T8 후)
+for h in api app; do
   aws route53 change-resource-record-sets --hosted-zone-id "$ZONE" --change-batch \
     "{\"Changes\":[{\"Action\":\"UPSERT\",\"ResourceRecordSet\":{\"Name\":\"$h.cledyu.com\",\"Type\":\"A\",\"AliasTarget\":{\"HostedZoneId\":\"$ALB_ZONE\",\"DNSName\":\"$ALB\",\"EvaluateTargetHealth\":false}}}]}"
 done
 # ⚠️ 이 레코드는 terraform aws_route53_record.public 관리분 — 온프렘 복구 후 terraform apply 로 원복(failback).
 
 # (B) 라이브 DNS 미전환 로컬 드릴 검증(F3) — 운영자 머신에서만
-for h in api app auth; do
+for h in api app; do
   curl -sk --resolve $h.cledyu.com:443:$(dig +short $ALB|head -1) https://$h.cledyu.com/ -o /dev/null -w "%{http_code} $h\n"
 done
 ```
