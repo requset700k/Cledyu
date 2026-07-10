@@ -198,9 +198,14 @@ variable "enable_eks_dr" {
 }
 
 variable "eks_dr_cluster_version" {
-  description = "DR EKS 컨트롤플레인 쿠버네티스 버전."
+  description = <<-EOT
+    DR EKS 컨트롤플레인 쿠버네티스 버전. 온디맨드로 생성하는 DR 클러스터라 반드시 standard support
+    범위로 유지한다 — extended support 버전은 컨트롤플레인 비용이 약 6배로 뛰고, extended 마저 끝나면
+    해당 버전 신규 클러스터 생성이 막혀 DR 기동 자체가 실패한다. EKS 버전 캘린더 기준 주기적으로
+    최신 standard 버전으로 갱신할 것.
+  EOT
   type        = string
-  default     = "1.31"
+  default     = "1.34"
 }
 
 variable "eks_dr_node_instance_type" {
