@@ -138,7 +138,8 @@ kubectl -n vault exec -it vault-0 -- rm -f /tmp/vault-raft.snap
 # 0) 모든 <<...>> 플레이스홀더를 치환 후 드릴 브랜치에 커밋.
 #    남기면 부트스트랩이 막힌다: ALB Controller 가 role-arn/vpcId 없이는 ALB 를 못 만들고(api/web 도달 불가),
 #    Vault SA 가 role-arn 없이는 IRSA unseal 실패로 봉인된 채 남는다.
-cd infra/terraform/aws
+REPO_ROOT=$(git rev-parse --show-toplevel)   # 아래 seed/apply 의 gitops/ 상대경로 기준
+cd "$REPO_ROOT/infra/terraform/aws"
 # (a) ACM 와일드카드 — api/web values-eks (계정 고정값)
 aws acm list-certificates --region ap-northeast-2 \
   --query "CertificateSummaryList[?DomainName=='*.cledyu.com'].CertificateArn" --output text   # → <<WILDCARD_ACM_ARN>>
@@ -148,7 +149,9 @@ terraform output -raw eks_dr_vault_unseal_role_arn        # → <<VAULT_UNSEAL_R
 terraform output -raw eks_dr_alb_controller_role_arn      # → <<T2 eks_dr_alb_controller_role_arn>>
 aws eks describe-cluster --name "$(terraform output -raw eks_dr_cluster_name)" --region ap-northeast-2 \
   --query cluster.resourcesVpcConfig.vpcId --output text  # → <<T1 vpc id>> (vpc id 출력이 없어 describe-cluster 로 취득)
-# 위 값들로 해당 파일의 <<...>> 를 치환 → 커밋(드릴 브랜치)
+# 위 값들로 해당 파일의 <<...>> 를 치환 → 드릴 브랜치에 커밋·**push**
+#   (ArgoCD 앱은 targetRevision=feat/dr-eks-overlay 원격 git 을 sync 하므로 로컬 커밋만으론 반영 안 됨)
+cd "$REPO_ROOT"   # ↓ seed·apply 는 gitops/ 상대경로라 repo root 로 복귀(terraform 디렉터리 아님)
 
 # 0.5) ArgoCD seed 설치 — self-managed 이지만 빈 클러스터엔 ArgoCD(Application CRD·컨트롤러)가 없어
 #      root-app 을 적용·조정할 주체가 없다(치킨-에그). 최초 1회 helm 으로 seed 하면, 이후 platform-argocd
@@ -182,7 +185,14 @@ terraform 밖이다. 클러스터를 먼저 부수면 ALB·target group·`k8s-*`
 남은 ENI 가 서브넷/VPC 삭제를 `DependencyViolation` 으로 막는다. 반드시 in-cluster 부터 정리한다.
 
 ```bash
-# 1) Ingress 삭제 → 컨트롤러가 ALB/TG/SG 정리 (완료까지 대기)
+# 0) ArgoCD selfHeal 중지 — root-app 은 automated.selfHeal 로 apps-eks 를 계속 조정한다. 안 끄면 아래에서 지운
+#    Ingress/PVC 를 즉시 다시 만들어 ALB/EBS 삭제가 안 끝나고 ENI/볼륨이 고아로 남는다.
+#    주의: root-app 을 delete-cascade 하면 self-managed ArgoCD 가 자기(eks-platform-argocd)를 먼저 prune 해
+#    컨트롤러가 죽고 나머지 child finalizer 가 멈추는 데드락이 난다 → 삭제 대신 automated 제거(patch)로 selfHeal 만 끈다.
+kubectl -n argocd patch applications.argoproj.io --all --type=merge \
+  -p '{"spec":{"syncPolicy":{"automated":null}}}'
+
+# 1) Ingress 삭제 → 컨트롤러가 ALB/TG/SG 정리 (selfHeal 꺼서 재생성 안 됨, 완료까지 대기)
 kubectl delete ingress -A --all
 aws elbv2 describe-load-balancers --region ap-northeast-2 \
   --query "LoadBalancers[?VpcId=='<dr-vpc-id>'].LoadBalancerArn" --output text   # 빈 값 될 때까지 확인
@@ -193,7 +203,7 @@ kubectl delete pvc -A --all
 # 3) LoadBalancer 타입 Service 없음(traefik 은 DR 앱셋 미포함) — skip
 
 # 4) terraform destroy
-cd infra/terraform/aws && terraform apply -var enable_eks_dr=false
+cd "$(git rev-parse --show-toplevel)/infra/terraform/aws" && terraform apply -var enable_eks_dr=false
 
 # 5) 고아 검증(전부 0/비어야 함)
 aws elbv2 describe-load-balancers --region ap-northeast-2 --query "LoadBalancers[?VpcId=='<dr-vpc-id>']" --output text
