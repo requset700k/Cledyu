@@ -1,0 +1,128 @@
+# EKS Cold DR 기반. enable_eks_dr=false 면 count=0 → 평시 리소스 없음(비용 0).
+locals {
+  eks_dr_enabled = var.enable_eks_dr ? 1 : 0
+  eks_dr_name    = "cledyu-dr"
+  eks_dr_tags    = { Project = "cledyu", Purpose = "dr", ManagedBy = "terraform" }
+}
+
+module "eks_dr_vpc" {
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "~> 5.13"
+  count   = local.eks_dr_enabled
+
+  name = "${local.eks_dr_name}-vpc"
+  cidr = "10.90.0.0/16"
+
+  azs             = ["ap-northeast-2a", "ap-northeast-2b", "ap-northeast-2c"]
+  private_subnets = ["10.90.1.0/24", "10.90.2.0/24", "10.90.3.0/24"]
+  public_subnets  = ["10.90.101.0/24", "10.90.102.0/24", "10.90.103.0/24"]
+
+  enable_nat_gateway = true
+  single_nat_gateway = true # 드릴 비용 절감(가용성 요구 낮음)
+
+  # ALB Controller / EKS 서브넷 자동 발견 태그
+  public_subnet_tags  = { "kubernetes.io/role/elb" = "1" }
+  private_subnet_tags = { "kubernetes.io/role/internal-elb" = "1" }
+  tags                = local.eks_dr_tags
+}
+
+module "eks_dr" {
+  source  = "terraform-aws-modules/eks/aws"
+  version = "~> 20.24"
+  count   = local.eks_dr_enabled
+
+  cluster_name    = local.eks_dr_name
+  cluster_version = var.eks_dr_cluster_version
+
+  cluster_endpoint_public_access = true # 부트스트랩/드릴 운영자 kubectl 접근
+  enable_irsa                    = true
+
+  vpc_id     = module.eks_dr_vpc[0].vpc_id
+  subnet_ids = module.eks_dr_vpc[0].private_subnets
+
+  eks_managed_node_groups = {
+    dr = {
+      instance_types = [var.eks_dr_node_instance_type]
+      capacity_type  = "ON_DEMAND"
+      desired_size   = var.eks_dr_node_desired
+      min_size       = var.eks_dr_node_desired
+      max_size       = var.eks_dr_node_desired
+    }
+  }
+
+  # 부트스트랩 운영자가 관리자로 접근
+  enable_cluster_creator_admin_permissions = true
+  tags                                     = local.eks_dr_tags
+
+  cluster_addons = {
+    aws-ebs-csi-driver = {
+      service_account_role_arn = module.eks_dr_ebs_csi_irsa[0].iam_role_arn
+    }
+    coredns    = {}
+    kube-proxy = {}
+    vpc-cni    = {}
+  }
+}
+
+# EBS CSI 애드온용 IRSA — gp3 StorageClass(apps-eks)가 이 SA 로 EBS 볼륨을 프로비저닝한다.
+module "eks_dr_ebs_csi_irsa" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
+  version = "~> 5.44"
+  count   = local.eks_dr_enabled
+
+  role_name             = "${local.eks_dr_name}-ebs-csi"
+  attach_ebs_csi_policy = true
+  oidc_providers = {
+    main = {
+      provider_arn               = module.eks_dr[0].oidc_provider_arn
+      namespace_service_accounts = ["kube-system:ebs-csi-controller-sa"]
+    }
+  }
+  tags = local.eks_dr_tags
+}
+
+# AWS Load Balancer Controller IRSA — Helm 차트 자체는 Phase 2(apps-eks)에서 배포, 이 롤 ARN 을 SA 에 annotation.
+module "eks_dr_alb_irsa" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
+  version = "~> 5.44"
+  count   = local.eks_dr_enabled
+
+  role_name                              = "${local.eks_dr_name}-alb-controller"
+  attach_load_balancer_controller_policy = true
+  oidc_providers = {
+    main = {
+      provider_arn               = module.eks_dr[0].oidc_provider_arn
+      namespace_service_accounts = ["kube-system:aws-load-balancer-controller"]
+    }
+  }
+  tags = local.eks_dr_tags
+}
+
+# 프라이빗 서브넷 S3/KMS/STS 엔드포인트. github/ghcr(이미지)는 NAT 로 egress(ECR 미사용, 자격 불필요 — Plan B 스펙 F5).
+module "eks_dr_endpoints" {
+  source  = "terraform-aws-modules/vpc/aws//modules/vpc-endpoints"
+  version = "~> 5.13"
+  count   = local.eks_dr_enabled
+
+  vpc_id = module.eks_dr_vpc[0].vpc_id
+  endpoints = {
+    s3 = {
+      service         = "s3"
+      service_type    = "Gateway"
+      route_table_ids = module.eks_dr_vpc[0].private_route_table_ids
+    }
+    kms = {
+      service             = "kms"
+      private_dns_enabled = true
+      subnet_ids          = module.eks_dr_vpc[0].private_subnets
+      security_group_ids  = [module.eks_dr[0].node_security_group_id]
+    }
+    sts = {
+      service             = "sts"
+      private_dns_enabled = true
+      subnet_ids          = module.eks_dr_vpc[0].private_subnets
+      security_group_ids  = [module.eks_dr[0].node_security_group_id]
+    }
+  }
+  tags = local.eks_dr_tags
+}
