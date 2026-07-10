@@ -142,7 +142,7 @@ variable "tailscale_auth_key" {
 variable "proxy_instance_type" {
   description = "tailnet 리버스프록시 인스턴스 타입. 경량 프록시이므로 작게(비용 절감)."
   type        = string
-  default     = "t3.nano"
+  default     = "t3.micro"
 }
 
 variable "public_ingress_allowed_cidrs" {
@@ -178,4 +178,10 @@ variable "waf_rate_limit" {
   description = "WAF rate-based 룰의 IP당 5분(기본 평가창) 요청 상한. 초과 시 block. 데모 부하 기준 2000."
   type        = number
   default     = 2000
+}
+
+variable "alert_email" {
+  description = "공개진입점 CloudWatch 알람 수신 이메일(SNS 구독). enable_public_ingress=true 면 TF_VAR_alert_email 또는 tfvars 로 반드시 지정(빈 값이면 SNS 구독 apply 실패)."
+  type        = string
+  default     = ""
 }
