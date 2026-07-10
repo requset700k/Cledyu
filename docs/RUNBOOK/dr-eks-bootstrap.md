@@ -150,7 +150,16 @@ aws eks describe-cluster --name "$(terraform output -raw eks_dr_cluster_name)" -
   --query cluster.resourcesVpcConfig.vpcId --output text  # → <<T1 vpc id>> (vpc id 출력이 없어 describe-cluster 로 취득)
 # 위 값들로 해당 파일의 <<...>> 를 치환 → 커밋(드릴 브랜치)
 
-# 1) root-app 적용 — 이후 ArgoCD 가 wave 순서(cert-manager -10 → pki -8 → ... → api/web 0)로 sync
+# 0.5) ArgoCD seed 설치 — self-managed 이지만 빈 클러스터엔 ArgoCD(Application CRD·컨트롤러)가 없어
+#      root-app 을 적용·조정할 주체가 없다(치킨-에그). 최초 1회 helm 으로 seed 하면, 이후 platform-argocd
+#      가 같은 릴리스(argocd, ns argocd)를 ServerSideApply 로 adopt 한다.
+helm repo add argo https://argoproj.github.io/argo-helm && helm repo update
+helm upgrade --install argocd argo/argo-cd --version 7.7.10 \
+  -f gitops/apps/argocd/values.yaml -f gitops/apps/argocd/values-eks.yaml \
+  -n argocd --create-namespace --wait
+kubectl -n argocd rollout status deploy/argocd-server --timeout=300s
+
+# 1) root-app 적용 — 이제 ArgoCD 가 존재하므로 wave 순서(cert-manager -10 → pki -8 → ... → api/web 0)로 sync
 kubectl apply -f gitops/argocd/root-app-eks.yaml
 
 # 2) 플랫폼 Ready 대기: cert-manager·cledyu-ca(ClusterIssuer)·Bundle(ConfigMap) 확인
