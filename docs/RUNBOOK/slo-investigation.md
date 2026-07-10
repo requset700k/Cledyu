@@ -22,6 +22,7 @@
 
 - `kubectl`이 Cledyu 클러스터에 인증되어 있어야 한다.
 - Prometheus, Alertmanager, Sloth 리소스 조회 권한이 있어야 한다.
+- Grafana `Cledyu API & Validation Tempo Bottleneck` 대시보드와 Tempo Explore 조회 권한이 있어야 한다.
 - 실클러스터 직접 접속이 어려운 PR 리뷰 상황에서는 `gitops/apps/sloth/*.yaml`, Grafana 링크,
   CI 결과, 운영자가 첨부한 Prometheus 쿼리 결과를 기준으로 판단한다.
 
@@ -57,6 +58,7 @@ traefik-slo      1d
 | WebSocket 안정성 | 99.0% | `ws_connection_drop_total{result="error"}` / `ws_connection_established_total` |
 | Validation 지연 | 99.0% 요청 10초 이내 | `validation_duration_seconds_bucket{le="10"}` |
 | AI 힌트 지연 | 99.0% 요청 5초 이내 | `ai_hint_latency_seconds_bucket{le="5"}` |
+| Validation Kafka 흐름 | 운영 확인용 | `kafka_server_brokertopicmetrics_messagesinpersec_oneminuterate{topic=~"validation-requests|validation-results|validation-requests-dlq"}`, `kafka_consumergroup_lag` |
 | Traefik 가용성 | 99.9% | `traefik_service_requests_total{code=~"5.."}` |
 | Traefik 지연 | 99.9% 요청 1.2초 이내 | `traefik_service_request_duration_seconds_bucket{le="1.2"}` |
 | KubeVirt 컴포넌트 가용성 | 99.9% | `up{job="kubevirt-prometheus-metrics", container=...}` |
@@ -129,6 +131,31 @@ curl -G -s http://127.0.0.1:9090/api/v1/query \
   | jq '.data.result'
 ```
 
+Validation Kafka 토픽 유입:
+
+```bash
+curl -G -s http://127.0.0.1:9090/api/v1/query \
+  --data-urlencode 'query=sum by (topic) (kafka_server_brokertopicmetrics_messagesinpersec_oneminuterate{topic=~"validation-requests|validation-results|validation-requests-dlq"})' \
+  | jq '.data.result'
+```
+
+Validation Kafka consumer lag:
+
+```bash
+curl -G -s http://127.0.0.1:9090/api/v1/query \
+  --data-urlencode 'query=sum(kafka_consumergroup_lag{topic="validation-requests",consumergroup="validation-engine"})' \
+  | jq '.data.result'
+
+curl -G -s http://127.0.0.1:9090/api/v1/query \
+  --data-urlencode 'query=sum(kafka_consumergroup_lag{topic="validation-results",consumergroup="cledyu-api-validation-results"})' \
+  | jq '.data.result'
+```
+
+주의:
+
+- `validation-requests`, `validation-results`, `validation-requests-dlq` 토픽 유입 패널은 no data를 `0`으로 보정하지 않는다.
+- 값이 `0`이면 해당 시점에 유입이 없는 것이고, no data면 Kafka JMX scrape, ServiceMonitor, metricsConfig, 토픽 MBean 생성 여부를 먼저 확인한다.
+
 4. 영향 범위를 분리한다.
 
 ```bash
@@ -149,6 +176,37 @@ kubectl -n traefik get pods
 - `Kafka*SLO`: Strimzi Kafka broker, offline partition, disk pressure, ISR shrink를 확인한다.
 - `KubeVirt*SLO`: `virt-api`, `virt-controller`, `virt-handler`, 노드 상태를 확인한다.
 - `Traefik*SLO`: upstream별 5xx, Ingress 경로, TLS/cert, backend readiness를 확인한다.
+
+### Validation/Kafka 병목 대시보드 확인
+
+Grafana의 `Cledyu API & Validation Tempo Bottleneck` 대시보드에서 아래 순서로 확인한다.
+
+1. `API Internal Operations`
+   - `Validation latency`: API가 검증 요청을 발행한 뒤 `validation-results`를 받아 Redis start time과 매칭한 왕복 지연이다.
+   - `AI hint latency`: API가 AI 힌트를 요청하고 응답을 받은 지연이다.
+   - 실제 API 경로를 탄 요청이 없으면 latency 패널에 표시할 샘플도 없다.
+
+2. `Kafka Validation Flow`
+   - `validation-requests 유입`: Session API가 Kafka에 검증 요청을 넣는지 확인한다.
+   - `validation-results 유입`: validation-engine이 검증 결과를 Kafka에 넣는지 확인한다.
+   - `validation DLQ 유입`: 처리 실패 메시지가 `validation-requests-dlq`로 빠지는지 확인한다. 0이 정상이며, 증가하면 handler 오류나 메시지 계약 문제를 본다.
+   - `검증 consumer lag`: `validation-engine`의 `validation-requests` 소비와 API의 `validation-results` 소비가 밀리는지 확인한다.
+
+3. `Validation Engine Tempo`
+   - `최근 validation-engine trace`에서 `validation-engine` span을 확인한다.
+   - TraceQL에서 직접 볼 때는 `{ resource.service.name = "validation-engine" }` 또는 `{ name = "validation_engine.handle" }`를 사용한다.
+   - Kafka에 직접 넣은 수동 테스트 메시지는 API root span이 없어 `<root span not yet received>`로 보일 수 있다. 실제 앱 트래픽은 API가 주입한 `traceparent`로 `cledyu-api` span과 `validation_engine.handle` span이 같은 trace에 연결되어야 한다.
+
+판단 기준:
+
+| 증상 | 우선 확인 |
+|---|---|
+| `Validation latency` 상승, `validation-requests` 유입 정상, `validation-results` 유입 지연 | `validation-engine` 로그, VM SSH/exec, consumer lag |
+| `validation-requests` 유입 없음 | Session API publish 경로, Kafka 인증서, `api.validation.publish_kafka` trace |
+| `validation-results` 유입 없음 | validation-engine 처리 오류, result producer, DLQ 유입 |
+| DLQ 유입 증가 | 메시지 JSON 계약, 빈 `checks`, handler 오류 로그 |
+| Kafka topic 패널 no data | Kafka JMX scrape, `kafka-metrics` ServiceMonitor, metricsConfig, 토픽 MBean 생성 여부 |
+| consumer lag 증가 | validation-engine/API 레플리카 상태, Kafka broker 부하, consumer group 상태 |
 
 5. 최근 변경과 상관관계를 확인한다.
 
@@ -209,6 +267,7 @@ curl -k -i https://api.cledyu.local/ready
 kubectl -n api rollout status deploy/api
 kubectl -n kubevirt get vmi -A
 kubectl -n kafka get kafka cledyu-kafka
+kubectl -n validation-engine rollout status deploy/validation-engine
 ```
 
 ## 롤백
@@ -238,6 +297,7 @@ Sloth SLO 정의 변경 자체가 잘못되어 오탐을 만든 경우에는 `gi
 - SLO 정의: `gitops/apps/sloth/*.yaml`
 - Prometheus/Grafana 스택: `gitops/apps/kube-prometheus-stack/values.yaml`
 - API metrics scrape: `gitops/apps/api/templates/servicemonitor.yaml`
+- 병목 대시보드: `infra/kubernetes/monitoring/dashboard-bottleneck.yaml`
 - PR SLO 체크리스트: `.github/PULL_REQUEST_TEMPLATE.md`
 - API probe triage: `docs/RUNBOOK/api-probe-triage.md`
 - EC2 overflow: `docs/RUNBOOK/ec2-overflow.md`
