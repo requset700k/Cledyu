@@ -223,6 +223,10 @@ kubectl -n api get configmap cledyu-root-ca-bundle   # trust-manager Bundle 분�
 ```
 
 - [ ] apps-eks root-app 적용 → 플랫폼(cert-manager·ALB·gp3·ESO·CNPG operator) Ready
+- [ ] Kafka Ready(실습 스택 — A1) — strimzi-operator(wave 0) Running 후 kafka-cluster(wave 1) sync.
+      `kubectl -n kafka get kafka cledyu-kafka`(READY=True), `kubectl -n kafka get kafkatopic`(validation-requests·-dlq·-results·lab-events·security-logs 존재),
+      bootstrap svc `cledyu-kafka-kafka-bootstrap.kafka.svc:9093` 응답. 의존: cert-manager CA + trust-manager Bundle + gp3(nodepool SC-agnostic).
+      (ServiceMonitor 2종 미배포는 정상 — EKS 관측 스택 없음, directory.exclude 로 제거.)
 - [ ] **Vault 스냅샷 복원**(위 섹션)
 - [ ] CNPG 복원 차트 sync → `cledyu-pg-rw`·`keycloak-pg-rw` Ready(자동 S3 복원)
 - [ ] Keycloak·api·web Ready + ALB/ACM 종단 확인
