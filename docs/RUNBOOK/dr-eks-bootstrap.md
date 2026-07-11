@@ -226,14 +226,14 @@ kubectl -n api get configmap cledyu-root-ca-bundle   # trust-manager Bundle 분�
 - [ ] **Vault 스냅샷 복원**(위 섹션)
 - [ ] CNPG 복원 차트 sync → `cledyu-pg-rw`·`keycloak-pg-rw` Ready(자동 S3 복원)
 - [ ] Keycloak·api·web Ready + ALB/ACM 종단 확인
-- [ ] **DR ALB 에 WAF 연결(/metrics 차단) + 공개 DNS 전환**(아래 섹션) — WAF 없으면 무인증 /metrics 공개 노출, DNS 안 바꾸면 죽은 온프렘 프록시로 계속 감
+- [ ] **공개 DNS 전환**(아래 섹션) — DNS 안 바꾸면 죽은 온프렘 프록시로 계속 감. WAF(/metrics 차단)는 api·web values-eks 의 wafv2-acl-arn 로 ALB 생성과 동시에 자동 연결(수동 불요) → 여기선 붙었는지 확인만
 - [ ] **api·web rollout restart**(아래 섹션) — CNPG·Keycloak·DNS Ready 후 필수. api 는 startup 1회만 DB/auth 초기화·실패 시 degraded 유지라, 의존성이 늦게 살아나면 restart 해야 DB모드·로그인 활성
 - [ ] 검증(로컬 테스트유저 로그인·복원 데이터 서빙) + RTO 실측
 - [ ] destroy — **고아 방지 순서 필수** (아래)
 
-### DR ALB WAF 연결(/metrics 차단) + 공개 DNS 전환 (검증·서빙 전 필수)
+### 공개 DNS 전환 (+ WAF 연결 확인) (검증·서빙 전 필수)
 
-> ⚠️ **실행 위치 = bastion 아님, 운영자 작업 머신**. 아래 `aws wafv2 associate-web-acl`·`elbv2 describe-load-balancers`·
+> ⚠️ **실행 위치 = bastion 아님, 운영자 작업 머신**. 아래 `aws wafv2 get-web-acl-for-resource`·`elbv2 describe-load-balancers`·
 > `route53 change-resource-record-sets` 는 bastion instance profile 권한 밖이다(bastion 롤은 eks:Describe +
 > Vault 복원용 S3/KMS/Secrets 만 — eks-dr-bastion.tf). bastion 에서 실행하면 AccessDenied. route53/wafv2/elbv2
 > 권한이 있는 운영자 자격의 머신에서 실행한다(kubectl 로 ALB DNS 취득만 bastion, AWS API 전환은 운영자 머신).
@@ -250,13 +250,13 @@ ALB_ZONE=$(aws elbv2 describe-load-balancers --region ap-northeast-2 \
   --query "LoadBalancers[?DNSName=='$ALB'].CanonicalHostedZoneId" --output text)
 ZONE=$(aws route53 list-hosted-zones-by-name --dns-name cledyu.com --query "HostedZones[0].Id" --output text)
 
-# 공개 노출 전 필수 — /metrics 차단. api /metrics(무인증)가 '/' Prefix 로 인터넷에 노출된다. 온프렘과 동일
-# WAF(cledyu-lab-public, block-public-metrics 룰)를 DR ALB 에 연결한다(REGIONAL WebACL 재사용, 새 리소스 불필요).
+# /metrics 차단 WAF(cledyu-lab-public, block-public-metrics 룰)는 api·web values-eks 의 wafv2-acl-arn
+# annotation 으로 ALB 생성과 동시에 자동 연결된다 → 수동 associate-web-acl 불요(프로비저닝~연결 노출 창 제거).
+# 여기서는 실제로 붙었는지 + /metrics 차단만 확인한다.
 ALB_ARN=$(aws elbv2 describe-load-balancers --region ap-northeast-2 \
   --query "LoadBalancers[?DNSName=='$ALB'].LoadBalancerArn" --output text)
-WAF_ARN=$(aws wafv2 list-web-acls --scope REGIONAL --region ap-northeast-2 \
-  --query "WebACLs[?Name=='cledyu-lab-public'].ARN" --output text)
-aws wafv2 associate-web-acl --web-acl-arn "$WAF_ARN" --resource-arn "$ALB_ARN" --region ap-northeast-2
+aws wafv2 get-web-acl-for-resource --resource-arn "$ALB_ARN" --region ap-northeast-2 \
+  --query "WebACL.Name" --output text          # → cledyu-lab-public (비어 있으면 values-eks ARN stale → 갱신 후 재sync)
 # 확인: curl https://api.cledyu.com/metrics → 403(WAF block)
 
 # (A) 실제 페일오버 — api/app.cledyu.com alias 를 EKS ALB 로 UPSERT (auth 는 T8 후)
