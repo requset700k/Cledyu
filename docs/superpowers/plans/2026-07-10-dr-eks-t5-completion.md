@@ -583,20 +583,34 @@ terraform 밖이다. 클러스터를 먼저 부수면 ALB·target group·`k8s-*`
 남은 ENI 가 서브넷/VPC 삭제를 `DependencyViolation` 으로 막는다. 반드시 in-cluster 부터 정리한다.
 
 ```bash
-# 1) Ingress 삭제 → 컨트롤러가 ALB/TG/SG 정리 (완료까지 대기)
+# ⚠️ 이 초기 계획본 teardown 은 드릴서 교정됐다 — 최신·권위는 런북(docs/RUNBOOK/dr-eks-bootstrap.md "destroy(고아 방지)"). 아래는 교정 요지.
+# 0) selfHeal 정지: kubectl -n argocd scale statefulset argocd-application-controller --replicas=0
+#    (root-app 을 delete-cascade 하면 self-managed ArgoCD 가 자기 자신 prune → 데드락. Application 삭제 말고 컨트롤러 스케일 0.)
+# 1) 워크로드 먼저 종료: vault StatefulSet·CNPG Cluster 삭제 후 파드 종료 대기
+#    (파드가 PVC 물고 있으면 아래 PVC 삭제가 finalizer 에 걸리고, selfHeal 안 끄면 재생성돼 EBS 고아).
+kubectl -n vault delete statefulset vault --ignore-not-found
+kubectl delete clusters.postgresql.cnpg.io -A --all --ignore-not-found
+kubectl wait --for=delete pod -n vault -l app.kubernetes.io/name=vault --timeout=300s
+# 2) Ingress 삭제 → ALB/TG/SG 정리 (완료까지 대기)
 kubectl delete ingress -A --all
-aws elbv2 describe-load-balancers --region ap-northeast-2 \
-  --query "LoadBalancers[?VpcId=='<dr-vpc-id>'].LoadBalancerArn" --output text   # 빈 값 될 때까지 확인
-
-# 2) PVC 삭제 → EBS CSI 가 gp3 볼륨 삭제 (드릴 데이터는 S3 백업에 있으니 폐기 가능)
+# 3) PVC 삭제 → EBS CSI gp3 볼륨 삭제 (PV 0 확인)
 kubectl delete pvc -A --all
 
-# 3) LoadBalancer 타입 Service 없음(traefik 은 DR 앱셋 미포함) — skip
+# 4) 노드 종료 후 남은 available CNI ENI(설명 aws-K8S-*) 삭제 — subnet/SG DependencyViolation 방지(드릴 실측).
+#    for eni in $(aws ec2 describe-network-interfaces --filters Name=vpc-id,Values=<dr-vpc-id> Name=status,Values=available \
+#      --query "NetworkInterfaces[?starts_with(Description,'aws-K8S-')].NetworkInterfaceId" --output text); do aws ec2 delete-network-interface --network-interface-id "$eni"; done
 
-# 4) terraform destroy
-cd infra/terraform/aws && terraform apply -var enable_eks_dr=false
+# 5) terraform destroy — ⚠️ DR -target 목록 필수. tfvars 부재로 -target 없이 apply 하면 enable_public_ingress 등
+#    비-DR 운영 게이트가 기본값(false)으로 수렴돼 프로덕션 리소스가 삭제/변경된다. Task 1 Step 8 과 동일 -target 목록 사용.
+cd infra/terraform/aws && terraform apply -var enable_eks_dr=false \
+  -target=module.eks_dr_vpc -target=module.eks_dr -target=module.eks_dr_ebs_csi_irsa -target=module.eks_dr_alb_irsa \
+  -target=aws_security_group.eks_dr_endpoints -target=aws_security_group.eks_dr_bastion -target=module.eks_dr_endpoints \
+  -target=module.eks_dr_vault_unseal_irsa -target=aws_iam_policy.eks_dr_vault_unseal -target=aws_iam_policy.eks_dr_cnpg_restore \
+  -target=module.eks_dr_cnpg_restore_irsa -target=aws_iam_role.eks_dr_bastion \
+  -target=aws_iam_role_policy_attachment.eks_dr_bastion_ssm -target=aws_iam_role_policy.eks_dr_bastion_describe \
+  -target=aws_iam_role_policy.eks_dr_bastion_vault_restore -target=aws_iam_instance_profile.eks_dr_bastion -target=aws_instance.eks_dr_bastion
 
-# 5) 고아 검증(전부 0/비어야 함)
+# 6) 고아 검증(전부 0/비어야 함) — ALB·owned EBS·CNI ENI·k8s-* SG
 aws elbv2 describe-load-balancers --region ap-northeast-2 --query "LoadBalancers[?VpcId=='<dr-vpc-id>']" --output text
 aws ec2 describe-volumes --region ap-northeast-2 --filters "Name=tag:kubernetes.io/cluster/<dr-cluster-name>,Values=owned" --query "Volumes[].VolumeId" --output text
 aws ec2 describe-network-interfaces --region ap-northeast-2 --filters "Name=vpc-id,Values=<dr-vpc-id>" --query "NetworkInterfaces[].NetworkInterfaceId" --output text
