@@ -1,0 +1,10 @@
+---
+# EKS DR 전용 cert-manager 값 — 콜드 DR 1회 드릴이라 온프렘 HA 튜닝(replica 2/3·PDB·topology spread)
+# 대신 lean(단일 replica). 노드 3개라 HA도 가능하지만 기동 단순·빠른 Ready 우선(YAGNI).
+crds:
+  enabled: true
+replicaCount: 1
+webhook:
+  replicaCount: 1
+cainjector:
+  replicaCount: 1

@@ -1,0 +1,39 @@
+---
+# PKI 부트스트랩 — 온프렘 pki-bootstrap.yaml 재사용(드리프트 0). DR 클러스터에 자체 CA 신규 발급.
+# 체인: selfsigned-root(ClusterIssuer) → cledyu-root-ca(CA Cert/secret) → cledyu-root-ca(ClusterIssuer)
+#      → cledyu-ca(CA Cert) → cledyu-ca(ClusterIssuer). api/web/vault Certificate 가 cledyu-ca 사용.
+# cert-manager(-10) 이후, consumer(0) 이전 → wave -8.
+# SkipDryRunOnMissingResource: 첫 sync 때 cert-manager CRD 등록 전이면 CR dry-run 을 skip(retry 수렴).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eks-platform-pki
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-8"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/requset700k/Cledyu.git
+    targetRevision: main
+    path: infra/kubernetes/cert-manager
+    directory:
+      include: pki-bootstrap.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+    retry:
+      limit: 10
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m

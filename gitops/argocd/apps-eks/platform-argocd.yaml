@@ -1,0 +1,48 @@
+---
+# ArgoCD self-managed Application — EKS 는 온프렘과 별도의 자체 ArgoCD 인스턴스를 구동하며,
+# 그 인스턴스가 스스로를 관리하도록 등록(onprem gitops/argocd/apps/platform-argocd.yaml 과 동일 패턴).
+# finalizer 의도적 생략: 이 Application 삭제가 ArgoCD 자기 자신을 cascade 삭제하지 않도록.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eks-platform-argocd
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+spec:
+  project: default
+  sources:
+    - repoURL: https://argoproj.github.io/argo-helm
+      chart: argo-cd
+      targetRevision: 7.7.10
+      helm:
+        releaseName: argocd
+        valueFiles:
+          - $values/gitops/apps/argocd/values.yaml
+          - $values/gitops/apps/argocd/values-eks.yaml
+    - repoURL: https://github.com/requset700k/Cledyu.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - ServerSideApply=true
+      - RespectIgnoreDifferences=true
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+  ignoreDifferences:
+    - group: ""
+      kind: Secret
+      name: argocd-secret
+      jsonPointers:
+        - /data
