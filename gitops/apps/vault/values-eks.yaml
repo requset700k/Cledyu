@@ -1,0 +1,61 @@
+---
+# EKS DR 오버레이 — 온프렘 동일 3-node raft + IRSA awskms unseal + gp3. 정적 크레드 env 없음.
+# 3-node 인 이유: 온프렘 3-peer raft 스냅샷을 동일 토폴로지로 복원해야 quorum 이 선다(setNodeId:true 라
+# EKS 파드 node ID(vault-0/1/2)가 스냅샷 peer 와 일치 → 복원 후 leader 재선출). 1-node 면 2/3 quorum 불가.
+# raft.config 는 base(retry_join) + seal awskms 를 통째로 재기술(base 에 seal 이 없어 override 불가피).
+server:
+  serviceAccount:
+    # IRSA: SA(vault)에 role-arn 만 추가(name/create 미지정 → 차트 기본 SA vault 유지).
+    annotations:
+      eks.amazonaws.com/role-arn: "arn:aws:iam::504284203153:role/cledyu-dr-vault-unseal"   # role_name 고정→결정적, verbatim 하드코딩
+  dataStorage:
+    storageClass: gp3
+  auditStorage:
+    storageClass: gp3
+  ha:
+    # replicas 는 base(3) 유지 — override 안 함(스냅샷 3-peer 와 동일 토폴로지).
+    raft:
+      config: |
+        ui = true
+        disable_mlock = true
+
+        listener "tcp" {
+          address = "[::]:8200"
+          cluster_address = "[::]:8201"
+          tls_disable = 0
+          tls_cert_file = "/vault/tls/tls.crt"
+          tls_key_file = "/vault/tls/tls.key"
+          tls_client_ca_file = "/vault/tls/ca.crt"
+          telemetry {
+            unauthenticated_metrics_access = true
+          }
+        }
+
+        storage "raft" {
+          path = "/vault/data"
+
+          retry_join {
+            leader_api_addr = "https://vault-0.vault-internal:8200"
+            leader_ca_cert_file = "/vault/tls/ca.crt"
+          }
+          retry_join {
+            leader_api_addr = "https://vault-1.vault-internal:8200"
+            leader_ca_cert_file = "/vault/tls/ca.crt"
+          }
+          retry_join {
+            leader_api_addr = "https://vault-2.vault-internal:8200"
+            leader_ca_cert_file = "/vault/tls/ca.crt"
+          }
+        }
+
+        seal "awskms" {
+          region     = "ap-northeast-2"
+          kms_key_id = "arn:aws:kms:ap-northeast-2:504284203153:key/e29e3ec2-f5e0-4308-af6f-5b576cc99f52"
+        }
+
+        service_registration "kubernetes" {}
+
+        telemetry {
+          prometheus_retention_time = "30s"
+          disable_hostname = true
+        }
