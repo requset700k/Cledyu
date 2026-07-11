@@ -1,0 +1,58 @@
+---
+# EKS DR — Strimzi Kafka Operator. 온프렘 data-strimzi-operator.yaml 과 동일 패턴(multi-source).
+# wave 0 — kafka-cluster(data-kafka-cluster, wave 1)보다 먼저 CRD·오퍼레이터가 서야 한다.
+# targetRevision: main — apps-eks 형제 앱 규약 일치(#284 는 main 머지 후 드릴 모델).
+#   머지 전 드릴이 필요하면 apps-eks 전체를 일괄 flip(2934d31)→revert(d1bd981)로 처리.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eks-data-strimzi-operator
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  # multi-source: Helm 차트 + values 파일 + namespace 선언을 별도 소스로 분리(온프렘과 동일).
+  sources:
+    - repoURL: https://strimzi.io/charts/
+      chart: strimzi-kafka-operator
+      targetRevision: 0.43.0
+      helm:
+        releaseName: strimzi
+        valueFiles:
+          - $values/gitops/apps/strimzi-operator/values.yaml
+    - repoURL: https://github.com/requset700k/Cledyu.git
+      targetRevision: main
+      ref: values
+    - repoURL: https://github.com/requset700k/Cledyu.git
+      targetRevision: main
+      path: gitops/apps/strimzi-operator
+      directory:
+        include: namespace.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: strimzi-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+  # Strimzi CRD 는 apply 시 preserveUnknownFields/status/openAPIV3Schema diff 가 영구 발생 → 비교 제외.
+  ignoreDifferences:
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      jsonPointers:
+        - /spec/preserveUnknownFields
+        - /status
+      jqPathExpressions:
+        - .spec.versions[].schema.openAPIV3Schema
