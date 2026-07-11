@@ -7,7 +7,7 @@
 #   토픽을 빼면 발행 에러. 분석 소비자 없어도 KafkaTopic CR 은 무해(보존기간 후 만료).
 # nodepool 은 SC-agnostic(class 제거)이라 EKS 기본 SC(gp3) 자동 사용.
 # 온프렘 원본의 cilium.io/CiliumIdentity ignoreDifferences 는 제거 — EKS 는 VPC CNI(Cilium 없음).
-# targetRevision: main — apps-eks 형제 앱 규약 일치.
+# targetRevision: main — apps-eks 형제 앱 규약 일치
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
