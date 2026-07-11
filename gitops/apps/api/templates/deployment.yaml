@@ -44,6 +44,10 @@ spec:
                   name: {{ .Values.db.secretName | quote }}
                   key: {{ .Values.db.secretKey | quote }}
                   optional: true
+            # 세션 실행 백엔드(KubeVirt) 활성 여부. false 면 kubevirt manager 미생성 → 세션 Provider nil →
+            # 세션 API 가 처음부터 503(DR 처럼 KubeVirt 없는 환경서 ns 고아 방지). values-eks 에서 false.
+            - name: CLEDYU_KUBEVIRT_ENABLED
+              value: {{ .Values.kubevirt.enabled | quote }}
             # 세션 VM cloud-init이 lab authorized_keys로 넣는 검증엔진 공개키(공개값이라 평문 OK).
             - name: CLEDYU_KUBEVIRT_LAB_SSH_PUBLIC_KEY
               value: {{ .Values.kubevirt.labSshPublicKey | quote }}
@@ -128,9 +132,11 @@ spec:
               value: {{ printf "%s/%s" .Values.analytics.credentialsMountPath .Values.analytics.secretKey | quote }}
             {{- end }}
           volumeMounts:
+            {{- if .Values.kafka.enabled }}
             - name: kafka-certs
               mountPath: /etc/kafka-certs
               readOnly: true
+            {{- end }}
             - name: cledyu-ca
               mountPath: /etc/ssl/cledyu
               readOnly: true
@@ -164,9 +170,11 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
       volumes:
+        {{- if .Values.kafka.enabled }}
         - name: kafka-certs
           secret:
             secretName: api-kafka-client-tls
+        {{- end }}
         - name: cledyu-ca
           configMap:
             name: cledyu-root-ca-bundle  # trust-manager 가 ns 라벨 기준으로 배포(키: ca.crt)
