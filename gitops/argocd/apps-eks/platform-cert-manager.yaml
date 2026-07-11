@@ -22,7 +22,7 @@ spec:
         valueFiles:
           - $values/gitops/apps/cert-manager/values.yaml
     - repoURL: https://github.com/requset700k/Cledyu.git
-      targetRevision: main
+      targetRevision: feat/dr-eks-overlay
       ref: values
   destination:
     server: https://kubernetes.default.svc

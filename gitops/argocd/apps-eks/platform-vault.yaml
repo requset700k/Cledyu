@@ -21,10 +21,10 @@ spec:
           - $values/gitops/apps/vault/values.yaml
           - $values/gitops/apps/vault/values-eks.yaml
     - repoURL: https://github.com/requset700k/Cledyu.git
-      targetRevision: main
+      targetRevision: feat/dr-eks-overlay
       ref: values
     - repoURL: https://github.com/requset700k/Cledyu.git
-      targetRevision: main
+      targetRevision: feat/dr-eks-overlay
       path: gitops/apps/vault
       directory:
         include: "{namespace.yaml,admin-serviceaccount.yaml,certificate.yaml}"
