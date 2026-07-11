@@ -263,7 +263,7 @@ git commit -m "feat(dr): ESO 배선 — vault-backend store + cledyu-api-oidc ES
 
 - [ ] **Step 1: k8s auth 재설정 스텝 추가**
 
-Edit `docs/RUNBOOK/dr-eks-bootstrap.md` — Vault 복원/unseal 절차 **뒤**(ESO가 붙기 직전)에 아래 블록을 삽입한다. 삽입 위치 앵커: 체크리스트의 `- [ ] apps-eks root-app 적용` 줄 **뒤**(또는 Vault 복원 절 말미). 아래 마크다운 블록을 추가:
+Edit `docs/RUNBOOK/dr-eks-bootstrap.md` — 아래 블록을 삽입한다. **삽입 위치 앵커: Vault snapshot restore·unseal 확인 줄 뒤(ESO 인증 직전) 단 한 곳.** ⚠️ 반드시 복원 **이후**여야 한다 — `apps-eks root-app 적용` 뒤(=복원 전)에 넣으면 빈/스냅샷-이전 Vault 에 EKS `auth/kubernetes/config` 를 먼저 썼다가 이어지는 snapshot restore 가 온프렘 CA/token 으로 다시 덮어써, ESO 가 `vault-backend` 로그인에 실패하고 `cledyu-api-oidc` 생성·api 기동이 막힌다. 아래 마크다운 블록을 추가:
 
 ```markdown
 ### Vault k8s auth 를 EKS 용으로 재설정 (복원·unseal 후, ESO 인증 직전)

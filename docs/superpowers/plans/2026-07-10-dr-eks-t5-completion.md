@@ -584,21 +584,25 @@ terraform 밖이다. 클러스터를 먼저 부수면 ALB·target group·`k8s-*`
 
 ```bash
 # ⚠️ 이 초기 계획본 teardown 은 드릴서 교정됐다 — 최신·권위는 런북(docs/RUNBOOK/dr-eks-bootstrap.md "destroy(고아 방지)"). 아래는 교정 요지.
-# 0) selfHeal 정지: kubectl -n argocd scale statefulset argocd-application-controller --replicas=0
-#    (root-app 을 delete-cascade 하면 self-managed ArgoCD 가 자기 자신 prune → 데드락. Application 삭제 말고 컨트롤러 스케일 0.)
-# 1) 워크로드 먼저 종료: vault StatefulSet·CNPG Cluster 삭제 후 파드 종료 대기
-#    (파드가 PVC 물고 있으면 아래 PVC 삭제가 finalizer 에 걸리고, selfHeal 안 끄면 재생성돼 EBS 고아).
+# 0) selfHeal 정지 — 이 줄을 먼저 실행해야 이후 delete 가 재생성되지 않는다(root-app delete-cascade 는
+#    self-managed ArgoCD 가 자기 자신 prune → 데드락이므로 금지. Application 삭제 말고 컨트롤러만 스케일 0).
+kubectl -n argocd scale statefulset argocd-application-controller --replicas=0
+kubectl -n argocd rollout status statefulset argocd-application-controller --timeout=60s   # replicas 0 확인 후 진행
+
+# 1) 워크로드 먼저 종료: vault StatefulSet·CNPG Cluster 삭제 후 파드 종료 대기(파드가 PVC 물면 아래 PVC 삭제가 finalizer 에 걸림).
 kubectl -n vault delete statefulset vault --ignore-not-found
 kubectl delete clusters.postgresql.cnpg.io -A --all --ignore-not-found
 kubectl wait --for=delete pod -n vault -l app.kubernetes.io/name=vault --timeout=300s
+
 # 2) Ingress 삭제 → ALB/TG/SG 정리 (완료까지 대기)
 kubectl delete ingress -A --all
+
 # 3) PVC 삭제 → EBS CSI gp3 볼륨 삭제 (PV 0 확인)
 kubectl delete pvc -A --all
 
-# 4) 노드 종료 후 남은 available CNI ENI(설명 aws-K8S-*) 삭제 — subnet/SG DependencyViolation 방지(드릴 실측).
-#    for eni in $(aws ec2 describe-network-interfaces --filters Name=vpc-id,Values=<dr-vpc-id> Name=status,Values=available \
-#      --query "NetworkInterfaces[?starts_with(Description,'aws-K8S-')].NetworkInterfaceId" --output text); do aws ec2 delete-network-interface --network-interface-id "$eni"; done
+# 4) 노드 종료 후 남은 available CNI ENI(설명 aws-K8S-*) 삭제 — subnet/SG DependencyViolation 방지(드릴 실측). <dr-vpc-id> 치환.
+for eni in $(aws ec2 describe-network-interfaces --filters Name=vpc-id,Values=<dr-vpc-id> Name=status,Values=available \
+  --query "NetworkInterfaces[?starts_with(Description,'aws-K8S-')].NetworkInterfaceId" --output text); do aws ec2 delete-network-interface --network-interface-id "$eni"; done
 
 # 5) terraform destroy — ⚠️ DR -target 목록 필수. tfvars 부재로 -target 없이 apply 하면 enable_public_ingress 등
 #    비-DR 운영 게이트가 기본값(false)으로 수렴돼 프로덕션 리소스가 삭제/변경된다. Task 1 Step 8 과 동일 -target 목록 사용.

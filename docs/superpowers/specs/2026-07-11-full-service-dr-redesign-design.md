@@ -35,7 +35,7 @@ EKS 컨트롤플레인 + VPC + IRSA + 노드그룹(desired=0)
 
 ```bash
 # 재해 트리거 (단일 apply — DR -target 목록 유지, tfvars 없어 전체 apply 금지)
-terraform apply -var eks_dr_active=true -var eks_dr_node_desired_size=N <DR -target 목록>
+terraform apply -var eks_dr_active=true -var eks_dr_node_desired=N <DR -target 목록>
 #   → NAT + VPC 엔드포인트 + bastion + 노드 N개 생성
 #   → Pending 파드 전부 스케줄 → ArgoCD 가 git(main)에서 최신 pull 해 wave 순서로 자동 수렴
 #      (cert-manager → PKI → ESO → strimzi → kafka → cnpg → vault → validation-engine → api/web)
@@ -44,7 +44,7 @@ terraform apply -var eks_dr_active=true -var eks_dr_node_desired_size=N <DR -tar
 ```
 RTO 목표 ~8~10분 (cold ~15~20분 대비 단축: 컨트롤플레인 사전 생성 + 앱 사전 seed).
 
-**failback:** 온프렘 복구 후 `eks_dr_active=false` + `eks_dr_node_desired_size=0` + DNS 원복 → 노드·NAT·엔드포인트·bastion 소멸, 클러스터는 warm 유지.
+**failback:** 온프렘 복구 후 `eks_dr_active=false` + `eks_dr_node_desired=0` + DNS 원복 → 노드·NAT·엔드포인트·bastion 소멸, 클러스터는 warm 유지.
 
 ### 2.3 실습 실행 흐름 (재해 시)
 
@@ -92,7 +92,7 @@ RTO 목표 ~8~10분 (cold ~15~20분 대비 단축: 컨트롤플레인 사전 생
 ### 4.1 terraform 재구조
 
 - `enable_eks_dr = true` 를 **상시 유지**(warm 스택 존재 여부 토글, 폐기 시만 false).
-- 노드그룹: `desired_size = var.eks_dr_node_desired_size`(기본 0), `min_size = 0`, `max_size = N`.
+- 노드그룹: `desired_size = var.eks_dr_node_desired`(기본 0), `min_size = 0`, `max_size = N`.
 - 새 게이트 `var.eks_dr_active`(기본 false): **NAT · VPC 인터페이스 엔드포인트 · bastion · 노드 스케일**을 이 값으로 gate → 평시 미생성(비용 0), 재해 시 true.
 - 상시 warm = 컨트롤플레인 + VPC/서브넷/RT(무료) + IRSA(무료) + 노드그룹 정의(desired 0, 무료) + SG(무료).
 
