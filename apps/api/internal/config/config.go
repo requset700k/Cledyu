@@ -65,6 +65,11 @@ type KafkaConfig struct {
 }
 
 type KubeVirtConfig struct {
+	// Enabled: 세션 실행 백엔드(KubeVirt) 사용 여부. 기본 true(현행 온프렘 동작 보존).
+	// false면 kubevirt manager 를 만들지 않아(main.go) 세션 Provider 가 nil → 세션 API 가 처음부터 503.
+	// DR(EKS)처럼 KubeVirt CRD/오퍼레이터가 없는 환경에서 세션 생성이 lab-* ns/Secret 을 만든 뒤
+	// VM 생성서 500 나며 네임스페이스가 고아로 남는 것을 차단한다. env: CLEDYU_KUBEVIRT_ENABLED.
+	Enabled         bool   `mapstructure:"enabled"`
 	Kubeconfig      string `mapstructure:"kubeconfig"`
 	BaseImageNS     string `mapstructure:"base_image_ns"`
 	BaseImageName   string `mapstructure:"base_image_name"`
@@ -178,6 +183,7 @@ func Load() (*Config, error) {
 	// 역할 승격 service-account — 빈 기본값. env CLEDYU_KEYCLOAK_ADMIN_CLIENT_ID/SECRET 로 주입.
 	v.SetDefault("keycloak.admin_client_id", "")
 	v.SetDefault("keycloak.admin_client_secret", "")
+	v.SetDefault("kubevirt.enabled", true) // 기본 활성(온프렘). DR 은 CLEDYU_KUBEVIRT_ENABLED=false 로 끈다.
 	v.SetDefault("kubevirt.kubeconfig", os.Getenv("KUBECONFIG"))
 	v.SetDefault("kubevirt.base_image_ns", "kubevirt")
 	v.SetDefault("kubevirt.base_image_name", "ubuntu-2204-base")
