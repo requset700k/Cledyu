@@ -159,8 +159,9 @@ resource "aws_instance" "eks_dr_bastion" {
     curl -fsSL --retry 8 --retry-delay 5 "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
     unzip -q /tmp/awscliv2.zip -d /tmp
     /tmp/aws/install
-    # ④ helm (ArgoCD seed 에 필요)
-    curl -fsSL --retry 8 --retry-delay 5 https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    # ④ helm (ArgoCD seed 에 필요) — 버전 핀. get-helm-3 기본은 latest 라 드릴 시점마다 달라져 재현성이 없다.
+    # 레포 표준(infra/images/lab-base/provisioners/50-ansible-helm.sh)과 동일한 v3.21.2 로 고정한다.
+    curl -fsSL --retry 8 --retry-delay 5 https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | DESIRED_VERSION=v3.21.2 bash
   EOT
 
   # user_data(cloud-init)는 인스턴스 최초 launch 때만 실행된다. user_data 만 바꾸고 apply 하면
