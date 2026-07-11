@@ -18,7 +18,9 @@ spec:
   storage:
     type: persistent-claim
     size: 30Gi
-    class: longhorn
+    # class 미지정 → 각 클러스터 기본 StorageClass 사용(온프렘=longhorn, EKS DR=gp3).
+    # 환경별 SC 차이를 raw-디렉토리 앱에서 흡수(values 오버레이 불가하므로 default SC 에 위임).
+    # 온프렘 안전: ansible longhorn_make_default_storage_class=true → default SC=longhorn(제거해도 동작 동일).
     deleteClaim: false
   resources:
     requests:
