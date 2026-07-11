@@ -1,9 +1,10 @@
 # EKS Cold DR 부트스트랩 런북 (Plan B)
 
-> **상태: 작성 중 (Plan B Task 9).** 온프렘 상실 시 EKS 에서 백업으로 과금최소경로를
-> 재현하는 수동 부트스트랩 절차. 현재는 **Vault 스냅샷 복원** 섹션만 확정돼 있고,
-> 나머지 스텝(terraform apply → 엔드포인트 치환 → CNPG 복원 → 앱 Ready → 검증 → destroy)은
-> T9 에서 채운다. 드릴(T10)은 이 문서를 처음부터 끝까지 한 번 완주하는 것.
+> 온프렘 상실 시 EKS 에서 백업으로 과금최소경로(계정·수료·진도)를 재현하는 수동 부트스트랩 절차.
+> ⚠️ **실행 순서는 아래 체크리스트 기준** — 이 문서의 섹션 배치(Vault 복원이 앞에 옴)와 다르다. 실제 순서:
+> ① terraform apply → ② **apps-eks 부트스트랩(Vault 를 여기서 배포)** → ③ Vault 스냅샷 복원 →
+> ④ Vault k8s auth 재설정 → ⑤ CNPG 복원 → ⑥ api/web Ready → ⑦ 공개 DNS 전환 → ⑧ api/web restart →
+> ⑨ 검증 → ⑩ destroy. 드릴(T10)은 이 순서를 처음부터 끝까지 한 번 완주하는 것.
 
 ---
 
@@ -41,8 +42,9 @@ S3 에 올린다. DR 시엔 이 적재분을 그대로 복원 소스로 쓴다.
 
 ### 복원 절차 (드릴 — EKS)
 
-전제: Phase 1 terraform apply 완료(bastion 존재), Vault 앱(T6) sync 됨. 모든 `kubectl`
-명령은 **bastion 에서** 실행한다(private 엔드포인트).
+⚠️ **선행: 아래 "apps-eks 부트스트랩" 을 먼저 실행**(ArgoCD seed → root-app → Vault 앱 sync)해 vault-0/1/2 파드가
+존재해야 이 복원이 가능하다. 문서 배치상 이 섹션이 앞에 있지만 **실행은 부트스트랩 후**다. Phase 1 terraform
+apply 완료(bastion 존재) 전제. 모든 `kubectl` 명령은 **bastion 에서** 실행한다(private 엔드포인트).
 
 ```bash
 # 0) bastion 진입 + kubeconfig
@@ -137,9 +139,9 @@ kubectl -n vault exec -it vault-0 -- rm -f /tmp/vault-raft.snap
 
 ---
 
-## (T9 잔여) 나머지 부트스트랩 스텝
+## 부트스트랩 스텝 (실행 순서 = 체크리스트)
 
-- [ ] terraform apply (`enable_eks_dr=true`) + `<<...>>` 치환값(`terraform output`) 수집
+- [ ] terraform apply (`enable_eks_dr=true`) — DR 인프라(VPC·EKS·bastion·IRSA·엔드포인트) 생성
 
 ### apps-eks 부트스트랩 (bastion 에서)
 
@@ -151,13 +153,12 @@ curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 |
 git clone https://github.com/requset700k/Cledyu.git ~/Cledyu && cd ~/Cledyu
 aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2   # (Vault 복원 때 이미 했으면 생략)
 
-# 0) 사전 확인 — apps-eks 앱은 targetRevision=main 을 sync 하므로 드릴-타임 git 치환은 쓰지 않는다.
-#    IRSA 롤 ARN(vault/alb)은 role_name 고정→결정적이라 values-eks 에 하드코딩됨. vpcId 는 ALB 컨트롤러
-#    auto-discover 로 제거됨. 남은 건 ACM 와일드카드 ARN 하나 — 이 PR 병합 전 하드코딩(→ main)했어야 한다.
-#    여기서는 placeholder 가 남아있지 않은지만 확인한다(남으면 ALB 에 TLS 리스너 미설정).
+# 0) 사전 확인 — apps-eks 앱은 targetRevision=main 을 sync. 치환할 placeholder 는 없다:
+#    IRSA 롤 ARN(vault/alb)은 role_name 고정→결정적이라 하드코딩, vpcId·ACM cert 는 ALB 컨트롤러가
+#    auto-discover(vpc=IMDS, cert=Ingress host 기반 *.cledyu.com 매칭). 혹시 남은 placeholder 가 있으면 잡힌다.
 REPO_ROOT=$(git rev-parse --show-toplevel); cd "$REPO_ROOT"
 grep -rn '<<' gitops/apps/*/values-eks.yaml gitops/apps/alb-controller/values.yaml \
-  && echo "⚠ placeholder 잔존 — 병합 전 ACM ARN 을 실제 값으로 하드코딩 필요" || echo "placeholder 없음 OK"
+  && echo "⚠ placeholder 잔존 — 확인 필요" || echo "placeholder 없음 OK ✅"
 
 # 0.5) ArgoCD seed 설치 — self-managed 이지만 빈 클러스터엔 ArgoCD(Application CRD·컨트롤러)가 없어
 #      root-app 을 적용·조정할 주체가 없다(치킨-에그). 최초 1회 helm 으로 seed 하면, 이후 platform-argocd
@@ -254,7 +255,8 @@ aws elbv2 describe-load-balancers --region ap-northeast-2 \
 
 # 3) PVC 삭제 → 이제 마운트 없어 즉시 삭제 → EBS CSI 가 gp3 볼륨 삭제. PV/EBS 삭제 완료까지 대기.
 kubectl delete pvc -A --all
-until [ -z "$(kubectl get pv -o name 2>/dev/null)" ]; do echo "PV/EBS 삭제 대기..."; sleep 10; done
+for i in $(seq 1 30); do [ -z "$(kubectl get pv -o name 2>/dev/null)" ] && break; echo "PV/EBS 삭제 대기($i/30)..."; sleep 10; done
+kubectl get pv 2>/dev/null   # 남아있으면(Retain PV 등) 수동 확인 — gp3(Delete)면 비어야 정상
 
 # 4) LoadBalancer 타입 Service 없음(traefik 은 DR 앱셋 미포함) — skip
 
