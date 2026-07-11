@@ -1,0 +1,59 @@
+---
+# EKS DR — Kafka 클러스터(Strimzi). 온프렘 data-kafka-cluster.yaml 이식.
+# EKS 미지원/불필요 파일만 directory.exclude 로 제거:
+#   - *servicemonitor* : EKS 엔 prometheus-operator CRD 없음(sync 블로커)
+#   - kafkauser-airflow-analytics : airflow DR 미배포
+# ⚠️ 토픽은 전부 포함(lab-events·security-logs 도) — api 가 kafka.enabled 시 lab-events 에 발행하므로(A3 교차의존).
+#   토픽을 빼면 발행 에러. 분석 소비자 없어도 KafkaTopic CR 은 무해(보존기간 후 만료).
+# nodepool 은 SC-agnostic(class 제거)이라 EKS 기본 SC(gp3) 자동 사용.
+# 온프렘 원본의 cilium.io/CiliumIdentity ignoreDifferences 는 제거 — EKS 는 VPC CNI(Cilium 없음).
+# targetRevision: main — apps-eks 형제 앱 규약 일치.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eks-data-kafka-cluster
+  namespace: argocd
+  annotations:
+    # data-strimzi-operator(wave 0)가 CRD 설치 후 sync.
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/requset700k/Cledyu.git
+    targetRevision: main
+    path: gitops/apps/kafka-cluster
+    directory:
+      recurse: true
+      exclude: "{kafka-servicemonitor.yaml,kafka-exporter-servicemonitor.yaml,kafkauser-airflow-analytics.yaml}"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kafka
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    # CRD 전파 지연 흡수 위해 retry 높게(온프렘과 동일).
+    retry:
+      limit: 10
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+  ignoreDifferences:
+    - group: kafka.strimzi.io
+      kind: Kafka
+      jsonPointers:
+        - /status
+    - group: kafka.strimzi.io
+      kind: KafkaTopic
+      jsonPointers:
+        - /status
+    - group: ""
+      kind: PersistentVolumeClaim
+      jsonPointers:
+        - /status
