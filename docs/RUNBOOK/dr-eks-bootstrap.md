@@ -182,12 +182,12 @@ kubectl -n api get configmap cledyu-root-ca-bundle   # trust-manager Bundle 분�
 - [ ] **Vault 스냅샷 복원**(위 섹션)
 - [ ] CNPG 복원 차트 sync → `cledyu-pg-rw`·`keycloak-pg-rw` Ready(자동 S3 복원)
 - [ ] Keycloak·api·web Ready + ALB/ACM 종단 확인
-- [ ] **공개 DNS 를 DR EKS ALB 로 전환**(아래 섹션) — 안 하면 DNS 가 죽은 온프렘 프록시로 계속 보내 EKS 가 Healthy 여도 도달 불가
+- [ ] **DR ALB 에 WAF 연결(/metrics 차단) + 공개 DNS 전환**(아래 섹션) — WAF 없으면 무인증 /metrics 공개 노출, DNS 안 바꾸면 죽은 온프렘 프록시로 계속 감
 - [ ] **api·web rollout restart**(아래 섹션) — CNPG·Keycloak·DNS Ready 후 필수. api 는 startup 1회만 DB/auth 초기화·실패 시 degraded 유지라, 의존성이 늦게 살아나면 restart 해야 DB모드·로그인 활성
 - [ ] 검증(로컬 테스트유저 로그인·복원 데이터 서빙) + RTO 실측
 - [ ] destroy — **고아 방지 순서 필수** (아래)
 
-### 공개 DNS 를 DR EKS ALB 로 전환 (검증·서빙 전 필수)
+### DR ALB WAF 연결(/metrics 차단) + 공개 DNS 전환 (검증·서빙 전 필수)
 
 공개 DNS(`aws_route53_record.public`)는 온프렘 프록시 ALB 를 alias 로 가리킨다. 온프렘 장애 시에도 그대로면
 EKS ALB target 이 Healthy 여도 사용자가 도달하지 못한다. **api/app 만** EKS ALB 로 돌린다.
@@ -200,6 +200,15 @@ ALB=$(kubectl -n api get ingress api -o jsonpath='{.status.loadBalancer.ingress[
 ALB_ZONE=$(aws elbv2 describe-load-balancers --region ap-northeast-2 \
   --query "LoadBalancers[?DNSName=='$ALB'].CanonicalHostedZoneId" --output text)
 ZONE=$(aws route53 list-hosted-zones-by-name --dns-name cledyu.com --query "HostedZones[0].Id" --output text)
+
+# 공개 노출 전 필수 — /metrics 차단. api /metrics(무인증)가 '/' Prefix 로 인터넷에 노출된다. 온프렘과 동일
+# WAF(cledyu-lab-public, block-public-metrics 룰)를 DR ALB 에 연결한다(REGIONAL WebACL 재사용, 새 리소스 불필요).
+ALB_ARN=$(aws elbv2 describe-load-balancers --region ap-northeast-2 \
+  --query "LoadBalancers[?DNSName=='$ALB'].LoadBalancerArn" --output text)
+WAF_ARN=$(aws wafv2 list-web-acls --scope REGIONAL --region ap-northeast-2 \
+  --query "WebACLs[?Name=='cledyu-lab-public'].ARN" --output text)
+aws wafv2 associate-web-acl --web-acl-arn "$WAF_ARN" --resource-arn "$ALB_ARN" --region ap-northeast-2
+# 확인: curl https://api.cledyu.com/metrics → 403(WAF block)
 
 # (A) 실제 페일오버 — api/app.cledyu.com alias 를 EKS ALB 로 UPSERT (auth 는 T8 후)
 for h in api app; do
