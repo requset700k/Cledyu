@@ -163,5 +163,11 @@ resource "aws_instance" "eks_dr_bastion" {
     curl -fsSL --retry 8 --retry-delay 5 https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
   EOT
 
+  # user_data(cloud-init)는 인스턴스 최초 launch 때만 실행된다. user_data 만 바꾸고 apply 하면
+  # AWS 는 속성만 갱신하고 재부팅·재실행하지 않아, 이미 뜬 bastion 엔 kubectl/git/jq/helm·retry 보강이
+  # 반영되지 않는다(실패한 드릴로 인스턴스가 남으면 복구 경로가 계속 깨짐). → user_data 변경 시 강제 교체.
+  # (public-ingress.tf proxy 인스턴스와 동일 패턴.)
+  user_data_replace_on_change = true
+
   tags = merge(local.eks_dr_tags, { Name = "${local.eks_dr_name}-bastion" })
 }
