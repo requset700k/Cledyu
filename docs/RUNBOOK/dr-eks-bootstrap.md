@@ -182,6 +182,7 @@ kubectl -n api get configmap cledyu-root-ca-bundle   # trust-manager Bundle 분�
 - [ ] CNPG 복원 차트 sync → `cledyu-pg-rw`·`keycloak-pg-rw` Ready(자동 S3 복원)
 - [ ] Keycloak·api·web Ready + ALB/ACM 종단 확인
 - [ ] **공개 DNS 를 DR EKS ALB 로 전환**(아래 섹션) — 안 하면 DNS 가 죽은 온프렘 프록시로 계속 보내 EKS 가 Healthy 여도 도달 불가
+- [ ] **api·web rollout restart**(아래 섹션) — CNPG·Keycloak·DNS Ready 후 필수. api 는 startup 1회만 DB/auth 초기화·실패 시 degraded 유지라, 의존성이 늦게 살아나면 restart 해야 DB모드·로그인 활성
 - [ ] 검증(로컬 테스트유저 로그인·복원 데이터 서빙) + RTO 실측
 - [ ] destroy — **고아 방지 순서 필수** (아래)
 
@@ -210,6 +211,20 @@ done
 for h in api app; do
   curl -sk --resolve $h.cledyu.com:443:$(dig +short $ALB|head -1) https://$h.cledyu.com/ -o /dev/null -w "%{http_code} $h\n"
 done
+```
+
+### api·web 재기동 (복원 데이터·로그인 활성화 — CNPG·Keycloak·DNS Ready 후)
+
+api 는 startup 에 `store.Open`(DB)·auth provider 를 **1회만** 초기화하고, 실패하면 in-memory/nil 로 **계속 실행**한다
+(재연결 루프 없음 — `apps/api/cmd/server/main.go`). 그래서 Vault 복원으로 `cledyu-api-oidc` 가 생겨 api 파드가 **일찍**
+뜨면, 그 시점에 CNPG(`cledyu-pg-rw`)·Keycloak·`auth.cledyu.com` 이 아직이면 **영구 degraded**(진도/계정 in-memory,
+로그인 불가)로 남는다. → 의존성이 모두 Ready 된 뒤 **반드시 rollout restart** 로 재초기화한다.
+
+```bash
+kubectl -n api rollout restart deploy/api && kubectl -n api rollout status deploy/api
+kubectl -n web rollout restart deploy/web && kubectl -n web rollout status deploy/web
+# 재기동 후 api 로그에 "db 연결 — 유저/진행 상태 영속화 활성"(in-memory 폴백 아님)·/ready checks 의 keycloak=connected 확인.
+kubectl -n api logs deploy/api | grep -E "db 연결|in-memory"
 ```
 
 ### destroy (고아 방지)
