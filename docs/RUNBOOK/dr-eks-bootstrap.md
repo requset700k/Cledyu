@@ -55,6 +55,8 @@ aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2
 #    (awskms seal 이라 unseal 키 입력은 불필요 — init 만 하면 자동 unseal 된다.)
 # in-pod vault CLI: VAULT_ADDR(https://127.0.0.1:8200)는 파드 env 에 있으나 VAULT_CACERT 는 없다.
 # TLS 자체서명(cledyu-ca)이라 CA 를 명시 안 하면 x509 실패 → 모든 vault 명령에 VAULT_CACERT=/vault/tls/ca.crt.
+# (cert 에 127.0.0.1 IP SAN 을 넣어뒀다 — certificate.yaml. 없으면 CA 를 줘도 127.0.0.1 은 IP-SAN 부재로
+#  x509 실패한다. 드릴서 실측 후 SAN 추가 → 아래 127.0.0.1 명령들이 그대로 통한다.)
 kubectl -n vault exec -it vault-0 -- sh -c 'VAULT_CACERT=/vault/tls/ca.crt vault operator init'
 #    → 출력된 Initial Root Token 을 <INIT_ROOT> 로 보관(restore 실행에만 임시 사용).
 #    vault-0 init·unseal 후 vault-1/2 가 retry_join 으로 자동 합류 → 3-node(스냅샷 3-peer 와 동일 토폴로지) 형성 대기:
@@ -78,21 +80,34 @@ kubectl -n vault cp ./vault-raft.snap vault-0:/tmp/vault-raft.snap
 kubectl -n vault exec -it vault-0 -- sh -c \
   'VAULT_CACERT=/vault/tls/ca.crt VAULT_TOKEN=<INIT_ROOT> vault operator raft snapshot restore -force /tmp/vault-raft.snap'
 
-# 4) force restore 후에는 스냅샷(원본 클러스터)의 recovery 키·루트토큰이 유효해지고
-#    init(1단계) 때 받은 <INIT_ROOT> 는 무효화된다. 따라서 이후 인증은 원본 자격으로 한다:
-#    원본 root token / recovery keys 는 DR 부트스트랩 시크릿(AWS Secrets Manager
-#    `cledyu/vault/bootstrap`)에 보관 — 이걸로 인증하거나 recovery 키로 새 root 를 생성한다.
-#      aws secretsmanager get-secret-value --secret-id cledyu/vault/bootstrap
-#      vault operator generate-root  (원본 recovery 키 threshold 로)
-#    bastion instance profile 에 cledyu/vault/* GetSecretValue 가 있다(eks-dr-bastion.tf
-#    aws_iam_role_policy.eks_dr_bastion_vault_restore) — 정적 키 없이 취득 가능.
-#    (그 시크릿이 CMK 로 암호화됐다면 롤에 해당 kms:Decrypt 추가 필요 — 코드 주석 참조.)
-kubectl -n vault exec -it vault-0 -- sh -c \
-  'VAULT_CACERT=/vault/tls/ca.crt VAULT_TOKEN=<원본 루트토큰> vault secrets list'   # 복원 확인
+# 4) force restore 후에는 스냅샷(원본 클러스터)의 recovery 키가 유효해지고 init(1단계) 때 받은
+#    <INIT_ROOT> 는 무효화된다. restore 직후 Vault 는 복원된 keyring 을 KMS 로 재-unseal 하니
+#    `vault status` 의 Sealed=false 를 먼저 확인(수 초). 이후 인증은 원본 자격으로 한다.
+#
+#    ⚠️ 드릴 실측: 부트스트랩 시크릿의 root_token 은 **온프렘이 초기 root 를 폐기(revoke)** 해
+#    무효였다(login 403). 따라서 **recovery 키로 generate-root** 가 주경로다(root_token 직접 사용 X).
+#    bastion instance profile 에 cledyu/vault/* GetSecretValue 있음(eks-dr-bastion.tf
+#    aws_iam_role_policy.eks_dr_bastion_vault_restore) — 정적 키 불요.
+#    (시크릿이 CMK 암호화면 롤에 해당 kms:Decrypt 추가 필요.)
+SECRET=$(aws secretsmanager get-secret-value --secret-id cledyu/vault/bootstrap \
+  --region ap-northeast-2 --query SecretString --output text)
+THRESH=$(echo "$SECRET" | jq -r .recovery_keys_threshold)
+GR=$(kubectl -n vault exec vault-0 -- sh -c \
+  'VAULT_CACERT=/vault/tls/ca.crt vault operator generate-root -init -format=json')
+NONCE=$(echo "$GR" | jq -r .nonce); OTP=$(echo "$GR" | jq -r .otp)
+ENC=""; for k in $(echo "$SECRET" | jq -r '.recovery_keys_b64[]' | head -n "$THRESH"); do
+  ENC=$(kubectl -n vault exec vault-0 -- sh -c \
+    "VAULT_CACERT=/vault/tls/ca.crt vault operator generate-root -nonce=$NONCE -format=json '$k'" \
+    | jq -r '.encoded_root_token // empty'); done
+NEWROOT=$(kubectl -n vault exec vault-0 -- sh -c \
+  "VAULT_CACERT=/vault/tls/ca.crt vault operator generate-root -decode=$ENC -otp=$OTP -format=json" | jq -r .token)
+# 복원 확인 — cledyu/ kv 에 oidc·db 등 온프렘 시크릿이 있어야 정상(비어 있으면 복원 실패 판정).
+kubectl -n vault exec vault-0 -- sh -c \
+  "VAULT_CACERT=/vault/tls/ca.crt VAULT_TOKEN=$NEWROOT vault kv list cledyu"
 # 복원 후 quorum 재확인 — 3 peers·leader 있어야 ESO 인증 진행. 없으면(leader 없음) quorum 실패 →
 # HashiCorp lost-quorum peers.json 복구 필요(3-node 로 복원했으니 정상적으론 재선출됨).
-kubectl -n vault exec -it vault-0 -- sh -c \
-  'VAULT_CACERT=/vault/tls/ca.crt VAULT_TOKEN=<원본 루트토큰> vault operator raft list-peers'
+kubectl -n vault exec vault-0 -- sh -c \
+  "VAULT_CACERT=/vault/tls/ca.crt VAULT_TOKEN=$NEWROOT vault operator raft list-peers"   # vault-0 leader + vault-1/2 follower(Voter=true)
 ```
 
 **복원 후 정합성 체크(다음 스텝의 선행조건):**
@@ -108,16 +123,25 @@ kubectl -n vault exec -it vault-0 -- sh -c \
 `external-secrets-operator` 는 스냅샷에 이미 있어 재설정 불요).
 
 ```bash
-# bastion. VAULT_ADDR 는 파드 env 에 있으나 VAULT_CACERT 는 없어(CA=/vault/tls/ca.crt 마운트) 명시한다.
-kubectl -n vault exec -it vault-0 -- sh -c \
-  'VAULT_CACERT=/vault/tls/ca.crt VAULT_TOKEN=<원본 루트토큰> vault write auth/kubernetes/config \
+# bastion. VAULT_ADDR(127.0.0.1) 는 파드 env, VAULT_CACERT 만 명시(CA=/vault/tls/ca.crt).
+# disable_local_ca_jwt=true — 제공한 reviewer JWT/CA 로만 TokenReview(로컬 파드 CA/JWT 미사용) → EKS 서 안정적.
+kubectl -n vault exec vault-0 -- sh -c \
+  "VAULT_CACERT=/vault/tls/ca.crt VAULT_TOKEN=$NEWROOT vault write auth/kubernetes/config \
      kubernetes_host=https://kubernetes.default.svc:443 \
      kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt \
-     token_reviewer_jwt=@/var/run/secrets/kubernetes.io/serviceaccount/token'
+     token_reviewer_jwt=@/var/run/secrets/kubernetes.io/serviceaccount/token \
+     disable_local_ca_jwt=true"
 
-# 검증: ESO 가 store 인증 → 시크릿 생성 → api 기동
-kubectl -n api get externalsecret cledyu-web-oidc-client-secret   # STATUS: SecretSynced
-kubectl -n api get secret cledyu-api-oidc                          # 생성 확인
+# ⚠️ 드릴 실측: ESO 컨트롤러는 Vault 가 늦게(복원 후) 살아나면 **실패한 provider client 를 캐시**해
+# store 를 InvalidProviderConfig 로 붙잡는다 → k8s auth 재설정 직후 **ESO 재기동으로 캐시를 버린다**.
+kubectl -n external-secrets rollout restart deploy/external-secrets
+kubectl -n external-secrets rollout status deploy/external-secrets --timeout=120s
+
+# 검증: store Ready → ExternalSecret SecretSynced → 시크릿 생성 → api 기동
+kubectl get clustersecretstore vault-backend \
+  -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'   # True
+kubectl get externalsecret -A                                     # 전부 STATUS SecretSynced
+kubectl -n api get secret cledyu-api-oidc cledyu-api-db            # 생성 확인
 ```
 
 주: `token_reviewer_jwt` 는 파드 projected 토큰(~1h 만료). 재설정 직후 1회 sync 로 `cledyu-api-oidc`(Retain)
@@ -146,9 +170,12 @@ kubectl -n vault exec -it vault-0 -- rm -f /tmp/vault-raft.snap
 ### apps-eks 부트스트랩 (bastion 에서)
 
 ```bash
-# -1) bastion 준비 — user_data 는 kubectl/awscli 만 깐다. seed/apply 에 git·helm·repo 가 필요하니 여기서 설치.
-sudo dnf install -y git
-curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+# -1) bastion 준비 — user_data 가 kubectl/awscli/git/helm 을 모두 설치한다(egress 대기+curl --retry 포함).
+#     ⚠️ 부팅 직후 NAT 준비 전이면 예전엔 kubectl 설치가 깨졌다(드릴 실측) → user_data 에 대기/retry 를 넣어 해소.
+#     여기선 cloud-init 완료를 기다린 뒤 도구 존재만 검증한다(없으면 user_data 실패 → cloud-init 로그 확인).
+cloud-init status --wait                                             # user_data 완료까지 대기
+command -v kubectl git helm aws >/dev/null && echo "tools OK" \
+  || echo "⚠ user_data 미완/실패 → sudo cat /var/log/cloud-init-output.log 로 원인 확인"
 # repo 가 private 면 인증 필요: git clone https://<GITHUB_PAT>@github.com/requset700k/Cledyu.git ~/Cledyu
 git clone https://github.com/requset700k/Cledyu.git ~/Cledyu && cd ~/Cledyu
 aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2   # (Vault 복원 때 이미 했으면 생략)
