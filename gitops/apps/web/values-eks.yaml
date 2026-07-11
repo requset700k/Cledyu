@@ -13,6 +13,9 @@ ingress:
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/group.name: cledyu-dr
+    # HTTPS 443 리스너 명시(cert 자동발견만으론 안 생김). 그룹(cledyu-dr) 멤버 api 와 동일하게 맞춘다.
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
     # web 은 프로브가 없고 AUTH_ENABLED 시 '/'가 로그인 리다이렉트(302)일 수 있어, 기본 200-only 헬스체크로는
     # target 이 unhealthy 가 될 수 있다 → 2xx/3xx 를 healthy 로 인정(파드가 응답하면 up). 드릴서 실제 응답 코드 확인.
     alb.ingress.kubernetes.io/success-codes: "200-399"

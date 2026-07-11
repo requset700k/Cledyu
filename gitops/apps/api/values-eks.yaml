@@ -24,9 +24,11 @@ ingress:
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
     alb.ingress.kubernetes.io/group.name: cledyu-dr
+    # HTTPS 443 리스너 명시 — cert 자동발견만으론 리스너가 안 생긴다(기본 HTTP 80만). 공식 문서 요구.
+    # 그룹(cledyu-dr) 멤버(api·web)는 listen-ports 를 동일하게 맞춰야 한다.
+    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP":80},{"HTTPS":443}]'
+    alb.ingress.kubernetes.io/ssl-redirect: '443'
     # ALB 기본 헬스체크 경로는 '/'(200 기대)인데 api 라우터는 /health·/ready 만 등록 → '/'는 404.
-    # 명시 안 하면 target group 이 계속 unhealthy 라 ALB 가 api 로 트래픽을 안 보낸다.
     alb.ingress.kubernetes.io/healthcheck-path: /ready
-    # certificate-arn 미지정 → ALB Controller 가 Ingress spec.tls host(api.cledyu.com)에 매칭되는 ACM 인증서를
-    # 자동발견해 443 HTTPS 리스너를 구성한다(*.cledyu.com 와일드카드·ISSUED·ap-northeast-2). 컨트롤러 IRSA 에
-    # ACM read 권한 있음(attach_load_balancer_controller_policy). → placeholder/하드코딩 불필요, main 그대로 sync.
+    # certificate-arn 미지정 → 443 리스너에 Ingress spec.tls host(api.cledyu.com) 매칭 ACM 을 자동발견해 붙인다
+    # (*.cledyu.com·ISSUED·ap-northeast-2, 컨트롤러 IRSA 에 ACM read 있음). → placeholder 불필요, main 그대로 sync.
