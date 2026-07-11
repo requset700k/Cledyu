@@ -137,19 +137,30 @@ resource "aws_instance" "eks_dr_bastion" {
     encrypted   = true
   }
 
-  # 드릴 발판을 kubectl/awscli 로 준비. NAT egress 로 패키지 취득.
+  # 드릴 발판을 kubectl/git/helm/awscli 로 준비. NAT egress 로 패키지 취득.
   # user_data 에는 raw 텍스트를 넣는다 — provider 가 EC2 로 보낼 때 base64 인코딩하므로
   # base64encode() 로 감싸면 이중 인코딩돼 cloud-init 이 스크립트 대신 base64 문자열을 받아
   # 실행하지 않는다(kubectl 미설치 → bastion kubectl 경로 붕괴). 이미 인코딩된 값은 user_data_base64 로.
+  #
+  # ⚠️ 부팅 직후엔 NAT/라우트 프로비저닝이 아직이라 egress 가 안 될 수 있다(드릴 실측: curl dl.k8s.io
+  # 132s 타임아웃 → kubectl 미설치). 그래서 ① egress 준비까지 대기 루프 ② 모든 curl 에 --retry 를 건다.
+  # git/helm 도 여기서 깐다(런북 ArgoCD seed·repo clone 에 필요 — 수동 설치 스텝 제거).
   user_data = <<-EOT
     #!/bin/bash
     set -euxo pipefail
-    dnf install -y unzip
-    curl -sSLo /usr/local/bin/kubectl "https://dl.k8s.io/release/v${var.eks_dr_cluster_version}.0/bin/linux/amd64/kubectl"
+    # ① egress(NAT) 준비까지 대기 — 라우트/NAT 프로비저닝 레이스 흡수(최대 ~5분)
+    for i in $(seq 1 60); do curl -fsS -m 5 https://dl.k8s.io >/dev/null 2>&1 && break; echo "wait egress $i/60"; sleep 5; done
+    # unzip(awscli), git(repo clone), jq(런북 generate-root/시크릿 파싱) — 명시 설치(AMI 기본 의존 X)
+    dnf install -y unzip git jq
+    # ② kubectl (--retry 로 일시적 실패 흡수)
+    curl -fsSL --retry 8 --retry-delay 5 --retry-connrefused -o /usr/local/bin/kubectl "https://dl.k8s.io/release/v${var.eks_dr_cluster_version}.0/bin/linux/amd64/kubectl"
     chmod +x /usr/local/bin/kubectl
-    curl -sSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+    # ③ awscli v2
+    curl -fsSL --retry 8 --retry-delay 5 "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
     unzip -q /tmp/awscliv2.zip -d /tmp
     /tmp/aws/install
+    # ④ helm (ArgoCD seed 에 필요)
+    curl -fsSL --retry 8 --retry-delay 5 https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
   EOT
 
   tags = merge(local.eks_dr_tags, { Name = "${local.eks_dr_name}-bastion" })
