@@ -7,3 +7,10 @@ controller:
   metrics:
     serviceMonitor:
       enabled: false
+
+server:
+  # 온프렘 server.ingress 는 className traefik + argocd.cledyu.local — EKS 엔 Traefik 없어 이 Ingress 가
+  # 주소 없이 떠 self-managed platform-argocd 가 Progressing 에 묶인다. DR 은 bastion port-forward 로 접근하니 끈다.
+  # (OIDC/URL 도 keycloak.cledyu.local 가리키나 kubectl 부트스트랩엔 무관 — 실 ingress/OIDC 는 T8 서 ALB 로 정의.)
+  ingress:
+    enabled: false
