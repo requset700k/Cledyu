@@ -30,7 +30,7 @@ spec:
   jvmOptions:
     -Xms: 1024m
     -Xmx: 2048m
-  # kafka 네임스페이스 PSA restricted 적용을 위해 securityContext를 명시한다.
+  # kafka 네임스페이스 PSA restricted 적용을 위해 securityContext를 명시
   template:
     persistentVolumeClaim:
       metadata:
