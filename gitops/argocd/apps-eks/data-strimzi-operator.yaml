@@ -18,7 +18,11 @@ spec:
   sources:
     - repoURL: https://strimzi.io/charts/
       chart: strimzi-kafka-operator
-      targetRevision: 0.43.0
+      # 0.45.2 — EKS DR 는 k8s 1.34(eks_dr_cluster_version, standard support 최신)라 온프렘 0.43.0 을
+      # 그대로 쓰면 Cluster Operator 가 emulationMajor 디코딩 오류로 기동 실패(k8s 1.32+ 미지원,
+      # upstream #11603/#11386). 0.45.2 는 k8s 1.25–1.35 지원(1.34·온프렘 1.31 모두 커버) + Kafka
+      # 3.8.0 도 지원해 공유 Kafka CR(version 3.8.0·metadataVersion 3.8-IV0)·온프렘 변경 없이 EKS 만 상향.
+      targetRevision: 0.45.2
       helm:
         releaseName: strimzi
         valueFiles:
