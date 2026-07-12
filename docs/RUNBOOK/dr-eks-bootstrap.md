@@ -223,6 +223,10 @@ kubectl -n api get configmap cledyu-root-ca-bundle   # trust-manager Bundle 분�
 ```
 
 - [ ] apps-eks root-app 적용 → 플랫폼(cert-manager·ALB·gp3·ESO·CNPG operator) Ready
+- [ ] Kafka Ready(실습 스택 — A1) — strimzi-operator(wave 0) Running 후 kafka-cluster(wave 1) sync.
+      `kubectl -n kafka get kafka cledyu-kafka`(READY=True), `kubectl -n kafka get kafkatopic`(validation-requests·-dlq·-results·lab-events·security-logs 존재),
+      bootstrap svc `cledyu-kafka-kafka-bootstrap.kafka.svc:9093` 응답. 의존: cert-manager CA + trust-manager Bundle + gp3(nodepool SC-agnostic).
+      (ServiceMonitor 2종 미배포는 정상 — EKS 관측 스택 없음, directory.exclude 로 제거.)
 - [ ] **Vault 스냅샷 복원**(위 섹션)
 - [ ] CNPG 복원 차트 sync → `cledyu-pg-rw`·`keycloak-pg-rw` Ready(자동 S3 복원)
 - [ ] Keycloak·api·web Ready + ALB/ACM 종단 확인
@@ -307,11 +311,19 @@ VPCID=$(aws eks describe-cluster --name cledyu-dr --region ap-northeast-2 --quer
 kubectl -n argocd scale statefulset argocd-application-controller --replicas=0
 kubectl -n argocd rollout status statefulset argocd-application-controller --timeout=60s
 
-# 1) PVC 를 물고 있는 워크로드 먼저 종료 — vault StatefulSet + CNPG Cluster(T7). 파드가 PVC 를 마운트한 채
-#    delete pvc 하면 pvc-protection 으로 PVC 가 Terminating 에 묶여 EBS CSI 가 볼륨을 못 지우고 고아가 된다.
+# 1) PVC 를 물고 있는 워크로드 먼저 종료 — vault StatefulSet + CNPG Cluster(T7) + Kafka 브로커(실습 스택 A1).
+#    파드가 PVC 를 마운트한 채 delete pvc 하면 pvc-protection 으로 PVC 가 Terminating 에 묶여 EBS CSI 가 볼륨을
+#    못 지우고 고아가 된다(gp3 EBS 잔존 → 고아 볼륨 검증·서브넷/VPC 삭제까지 막힘).
 kubectl -n vault delete statefulset vault --ignore-not-found
 kubectl delete clusters.postgresql.cnpg.io -A --all --ignore-not-found   # 오퍼레이터가 파드+PVC 정리
+# Kafka 브로커도 gp3 PVC 3개(kafka-nodepool-eks)를 마운트 → Kafka CR 삭제 시 Strimzi 오퍼레이터가
+# StrimziPodSet/브로커 파드를 제거해 마운트를 푼다. KafkaNodePool 은 deleteClaim:false 라 PVC 자체는 남고
+# 아래 3) delete pvc 에서 마운트 없어진 뒤 삭제된다.
+# ⚠️ 전제: strimzi-cluster-operator(strimzi-system)는 아직 떠 있어야 CR 삭제를 처리한다 — 위 0)은 argocd
+#    application-controller 만 scale0 했다. 오퍼레이터가 이미 내려갔으면 브로커 파드가 안 지워지니 먼저 살린다.
+kubectl delete kafkas.kafka.strimzi.io -A --all --ignore-not-found
 kubectl wait --for=delete pod -n vault -l app.kubernetes.io/name=vault --timeout=300s 2>/dev/null || true
+kubectl wait --for=delete pod -n kafka -l strimzi.io/cluster=cledyu-kafka --timeout=300s 2>/dev/null || true
 
 # 2) Ingress 삭제 → 컨트롤러가 ALB/TG/SG 정리 (selfHeal 꺼서 재생성 안 됨, 완료까지 대기)
 kubectl delete ingress -A --all

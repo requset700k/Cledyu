@@ -1,0 +1,65 @@
+---
+# EKS DR 전용 KafkaNodePool — 온프렘 kafka-nodepool.yaml 과 동일하되 storage class 만 gp3.
+# ⚠️ 공유 kafka-nodepool.yaml 에서 class 를 제거/변경하면 이미 배포된 온프렘 Kafka 의 storage spec 이
+#    바뀌어 Strimzi 가 "허용되지 않는 storage 변경"으로 경고/비정상 reconcile 에 남는다(Codex P1).
+#    그래서 온프렘 파일은 class: longhorn 그대로 두고, EKS 는 이 별도 파일(gp3)을 쓴다.
+# 배선: EKS data-kafka-cluster 앱은 kafka-nodepool.yaml 을 exclude 하고 이 파일을 include,
+#       온프렘 data-kafka-cluster 앱은 이 파일을 exclude 한다(서로 상대 nodepool 을 배제).
+# name/label 은 온프렘과 동일(kafka / cledyu-kafka) — 클러스터가 달라 충돌 없음, 토폴로지 동일 유지.
+apiVersion: kafka.strimzi.io/v1beta2
+kind: KafkaNodePool
+metadata:
+  name: kafka
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: cledyu-kafka
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  replicas: 3
+  roles:
+    - controller
+    - broker
+  storage:
+    type: persistent-claim
+    size: 30Gi
+    class: gp3
+    deleteClaim: false
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+  jvmOptions:
+    -Xms: 1024m
+    -Xmx: 2048m
+  # kafka 네임스페이스 PSA restricted 적용을 위해 securityContext를 명시
+  template:
+    persistentVolumeClaim:
+      metadata:
+        annotations:
+          argocd.argoproj.io/sync-options: Prune=false
+          argocd.argoproj.io/compare-options: IgnoreExtraneous
+    pod:
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  strimzi.io/cluster: cledyu-kafka
+                  app.kubernetes.io/name: kafka
+              topologyKey: kubernetes.io/hostname
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+    kafkaContainer:
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop:
+            - ALL
