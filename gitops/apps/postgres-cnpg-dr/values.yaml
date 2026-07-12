@@ -1,5 +1,5 @@
 # EKS Cold DR — cledyu-pg 복원 차트 values.
-# 이 차트는 라이브 구DB 를 참조하지 않고 S3(postgres/ 프리픽스) 백업에서만 복원한다(설계 §5.1).
+# 이 차트는 라이브 구DB 를 참조하지 않고 S3(postgres/ 프리픽스) 백업에서만 복원한다(설계 §5.1)
 # 운영 postgres-cnpg 는 EKS(apps-eks)에 배포되지 않으므로 import-bootstrap 앱과 충돌하지 않는다.
 
 storage:
