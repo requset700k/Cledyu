@@ -302,8 +302,8 @@ kubectl -n api logs deploy/api | grep -E "db 연결|in-memory"
 #    (kubevirt=false·aws=true 이므로 sessions=EC2 provisioner, validator=validation-engine(A2) 로 non-nil → 503 안 뜸)
 kubectl -n api logs deploy/api | grep -E "EC2|launch|instance"
 aws ec2 describe-instances --region ap-northeast-2 \
-  --filters "Name=tag:cledyu-session,Values=*" "Name=instance-state-name,Values=running" \
-  --query "Reservations[].Instances[].InstanceId" --output text          # 세션 인스턴스 존재
+  --filters "Name=tag:cledyu.io/managed-by,Values=cledyu-session" "Name=instance-state-name,Values=running" \
+  --query "Reservations[].Instances[].InstanceId" --output text          # 세션 인스턴스 존재(provisioner.go 태그: cledyu.io/managed-by=cledyu-session)
 
 # 2) 사용자 터미널 도달(tailnet) — api 가 tsnet 으로 인스턴스에 다이얼(라이브 터미널 WebSocket 200).
 #    CLEDYU_AWS_API_TAILSCALE_AUTH_KEY(=cledyu-api-aws.api_tailscale_authkey) 필요 — 미시드면 터미널만 비활성(SSM 채점은 정상).
