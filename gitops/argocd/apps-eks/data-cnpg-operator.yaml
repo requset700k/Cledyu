@@ -1,0 +1,43 @@
+---
+# CloudNativePG 오퍼레이터 — onprem data-cnpg-operator.yaml 과 동일 패턴(multi-source).
+# sync-wave 0 — Cluster CR(Task 7, 이 태스크 범위 밖)보다 먼저 CRD·오퍼레이터가 서야 한다.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eks-data-cnpg-operator
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://cloudnative-pg.github.io/charts
+      chart: cloudnative-pg
+      # 온프렘과 동일 0.26.1 — keycloak-pg 가 PG 18(18.2) 이미지라 구버전 오퍼레이터는 reconcile 실패(T7 복원 막힘).
+      targetRevision: 0.26.1
+      helm:
+        releaseName: cnpg
+        valueFiles:
+          - $values/gitops/apps/cnpg-operator/values.yaml
+          - $values/gitops/apps/cnpg-operator/values-eks.yaml
+    - repoURL: https://github.com/requset700k/Cledyu.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnpg-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m

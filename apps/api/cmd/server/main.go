@@ -122,11 +122,19 @@ func main() {
 	vmBootMetrics := vmmetrics.New(prometheus.DefaultRegisterer)
 
 	var onprem session.Provider
-	if mgr, err := kubevirt.NewManager(&cfg.KubeVirt, vmBootMetrics); err != nil {
-		logger.Warn("kubevirt manager init failed, on-prem sessions disabled", zap.Error(err))
-	} else {
-		onprem = mgr
-		mgr.StartVMIWatcher(ctx)
+	switch {
+	case !cfg.KubeVirt.Enabled:
+		// 실행 백엔드 명시적 비활성(DR 등 KubeVirt 없는 환경). manager 를 만들지 않아 sessions=nil →
+		// 세션 API 가 처음부터 503. 안 그러면 NewManager 는 in-cluster config 만으로 성공해 세션 생성이
+		// lab-* ns/Secret 을 만든 뒤 VM 생성서 500 나고 네임스페이스가 고아로 남는다.
+		logger.Info("kubevirt disabled by config — on-prem sessions off (session API returns 503)")
+	default:
+		if mgr, err := kubevirt.NewManager(&cfg.KubeVirt, vmBootMetrics); err != nil {
+			logger.Warn("kubevirt manager init failed, on-prem sessions disabled", zap.Error(err))
+		} else {
+			onprem = mgr
+			mgr.StartVMIWatcher(ctx)
+		}
 	}
 
 	var overflow session.Provider
