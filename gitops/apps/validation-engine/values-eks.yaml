@@ -1,0 +1,17 @@
+---
+# EKS DR 오버레이 — deltas only, values.yaml 위에 레이어.
+# 네트워크 정책 둘 다 미렌더:
+#   - cilium: CiliumNetworkPolicy(cilium.io/v2 CRD 없음 → sync 블로커)
+#   - k8s:    plain NetworkPolicy 는 egress 에 SSM(FQDN) 규칙이 없어(plain NetworkPolicy 는 FQDN 미지원),
+#             VPC CNI netpol 강제가 켜지면 EC2 채점(SSM SendCommand)이 차단되는 트랩 → EKS 엔 미렌더.
+#   EKS 는 SG/VPC 로 네트워크 통제(현재 vpc-cni addon 은 netpol 미강제).
+networkPolicy:
+  cilium:
+    enabled: false
+  k8s:
+    enabled: false
+# 참고(재선언 불요, 확인용):
+#   - aws.enabled: true (values.yaml 기본) → EC2 세션 SSM 채점 활성, cledyu-validation-engine-aws 주입(Task 4 ESO).
+#   - env.KAFKA_BROKERS: cledyu-kafka-kafka-bootstrap.kafka.svc:9093 (A1 Kafka) — 그대로 유효.
+#   - env.OTEL_ENDPOINT: alloy.loki(...) — DR 에 관측 미배포지만 otlptracegrpc 지연연결이라 non-fatal(노이즈만).
+#     노이즈 제거는 비-DR 후속(코드가 빈 endpoint 시 tracing skip 하도록).
