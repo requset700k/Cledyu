@@ -120,6 +120,15 @@ spec:
                   name: {{ .Values.aws.secretName | quote }}
                   key: tailscale_authkey
                   optional: true
+            # api 파드 자신이 tsnet 으로 tailnet 가입(tag:cledyu-api) — EC2 세션에 라이브 터미널 SSH 부착용.
+            # 세션 cloud-init 용 CLEDYU_AWS_TAILSCALE_AUTH_KEY 와 별개 키(config AWSConfig.APITailscaleAuthKey).
+            # optional: 미시드 시 tsnet 미기동 → 라이브 터미널만 비활성(SSM 채점은 정상).
+            - name: CLEDYU_AWS_API_TAILSCALE_AUTH_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.aws.secretName | quote }}
+                  key: api_tailscale_authkey
+                  optional: true
             {{- end }}
             {{- if .Values.analytics.enabled }}
             # D3 강사 분석 — BigQuery 뷰 읽기전용. projectId 설정 시 /api/v1/instructor/analytics 활성(미설정 시 503).
