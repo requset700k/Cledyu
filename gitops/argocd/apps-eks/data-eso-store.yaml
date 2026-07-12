@@ -18,7 +18,7 @@ spec:
     directory:
       # api-db DSN 은 cledyu-pg-rw.postgres.svc(서비스명 기반)라 DR 서도 동일 — T7 복원 CNPG 에 그대로 붙는다.
       # 이게 있어야 api 가 in-memory 폴백이 아닌 DB 모드로 붙어 '복원 데이터 서빙'을 검증할 수 있다.
-      include: "{clustersecretstore.yaml,cledyu-web-oidc-externalsecret.yaml,cledyu-api-db-externalsecret.yaml,cledyu-validation-engine-aws-externalsecret.yaml}"
+      include: "{clustersecretstore.yaml,cledyu-web-oidc-externalsecret.yaml,cledyu-api-db-externalsecret.yaml,cledyu-validation-engine-aws-externalsecret.yaml,cledyu-api-aws-externalsecret.yaml}"
   destination:
     server: https://kubernetes.default.svc
     namespace: external-secrets
