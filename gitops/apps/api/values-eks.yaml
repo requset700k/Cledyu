@@ -5,6 +5,9 @@
 # scheme/target-type must match across api+web (see web/values-eks.yaml).
 replicaCount: 1
 
+# EKS DR 은 api 네임스페이스를 eso-store 가 선행(wave -5) 생성 → 차트 namespace.yaml 미렌더(이중 소유 방지, Codex P1 #2).
+skipNamespace: true
+
 # 실습 스택 활성(풀서비스 DR) — A1 Kafka + A2 validation-engine + EC2 백엔드로 세션·검증이 EKS 에서 동작.
 kafka:
   enabled: true    # A1 Kafka 배포됨 → api-kafka-client cert·KafkaUser 렌더, validation 발행·results 소비·lab-events 발행

@@ -1,3 +1,6 @@
+{{- if not .Values.skipNamespace }}
+# EKS DR 은 values-eks 에서 skipNamespace=true → 이 ns 를 eso-store 가 선행(wave -5) 생성(Codex P1 #2).
+# 온프렘은 skipNamespace 미설정 → 아래대로 생성(변화 없음).
 apiVersion: v1
 kind: Namespace
 metadata:
@@ -6,3 +9,4 @@ metadata:
     # trust-manager 가 cledyu Root CA 번들(ConfigMap cledyu-root-ca-bundle)을 이 ns에 배포 →
     # api 가 keycloak.cledyu.local(내부 CA 발급 인증서) OIDC discovery TLS 검증 가능.
     cledyu.io/trust-bundle: root-ca
+{{- end }}
