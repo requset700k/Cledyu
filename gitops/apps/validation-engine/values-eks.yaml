@@ -10,6 +10,9 @@ networkPolicy:
     enabled: false
   k8s:
     enabled: false
+# KubeVirt(virtctl) 채점 경로 미사용(DR 은 EC2/SSM) → KubeVirt ClusterRole·토큰 automount 미부여(최소권한, api P2 와 동일).
+kubevirt:
+  enabled: false
 # 참고(재선언 불요, 확인용):
 #   - aws.enabled: true (values.yaml 기본) → EC2 세션 SSM 채점 활성, cledyu-validation-engine-aws 주입(Task 4 ESO).
 #   - env.KAFKA_BROKERS: cledyu-kafka-kafka-bootstrap.kafka.svc:9093 (A1 Kafka) — 그대로 유효.

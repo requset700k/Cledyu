@@ -35,3 +35,8 @@ networkPolicy:
     enabled: true
   k8s:
     enabled: true
+
+# 채점 백엔드 — KubeVirt(virtctl) 경로 사용 여부. EKS DR 은 EC2/SSM(aws.enabled)만 쓰므로
+# values-eks 에서 false → rbac.yaml 의 KubeVirt ClusterRole·토큰 automount 미부여(최소권한).
+kubevirt:
+  enabled: true

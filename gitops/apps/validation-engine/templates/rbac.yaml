@@ -5,7 +5,10 @@ kind: ServiceAccount
 metadata:
   name: validation-engine
   namespace: {{ .Release.Namespace }}
-automountServiceAccountToken: true # virtctl이 K8s API(portforward)에 접근하기 위해 필요
+# kubevirt.enabled=false(EKS DR)면 VE 는 KubeVirt 아닌 EC2/SSM 로 채점 → virtctl(K8s API) 불필요.
+# 토큰 automount 와 아래 KubeVirt ClusterRole 을 미부여(최소권한, api P2 와 동일 패턴). SA 는 유지(deployment 참조).
+automountServiceAccountToken: {{ .Values.kubevirt.enabled }} # virtctl 이 K8s API(portforward) 접근에 사용(kubevirt 시에만)
+{{- if .Values.kubevirt.enabled }}
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -27,3 +30,4 @@ rules:
   - apiGroups: ["kubevirt.io"]
     resources: ["virtualmachineinstances", "virtualmachines"]
     verbs: ["get", "list"] # 조회만 가능, 생성/삭제는 불가
+{{- end }}
