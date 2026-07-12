@@ -293,6 +293,32 @@ kubectl -n web rollout restart deploy/web && kubectl -n web rollout status deplo
 kubectl -n api logs deploy/api | grep -E "db 연결|in-memory"
 ```
 
+### 실습 fidelity 검증 (EC2 채점 == 온프렘 KubeVirt) — A3
+
+풀서비스 DR 의 실습이 온프렘과 동등한지 라이브로 확인한다. 대표 랩 6종(lab-linux-basics 등)에 대해:
+
+```bash
+# 1) 로컬 테스트유저로 세션 생성 → api 가 EC2 인스턴스를 띄우는지
+#    (kubevirt=false·aws=true 이므로 sessions=EC2 provisioner, validator=validation-engine(A2) 로 non-nil → 503 안 뜸)
+kubectl -n api logs deploy/api | grep -E "EC2|launch|instance"
+aws ec2 describe-instances --region ap-northeast-2 \
+  --filters "Name=tag:cledyu-session,Values=*" "Name=instance-state-name,Values=running" \
+  --query "Reservations[].Instances[].InstanceId" --output text          # 세션 인스턴스 존재
+
+# 2) 사용자 터미널 도달(tailnet) — api 가 tsnet 으로 인스턴스에 다이얼(라이브 터미널 WebSocket 200).
+#    CLEDYU_AWS_API_TAILSCALE_AUTH_KEY(=cledyu-api-aws.api_tailscale_authkey) 필요 — 미시드면 터미널만 비활성(SSM 채점은 정상).
+
+# 3) 검증엔진 채점 — 각 스텝을 통과 상태로 만들고 /validate 호출 → validation-engine 이 SSM SendCommand 로
+#    EC2 를 채점 → validation-results → api 가 Postgres(session_steps/progress/completions)에 반영.
+kubectl -n validation-engine logs deploy/validation-engine | grep -E "SSM|SendCommand|passed|failed"
+# 수용기준: 온프렘에서 통과하는 정답 입력이 DR(EC2)에서도 passed, 오답은 failed. 6종 랩 각 최소 1스텝 정답/오답 대조가 온프렘과 일치.
+
+# 4) mock-pass 미발생 확인(보안) — validator non-nil 이므로 "mock" 응답이 없어야 한다.
+kubectl -n api logs deploy/api | grep -c "mock"                          # 0
+```
+
+수용기준 요약: (a) 세션=EC2 인스턴스 생성, (b) 터미널 tailnet 도달, (c) SSM 채점 결과가 온프렘과 동일 판정(정답 passed/오답 failed), (d) mock-pass 0건.
+
 ### destroy (고아 방지)
 
 DR ALB(aws-load-balancer-controller 가 Ingress 보고 out-of-band 생성)와 gp3 EBS(reclaim=Delete)는
