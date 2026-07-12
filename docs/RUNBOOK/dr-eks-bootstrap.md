@@ -229,6 +229,9 @@ kubectl -n api get configmap cledyu-root-ca-bundle   # trust-manager Bundle 분�
       (ServiceMonitor 2종 미배포는 정상 — EKS 관측 스택 없음, directory.exclude 로 제거.)
 - [ ] **Vault 스냅샷 복원**(위 섹션)
 - [ ] CNPG 복원 차트 sync → `cledyu-pg-rw`·`keycloak-pg-rw` Ready(자동 S3 복원)
+- [ ] validation-engine Ready(실습 스택 — A2) — `kubectl -n validation-engine get deploy validation-engine` Available.
+      선행: A1 Kafka(KafkaUser `validation-engine` Ready · kafka-clients-ca client cert) + **Vault 복원→ESO 로 `cledyu-validation-engine-aws` Secret 생성 후** 기동(AWS 키 non-optional).
+      (CiliumNetworkPolicy·plain NetworkPolicy 둘 다 미렌더 정상 — EKS values-eks 게이트. lab-ssh-key 없음도 정상 — EC2/SSM 채점.)
 - [ ] Keycloak·api·web Ready + ALB/ACM 종단 확인
 - [ ] **공개 DNS 전환**(아래 섹션) — DNS 안 바꾸면 죽은 온프렘 프록시로 계속 감. WAF(/metrics 차단)는 api·web values-eks 의 wafv2-acl-arn 로 ALB 생성과 동시에 자동 연결(수동 불요) → 여기선 붙었는지 확인만
 - [ ] **api·web rollout restart**(아래 섹션) — CNPG·Keycloak·DNS Ready 후 필수. api 는 startup 1회만 DB/auth 초기화·실패 시 degraded 유지라, 의존성이 늦게 살아나면 restart 해야 DB모드·로그인 활성
