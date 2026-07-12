@@ -5,18 +5,19 @@
 # scheme/target-type must match across api+web (see web/values-eks.yaml).
 replicaCount: 1
 
-# 온프렘 전용 기능 off — 이 secret/CR 들이 EKS 엔 없어서 게이팅 안 하면 api 가 못 뜬다.
+# 실습 스택 활성(풀서비스 DR) — A1 Kafka + A2 validation-engine + EC2 백엔드로 세션·검증이 EKS 에서 동작.
 kafka:
-  enabled: false   # Strimzi/KafkaUser 미배포 (B2/F7)
+  enabled: true    # A1 Kafka 배포됨 → api-kafka-client cert·KafkaUser 렌더, validation 발행·results 소비·lab-events 발행
 aws:
-  enabled: false   # EC2 오버플로우 미사용 → 비-optional AWS 크레드(cledyu-api-aws) 주입 차단 (B7/F10)
+  enabled: true    # EC2 실습 백엔드 활성 — 온프렘 부재 시 DR 유일 세션 백엔드(launch template + tailnet)
+  maxActiveSessions: 10   # 온프렘 부재 반영해 DR 상한 상향. 실제 값은 노드 용량에 맞춰 조정(Plan B pilot-light 사이징).
 kubevirt:
-  # KubeVirt CRD/오퍼레이터 미배포 → 세션 실행 백엔드 없음. false 로 manager 미생성 → 세션 Provider nil →
-  # 세션 생성이 lab-* ns/Secret 만들고 VM 생성서 500 나며 ns 고아 남는 것 대신 처음부터 503 (Codex P2).
+  # DR 백엔드는 EC2(aws overflow)라 KubeVirt 미사용 → enabled=false 유지.
+  # sessions 는 EC2 provisioner 로 non-nil(세션 API 정상), validator 는 A2 validation-engine 배포로 non-nil(실검증)
+  # → fail-closed 503 은 발동 안 하고 실습 정상 동작. release 모드(CLEDYU_SERVER_MODE)는 그대로 유지(mock-pass 금지).
+  # ⚠️ #284(config.go kubevirt.enabled + main.go 스킵 스위치 + deployment CLEDYU_KUBEVIRT_ENABLED)가 main 에
+  #    있어야 실제 EC2 경로로 동작 — #284 머지 완료(main 8337c7d)로 전제 충족.
   enabled: false
-  # ⚠️ validator(validation-engine) 는 DR 에 없어 h.validator=nil 이다. release 모드(server.mode=release)에서는
-  # ValidateStep 이 mock-pass 대신 503 을 반환하도록 코드에서 fail-closed 처리됨(Codex P1) — 무검증 통과 차단.
-  # 따라서 이 오버레이는 server.mode=release 를 반드시 유지해야 한다(env.CLEDYU_SERVER_MODE).
 metrics:
   serviceMonitor:
     enabled: false   # EKS DR 엔 Prometheus Operator(ServiceMonitor CRD) 없음 → sync 블로커 제거 (B3)
