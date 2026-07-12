@@ -28,7 +28,9 @@ spec:
     path: gitops/apps/kafka-cluster
     directory:
       recurse: true
-      exclude: "{kafka-servicemonitor.yaml,kafka-exporter-servicemonitor.yaml,kafkauser-airflow-analytics.yaml,kafka-nodepool.yaml}"
+      # namespace.yaml(kafka ns)은 operator 앱(wave 0)이 자기 RoleBinding 전에 선행 생성하므로 여기선
+      # exclude(이중 소유 방지). ns 는 CreateNamespace=true 로도 보장된다.
+      exclude: "{kafka-servicemonitor.yaml,kafka-exporter-servicemonitor.yaml,kafkauser-airflow-analytics.yaml,kafka-nodepool.yaml,namespace.yaml}"
   destination:
     server: https://kubernetes.default.svc
     namespace: kafka
