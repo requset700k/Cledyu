@@ -4,6 +4,12 @@ kind: Application
 metadata:
   name: eks-service-api
   namespace: argocd
+  annotations:
+    # wave 2 — A1 Kafka(kafka-clients-ca ClusterIssuer·브로커·KafkaUser, wave 1) 뒤에 sync.
+    # api 는 kafka.enabled 시 kafka cert(issuer=kafka-clients-ca)·KafkaUser(wave 1 산출물)를 만드는데, api 가
+    # wave 0(기본)이면 kafka 보다 먼저 sync→cert 미발급→파드 대기→root-app 이 wave 1 로 못 넘어가는 순서
+    # 데드락 위험. VE(wave 2)와 동일하게 kafka 뒤로 배치.
+    argocd.argoproj.io/sync-wave: "2"
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
