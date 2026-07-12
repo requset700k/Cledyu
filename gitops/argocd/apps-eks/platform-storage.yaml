@@ -11,7 +11,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/requset700k/Cledyu.git
-    targetRevision: main
+    targetRevision: feat/dr-eks-overlay-cnpg-keycloak
     path: gitops/apps/storage
     directory:
       recurse: true
