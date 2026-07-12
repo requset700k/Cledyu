@@ -319,12 +319,15 @@ kubectl -n argocd rollout status statefulset argocd-application-controller --tim
 #    못 지우고 고아가 된다(gp3 EBS 잔존 → 고아 볼륨 검증·서브넷/VPC 삭제까지 막힘).
 kubectl -n vault delete statefulset vault --ignore-not-found
 kubectl delete clusters.postgresql.cnpg.io -A --all --ignore-not-found   # 오퍼레이터가 파드+PVC 정리
-# Kafka 브로커도 gp3 PVC 3개(kafka-nodepool-eks)를 마운트 → Kafka CR 삭제 시 Strimzi 오퍼레이터가
-# StrimziPodSet/브로커 파드를 제거해 마운트를 푼다. KafkaNodePool 은 deleteClaim:false 라 PVC 자체는 남고
-# 아래 3) delete pvc 에서 마운트 없어진 뒤 삭제된다.
-# ⚠️ 전제: strimzi-cluster-operator(strimzi-system)는 아직 떠 있어야 CR 삭제를 처리한다 — 위 0)은 argocd
-#    application-controller 만 scale0 했다. 오퍼레이터가 이미 내려갔으면 브로커 파드가 안 지워지니 먼저 살린다.
+# Kafka 브로커도 gp3 PVC 3개(kafka-nodepool-eks)를 마운트 → 삭제해야 마운트가 풀린다.
+# ⚠️ 드릴 실측(2026-07-12): node-pool 기반 Kafka 는 브로커 파드를 KafkaNodePool→StrimziPodSet 이 소유한다.
+#    Kafka CR(kafkas)만 지우면 StrimziPodSet/브로커 파드가 남아 PVC 가 Terminating 고착(EBS 고아)한다 →
+#    KafkaNodePool 도 반드시 지워야 파드가 빠진다. (KafkaNodePool deleteClaim:false 라 PVC 자체는 남고,
+#    아래 3) delete pvc 에서 마운트 없어진 뒤 삭제된다.)
+# 전제: strimzi-cluster-operator(strimzi-system)는 아직 떠 있어야 삭제를 처리한다 — 위 0)은 argocd
+#    application-controller 만 scale0 했다.
 kubectl delete kafkas.kafka.strimzi.io -A --all --ignore-not-found
+kubectl delete kafkanodepool.kafka.strimzi.io -A --all --ignore-not-found   # ← 브로커 파드 실소유자(StrimziPodSet). 없으면 파드 안 빠져 PVC 고착
 kubectl wait --for=delete pod -n vault -l app.kubernetes.io/name=vault --timeout=300s 2>/dev/null || true
 kubectl wait --for=delete pod -n kafka -l strimzi.io/cluster=cledyu-kafka --timeout=300s 2>/dev/null || true
 
