@@ -1,0 +1,13 @@
+# EKS Cold DR — cledyu-pg 복원 차트 values.
+# 이 차트는 라이브 구DB 를 참조하지 않고 S3(postgres/ 프리픽스) 백업에서만 복원한다(설계 §5.1).
+# 운영 postgres-cnpg 는 EKS(apps-eks)에 배포되지 않으므로 import-bootstrap 앱과 충돌하지 않는다.
+
+storage:
+  # 운영과 동일 규격. durability 는 barman S3 가 담당하므로 EBS 볼륨은 워킹셋만.
+  size: 10Gi
+
+# CNPG 가 Cluster 명(cledyu-pg)으로 자동 생성하는 SA(postgres:cledyu-pg)에 붙일 IRSA 롤 ARN.
+# barman 이 inheritFromIAMRole 로 assume → S3 recovery-read(postgres/) + backup-write(postgres-dr/).
+# 롤 이름(cledyu-dr-cnpg-restore-postgres)·계정이 결정적이라 verbatim 하드코딩(vault values-eks 선례).
+# terraform: eks_dr_name=cledyu-dr → ${eks_dr_name}-cnpg-restore-postgres (eks-dr-irsa.tf).
+restoreRoleArn: "arn:aws:iam::504284203153:role/cledyu-dr-cnpg-restore-postgres"
