@@ -1,0 +1,65 @@
+## Keycloak 인스턴스 CR — 온프렘 keycloak_foundation/templates/keycloak.yaml.j2 를 Helm 으로 옮김.
+## apiVersion: 오퍼레이터 26.6.1 CRD 는 v2beta1(storage)·v2alpha1(deprecated) 서빙 → 현행 v2beta1 사용.
+## httpEnabled=true + ingress.enabled=false → Keycloak 은 평문 8080 서빙, TLS 는 ALB(ACM)가 종단
+## (그래서 CR 에 tlsSecret 불필요 — 온프렘은 Traefik ingress 가 keycloak-tls 로 종단했으나 EKS 는 ALB).
+apiVersion: k8s.keycloak.org/v2beta1
+kind: Keycloak
+metadata:
+  name: cledyu-keycloak
+  namespace: {{ .Release.Namespace }}
+spec:
+  instances: {{ .Values.instances }}
+  unsupported:
+    podTemplate:
+      spec:
+        serviceAccountName: {{ .Values.serviceAccountName }}
+        # 온프렘과 동일 — bare ns(PSA enforce 없음)여도 파드 자체 준수(B10) 유지.
+        securityContext:
+          runAsNonRoot: true
+          seccompProfile:
+            type: RuntimeDefault
+        # ConfigMap 마운트(커스텀 이미지 불필요): 테마 → /opt/keycloak/themes/cledyu, SPI JAR → /opt/keycloak/providers.
+        containers:
+          - name: keycloak
+            volumeMounts:
+              - name: cledyu-theme
+                mountPath: /opt/keycloak/themes/cledyu
+                readOnly: true
+              - name: naver-spi
+                mountPath: /opt/keycloak/providers/naver-idp.jar
+                subPath: naver-idp.jar
+                readOnly: true
+        volumes:
+          # 플랫 ConfigMap 키를 테마 디렉터리 구조로 매핑(items). 누락 시 테마 파일이 잘못된 경로로 떨어져 로드 실패.
+          - name: cledyu-theme
+            configMap:
+              name: {{ .Values.themeConfigMap }}
+              items:
+                - key: theme.properties
+                  path: login/theme.properties
+                - key: cledyu.css
+                  path: login/resources/css/cledyu.css
+                - key: messages_ko.properties
+                  path: login/messages/messages_ko.properties
+          - name: naver-spi
+            configMap:
+              name: {{ .Values.naverSpiConfigMap }}
+  db:
+    vendor: postgres
+    host: {{ .Values.dbHost }}
+    usernameSecret:
+      name: {{ .Values.dbSecret }}
+      key: username
+    passwordSecret:
+      name: {{ .Values.dbSecret }}
+      key: password
+  http:
+    httpEnabled: true
+  ingress:
+    enabled: false
+  proxy:
+    # ALB 가 X-Forwarded-* 를 주입 → Keycloak 이 이를 신뢰해 올바른 issuer/redirect URL 생성.
+    headers: xforwarded
+  hostname:
+    hostname: {{ .Values.hostname }}
+    strict: {{ .Values.hostnameStrict }}

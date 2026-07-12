@@ -1,0 +1,46 @@
+---
+# Keycloak 인스턴스(CR) + 테마/SPI ConfigMap + ALB Ingress.
+# 선행: platform-keycloak-operator(wave 0, CRD/오퍼레이터) + keycloak-pg-dr(wave 1, DB rw + ESO 자격).
+# realm 은 복원 DB 것을 그대로 사용(KeycloakRealmImport 없음).
+# sync-wave 2 — data-keycloak-pg-dr(wave 1) 뒤. keycloak-pg-rw / keycloak-pg-credentials 가 있어야 CR 이 뜬다.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eks-service-keycloak
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/requset700k/Cledyu.git
+    targetRevision: main
+    path: gitops/apps/keycloak
+    helm:
+      releaseName: keycloak
+      valueFiles:
+        - values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keycloak
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 10
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+  ignoreDifferences:
+    # 오퍼레이터가 Keycloak CR status 를 지속 갱신 → 소스에 없어 영구 OutOfSync 방지.
+    - group: k8s.keycloak.org
+      kind: Keycloak
+      jsonPointers:
+        - /status

@@ -1,0 +1,33 @@
+# EKS Cold DR — Keycloak 차트 values.
+# Ansible keycloak_foundation(온프렘)의 정적값을 Helm 으로 옮긴 것. realm 은 복원 DB 것을 그대로 쓴다
+# (KeycloakRealmImport CR 없음 → 재import 충돌 없음, DR 유리).
+
+instances: 1
+
+# DB — T7-b 복원 서비스. 자격은 keycloak-pg-dr 차트가 만든 ESO 시크릿(basic-auth).
+# ⚠ keycloak-pg-credentials 가 현행(ESO←Vault cledyu/keycloak/postgres). 구 keycloak-db-credentials 는 고아.
+dbHost: keycloak-pg-rw
+dbSecret: keycloak-pg-credentials
+
+# hostname 고정 = 공개 issuer 단일화(auth.cledyu.com). EKS DR 엔 내부 .local 이 없어 동적모드 불필요.
+# 복원 realm 의 frontend URL(issuer/redirect)이 auth.cledyu.com 로 고정된다.
+hostname: auth.cledyu.com
+hostnameStrict: false
+
+serviceAccountName: cledyu-keycloak
+
+# 테마/SPI ConfigMap 명(온프렘 keycloak_foundation 과 동일). CR volume 이 이 이름을 참조.
+themeConfigMap: cledyu-keycloak-theme
+naverSpiConfigMap: cledyu-keycloak-naver-spi
+
+ingress:
+  host: auth.cledyu.com
+  # 오퍼레이터가 CR 명(cledyu-keycloak)으로 생성하는 Service:8080(http).
+  serviceName: cledyu-keycloak-service
+  servicePort: 8080
+  group: cledyu-dr
+  # ALB 그룹(cledyu-dr) 멤버(api·web·keycloak)는 ALB 레벨 설정(WAF·listen-ports·scheme)을 동일하게 맞춰야
+  # 컨트롤러 reconcile 이 성공한다. api values-eks 와 동일 ARN(terraform output public_waf_web_acl_arn).
+  wafAclArn: arn:aws:wafv2:ap-northeast-2:504284203153:regional/webacl/cledyu-lab-public/1a75fff2-a358-4f02-85f4-48f4714a2c0c
+  # 로그인 페이지 헬스체크 — 8080 관리포트(9000) 분리로 /health 는 8080 에 없음. /realms/master 는 200(JSON).
+  healthcheckPath: /realms/master

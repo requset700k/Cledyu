@@ -1,0 +1,11 @@
+## 네이버 소셜 로그인 SPI(커스텀 provider "naver"). 네이버는 OIDC id_token 미발급이라 빌트인 oidc 로
+## 동작 안 함 → prebuilt JAR 을 binaryData 로 마운트(/opt/keycloak/providers/naver-idp.jar).
+## 오퍼레이터가 비-optimized 로 기동 → 매 시작 시 augmentation 이 provider 등록(테마와 동일 패턴).
+## JAR 소스: keycloak/naver-idp/dist/naver-idp.jar(차트 files/ 로 복사, rebuild 는 keycloak/naver-idp README).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Values.naverSpiConfigMap }}
+  namespace: {{ .Release.Namespace }}
+binaryData:
+  naver-idp.jar: {{ .Files.Get "files/naver-idp.jar" | b64enc }}

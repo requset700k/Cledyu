@@ -1,0 +1,5 @@
+apiVersion: v2
+name: keycloak
+description: EKS Cold DR — Keycloak 인스턴스(CR) + cledyu 테마/네이버 SPI ConfigMap + ALB Ingress. 복원 DB(keycloak-pg-rw)의 realm 을 그대로 사용(재import 없음). 오퍼레이터는 keycloak-operator 앱(v26.6.1)이 선행 설치.
+type: application
+version: 0.1.0
