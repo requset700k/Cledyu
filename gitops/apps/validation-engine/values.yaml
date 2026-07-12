@@ -25,3 +25,13 @@ resources:
   limits: # Pod가 사용할 수 있는 최대 자원
     cpu: 500m # CPU 0.5코어
     memory: 256Mi # 메모리 256MB
+
+# 네트워크 정책 게이트 — 온프렘(Cilium)은 둘 다 강제. EKS DR 은 values-eks 에서 둘 다 false:
+#   - cilium: CiliumNetworkPolicy(cilium.io/v2)는 EKS(VPC CNI)에 CRD 가 없어 sync 블로커.
+#   - k8s:   plain NetworkPolicy 는 egress 에 SSM(FQDN) 규칙이 없어(FQDN 미지원), VPC CNI netpol 강제 시
+#            EC2 채점(SSM SendCommand)이 차단된다. EKS 는 SG/VPC 로 통제하고 두 정책 모두 미렌더.
+networkPolicy:
+  cilium:
+    enabled: true
+  k8s:
+    enabled: true
