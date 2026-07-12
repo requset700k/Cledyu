@@ -1,0 +1,15 @@
+## 복원된 DR 클러스터의 일 base backup(신 -dr 프리픽스). Cold DR 이 실제 재해 시 라이브 사이트가 되므로
+## 복원 후에도 자체 백업이 필요하다(WAL 은 Cluster backup stanza 가 -dr 로 연속 아카이빙).
+## CNPG cron 은 6필드(초 분 시 일 월 요일). "0 0 3 * * *" = 매일 03:00:00(postgres-cnpg-dr 02:00 과 분리).
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: keycloak-pg-daily
+  namespace: {{ .Release.Namespace }}
+spec:
+  schedule: "0 0 3 * * *"
+  # immediate: 복원 직후 1회 base backup(복원점을 -dr 프리픽스에 즉시 확보).
+  immediate: true
+  backupOwnerReference: self
+  cluster:
+    name: keycloak-pg

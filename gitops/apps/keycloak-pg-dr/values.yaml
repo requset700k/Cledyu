@@ -1,0 +1,13 @@
+# EKS Cold DR — keycloak-pg 복원 차트 values.
+# 라이브 구DB(keycloak-db-postgresql)를 참조하지 않고 S3(keycloak/ 프리픽스) 백업에서만 복원한다(설계 §5.1).
+# 운영 keycloak-pg 는 EKS(apps-eks)에 배포되지 않으므로 import-bootstrap 앱과 충돌하지 않는다.
+
+storage:
+  # 운영 keycloak-pg 와 동일 규격(20Gi). durability 는 barman S3 가 담당.
+  size: 20Gi
+
+# CNPG 가 Cluster 명(keycloak-pg)으로 자동 생성하는 SA(keycloak:keycloak-pg)에 붙일 IRSA 롤 ARN.
+# barman 이 inheritFromIAMRole 로 assume → S3 recovery-read(keycloak/) + backup-write(keycloak-dr/).
+# 롤 이름(cledyu-dr-cnpg-restore-keycloak)·계정이 결정적이라 verbatim 하드코딩(vault values-eks 선례).
+# terraform: eks_dr_name=cledyu-dr → ${eks_dr_name}-cnpg-restore-keycloak (eks-dr-irsa.tf).
+restoreRoleArn: "arn:aws:iam::504284203153:role/cledyu-dr-cnpg-restore-keycloak"

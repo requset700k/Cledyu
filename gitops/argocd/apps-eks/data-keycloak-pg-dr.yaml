@@ -1,0 +1,46 @@
+---
+# EKS Cold DR — keycloak-pg 복원(bootstrap.recovery) CNPG Cluster + 번들 ESO(keycloak-pg-credentials).
+# 운영 data-keycloak-pg.yaml(import-bootstrap)은 온프렘 apps/ 에만 있고 apps-eks 엔 없다 → 경쟁 import 앱 없음.
+# 차트가 ExternalSecret 을 동반하므로 EKS 엔 Ansible 없이도 keycloak-pg-credentials 가 프로비저닝된다
+# (managed.roles password 소스 + Keycloak(T8) DB 자격). ESO 는 복원된 Vault(vault-backend) 필요.
+# sync-wave 1 — data-cnpg-operator(wave 0) 뒤. Keycloak(T8, service-keycloak)은 이보다 뒤 wave.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eks-data-keycloak-pg-dr
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/requset700k/Cledyu.git
+    targetRevision: main
+    path: gitops/apps/keycloak-pg-dr
+    helm:
+      releaseName: keycloak-pg-dr
+      valueFiles:
+        - values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keycloak
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 10
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+  ignoreDifferences:
+    - group: postgresql.cnpg.io
+      kind: Cluster
+      jsonPointers:
+        - /status
