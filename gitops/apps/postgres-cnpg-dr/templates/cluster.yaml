@@ -48,7 +48,7 @@ spec:
     # serverName 이 원본과 같으면 "Expected empty archive" 로 primary setup 이 멈춘다(아카이브 충돌).
     barmanObjectStore:
       destinationPath: "s3://cledyu-lab-dr-backups/postgres-dr"
-      serverName: cledyu-pg-dr
+      serverName: "cledyu-pg-dr{{ .Values.backupSuffix }}"
       endpointURL: "https://s3.ap-northeast-2.amazonaws.com"
       s3Credentials:
         inheritFromIAMRole: true

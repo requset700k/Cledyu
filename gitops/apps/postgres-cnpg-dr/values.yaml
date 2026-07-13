@@ -11,3 +11,10 @@ storage:
 # 롤 이름(cledyu-dr-cnpg-restore-postgres)·계정이 결정적이라 verbatim 하드코딩(vault values-eks 선례).
 # terraform: eks_dr_name=cledyu-dr → ${eks_dr_name}-cnpg-restore-postgres (eks-dr-irsa.tf).
 restoreRoleArn: "arn:aws:iam::504284203153:role/cledyu-dr-cnpg-restore-postgres"
+
+# 복원된 클러스터가 -dr 프리픽스에 쓰는 backup serverName 접미(default 빈 값).
+# ⚠ 반복 드릴/재해(30일 내): 이전 recovery 가 -dr 에 쓴 아카이브가 Object Lock(GOVERNANCE 30d)로
+#   삭제 불가라, serverName 이 같으면 CNPG "Expected empty archive" 로 recovery 가 막힌다(실측 2026-07-13).
+#   → 부트스트랩서 매번 유니크 값 주입: helm/ArgoCD param `--set backupSuffix=-$(date +%Y%m%d%H%M)`.
+#   빈 값이면 -dr 이 비어있는 "최초" real-DR 만 안전.
+backupSuffix: ""
