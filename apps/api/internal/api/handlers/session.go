@@ -551,8 +551,9 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 			attribute.String("session.id", sessionID),
 			attribute.Int("step.id", req.StepID),
 		)
-		h.markStepPassed(sessionID, idx)
+		completedUser, completedLab := h.markStepPassed(sessionID, idx)
 		mockSpan.End()
+		h.recordLabCompletion(sessionID, completedUser, completedLab)
 		span.SetAttributes(attribute.String("validation.request.result", "mock_passed"))
 		c.JSON(http.StatusOK, gin.H{"status": "passed", "message": "검증을 통과했습니다 (mock)"})
 		return
@@ -775,13 +776,7 @@ func (h *Handler) ApplyValidationResult(r validation.ValidationResult) {
 	}
 
 	// 랩 완료 이력(수료증·배지·리더보드의 원천). (user, lab) 최초 1회만 기록된다.
-	if completedLab != "" && completedUser != "" && h.db != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
-		defer cancel()
-		if err := h.db.RecordCompletion(ctx, completedUser, completedLab, r.SessionID); err != nil {
-			h.log.Warn("랩 완료 이력 기록 실패", zap.String("session_id", r.SessionID), zap.Error(err))
-		}
-	}
+	h.recordLabCompletion(r.SessionID, completedUser, completedLab)
 }
 
 var errStepSessionNotFound = errors.New("session not found")
@@ -823,7 +818,7 @@ func (h *Handler) findValidatableStepIndex(sessionID string, stepID int) (int, e
 	return idx, nil
 }
 
-func (h *Handler) markStepPassed(sessionID string, idx int) {
+func (h *Handler) markStepPassed(sessionID string, idx int) (completedUser, completedLab string) {
 	h.steps.withSession(sessionID, func(ss *sessionSteps) bool {
 		if idx < 0 || idx >= len(ss.Steps) {
 			return false
@@ -836,8 +831,23 @@ func (h *Handler) markStepPassed(sessionID string, idx int) {
 			}
 			ss.CurrentStep = ss.Steps[idx+1].StepID
 		}
+		if ss.allPassed() {
+			completedUser, completedLab = ss.UserID, ss.LabID
+		}
 		return true
 	})
+	return completedUser, completedLab
+}
+
+func (h *Handler) recordLabCompletion(sessionID, userID, labID string) {
+	if labID == "" || userID == "" || h.db == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
+	defer cancel()
+	if err := h.db.RecordCompletion(ctx, userID, labID, sessionID); err != nil {
+		h.log.Warn("랩 완료 이력 기록 실패", zap.String("session_id", sessionID), zap.Error(err))
+	}
 }
 
 func findContentStep(lc content.LabContent, stepID int) (content.Step, bool) {

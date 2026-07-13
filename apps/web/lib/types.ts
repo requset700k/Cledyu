@@ -167,6 +167,7 @@ export interface DashboardLab {
   title: string;
   difficulty: Difficulty;
   status: LabStatus;
+  session_id?: string;
   completed_at: string | null;
 }
 

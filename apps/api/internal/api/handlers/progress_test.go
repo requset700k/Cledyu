@@ -20,9 +20,9 @@ type fakePersistence struct {
 	completions  map[string]string // user|lab → session
 	completionAt map[string]string // "user|lab" → RFC3339, 비면 zero time
 	saves        int
-	leaderboard  []store.LeaderboardRow // LeaderboardRows 가 돌려줄 행
-	hidden       map[string]bool        // SetLeaderboardHidden 이 기록
-	inProgress   map[string][]string    // user_id → lab_ids (진행기록 있는 랩)
+	leaderboard  []store.LeaderboardRow           // LeaderboardRows 가 돌려줄 행
+	hidden       map[string]bool                  // SetLeaderboardHidden 이 기록
+	inProgress   map[string][]store.InProgressLab // user_id → 진행기록 있는 랩
 }
 
 func newFakePersistence() *fakePersistence {
@@ -31,7 +31,7 @@ func newFakePersistence() *fakePersistence {
 		users:       map[string]string{},
 		completions: map[string]string{},
 		hidden:      map[string]bool{},
-		inProgress:  map[string][]string{},
+		inProgress:  map[string][]store.InProgressLab{},
 	}
 }
 
@@ -139,7 +139,7 @@ func (f *fakePersistence) SetLeaderboardHidden(_ context.Context, userID string,
 	return nil
 }
 
-func (f *fakePersistence) ListInProgressLabIDsByUser(_ context.Context, userID string) ([]string, error) {
+func (f *fakePersistence) ListInProgressLabsByUser(_ context.Context, userID string) ([]store.InProgressLab, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.inProgress[userID], nil
@@ -230,6 +230,23 @@ func TestProgress_RecordsCompletion(t *testing.T) {
 
 	if got := db.completions["alice|lab-linux-basics"]; got != "s1" {
 		t.Fatalf("expected completion recorded, got %q", got)
+	}
+}
+
+// validator 가 없는 로컬/mock 검증 경로도 마지막 스텝 통과 시 완료 이력을 기록해야 한다.
+// 그렇지 않으면 Lab 화면은 전 단계 통과로 보이지만 내 학습 대시보드는 계속 in_progress 로 남는다.
+func TestProgress_MockValidationRecordsCompletion(t *testing.T) {
+	db := newFakePersistence()
+	h := &Handler{log: zap.NewNop(), steps: newStepStore(db, zap.NewNop()), db: db}
+	seed := twoStepSeed()
+	seed.Steps[0].Status = "passed"
+	h.steps.put("s1", seed)
+
+	completedUser, completedLab := h.markStepPassed("s1", 1)
+	h.recordLabCompletion("s1", completedUser, completedLab)
+
+	if got := db.completions["alice|lab-linux-basics"]; got != "s1" {
+		t.Fatalf("expected mock completion recorded, got %q", got)
 	}
 }
 
