@@ -9,6 +9,11 @@ metadata:
   namespace: {{ .Release.Namespace }}
 spec:
   instances: {{ .Values.instances }}
+  # SPI JAR(naver-idp)를 ConfigMap 런타임 마운트하므로 시작 시 augmentation(빌드)이 돌아야 provider 가 등록된다.
+  # 현재는 spec.image 미지정(기본 이미지)이라 미명시여도 비-optimized 시작이지만(CRD: 미지정 시 optimized 간주는
+  # custom image 한정), 나중에 image 를 핀하면 가정이 뒤집혀 SPI 미등록 → naver 로그인만 조용히 깨진다(Codex P2).
+  # 명시해서 그 함정을 제거한다 — 현 동작 변화 없음. pre-augmented 이미지로 전환 시에만 재검토.
+  startOptimized: false
   unsupported:
     podTemplate:
       spec:
