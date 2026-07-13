@@ -33,6 +33,11 @@ spec:
     - "*.vault-internal.vault"
     - "*.vault-internal.vault.svc"
     - "*.vault-internal.vault.svc.cluster.local"
+  # 파드 기본 VAULT_ADDR 는 https://127.0.0.1:8200 이다. IP SAN 이 없으면 in-pod vault CLI 가
+  # x509(cannot validate for 127.0.0.1, no IP SANs)로 실패한다(DR 드릴 실측) → 127.0.0.1 IP SAN 추가.
+  # 이게 있어야 런북의 in-pod `VAULT_CACERT=.. vault operator init/restore` 명령이 그대로 통한다.
+  ipAddresses:
+    - "127.0.0.1"
   privateKey:
     algorithm: RSA
     size: 2048

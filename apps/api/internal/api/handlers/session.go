@@ -539,6 +539,14 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 	}
 
 	if h.validator == nil {
+		// mock pass 는 debug/로컬 전용이다. release 모드에서 validator 가 없으면(예: DR 에 validation-engine
+		// 미배포) mock 으로 스텝을 통과시키면 인증 사용자가 공개 API 로 수료/진도를 무검증 변조할 수 있다
+		// → fail-closed(503). (router.go 의 release 게이팅과 동일 원칙.)
+		if h.cfg != nil && h.cfg.Server.Mode == "release" {
+			span.SetAttributes(attribute.String("validation.request.result", "validator_unavailable"))
+			h.err(c, http.StatusServiceUnavailable, "validation engine not available")
+			return
+		}
 		_, mockSpan := startHandlerSpan(ctx, "api.validation.mock_pass",
 			attribute.String("session.id", sessionID),
 			attribute.Int("step.id", req.StepID),

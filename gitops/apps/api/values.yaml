@@ -79,6 +79,8 @@ resources:
     memory: 256Mi
 
 kubevirt:
+  # 세션 실행 백엔드 활성. 온프렘 기본 true. DR(EKS)은 values-eks 에서 false → 세션 API 503(KubeVirt 미배포).
+  enabled: true
   # 세션 VM cloud-init이 lab 사용자 authorized_keys로 넣는 검증엔진 공개키(공개값).
   # 대응 private key는 validation-engine Secret(lab-ssh-key)에 보관 — git에 넣지 않는다.
   labSshPublicKey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGIZUWVKVjoJzh6dirTVWAtLYewp+SXW54f3uiS8tCFj validation-engine@cledyu"
@@ -91,6 +93,11 @@ kubevirt:
     mountPath: "/etc/vm-file-ssh"
     publicKeyPath: "/etc/vm-file-ssh/public_key"
     privateKeyPath: "/etc/vm-file-ssh/id_ed25519"
+
+# Kafka(Strimzi) 커플링 — 온프렘 기본 활성. EKS DR 는 values-eks 에서 false(Strimzi/KafkaUser CRD 미배포 →
+# kafka.yaml·kafka-certs 볼륨 미렌더). false 여야 EKS 에서 api Application sync 가 통과한다(F2/F7).
+kafka:
+  enabled: true
 
 # AWS EC2 오버플로우 — 온프렘 KubeVirt 풀이 가득 차면 세션을 EC2로 버스트한다(Phase 13).
 # enabled=false 가 기본 — EC2 비활성(KubeVirt 전용, 현행 동작 보존). 활성화 절차:

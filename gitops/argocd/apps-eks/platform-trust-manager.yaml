@@ -1,0 +1,51 @@
+---
+# trust-manager — onprem platform-trust-manager.yaml 과 동일 패턴이나,
+# Bundle CR(cledyu-root-ca-bundle)은 cert-manager 의 cledyu-root-ca Secret 을 source 로 하며
+# cert-manager/root CA 프로비저닝은 이 태스크 범위 밖 — 여기서는 컨트롤러만 배선한다.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eks-platform-trust-manager
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://charts.jetstack.io
+      chart: trust-manager
+      targetRevision: v0.22.0
+      helm:
+        releaseName: trust-manager
+        valueFiles:
+          - $values/gitops/apps/trust-manager/values.yaml
+          - $values/gitops/apps/trust-manager/values-eks.yaml
+    - repoURL: https://github.com/requset700k/Cledyu.git
+      targetRevision: main
+      ref: values
+    # Bundle CR + namespace — directory mode(온프렘 platform-trust-manager.yaml 과 동일).
+    # cledyu-root-ca-bundle 이 라벨 ns 에 ConfigMap 분배 → api /etc/ssl/cledyu 비-optional 마운트 충족(F1).
+    - repoURL: https://github.com/requset700k/Cledyu.git
+      targetRevision: main
+      path: gitops/apps/trust-manager
+      directory:
+        include: "{namespace.yaml,cledyu-root-ca-bundle.yaml}"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: trust-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - SkipDryRunOnMissingResource=true
+    retry:
+      limit: 10
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
