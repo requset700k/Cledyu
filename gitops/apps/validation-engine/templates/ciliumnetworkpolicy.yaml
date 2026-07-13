@@ -1,3 +1,4 @@
+{{- if .Values.networkPolicy.cilium.enabled }}
 ---
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
@@ -47,3 +48,4 @@ spec:
             - port: "443"
               protocol: TCP
     {{- end }}
+{{- end }}
