@@ -1,0 +1,55 @@
+## 온프렘 failback — EKS DR 아카이브(postgres-dr/, serverName=cledyu-pg-dr-e{N+1})에서 recovery.
+## 운영 postgres-cnpg(import fail-safe)와 완전 별개. path-swap 으로 data-postgres-cnpg 앱에 transient
+## 적용 → stale cledyu-pg 삭제 후 ArgoCD 가 이 recovery 로 fresh 생성 → 정합 확인·drEpoch bump 후 운영 adopt.
+## 정적 키(cledyu-backup-s3, postgres ns) 사용 — 온프렘은 IRSA 불가. longhorn SC·운영 resources(온프렘 QoS).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cledyu-pg
+  namespace: {{ .Release.Namespace }}
+spec:
+  instances: 1
+  imageName: "ghcr.io/cloudnative-pg/postgresql:16.4@sha256:99be063781d171d3971089b49c992706bdab9ccbd2b57cdf126c7542773aedfe"
+  storage:
+    size: {{ .Values.storage.size | quote }}
+    storageClass: {{ .Values.storage.className }}
+  resources:
+    requests:
+      cpu: {{ .Values.resources.requests.cpu | quote }}
+      memory: {{ .Values.resources.requests.memory | quote }}
+    limits:
+      cpu: {{ .Values.resources.limits.cpu | quote }}
+      memory: {{ .Values.resources.limits.memory | quote }}
+  bootstrap:
+    # 최신 WAL 끝까지 재생(recoveryTarget 미지정) = quiesce 시점까지 복원.
+    recovery:
+      source: cledyu-pg-dr-origin
+  externalClusters:
+    - name: cledyu-pg-dr-origin
+      barmanObjectStore:
+        destinationPath: "s3://cledyu-lab-dr-backups/postgres-dr"
+        # EKS 가 진입 epoch 에 쓴 -dr 아카이브. drEpoch=0(첫 failback) → cledyu-pg-dr-e1.
+        serverName: "cledyu-pg-dr-e{{ add (int .Values.drEpoch) 1 }}"
+        endpointURL: "https://s3.ap-northeast-2.amazonaws.com"
+        s3Credentials:
+          accessKeyId:
+            name: cledyu-backup-s3
+            key: ACCESS_KEY_ID
+          secretAccessKey:
+            name: cledyu-backup-s3
+            key: ACCESS_SECRET_KEY
+        wal:
+          compression: gzip
+  managed:
+    # 복원 데이터의 cledyu role 비번을 온프렘 Vault(postgres-credentials-cnpg)에 맞춰 ALTER
+    # → S3 백업(EKS 비번) vs 온프렘 Vault 스큐 흡수. api DSN 인증 불변. DR 차트와 동일 패턴.
+    roles:
+      - name: cledyu
+        ensure: present
+        login: true
+        superuser: false
+        passwordSecret:
+          name: postgres-credentials-cnpg
+  # backup·ScheduledBackup 없음 — recovery 전용. 전진 아카이빙은 adopt 후 운영 차트가 담당.
+  monitoring:
+    enablePodMonitor: true
