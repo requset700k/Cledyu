@@ -46,8 +46,10 @@ YAML
 ### 3. 온프렘 recovery — 【승인 게이트: 삭제 전 -dr 건전성 확인 필수】
 ```bash
 N=<진입 epoch 정수>   # = 현재 운영/DR values 의 drEpoch(값 표 참조). 첫 failback 이면 0.
-# (a) 선-확인: -dr 아카이브에 base+WAL 존재(불완전하면 stale 삭제 금지 — DB 소실).
-aws s3 ls s3://cledyu-lab-dr-backups/postgres-dr/cledyu-pg-dr-e$((N+1))/ --recursive | grep -E 'base|wals' | head
+# (a) 선-확인: postgres·keycloak **둘 다** -dr 아카이브에 base+WAL 존재해야 진행. 하나라도 비면 그 DB 는
+#     (c) stale 삭제 금지 — 해당 -dr 복원 소스가 없어 삭제 시 DB 영구 소실(대칭 필수, keycloak 도 삭제 대상이므로).
+aws s3 ls s3://cledyu-lab-dr-backups/postgres-dr/cledyu-pg-dr-e$((N+1))/   --recursive | grep -E 'base|wals' | head
+aws s3 ls s3://cledyu-lab-dr-backups/keycloak-dr/keycloak-pg-dr-e$((N+1))/ --recursive | grep -E 'base|wals' | head
 # (b) path-swap: data-postgres-cnpg·data-keycloak-pg 앱 source.path 를 -failback 차트로 (git 커밋).
 #     postgres-cnpg → postgres-cnpg-failback, keycloak-pg → keycloak-pg-failback. drEpoch=N 확인.
 # (c) stale cluster 삭제(파괴적 — PVC 소멸) → ArgoCD 가 failback 차트로 fresh recovery.
@@ -83,7 +85,8 @@ done
 # (b) path-swap 원복: data-postgres-cnpg·data-keycloak-pg source.path 를 운영 차트로. (git 커밋)
 # (c) adopt: 운영 차트 재-sync. cledyu-pg 는 이미 존재 → bootstrap 재실행 없음. backup serverName=cledyu-pg-e{N+1}
 #     로 전진 아카이빙(WAL) 개시. ArgoCD OutOfSync(bootstrap diff) 나면 ignoreDifferences 검토(R1).
-# (d) 새 epoch anchor 를 결정론적으로 확보 — 명시적 on-demand base backup.
+# (d) 새 epoch anchor 를 결정론적으로 확보 — 명시적 on-demand base backup. **(c) adopt sync 완료 후 실행** —
+#     그래야 cluster backup 이 새 epoch serverName(cledyu-pg-e{N+1})을 가리켜 base backup 이 올바른 경로로 간다.
 #     ⚠️ 운영 ScheduledBackup(immediate:true)의 즉시백업은 CR '생성' 시에만 발화한다. adopt 시 path-swap
 #        prune→recreate 로 발화하긴 하나 그 부수효과에 의존하지 않는다. 아래로 확실히 anchor 를 만든다.
 #        (이게 없으면 새 epoch 에 WAL 만 있고 base 가 없어, 그 창에 재해 오면 f(N+1) recovery 가 anchor 없이 실패.)
@@ -119,7 +122,12 @@ cd infra/terraform/aws && terraform apply -var enable_public_ingress=true -targe
 ```
 
 ### 7. 온프렘 앱 재개
+> DNS 가 온프렘을 가리킨 뒤(step6) 재기동해야 api 의 startup-1회 OIDC discovery(issuer https://auth.cledyu.com)가
+> 온프렘 Keycloak 으로 해석된다(그 전 재기동 시 죽은/quiesce 된 EKS auth 로 붙어 영구 degraded).
 ```bash
+# 전제: 온프렘 앱이 step0 에서 scale-0/ArgoCD suspend 로 눌려 있었으면 먼저 desired 로 복구해야 한다
+#       (rollout restart 는 replicas=0 을 올리지 않는다). ArgoCD 자동 sync 상태면 이미 desired 로 떠 있다.
+#   예) kubectl --context onprem -n api scale deploy/api --replicas=<desired>  (web·keycloak instances 도 동일)
 # 전부 온프렘 대상 → --context onprem 고정(EKS 는 아직 살아있으므로 context 혼동 시 엉뚱한 사이트 재기동).
 kubectl --context onprem -n api rollout restart deploy/api && kubectl --context onprem -n api rollout status deploy/api
 kubectl --context onprem -n web rollout restart deploy/web && kubectl --context onprem -n web rollout status deploy/web
