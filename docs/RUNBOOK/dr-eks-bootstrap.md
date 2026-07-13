@@ -339,6 +339,19 @@ kubectl -n postgres delete cluster cledyu-pg --ignore-not-found
 kubectl -n keycloak delete cluster keycloak-pg --ignore-not-found
 ```
 
+### real-DR: DR-창 쓰기 캡처 (backupEnabled=true — 드릴과 다름)
+
+> 드릴은 `backupEnabled=false`(반복 드릴 -dr 충돌 회피)로 두지만, **실재해**에선 온프렘 복구 후
+> failback 하려면 EKS 가 DR-창 쓰기를 S3(`-dr/`)에 남겨야 한다. 아래는 real-DR 에서만 수행.
+
+1. **backupEnabled=true 로 flip** — `gitops/apps/postgres-cnpg-dr/values.yaml`·`keycloak-pg-dr/values.yaml`
+   의 `backupEnabled: false → true` 를 git 커밋(apps-eks 가 sync). → DR primary 가 `postgres-dr/cledyu-pg-dr-e{N+1}`·
+   `keycloak-dr/keycloak-pg-dr-e{N+1}` 로 WAL 아카이빙 + ScheduledBackup(immediate) 이 base backup 1회.
+   - `drEpoch` 는 **bump 하지 않는다**(여전히 N — 진입 epoch). serverName 의 -e{N+1} 는 템플릿이 자동 파생.
+2. **anchor 도달 확인** — `kubectl -n postgres get backup` 에 `completed` base backup 1건 이상 + S3
+   `s3://cledyu-lab-dr-backups/postgres-dr/cledyu-pg-dr-e{N+1}/` 아래 base·WAL 존재. keycloak 동일.
+   (이게 없으면 failback recovery 가 anchor 없이 실패 — 반드시 게이트.)
+
 - [ ] apps-eks root-app 적용 → 플랫폼(cert-manager·ALB·gp3·ESO·CNPG operator) Ready
 - [ ] Kafka Ready(실습 스택 — A1) — strimzi-operator(wave 0) Running 후 kafka-cluster(wave 1) sync.
       `kubectl -n kafka get kafka cledyu-kafka`(READY=True), `kubectl -n kafka get kafkatopic`(validation-requests·-dlq·-results·lab-events·security-logs 존재),
