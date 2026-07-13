@@ -5,7 +5,10 @@ import { normalizeReturnPath, pathWithSearch } from './auth-return.mjs';
 describe('auth return path helpers', () => {
   it('preserves query string for protected route redirects', () => {
     assert.equal(
-      pathWithSearch({ pathname: '/billing', search: '?checkout_session_id=cs_mock&provider=mock' }),
+      pathWithSearch({
+        pathname: '/billing',
+        search: '?checkout_session_id=cs_mock&provider=mock',
+      }),
       '/billing?checkout_session_id=cs_mock&provider=mock',
     );
   });
