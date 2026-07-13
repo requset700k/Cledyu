@@ -229,6 +229,9 @@ kubectl -n api get configmap cledyu-root-ca-bundle   # trust-manager Bundle 분�
       (ServiceMonitor 2종 미배포는 정상 — EKS 관측 스택 없음, directory.exclude 로 제거.)
 - [ ] **Vault 스냅샷 복원**(위 섹션)
 - [ ] CNPG 복원 차트 sync → `cledyu-pg-rw`·`keycloak-pg-rw` Ready(자동 S3 복원)
+- [ ] validation-engine Ready(실습 스택 — A2) — `kubectl -n validation-engine get deploy validation-engine` Available.
+      선행: A1 Kafka(KafkaUser `validation-engine` Ready · kafka-clients-ca client cert) + **Vault 복원→ESO 로 `cledyu-validation-engine-aws` Secret 생성 후** 기동(AWS 키 non-optional).
+      (CiliumNetworkPolicy·plain NetworkPolicy 둘 다 미렌더 정상 — EKS values-eks 게이트. lab-ssh-key 없음도 정상 — EC2/SSM 채점.)
 - [ ] Keycloak·api·web Ready + ALB/ACM 종단 확인
 - [ ] **공개 DNS 전환**(아래 섹션) — DNS 안 바꾸면 죽은 온프렘 프록시로 계속 감. WAF(/metrics 차단)는 api·web values-eks 의 wafv2-acl-arn 로 ALB 생성과 동시에 자동 연결(수동 불요) → 여기선 붙었는지 확인만
 - [ ] **api·web rollout restart**(아래 섹션) — CNPG·Keycloak·DNS Ready 후 필수. api 는 startup 1회만 DB/auth 초기화·실패 시 degraded 유지라, 의존성이 늦게 살아나면 restart 해야 DB모드·로그인 활성
@@ -316,12 +319,15 @@ kubectl -n argocd rollout status statefulset argocd-application-controller --tim
 #    못 지우고 고아가 된다(gp3 EBS 잔존 → 고아 볼륨 검증·서브넷/VPC 삭제까지 막힘).
 kubectl -n vault delete statefulset vault --ignore-not-found
 kubectl delete clusters.postgresql.cnpg.io -A --all --ignore-not-found   # 오퍼레이터가 파드+PVC 정리
-# Kafka 브로커도 gp3 PVC 3개(kafka-nodepool-eks)를 마운트 → Kafka CR 삭제 시 Strimzi 오퍼레이터가
-# StrimziPodSet/브로커 파드를 제거해 마운트를 푼다. KafkaNodePool 은 deleteClaim:false 라 PVC 자체는 남고
-# 아래 3) delete pvc 에서 마운트 없어진 뒤 삭제된다.
-# ⚠️ 전제: strimzi-cluster-operator(strimzi-system)는 아직 떠 있어야 CR 삭제를 처리한다 — 위 0)은 argocd
-#    application-controller 만 scale0 했다. 오퍼레이터가 이미 내려갔으면 브로커 파드가 안 지워지니 먼저 살린다.
+# Kafka 브로커도 gp3 PVC 3개(kafka-nodepool-eks)를 마운트 → 삭제해야 마운트가 풀린다.
+# ⚠️ 드릴 실측(2026-07-12): node-pool 기반 Kafka 는 브로커 파드를 KafkaNodePool→StrimziPodSet 이 소유한다.
+#    Kafka CR(kafkas)만 지우면 StrimziPodSet/브로커 파드가 남아 PVC 가 Terminating 고착(EBS 고아)한다 →
+#    KafkaNodePool 도 반드시 지워야 파드가 빠진다. (KafkaNodePool deleteClaim:false 라 PVC 자체는 남고,
+#    아래 3) delete pvc 에서 마운트 없어진 뒤 삭제된다.)
+# 전제: strimzi-cluster-operator(strimzi-system)는 아직 떠 있어야 삭제를 처리한다 — 위 0)은 argocd
+#    application-controller 만 scale0 했다.
 kubectl delete kafkas.kafka.strimzi.io -A --all --ignore-not-found
+kubectl delete kafkanodepool.kafka.strimzi.io -A --all --ignore-not-found   # ← 브로커 파드 실소유자(StrimziPodSet). 없으면 파드 안 빠져 PVC 고착
 kubectl wait --for=delete pod -n vault -l app.kubernetes.io/name=vault --timeout=300s 2>/dev/null || true
 kubectl wait --for=delete pod -n kafka -l strimzi.io/cluster=cledyu-kafka --timeout=300s 2>/dev/null || true
 

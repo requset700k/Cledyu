@@ -1,0 +1,47 @@
+---
+# EKS DR — validation-engine. service-api 패턴(로컬 helm 차트 + values-eks).
+# wave 2 — A1 Kafka(strimzi wave 0, kafka wave 1) 뒤. KafkaUser·client cert(kafka-clients-ca)·브로커 선재.
+# AWS SSM 키(cledyu-validation-engine-aws)는 Vault 복원→ESO(data-eso-store) 후 주입되어 파드 기동.
+# targetRevision: main — apps-eks 형제 앱 규약 일치.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eks-service-validation-engine
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/requset700k/Cledyu.git
+    targetRevision: main
+    path: gitops/apps/validation-engine
+    helm:
+      releaseName: validation-engine
+      valueFiles:
+        - values.yaml
+        - values-eks.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: validation-engine
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 10
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+  # KafkaUser status 는 런타임 값 → 비교 제외.
+  ignoreDifferences:
+    - group: kafka.strimzi.io
+      kind: KafkaUser
+      jsonPointers:
+        - /status
