@@ -1,6 +1,8 @@
-## 복원된 DR 클러스터의 일 base backup(신 -dr 프리픽스). Cold DR 이 실제 재해 시 라이브 사이트가 되므로
-## 복원 후에도 자체 백업이 필요하다(WAL 은 Cluster backup stanza 가 -dr 로 연속 아카이빙).
+## 복원된 DR 클러스터의 일 base backup(신 -dr 프리픽스). Cluster backup stanza(backupEnabled)에 종속되므로
+## backupEnabled=false(default)면 렌더 안 함 — barmanObjectStore 없이 ScheduledBackup 만 있으면 실패하기 때문.
+## real-DR post-failover 에서 backupEnabled=true 로 켜면 이 일 백업도 함께 활성.
 ## CNPG cron 은 6필드(초 분 시 일 월 요일). "0 0 3 * * *" = 매일 03:00:00(postgres-cnpg-dr 02:00 과 분리).
+{{- if .Values.backupEnabled }}
 apiVersion: postgresql.cnpg.io/v1
 kind: ScheduledBackup
 metadata:
@@ -13,3 +15,4 @@ spec:
   backupOwnerReference: self
   cluster:
     name: keycloak-pg
+{{- end }}

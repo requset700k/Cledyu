@@ -12,9 +12,9 @@ storage:
 # terraform: eks_dr_name=cledyu-dr → ${eks_dr_name}-cnpg-restore-keycloak (eks-dr-irsa.tf).
 restoreRoleArn: "arn:aws:iam::504284203153:role/cledyu-dr-cnpg-restore-keycloak"
 
-# 복원된 클러스터가 -dr 프리픽스에 쓰는 backup serverName 접미(default 빈 값).
-# ⚠ 반복 드릴/재해(30일 내): 이전 recovery 가 -dr 에 쓴 아카이브가 Object Lock(GOVERNANCE 30d)로
-#   삭제 불가라, serverName 이 같으면 CNPG "Expected empty archive" 로 recovery 가 막힌다(실측 2026-07-13).
-#   → 부트스트랩서 매번 유니크 값 주입: helm/ArgoCD param `--set backupSuffix=-$(date +%Y%m%d%H%M)`.
-#   빈 값이면 -dr 이 비어있는 "최초" real-DR 만 안전.
-backupSuffix: ""
+# recovery 클러스터의 자체 -dr 백업 아카이빙 스위치(default off).
+# ⚠ 반복 드릴/재해(30일 내): 이전 recovery 가 -dr 에 쓴 아카이브가 Object Lock(GOVERNANCE 30d)로 삭제 불가라,
+#   같은 serverName 으로 다시 쓰면 CNPG "WAL archive check: Expected empty archive" 로 recovery 가 막힌다(실측 2026-07-13).
+#   → default off: recovery 클러스터는 복원만 하고 자체 아카이빙을 안 해 충돌을 원천 회피(드릴/재해 반복 성립).
+#   real-DR 에서 새 primary 자체보호가 필요하면 안정화 후 true(post-failover 스텝). 복원 데이터 자체는 원본 백업이 보호.
+backupEnabled: false

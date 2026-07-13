@@ -43,18 +43,23 @@ spec:
           inheritFromIAMRole: true
         wal:
           compression: gzip
+  # recovery 클러스터의 자체 -dr 아카이빙. default off(values backupEnabled=false) — 반복 드릴/재해 시
+  # 이전 -dr 아카이브(Object Lock 30d)와의 "Expected empty archive" 충돌을 원천 회피. real-DR 새 primary
+  # 자체보호가 필요하면 안정화 후 backupEnabled=true(post-failover). backup 부재여도 recovery(externalClusters
+  # 에서 복원)와 단일 인스턴스 운영엔 지장 없다(스트리밍 복제 없음).
+  {{- if .Values.backupEnabled }}
   backup:
-    # 복원된 클러스터의 새 백업은 원본과 분리된 -dr 프리픽스로 쓴다.
-    # serverName 이 원본과 같으면 "Expected empty archive" 로 primary setup 이 멈춘다(아카이브 충돌).
     barmanObjectStore:
       destinationPath: "s3://cledyu-lab-dr-backups/postgres-dr"
-      serverName: "cledyu-pg-dr{{ .Values.backupSuffix }}"
+      # serverName 이 원본(cledyu-pg)과 같으면 "Expected empty archive" — 반드시 -dr 접미.
+      serverName: cledyu-pg-dr
       endpointURL: "https://s3.ap-northeast-2.amazonaws.com"
       s3Credentials:
         inheritFromIAMRole: true
       wal:
         compression: gzip
     # retentionPolicy 미설정 — 무-delete IAM + Object Lock(운영 차트와 동일 사유). 삭제는 S3 lifecycle(-dr 만료).
+  {{- end }}
   monitoring:
     # EKS DR 엔 kube-prometheus CRD(PodMonitor)가 없다 → false(운영 true 와 다름, [B4]).
     enablePodMonitor: false
