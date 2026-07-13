@@ -14,24 +14,28 @@ import (
 
 // fakePersistence는 persistence 의 in-memory 테스트 더블이다.
 type fakePersistence struct {
-	mu           sync.Mutex
-	progress     map[string]store.SessionProgress
-	users        map[string]string // id → role
-	completions  map[string]string // user|lab → session
-	completionAt map[string]string // "user|lab" → RFC3339, 비면 zero time
-	saves        int
-	leaderboard  []store.LeaderboardRow           // LeaderboardRows 가 돌려줄 행
-	hidden       map[string]bool                  // SetLeaderboardHidden 이 기록
-	inProgress   map[string][]store.InProgressLab // user_id → 진행기록 있는 랩
+	mu            sync.Mutex
+	progress      map[string]store.SessionProgress
+	users         map[string]string // id → role
+	completions   map[string]string // user|lab → session
+	completionAt  map[string]string // "user|lab" → RFC3339, 비면 zero time
+	saves         int
+	leaderboard   []store.LeaderboardRow           // LeaderboardRows 가 돌려줄 행
+	hidden        map[string]bool                  // SetLeaderboardHidden 이 기록
+	inProgress    map[string][]store.InProgressLab // user_id → 진행기록 있는 랩
+	subscriptions map[string]store.Subscription
+	checkouts     map[string]store.CheckoutSession
 }
 
 func newFakePersistence() *fakePersistence {
 	return &fakePersistence{
-		progress:    map[string]store.SessionProgress{},
-		users:       map[string]string{},
-		completions: map[string]string{},
-		hidden:      map[string]bool{},
-		inProgress:  map[string][]store.InProgressLab{},
+		progress:      map[string]store.SessionProgress{},
+		users:         map[string]string{},
+		completions:   map[string]string{},
+		hidden:        map[string]bool{},
+		inProgress:    map[string][]store.InProgressLab{},
+		subscriptions: map[string]store.Subscription{},
+		checkouts:     map[string]store.CheckoutSession{},
 	}
 }
 
@@ -143,6 +147,23 @@ func (f *fakePersistence) ListInProgressLabsByUser(_ context.Context, userID str
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.inProgress[userID], nil
+}
+
+func (f *fakePersistence) GetSubscription(_ context.Context, userID string) (*store.Subscription, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	sub, ok := f.subscriptions[userID]
+	if !ok {
+		return nil, nil
+	}
+	return &sub, nil
+}
+
+func (f *fakePersistence) CreateCheckoutSession(_ context.Context, session store.CheckoutSession) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.checkouts[session.ID] = session
+	return nil
 }
 
 func twoStepSeed() *sessionSteps {
