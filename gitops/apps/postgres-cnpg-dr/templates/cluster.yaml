@@ -43,6 +43,18 @@ spec:
           inheritFromIAMRole: true
         wal:
           compression: gzip
+  managed:
+    # DR 은 Vault(db/postgres)와 DB(S3 백업)를 독립 복원하므로 비번 드리프트 위험이 최대다.
+    # CNPG 가 cledyu role 비번을 postgres-credentials-cnpg(ESO←Vault)에 맞춰 지속 ALTER ROLE 해
+    # 항상 Secret=DBrole 을 보장 → 복원 시점 스큐(S3 백업 vs Vault 스냅샷)가 있어도 api(cledyu/db/api
+    # DSN) DB 인증이 깨지지 않는다. keycloak-pg-dr 와 동일 패턴(Codex P2).
+    roles:
+      - name: cledyu
+        ensure: present
+        login: true
+        superuser: false
+        passwordSecret:
+          name: postgres-credentials-cnpg
   # recovery 클러스터의 자체 -dr 아카이빙. default off(values backupEnabled=false) — 반복 드릴/재해 시
   # 이전 -dr 아카이브(Object Lock 30d)와의 "Expected empty archive" 충돌을 원천 회피. real-DR 새 primary
   # 자체보호가 필요하면 안정화 후 backupEnabled=true(post-failover). backup 부재여도 recovery(externalClusters
