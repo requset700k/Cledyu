@@ -129,6 +129,12 @@ type CheckoutSession struct {
 	ExpiresAt   time.Time `json:"expires_at"`
 }
 
+var (
+	ErrCheckoutNotFound      = errors.New("checkout session not found")
+	ErrCheckoutExpired       = errors.New("checkout session expired")
+	ErrCheckoutInvalidStatus = errors.New("checkout session cannot be completed")
+)
+
 // GetSubscription은 유저의 구독 상태를 반환한다. 아직 구독 행이 없으면 (nil, nil).
 func (s *Store) GetSubscription(ctx context.Context, userID string) (*Subscription, error) {
 	var sub Subscription
@@ -159,6 +165,90 @@ func (s *Store) CreateCheckoutSession(ctx context.Context, cs CheckoutSession) e
 		return fmt.Errorf("create checkout session: %w", err)
 	}
 	return nil
+}
+
+// CompleteCheckoutSession은 mock checkout 완료를 원자적으로 반영한다.
+// 실제 PG 웹훅 도입 전까지는 checkout 완료와 구독 활성화를 같은 트랜잭션으로 묶어
+// "결제 완료처럼 보이지만 구독은 그대로" 남는 상태를 방지한다.
+func (s *Store) CompleteCheckoutSession(ctx context.Context, id, userID string) (*Subscription, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin checkout completion: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // Commit 성공 시 Rollback 은 no-op.
+
+	var cs CheckoutSession
+	err = tx.QueryRow(ctx, `
+		SELECT id, user_id, plan_id, provider, status, checkout_url, created_at, expires_at
+		FROM checkout_sessions WHERE id = $1 FOR UPDATE`, id).
+		Scan(&cs.ID, &cs.UserID, &cs.PlanID, &cs.Provider, &cs.Status, &cs.CheckoutURL, &cs.CreatedAt, &cs.ExpiresAt)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && cs.UserID != userID) {
+		return nil, ErrCheckoutNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get checkout session: %w", err)
+	}
+
+	now := time.Now().UTC()
+	if cs.Status != "pending" && cs.Status != "completed" {
+		return nil, ErrCheckoutInvalidStatus
+	}
+	if cs.Status == "completed" {
+		var sub Subscription
+		var existingPeriodEnd sql.NullTime
+		err = tx.QueryRow(ctx, `
+			SELECT user_id, plan_id, status, current_period_end, updated_at
+			FROM subscriptions WHERE user_id = $1`, userID).
+			Scan(&sub.UserID, &sub.PlanID, &sub.Status, &existingPeriodEnd, &sub.UpdatedAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrCheckoutInvalidStatus
+		}
+		if err != nil {
+			return nil, fmt.Errorf("get completed checkout subscription: %w", err)
+		}
+		if existingPeriodEnd.Valid {
+			sub.CurrentPeriodEnd = &existingPeriodEnd.Time
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit completed checkout read: %w", err)
+		}
+		return &sub, nil
+	}
+	if cs.Status == "pending" && cs.ExpiresAt.Before(now) {
+		if _, err := tx.Exec(ctx, `UPDATE checkout_sessions SET status = 'expired' WHERE id = $1`, id); err != nil {
+			return nil, fmt.Errorf("expire checkout session: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit expired checkout session: %w", err)
+		}
+		return nil, ErrCheckoutExpired
+	}
+	if _, err := tx.Exec(ctx, `UPDATE checkout_sessions SET status = 'completed' WHERE id = $1`, id); err != nil {
+		return nil, fmt.Errorf("mark checkout completed: %w", err)
+	}
+
+	periodEnd := now.AddDate(0, 1, 0)
+	var sub Subscription
+	err = tx.QueryRow(ctx, `
+		INSERT INTO subscriptions (user_id, plan_id, status, current_period_end, updated_at)
+		VALUES ($1, $2, 'active', $3, now())
+		ON CONFLICT (user_id) DO UPDATE SET
+			plan_id = EXCLUDED.plan_id,
+			status = EXCLUDED.status,
+			current_period_end = EXCLUDED.current_period_end,
+			updated_at = now()
+		RETURNING user_id, plan_id, status, current_period_end, updated_at`,
+		userID, cs.PlanID, periodEnd).
+		Scan(&sub.UserID, &sub.PlanID, &sub.Status, &periodEnd, &sub.UpdatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("upsert subscription: %w", err)
+	}
+	sub.CurrentPeriodEnd = &periodEnd
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit checkout completion: %w", err)
+	}
+	return &sub, nil
 }
 
 // ── session progress ─────────────────────────────────────────────────────────

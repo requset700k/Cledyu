@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -172,6 +173,46 @@ func (h *Handler) CreateCheckout(c *gin.Context) {
 		Status:      checkoutStatusPending,
 		CheckoutURL: checkoutURL,
 		ExpiresAt:   expiresAt,
+	})
+}
+
+// CompleteCheckout는 mock provider 승인 완료를 시뮬레이션한다.
+// 실제 PG 웹훅 전까지 프론트가 결제 완료 후 구독 상태 변화를 검증할 수 있게 한다.
+func (h *Handler) CompleteCheckout(c *gin.Context) {
+	if h.db == nil {
+		h.err(c, http.StatusServiceUnavailable, "billing store not configured")
+		return
+	}
+	userID := c.GetString("user_id")
+	if userID == "" {
+		h.err(c, http.StatusUnauthorized, "missing user")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), dbTimeout)
+	defer cancel()
+	sub, err := h.db.CompleteCheckoutSession(ctx, c.Param("id"), userID)
+	if errors.Is(err, store.ErrCheckoutNotFound) {
+		h.err(c, http.StatusNotFound, "checkout session not found")
+		return
+	}
+	if errors.Is(err, store.ErrCheckoutExpired) {
+		h.err(c, http.StatusConflict, "checkout session expired")
+		return
+	}
+	if errors.Is(err, store.ErrCheckoutInvalidStatus) {
+		h.err(c, http.StatusConflict, "checkout session cannot be completed")
+		return
+	}
+	if err != nil {
+		h.err(c, http.StatusInternalServerError, "checkout completion failed")
+		return
+	}
+
+	c.JSON(http.StatusOK, subscriptionResponse{
+		PlanID:           sub.PlanID,
+		Status:           sub.Status,
+		CurrentPeriodEnd: sub.CurrentPeriodEnd,
 	})
 }
 

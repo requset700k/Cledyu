@@ -166,6 +166,42 @@ func (f *fakePersistence) CreateCheckoutSession(_ context.Context, session store
 	return nil
 }
 
+func (f *fakePersistence) CompleteCheckoutSession(_ context.Context, id, userID string) (*store.Subscription, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cs, ok := f.checkouts[id]
+	if !ok || cs.UserID != userID {
+		return nil, store.ErrCheckoutNotFound
+	}
+	if cs.Status != "pending" && cs.Status != "completed" {
+		return nil, store.ErrCheckoutInvalidStatus
+	}
+	if cs.Status == "completed" {
+		sub, ok := f.subscriptions[userID]
+		if !ok {
+			return nil, store.ErrCheckoutInvalidStatus
+		}
+		return &sub, nil
+	}
+	if cs.Status == "pending" && cs.ExpiresAt.Before(time.Now()) {
+		cs.Status = "expired"
+		f.checkouts[id] = cs
+		return nil, store.ErrCheckoutExpired
+	}
+	cs.Status = "completed"
+	f.checkouts[id] = cs
+	periodEnd := time.Now().AddDate(0, 1, 0)
+	sub := store.Subscription{
+		UserID:           userID,
+		PlanID:           cs.PlanID,
+		Status:           "active",
+		CurrentPeriodEnd: &periodEnd,
+		UpdatedAt:        time.Now(),
+	}
+	f.subscriptions[userID] = sub
+	return &sub, nil
+}
+
 func twoStepSeed() *sessionSteps {
 	return &sessionSteps{
 		LabID:  "lab-linux-basics",

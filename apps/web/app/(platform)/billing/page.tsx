@@ -73,6 +73,7 @@ export default function BillingPage() {
 }
 
 function BillingPageContent() {
+  const mockCheckoutEnabled = process.env.NODE_ENV !== 'production';
   const searchParams = useSearchParams();
   const checkoutSessionID = searchParams.get('checkout_session_id');
   const checkoutProvider = searchParams.get('provider');
@@ -86,6 +87,12 @@ function BillingPageContent() {
   });
   const checkout = useMutation({
     mutationFn: (planID: string) => api.billing.checkout(planID),
+  });
+  const completeCheckout = useMutation({
+    mutationFn: (checkoutID: string) => api.billing.completeCheckout(checkoutID),
+    onSuccess: () => {
+      void subscription.refetch();
+    },
   });
 
   if (plans.isLoading || subscription.isLoading) {
@@ -124,6 +131,24 @@ function BillingPageContent() {
             실제 PG 승인/웹훅은 후속 PR에서 연결합니다. provider: {visibleCheckout.provider} ·
             session: {visibleCheckout.id}
           </p>
+          {mockCheckoutEnabled && (
+            <>
+              <button
+                type="button"
+                disabled={completeCheckout.isPending}
+                onClick={() => completeCheckout.mutate(visibleCheckout.id)}
+                className="mt-3 rounded-md bg-sky-500 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-sky-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+              >
+                {completeCheckout.isPending ? '승인 처리 중...' : 'Mock 승인 완료'}
+              </button>
+              {completeCheckout.isSuccess && (
+                <p className="mt-2 text-emerald-300 text-xs">구독 상태를 active 로 반영했습니다.</p>
+              )}
+              {completeCheckout.isError && (
+                <p className="mt-2 text-red-300 text-xs">Mock checkout 완료 처리에 실패했습니다.</p>
+              )}
+            </>
+          )}
         </section>
       )}
       {checkout.isError && (
