@@ -20,7 +20,12 @@
 ### 1. EKS 쓰기 quiesce (계획된 write-downtime 시작) — 【승인 게이트】
 > 이후 새 쓰기를 막아 recovery 데이터셋을 고정한다. 없으면 flush~DNS전환 사이 EKS 쓰기가 소실.
 ```bash
-kubectl --context eks-dr -n api scale deploy/api --replicas=0   # 쓰기 경로 정지(읽기도 멈춤 — 그 창만 다운)
+# api(진도·과금 쓰기)와 keycloak(로그인·세션·계정 쓰기) 양쪽 쓰기경로를 모두 정지 — 둘 다 failback 대상이라
+# 하나라도 열려 있으면 flush(step 2) 이후 그 DB 에 새 쓰기가 생겨 온프렘 recovery 데이터셋에 안 들어가고 소실된다(무손실 계약 위반).
+kubectl --context eks-dr -n api scale deploy/api --replicas=0   # 진도/과금 쓰기 정지
+# Keycloak 은 operator CR(instances)로 SS 를 관리하므로 SS 직접 scale 은 되돌려진다 → CR instances=0 으로 정지.
+kubectl --context eks-dr -n keycloak patch keycloak cledyu-keycloak --type merge -p '{"spec":{"instances":0}}'   # auth(로그인/계정) 쓰기 정지
+kubectl --context eks-dr -n keycloak rollout status statefulset/cledyu-keycloak --timeout=120s 2>/dev/null || true
 ```
 
 ### 2. EKS write frontier flush (EKS primary)
@@ -46,11 +51,13 @@ aws s3 ls s3://cledyu-lab-dr-backups/postgres-dr/cledyu-pg-dr-e$((N+1))/ --recur
 # (b) path-swap: data-postgres-cnpg·data-keycloak-pg 앱 source.path 를 -failback 차트로 (git 커밋).
 #     postgres-cnpg → postgres-cnpg-failback, keycloak-pg → keycloak-pg-failback. drEpoch=N 확인.
 # (c) stale cluster 삭제(파괴적 — PVC 소멸) → ArgoCD 가 failback 차트로 fresh recovery.
-kubectl -n postgres delete cluster cledyu-pg --ignore-not-found
-kubectl -n keycloak delete cluster keycloak-pg --ignore-not-found
+#     ⚠️ --context onprem 필수 — step 1·2 가 --context eks-dr 를 썼으므로 current-context 가 eks-dr 이면
+#        이 delete 가 서빙 중인 EKS primary(cledyu-pg/keycloak-pg)를 지워 DR 서비스 DB 를 내린다. 반드시 온프렘 고정.
+kubectl --context onprem -n postgres delete cluster cledyu-pg --ignore-not-found
+kubectl --context onprem -n keycloak delete cluster keycloak-pg --ignore-not-found
 # (d) recovery 완료 대기.
-kubectl -n postgres wait --for=condition=Ready cluster/cledyu-pg --timeout=900s
-kubectl -n keycloak wait --for=condition=Ready cluster/keycloak-pg --timeout=900s
+kubectl --context onprem -n postgres wait --for=condition=Ready cluster/cledyu-pg --timeout=900s
+kubectl --context onprem -n keycloak wait --for=condition=Ready cluster/keycloak-pg --timeout=900s
 ```
 
 ### 4. 데이터 정합 체크 — 【승인 게이트: 불일치 시 cutover 중단】
@@ -82,23 +89,27 @@ done
 #        (이게 없으면 새 epoch 에 WAL 만 있고 base 가 없어, 그 창에 재해 오면 f(N+1) recovery 가 anchor 없이 실패.)
 # delete-first 로 멱등 — CR 이름 고정이라 반복 failback 시 AlreadyExists 방지.
 # (Backup CR 삭제는 k8s 리소스만 지우고 S3 base backup 은 남긴다 — 이전 epoch anchor 보존.)
-kubectl -n postgres delete backup failback-epoch-anchor --ignore-not-found
-kubectl -n postgres create -f - <<'YAML'
+# ⚠️ 아래 anchor 생성/대기는 전부 온프렘 대상 → --context onprem 명시(step3 와 동일 사유).
+kubectl --context onprem -n postgres delete backup failback-epoch-anchor --ignore-not-found
+kubectl --context onprem -n postgres create -f - <<'YAML'
 apiVersion: postgresql.cnpg.io/v1
 kind: Backup
 metadata: { name: failback-epoch-anchor, namespace: postgres }
 spec: { cluster: { name: cledyu-pg } }
 YAML
-kubectl -n keycloak delete backup failback-epoch-anchor --ignore-not-found
-kubectl -n keycloak create -f - <<'YAML'
+kubectl --context onprem -n keycloak delete backup failback-epoch-anchor --ignore-not-found
+kubectl --context onprem -n keycloak create -f - <<'YAML'
 apiVersion: postgresql.cnpg.io/v1
 kind: Backup
 metadata: { name: failback-epoch-anchor, namespace: keycloak }
 spec: { cluster: { name: keycloak-pg } }
 YAML
-# (e) anchor 도달 확인 — 새 epoch 경로에 completed base backup 존재.
-kubectl -n postgres wait --for=jsonpath='{.status.phase}'=completed backup/failback-epoch-anchor --timeout=600s
-aws s3 ls s3://cledyu-lab-dr-backups/postgres/cledyu-pg-e$((N+1))/base/ | head   # 비어 있으면 anchor 실패 → 다음 failover 불가
+# (e) anchor 도달 확인 — 새 epoch 경로에 completed base backup 존재. postgres·keycloak 대칭 필수:
+#     한쪽이라도 base 없이 진행하면 drEpoch bump 후 그 DB 의 새 epoch 는 WAL 만 있어 다음 failover recovery 가 실패한다.
+kubectl --context onprem -n postgres  wait --for=jsonpath='{.status.phase}'=completed backup/failback-epoch-anchor --timeout=600s
+kubectl --context onprem -n keycloak wait --for=jsonpath='{.status.phase}'=completed backup/failback-epoch-anchor --timeout=600s
+aws s3 ls s3://cledyu-lab-dr-backups/postgres/cledyu-pg-e$((N+1))/base/   | head   # 비어 있으면 postgres anchor 실패 → 다음 failover 불가
+aws s3 ls s3://cledyu-lab-dr-backups/keycloak/keycloak-pg-e$((N+1))/base/ | head   # 비어 있으면 keycloak anchor 실패 → 다음 failover 불가
 ```
 
 ### 6. 수동 승인 → DNS 원복 — 【승인 게이트: split-brain 단일 권한 스위치】
@@ -109,12 +120,13 @@ cd infra/terraform/aws && terraform apply -var enable_public_ingress=true -targe
 
 ### 7. 온프렘 앱 재개
 ```bash
-kubectl -n api rollout restart deploy/api && kubectl -n api rollout status deploy/api
-kubectl -n web rollout restart deploy/web && kubectl -n web rollout status deploy/web
+# 전부 온프렘 대상 → --context onprem 고정(EKS 는 아직 살아있으므로 context 혼동 시 엉뚱한 사이트 재기동).
+kubectl --context onprem -n api rollout restart deploy/api && kubectl --context onprem -n api rollout status deploy/api
+kubectl --context onprem -n web rollout restart deploy/web && kubectl --context onprem -n web rollout status deploy/web
 # Keycloak 은 operator CR(kind: Keycloak, cledyu-keycloak)이 StatefulSet 을 만든다 → deploy 아님.
 # DB 재생성으로 커넥션 풀이 끊겼을 수 있어 재기동으로 keycloak-pg-rw 재연결 보장.
-kubectl -n keycloak rollout restart statefulset/cledyu-keycloak && kubectl -n keycloak rollout status statefulset/cledyu-keycloak
-kubectl -n api logs deploy/api | grep -E "db 연결|in-memory"   # in-memory 폴백 아님 확인
+kubectl --context onprem -n keycloak rollout restart statefulset/cledyu-keycloak && kubectl --context onprem -n keycloak rollout status statefulset/cledyu-keycloak
+kubectl --context onprem -n api logs deploy/api | grep -E "db 연결|in-memory"   # in-memory 폴백 아님 확인
 ```
 
 ### 8. EKS 축소
