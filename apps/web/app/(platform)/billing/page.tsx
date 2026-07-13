@@ -142,9 +142,7 @@ function BillingPageContent() {
                 {completeCheckout.isPending ? '승인 처리 중...' : 'Mock 승인 완료'}
               </button>
               {completeCheckout.isSuccess && (
-                <p className="mt-2 text-emerald-300 text-xs">
-                  구독 상태를 active 로 반영했습니다.
-                </p>
+                <p className="mt-2 text-emerald-300 text-xs">구독 상태를 active 로 반영했습니다.</p>
               )}
               {completeCheckout.isError && (
                 <p className="mt-2 text-red-300 text-xs">Mock checkout 완료 처리에 실패했습니다.</p>
