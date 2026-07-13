@@ -117,7 +117,7 @@ terraform init
 
 | Name | Version |
 | ---- | ------- |
-| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.5.0 |
+| <a name="requirement_terraform"></a> [terraform](#requirement\_terraform) | >= 1.9.0 |
 | <a name="requirement_aws"></a> [aws](#requirement\_aws) | ~> 5.0 |
 
 ## Providers
@@ -234,10 +234,12 @@ terraform init
 | <a name="input_assign_public_ip"></a> [assign\_public\_ip](#input\_assign\_public\_ip) | 세션 인스턴스에 퍼블릭 IP 를 할당할지. Launch Template 이 network\_interfaces 를 명시하면<br/>subnet 의 MapPublicIpOnLaunch 가 무시되어 기본 미할당이 되므로, default VPC(IGW) 환경에서는<br/>true 여야 인스턴스가 인터넷(tailscale 가입·SSM·패키지 설치)에 도달한다.<br/>private subnet + NAT 구성이면 false 로 둔다. | `bool` | `true` | no |
 | <a name="input_budget_limit_usd"></a> [budget\_limit\_usd](#input\_budget\_limit\_usd) | EC2 오버플로우 월 예산(USD). 0이면 예산 알람을 만들지 않는다. | `number` | `0` | no |
 | <a name="input_budget_notification_emails"></a> [budget\_notification\_emails](#input\_budget\_notification\_emails) | 예산 임계 도달 시 알림 받을 이메일 목록(budget\_limit\_usd>0 일 때 사용). | `list(string)` | `[]` | no |
+| <a name="input_eks_dr_active"></a> [eks\_dr\_active](#input\_eks\_dr\_active) | pilot-light hot 리소스 스위치. 평시 false — NAT·VPC 인터페이스 엔드포인트·bastion 인스턴스 미생성(비용은<br/>컨트롤플레인만). 재해 시 true — 이들 생성(+ eks\_dr\_node\_desired 로 노드 스케일). warm 스택(VPC·EKS·IRSA·SG·<br/>bastion 롤)은 enable\_eks\_dr 로 상시 유지되고 이 값과 무관. | `bool` | `false` | no |
 | <a name="input_eks_dr_cluster_version"></a> [eks\_dr\_cluster\_version](#input\_eks\_dr\_cluster\_version) | DR EKS 컨트롤플레인 쿠버네티스 버전. 온디맨드로 생성하는 DR 클러스터라 반드시 standard support<br/>범위로 유지한다 — extended support 버전은 컨트롤플레인 비용이 약 6배로 뛰고, extended 마저 끝나면<br/>해당 버전 신규 클러스터 생성이 막혀 DR 기동 자체가 실패한다. EKS 버전 캘린더 기준 주기적으로<br/>최신 standard 버전으로 갱신할 것. | `string` | `"1.34"` | no |
-| <a name="input_eks_dr_node_desired"></a> [eks\_dr\_node\_desired](#input\_eks\_dr\_node\_desired) | DR EKS 워커 노드 개수(고정 크기, min=max=desired). | `number` | `3` | no |
+| <a name="input_eks_dr_node_desired"></a> [eks\_dr\_node\_desired](#input\_eks\_dr\_node\_desired) | DR EKS 워커 노드 개수. pilot-light: 평시 0(비용 0), 재해 시 N 으로 스케일. min=0, max=eks\_dr\_node\_max. | `number` | `0` | no |
 | <a name="input_eks_dr_node_instance_type"></a> [eks\_dr\_node\_instance\_type](#input\_eks\_dr\_node\_instance\_type) | DR EKS 워커 노드 EC2 타입. CNPG(postgres·keycloak-pg)+Vault+api/web/keycloak/argocd/eso 수용, 드릴 신뢰성 위해 on-demand로 고정. | `string` | `"m6i.xlarge"` | no |
-| <a name="input_enable_eks_dr"></a> [enable\_eks\_dr](#input\_enable\_eks\_dr) | DR 드릴/재해 시에만 true. 평시 false 로 EKS 리소스 0. | `bool` | `false` | no |
+| <a name="input_eks_dr_node_max"></a> [eks\_dr\_node\_max](#input\_eks\_dr\_node\_max) | DR EKS 노드그룹 max\_size. 재해 시 eks\_dr\_node\_desired 를 이 상한 내에서 올린다. | `number` | `6` | no |
+| <a name="input_enable_eks_dr"></a> [enable\_eks\_dr](#input\_enable\_eks\_dr) | pilot-light: 평시 true 로 warm 스택(컨트롤플레인·노드그룹 0) 상시. false 는 완전 폐기 시만. | `bool` | `false` | no |
 | <a name="input_enable_public_ingress"></a> [enable\_public\_ingress](#input\_enable\_public\_ingress) | 공개 진입점 스택(Route53/ACM/ALB/프록시) 생성 여부. 도메인 위임·tailscale authkey 준비 후 true. | `bool` | `false` | no |
 | <a name="input_github_repo"></a> [github\_repo](#input\_github\_repo) | 베이커 워크플로를 실행하는 GitHub 레포(owner/name). OIDC sub 제한에 사용. | `string` | `"requset700k/Cledyu"` | no |
 | <a name="input_instance_type"></a> [instance\_type](#input\_instance\_type) | 세션 인스턴스 타입. Launch Template 기본값이며 api 가 런타임에 오버라이드할 수 있다. | `string` | `"t3.medium"` | no |

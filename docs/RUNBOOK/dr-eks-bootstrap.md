@@ -1,10 +1,42 @@
-# EKS Cold DR 부트스트랩 런북 (Plan B)
+# EKS DR 부트스트랩 런북 (Plan B — pilot-light)
 
 > 온프렘 상실 시 EKS 에서 백업으로 과금최소경로(계정·수료·진도)를 재현하는 수동 부트스트랩 절차.
-> ⚠️ **실행 순서는 아래 체크리스트 기준** — 이 문서의 섹션 배치(Vault 복원이 앞에 옴)와 다르다. 실제 순서:
-> ① terraform apply → ② **apps-eks 부트스트랩(Vault 를 여기서 배포)** → ③ Vault 스냅샷 복원 →
-> ④ Vault k8s auth 재설정 → ⑤ CNPG 복원 → ⑥ api/web Ready → ⑦ 공개 DNS 전환 → ⑧ api/web restart →
-> ⑨ 검증 → ⑩ destroy. 드릴(T10)은 이 순서를 처음부터 끝까지 한 번 완주하는 것.
+> **pilot-light**: 컨트롤플레인·VPC·IRSA·노드그룹(desired 0)은 Phase 0 로 상시 warm 유지(과금 ~$73/mo,
+> 컨트롤플레인뿐). 앱은 seed 하지 않는다(node=0 에선 ArgoCD 가 뜰 컴퓨트가 없어 불가) — 매 failover(Phase 1)가
+> hot 리소스·노드를 올린 뒤 기존 부트스트랩 본체로 앱을 처음부터 sync 한다.
+> ⚠️ **실행 순서는 아래 체크리스트 기준** — 이 문서의 섹션 배치(Vault 복원이 앞에 옴)와 다르다. 실제 순서(재해 시,
+> Phase 0 warm 은 사전 상시 유지 전제):
+> ① Phase 1 terraform apply(hot)+노드 스케일(CLI) → ② **apps-eks 부트스트랩(Vault 를 여기서 배포)** → ③ Vault 스냅샷 복원 →
+> ④ Vault k8s auth 재설정 → ⑤ CNPG 복원(재-failover 가드 포함) → ⑥ api/web Ready → ⑦ 공개 DNS 전환 → ⑧ api/web restart →
+> ⑨ 검증 → ⑩ destroy(정상 복귀=failback[warm 유지] / destroy=완전 폐기). 드릴(T10)은 이 순서를 처음부터 끝까지 한 번 완주하는 것.
+
+---
+
+### Phase 0 — warm 스택 셋업 (최초 1회, seed 없음)
+
+> **설계(B):** node=0 에선 ArgoCD 가 뜰 컴퓨트가 없어 "etcd seed"는 불가능하다(root-app 객체만 써질 뿐 자식 앱·
+> 워크로드는 생성 안 됨). 그래서 **앱을 seed 하지 않는다.** warm = 컨트롤플레인·VPC·IRSA·SG·bastion 롤·노드그룹
+> (desired 0) 뿐. 앱·bastion 인스턴스·NAT 는 Phase 1(재해)에서만 생긴다. 매 failover 가 기존 부트스트랩 본체
+> (ArgoCD 설치→root-app→Vault→CNPG→DNS)로 앱을 처음부터 sync 한다. pilot-light 이득은 컨트롤플레인 상시
+> warm(프로비저닝 ~10-15분 제거)뿐 — 2회차+ failover 는 warm etcd 에 남은 CR 로 더 빠를 수 있으나 부수효과일
+> 뿐 절차는 매번 동일·멱등이다.
+
+컨트롤플레인·VPC·IRSA·노드그룹(desired 0)만 상시 존재시킨다. NAT·엔드포인트·bastion 인스턴스·노드·앱은 이 단계서 만들지 않는다.
+
+```bash
+cd infra/terraform/aws && terraform init -reconfigure -input=false
+terraform apply -var enable_eks_dr=true -var eks_dr_active=false -var eks_dr_node_desired=0 \
+  -target=module.eks_dr_vpc -target=module.eks_dr -target=module.eks_dr_ebs_csi_irsa \
+  -target=module.eks_dr_alb_irsa -target=aws_security_group.eks_dr_endpoints \
+  -target=aws_security_group.eks_dr_bastion -target=module.eks_dr_endpoints \
+  -target=module.eks_dr_vault_unseal_irsa -target=aws_iam_policy.eks_dr_vault_unseal \
+  -target=aws_iam_policy.eks_dr_cnpg_restore -target=module.eks_dr_cnpg_restore_irsa \
+  -target=aws_iam_role.eks_dr_bastion -target=aws_iam_role_policy_attachment.eks_dr_bastion_ssm \
+  -target=aws_iam_role_policy.eks_dr_bastion_describe -target=aws_iam_role_policy.eks_dr_bastion_vault_restore \
+  -target=aws_iam_instance_profile.eks_dr_bastion -target=aws_instance.eks_dr_bastion
+#   → EKS 컨트롤플레인·VPC·IRSA·SG·bastion 롤/프로필/정책·노드그룹(0) 생성. hot(NAT·엔드포인트·bastion 인스턴스)·노드 없음.
+#   → 평시 과금 = 컨트롤플레인만 ~$73/mo. 이 상태로 상시 유지(재해 대기). 검증: aws eks describe-cluster --name cledyu-dr → ACTIVE.
+```
 
 ---
 
@@ -42,7 +74,7 @@ S3 에 올린다. DR 시엔 이 적재분을 그대로 복원 소스로 쓴다.
 
 ### 복원 절차 (드릴 — EKS)
 
-⚠️ **선행: 아래 "apps-eks 부트스트랩" 을 먼저 실행**(ArgoCD seed → root-app → Vault 앱 sync)해 vault-0/1/2 파드가
+⚠️ **선행: 아래 "apps-eks 부트스트랩" 을 먼저 실행**(ArgoCD 설치 → root-app → Vault 앱 sync)해 vault-0/1/2 파드가
 존재해야 이 복원이 가능하다. 문서 배치상 이 섹션이 앞에 있지만 **실행은 부트스트랩 후**다. Phase 1 terraform
 apply 완료(bastion 존재) 전제. 모든 `kubectl` 명령은 **bastion 에서** 실행한다(private 엔드포인트).
 
@@ -173,14 +205,19 @@ kubectl -n vault exec -it vault-0 -- rm -f /tmp/vault-raft.snap
 
 ## 부트스트랩 스텝 (실행 순서 = 체크리스트)
 
-- [ ] terraform apply (`enable_eks_dr=true`) — DR 인프라(VPC·EKS·bastion·IRSA·엔드포인트) 생성
+- [ ] Phase 0 warm 사전 셋업 확인(최초 1회 — 위 참고, 이미 상시 유지 중이면 skip)
+- [ ] Phase 1 — terraform apply(hot)+노드 스케일(CLI) — DR hot 리소스(NAT·엔드포인트·bastion 인스턴스)·노드 생성
 
-### Phase 1 — terraform apply (운영자 머신)
+### Phase 1 — 재해 페일오버 트리거 (pilot-light, 운영자 머신)
+
+warm(Phase 0)은 이미 존재하므로 여기서는 hot·노드만 올린다. 노드 desired 는 모듈이 `ignore_changes`
+하므로 terraform apply 로는 오르지 않는다 — CLI(§Global P1) 필수.
 
 ```bash
 # ⚠️ tfvars 가 없어 -target 없이 apply 하면 프로덕션을 오-destroy 한다 → DR 리소스만 -target(destroy 와 동일 목록).
-cd infra/terraform/aws && terraform init -reconfigure -input=false
-terraform apply -var enable_eks_dr=true \
+# (1) hot 리소스(NAT·엔드포인트·bastion) — terraform. 노드 desired 는 모듈이 ignore 하므로 여기선 안 오른다.
+cd infra/terraform/aws
+terraform apply -var enable_eks_dr=true -var eks_dr_active=true -var eks_dr_node_desired=0 \
   -target=module.eks_dr_vpc -target=module.eks_dr -target=module.eks_dr_ebs_csi_irsa \
   -target=module.eks_dr_alb_irsa -target=aws_security_group.eks_dr_endpoints \
   -target=aws_security_group.eks_dr_bastion -target=module.eks_dr_endpoints \
@@ -189,10 +226,52 @@ terraform apply -var enable_eks_dr=true \
   -target=aws_iam_role.eks_dr_bastion -target=aws_iam_role_policy_attachment.eks_dr_bastion_ssm \
   -target=aws_iam_role_policy.eks_dr_bastion_describe -target=aws_iam_role_policy.eks_dr_bastion_vault_restore \
   -target=aws_iam_instance_profile.eks_dr_bastion -target=aws_instance.eks_dr_bastion
-# → bastion instance id: terraform output / aws ec2 describe-instances Name=cledyu-dr-bastion
+#   → NAT·엔드포인트·bastion 생성(~2-3분). NAT 를 노드보다 먼저 세워 이미지 pull 경로 확보.
+#   → bastion instance id: terraform output / aws ec2 describe-instances Name=cledyu-dr-bastion
+# (2) [P1] 노드 스케일 0→N — CLI(terraform desired_size ignore_changes 회피, §Global).
+NG=$(aws eks list-nodegroups --cluster-name cledyu-dr --region ap-northeast-2 --query 'nodegroups[0]' --output text)
+aws eks update-nodegroup-config --cluster-name cledyu-dr --region ap-northeast-2 \
+  --nodegroup-name "$NG" --scaling-config minSize=0,maxSize=6,desiredSize=3
+aws eks wait nodegroup-active --cluster-name cledyu-dr --region ap-northeast-2 --nodegroup-name "$NG"
+#   → 노드 3 생성·Ready(~3-5분).
+# (3) [P1] coredns·ebs-csi 관리형 애드온 설치 — CLI. warm(node0)에선 이 둘이 Deployment 라 DEGRADED 로
+#     terraform apply 를 블록하므로 cluster_addons 에서 빼두었다(eks-dr.tf). 노드가 뜬 지금(위 wait 통과)
+#     설치하면 즉시 ACTIVE 된다. ebs-csi 는 warm IRSA(cledyu-dr-ebs-csi, 롤명 결정적)를 참조.
+ACCT=$(aws sts get-caller-identity --query Account --output text)
+# 멱등 설치: 애드온이 이미 있으면(failback 이 삭제 안 하고 warm 에 남겨 반복 failover) create-addon 은
+# 409 ResourceInUseException 으로 죽는다 → describe 로 존재 확인 후 있으면 update-addon, 없으면 create-addon.
+install_addon() {
+  local name="$1"; shift
+  local verb=create-addon
+  aws eks describe-addon --cluster-name cledyu-dr --region ap-northeast-2 --addon-name "$name" >/dev/null 2>&1 && verb=update-addon
+  aws eks "$verb" --cluster-name cledyu-dr --region ap-northeast-2 --addon-name "$name" --resolve-conflicts OVERWRITE "$@"
+}
+install_addon coredns
+install_addon aws-ebs-csi-driver --service-account-role-arn "arn:aws:iam::${ACCT}:role/cledyu-dr-ebs-csi"
+aws eks wait addon-active --cluster-name cledyu-dr --region ap-northeast-2 --addon-name coredns
+aws eks wait addon-active --cluster-name cledyu-dr --region ap-northeast-2 --addon-name aws-ebs-csi-driver
+#   → 둘 다 ACTIVE. (gp3 StorageClass·CNPG/Kafka PVC 프로비저닝, 클러스터 DNS 확보.)
 ```
 
+> **failback/destroy 시:** 이 두 애드온은 CLI 로 설치돼 terraform state 밖이다. 노드를 0 으로 내리면(failback)
+> 다시 DEGRADED 가 되지만 warm 에 무해하다 — **남겨둬도 다음 failover 의 `install_addon` 이 멱등(update-addon)이라
+> 안전**하다. 완전 폐기(destroy)는 클러스터 삭제로 함께 사라진다. warm 을 깨끗한 Phase-0 상태(kube-proxy·vpc-cni 만)로
+> 되돌리려면 `aws eks delete-addon --addon-name coredns|aws-ebs-csi-driver` 로 명시 삭제(선택).
+
+이후 **아래 "apps-eks 부트스트랩"부터 기존 절차를 매 failover 동일하게 수행**한다(seed 안 했으므로 여기서
+처음부터 설치·sync): bastion 진입 → `helm upgrade --install argocd`(멱등) → root-app apply → Vault 복원 →
+CNPG → api/web restart → DNS 전환.
+
+> **[C4]** 매 failover 가 `helm upgrade --install argocd` 를 재실행하므로 `argocd-application-controller`
+> 는 항상 replicas=1 로 (재)생성된다 — failback(아래)이 0 으로 내렸든 무관. **"재해 시 helm/root-app 재실행
+> 불요" 같은 스킵 문구는 넣지 않는다**(그건 교차사이클 dead-end 를 만든다 — seed 를 안 하므로 매번 처음부터
+> sync 해야 한다).
+
 ### apps-eks 부트스트랩 (bastion 에서)
+
+> 아래 3개 bash 블록(ArgoCD 설치 → C2 가드 → root-app apply)은 **동일한 bastion 쉘 세션**에서 이어서 실행한다 —
+> 가드 블록의 상대경로 grep 이 앞 블록에서 `cd`한 작업 디렉터리(`REPO_ROOT`)에 의존하므로, 세션을 끊거나 새
+> 터미널로 옮기면 cwd·변수(`REPO_ROOT` 등)가 이어지지 않아 가드가 엉뚱한 경로를 본다.
 
 ```bash
 # -1) bastion 준비 — user_data 가 kubectl/awscli/git/helm 을 모두 설치한다(egress 대기+curl --retry 포함).
@@ -212,15 +291,33 @@ REPO_ROOT=$(git rev-parse --show-toplevel); cd "$REPO_ROOT"
 grep -rn '<<' gitops/apps/*/values-eks.yaml gitops/apps/alb-controller/values.yaml \
   && echo "⚠ placeholder 잔존 — 확인 필요" || echo "placeholder 없음 OK ✅"
 
-# 0.5) ArgoCD seed 설치 — self-managed 이지만 빈 클러스터엔 ArgoCD(Application CRD·컨트롤러)가 없어
-#      root-app 을 적용·조정할 주체가 없다(치킨-에그). 최초 1회 helm 으로 seed 하면, 이후 platform-argocd
-#      가 같은 릴리스(argocd, ns argocd)를 ServerSideApply 로 adopt 한다.
+# 0.5) ArgoCD 설치(멱등 — 매 failover 반복, §Phase1 [C4]) — 앱을 seed 하지 않으므로(design B) 노드가
+#      올라온 직후 클러스터는 매번 비어 있다. ArgoCD(Application CRD·컨트롤러)가 없으면 root-app 을
+#      적용·조정할 주체가 없어(치킨-에그) helm 으로 먼저 설치한다. 이후 platform-argocd 가 같은 릴리스
+#      (argocd, ns argocd)를 ServerSideApply 로 adopt 한다. helm upgrade --install 은 멱등이라 warm etcd
+#      에 이전 사이클 잔존이 있어도 안전하게 재실행된다 — 절대 스킵하지 않는다.
 helm repo add argo https://argoproj.github.io/argo-helm && helm repo update
 helm upgrade --install argocd argo/argo-cd --version 7.7.10 \
   -f gitops/apps/argocd/values.yaml -f gitops/apps/argocd/values-eks.yaml \
   -n argocd --create-namespace --wait
 kubectl -n argocd rollout status deploy/argocd-server --timeout=300s
+```
 
+```bash
+# [P2] git-source targetRevision 이 main 도 chart-version(vX.Y / X.Y)도 아니면 = 브랜치핀 → 중단.
+# chart-version targetRevision(예: 0.32.0·v1.20.2·7.7.10)은 오탐 대상이 아니므로 무시 — git-source 브랜치핀만 잡는다.
+# ^[[:space:]]*targetRevision: 로 앵커 — 주석줄(# targetRevision: …)은 제외(value-only revert 후 오탐 방지).
+if grep -REn '^[[:space:]]*targetRevision:' gitops/argocd/root-app-eks.yaml gitops/argocd/apps-eks/ \
+   | grep -vE 'targetRevision:[[:space:]]*(main|v?[0-9]+\.[0-9])'; then
+  echo "❌ git-source 가 main 아닌 revision(브랜치핀) — main 으로 되돌린 뒤 진행"; exit 1
+fi
+```
+
+> 참고: 현재 main 의 `root-app-eks.yaml`·일부 apps-eks 에 `feat/dr-eks-overlay-cnpg-keycloak` 핀이 잔존
+> (#290 머지 전 revert 누락)한다 — 이 가드가 첫 드릴에서 그걸 잡을 것이므로, 사전에 main 을 정리해 둘 것
+> (별도 프로덕션 이슈).
+
+```bash
 # 1) root-app 적용 — 이제 ArgoCD 가 존재하므로 wave 순서(cert-manager -10 → pki -8 → ... → api/web 0)로 sync
 kubectl apply -f gitops/argocd/root-app-eks.yaml
 
@@ -230,13 +327,25 @@ kubectl get clusterissuer cledyu-ca
 kubectl -n api get configmap cledyu-root-ca-bundle   # trust-manager Bundle 분배 확인
 ```
 
+### CNPG 재-failover 가드 (구 CR 삭제 — 복원 전, bastion·kubectl 컨텍스트 확보 후)
+
+[P1b] failback 후 온프렘이 다시 primary 로 전진하므로, warm etcd 에 잔존하는 이전 사이클 CNPG CR 은 stale
+데이터를 가리킨다. root-app 적용(위) 직후, CNPG 차트가 `Cluster` CR 을 만들기 전에 구 CR 을 지워 ArgoCD 가
+새로 만들게 하면 `bootstrap.recovery` 가 최신 S3 로 재실행된다. 단발(첫) failover 는 CR 이 없어 아래는 no-op.
+
+```bash
+# [P1b] 재-failover 시 잔존 CNPG CR 제거 → ArgoCD 재생성 → bootstrap.recovery 최신 S3. 단발 failover 는 CR 이 없어 no-op.
+kubectl -n postgres delete cluster cledyu-pg --ignore-not-found
+kubectl -n keycloak delete cluster keycloak-pg --ignore-not-found
+```
+
 - [ ] apps-eks root-app 적용 → 플랫폼(cert-manager·ALB·gp3·ESO·CNPG operator) Ready
 - [ ] Kafka Ready(실습 스택 — A1) — strimzi-operator(wave 0) Running 후 kafka-cluster(wave 1) sync.
       `kubectl -n kafka get kafka cledyu-kafka`(READY=True), `kubectl -n kafka get kafkatopic`(validation-requests·-dlq·-results·lab-events·security-logs 존재),
       bootstrap svc `cledyu-kafka-kafka-bootstrap.kafka.svc:9093` 응답. 의존: cert-manager CA + trust-manager Bundle + gp3(nodepool SC-agnostic).
       (ServiceMonitor 2종 미배포는 정상 — EKS 관측 스택 없음, directory.exclude 로 제거.)
 - [ ] **Vault 스냅샷 복원**(위 섹션)
-- [ ] CNPG 복원 차트 sync → `cledyu-pg-rw`·`keycloak-pg-rw` Ready(자동 S3 복원)
+- [ ] **CNPG 재-failover 가드**(위 섹션) 적용 후 CNPG 복원 차트 sync → `cledyu-pg-rw`·`keycloak-pg-rw` Ready(자동 S3 복원)
 - [ ] validation-engine Ready(실습 스택 — A2) — `kubectl -n validation-engine get deploy validation-engine` Available.
       선행: A1 Kafka(KafkaUser `validation-engine` Ready · kafka-clients-ca client cert) + **Vault 복원→ESO 로 `cledyu-validation-engine-aws` Secret 생성 후** 기동(AWS 키 non-optional).
       (CiliumNetworkPolicy·plain NetworkPolicy 둘 다 미렌더 정상 — EKS values-eks 게이트. lab-ssh-key 없음도 정상 — EC2/SSM 채점.)
@@ -244,7 +353,7 @@ kubectl -n api get configmap cledyu-root-ca-bundle   # trust-manager Bundle 분�
 - [ ] **공개 DNS 전환**(아래 섹션) — DNS 안 바꾸면 죽은 온프렘 프록시로 계속 감. WAF(/metrics 차단)는 api·web values-eks 의 wafv2-acl-arn 로 ALB 생성과 동시에 자동 연결(수동 불요) → 여기선 붙었는지 확인만
 - [ ] **api·web rollout restart**(아래 섹션) — CNPG·Keycloak·DNS Ready 후 필수. api 는 startup 1회만 DB/auth 초기화·실패 시 degraded 유지라, 의존성이 늦게 살아나면 restart 해야 DB모드·로그인 활성
 - [ ] 검증(로컬 테스트유저 로그인·복원 데이터 서빙) + RTO 실측
-- [ ] destroy — **고아 방지 순서 필수** (아래)
+- [ ] 온프렘 복구 후: **정상 복귀 = failback**(warm 유지, 아래) / **완전 폐기 = destroy**(고아 방지 순서 필수, 아래)
 
 ### 공개 DNS 전환 (+ WAF 연결 확인) (검증·서빙 전 필수)
 
@@ -335,6 +444,40 @@ kubectl -n api logs deploy/api | grep -c "mock"                          # 0
 ```
 
 수용기준 요약: (a) 세션=EC2 인스턴스 생성, (b) 터미널 tailnet 도달, (c) SSM 채점 결과가 온프렘과 동일 판정(정답 passed/오답 failed), (d) mock-pass 0건.
+
+### failback (온프렘 복구 후 — 클러스터는 warm 유지, 노드만 회수)
+
+warm(컨트롤플레인·VPC·IRSA·노드그룹0·etcd)은 유지하고 hot·노드만 회수한다. 완전 폐기는 아래 destroy.
+
+```bash
+# 1) [Imp1] 공개 DNS 를 온프렘으로 먼저 원복 — 서빙 파괴 전에 트래픽부터 돌린다(운영자 머신, route53 권한).
+#    failover 가 route53 CLI UPSERT 로 EKS ALB 를 덮었으므로 terraform 관리값(온프렘 프록시 ALB alias)으로 되돌린다.
+#    ⚠️ 반드시 -var enable_public_ingress=true + -target — 안 그러면 count=0(기본 false)이라 terraform 이 레코드를
+#       DELETE 하거나 공개 스택을 오-destroy 한다. 온프렘 Healthy 확인 후 실행.
+cd infra/terraform/aws && terraform apply -var enable_public_ingress=true -target=aws_route53_record.public
+# 2) 고아 방지 in-cluster 정리(노드·컨트롤러 살아있을 때): 아래 destroy 의 0)~4.5) 스텝 전체를 수행
+#    (⚠️ terraform destroy 는 아님 — in-cluster 정리만). step 0) selfHeal 정지 → step 1) statefulset/CNPG/kafka
+#    CR unmount → step 2) Ingress → step 3) PVC → step 4.5) ENI. ⚠️ step 1) 을 빼면(PVC 를 아직 물고 있는 워크로드
+#    를 안 지우고 바로 PVC 를 지우면) step 3) PVC 삭제가 pvc-protection finalizer 로 Terminating 에 걸린다.
+#    Ingress→ALB/TG, PVC→EBS 가 정리되도록 완료까지 대기.
+# 3) [P1] 노드 N→0 (CLI). 위 in-cluster 정리 끝난 뒤 실행.
+NG=$(aws eks list-nodegroups --cluster-name cledyu-dr --region ap-northeast-2 --query 'nodegroups[0]' --output text)
+aws eks update-nodegroup-config --cluster-name cledyu-dr --region ap-northeast-2 --nodegroup-name "$NG" --scaling-config minSize=0,maxSize=6,desiredSize=0
+# 4) hot 회수: eks_dr_active=false → NAT·엔드포인트·bastion 소멸. 컨트롤플레인·VPC·IRSA·노드그룹(0)·etcd 유지.
+cd infra/terraform/aws && terraform apply -var enable_eks_dr=true -var eks_dr_active=false -var eks_dr_node_desired=0 \
+  -target=module.eks_dr_vpc -target=module.eks_dr -target=module.eks_dr_ebs_csi_irsa \
+  -target=module.eks_dr_alb_irsa -target=aws_security_group.eks_dr_endpoints \
+  -target=aws_security_group.eks_dr_bastion -target=module.eks_dr_endpoints \
+  -target=module.eks_dr_vault_unseal_irsa -target=aws_iam_policy.eks_dr_vault_unseal \
+  -target=aws_iam_policy.eks_dr_cnpg_restore -target=module.eks_dr_cnpg_restore_irsa \
+  -target=aws_iam_role.eks_dr_bastion -target=aws_iam_role_policy_attachment.eks_dr_bastion_ssm \
+  -target=aws_iam_role_policy.eks_dr_bastion_describe -target=aws_iam_role_policy.eks_dr_bastion_vault_restore \
+  -target=aws_iam_instance_profile.eks_dr_bastion -target=aws_instance.eks_dr_bastion
+```
+
+> 재-failover 시 CNPG 최신 재복원은 **Phase 1 의 CNPG 재-failover 가드**가 보장한다(failback 이 CR 을 남겨도
+> 무방). 정상 복귀는 이 failback(warm 유지), **완전 폐기는 아래 destroy + `enable_eks_dr=false`**(과금 0,
+> 단 다음 재해는 Phase 0 부터 다시).
 
 ### destroy (고아 방지)
 

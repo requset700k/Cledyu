@@ -115,7 +115,7 @@ resource "aws_iam_instance_profile" "eks_dr_bastion" {
 }
 
 resource "aws_instance" "eks_dr_bastion" {
-  count                  = local.eks_dr_enabled
+  count                  = local.eks_dr_active # pilot-light: 재해 시만. 롤/프로필/SG 는 warm(클러스터 access_entries 참조).
   ami                    = data.aws_ssm_parameter.eks_dr_bastion_ami[0].value
   instance_type          = "t3.small" # 드릴용 kubectl 발판, 최소 사양
   subnet_id              = module.eks_dr_vpc[0].private_subnets[0]
