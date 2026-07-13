@@ -167,7 +167,7 @@ export default function DashboardPage() {
         <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
           <input
             type="checkbox"
-            checked={leaderboard ? leaderboard.me.rank !== 0 : false}
+            checked={leaderboard ? !leaderboard.me.leaderboard_hidden : false}
             onChange={(e) => toggleLeaderboardHidden.mutate(!e.target.checked)}
             disabled={!leaderboard || toggleLeaderboardHidden.isPending}
           />

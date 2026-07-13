@@ -119,11 +119,12 @@ export interface LeaderboardItem {
   labs_completed: number;
 }
 
-/** 본인 순위 — rank=0 은 미공개(옵트아웃)/완료 없음 */
+/** 본인 순위 — 공개 랭킹에 없으면 rank=0, 공개 설정은 leaderboard_hidden 이 기준 */
 export interface MyRank {
   rank: number;
   score: number;
   labs_completed: number;
+  leaderboard_hidden: boolean;
 }
 
 /** GET /api/v1/leaderboard 응답 */

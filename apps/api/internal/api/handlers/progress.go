@@ -20,6 +20,7 @@ type persistence interface {
 	SetUserRole(ctx context.Context, userID, role string) error
 	RecordCompletion(ctx context.Context, userID, labID, sessionID string) error
 	LeaderboardRows(ctx context.Context, since *time.Time) ([]store.LeaderboardRow, error)
+	LeaderboardHidden(ctx context.Context, userID string) (bool, error)
 	SetLeaderboardHidden(ctx context.Context, userID string, hidden bool) error
 	ListInProgressLabsByUser(ctx context.Context, userID string) ([]store.InProgressLab, error)
 	GetSubscription(ctx context.Context, userID string) (*store.Subscription, error)

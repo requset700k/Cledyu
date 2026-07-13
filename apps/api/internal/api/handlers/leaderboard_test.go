@@ -105,9 +105,10 @@ func TestGetLeaderboard_IncludesMeOutsideTopN(t *testing.T) {
 			Name string `json:"name"`
 		} `json:"hall_of_fame"`
 		Me struct {
-			Rank          int `json:"rank"`
-			Score         int `json:"score"`
-			LabsCompleted int `json:"labs_completed"`
+			Rank              int  `json:"rank"`
+			Score             int  `json:"score"`
+			LabsCompleted     int  `json:"labs_completed"`
+			LeaderboardHidden bool `json:"leaderboard_hidden"`
 		} `json:"me"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
@@ -118,5 +119,44 @@ func TestGetLeaderboard_IncludesMeOutsideTopN(t *testing.T) {
 	}
 	if body.Me.Rank != 2 || body.Me.Score != 10 || body.Me.LabsCompleted != 1 {
 		t.Fatalf("me mismatch: %+v", body.Me)
+	}
+	if body.Me.LeaderboardHidden {
+		t.Fatalf("leaderboard_hidden: want false, got true")
+	}
+}
+
+func TestGetLeaderboard_ReturnsHiddenPreferenceWithoutCompletions(t *testing.T) {
+	fake := newFakePersistence()
+	fake.hidden["me"] = true
+	h := leaderboardTestHandler(t, fake)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/leaderboard", func(c *gin.Context) {
+		c.Set("user_id", "me")
+		h.GetLeaderboard(c)
+	})
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/leaderboard", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var body struct {
+		Me struct {
+			Rank              int  `json:"rank"`
+			Score             int  `json:"score"`
+			LabsCompleted     int  `json:"labs_completed"`
+			LeaderboardHidden bool `json:"leaderboard_hidden"`
+		} `json:"me"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Me.Rank != 0 || body.Me.Score != 0 || body.Me.LabsCompleted != 0 {
+		t.Fatalf("new user rank mismatch: %+v", body.Me)
+	}
+	if !body.Me.LeaderboardHidden {
+		t.Fatalf("leaderboard_hidden: want true, got false")
 	}
 }

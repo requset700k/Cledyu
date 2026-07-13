@@ -474,6 +474,20 @@ func (s *Store) LeaderboardRows(ctx context.Context, since *time.Time) ([]Leader
 	return out, rows.Err()
 }
 
+// LeaderboardHidden은 유저의 리더보드 이름 공개 옵트아웃 상태를 반환한다.
+// 아직 users 미러 행이 없으면 기본값(false, 공개)을 따른다.
+func (s *Store) LeaderboardHidden(ctx context.Context, userID string) (bool, error) {
+	var hidden bool
+	err := s.pool.QueryRow(ctx, `SELECT leaderboard_hidden FROM users WHERE id = $1`, userID).Scan(&hidden)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("leaderboard hidden: %w", err)
+	}
+	return hidden, nil
+}
+
 // SetLeaderboardHidden은 유저의 리더보드 노출 여부를 갱신한다(옵트아웃 토글).
 func (s *Store) SetLeaderboardHidden(ctx context.Context, userID string, hidden bool) error {
 	// upsert로 행을 보장한다 — 로그인 직후 UpsertUser(비동기)가 아직 미러 행을 만들기 전이라도

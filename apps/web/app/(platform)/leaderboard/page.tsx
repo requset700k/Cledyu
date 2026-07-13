@@ -58,7 +58,7 @@ export default function LeaderboardPage() {
   if (isLoading) return <p className="text-slate-400">불러오는 중...</p>;
   if (isError || !data) return <p className="text-red-400">리더보드를 불러오지 못했습니다.</p>;
 
-  const isHidden = data.me.rank === 0;
+  const isHidden = data.me.leaderboard_hidden;
   const hofRows = mergeMyRank(data.hall_of_fame, data.me);
 
   return (
