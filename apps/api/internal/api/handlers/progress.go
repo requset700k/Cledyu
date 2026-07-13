@@ -22,6 +22,8 @@ type persistence interface {
 	LeaderboardRows(ctx context.Context, since *time.Time) ([]store.LeaderboardRow, error)
 	SetLeaderboardHidden(ctx context.Context, userID string, hidden bool) error
 	ListInProgressLabsByUser(ctx context.Context, userID string) ([]store.InProgressLab, error)
+	GetSubscription(ctx context.Context, userID string) (*store.Subscription, error)
+	CreateCheckoutSession(ctx context.Context, session store.CheckoutSession) error
 }
 
 // dbTimeout은 요청 경로에서 허용하는 DB 왕복 상한이다.
