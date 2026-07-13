@@ -21,7 +21,7 @@ spec:
           - $values/gitops/apps/argocd/values.yaml
           - $values/gitops/apps/argocd/values-eks.yaml
     - repoURL: https://github.com/requset700k/Cledyu.git
-      targetRevision: feat/dr-eks-overlay-cnpg-keycloak
+      targetRevision: main
       ref: values
   destination:
     server: https://kubernetes.default.svc
