@@ -4,7 +4,7 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'next/navigation';
 import { Suspense } from 'react';
 import { api } from '@/lib/api';
-import type { BillingPlan, CheckoutSession } from '@/lib/types';
+import type { BillingPlan, CheckoutSession, Subscription } from '@/lib/types';
 
 function formatPrice(plan: BillingPlan) {
   if (plan.price_krw === 0) return '무료';
@@ -14,15 +14,17 @@ function formatPrice(plan: BillingPlan) {
 function PlanCard({
   plan,
   currentPlanID,
+  currentSubscriptionStatus,
   onCheckout,
   pending,
 }: {
   plan: BillingPlan;
   currentPlanID: string;
+  currentSubscriptionStatus: Subscription['status'];
   onCheckout: (planID: string) => void;
   pending: boolean;
 }) {
-  const isCurrent = plan.id === currentPlanID;
+  const isCurrent = plan.id === currentPlanID && currentSubscriptionStatus === 'active';
   const isPaid = plan.price_krw > 0;
 
   return (
@@ -136,6 +138,7 @@ function BillingPageContent() {
             key={plan.id}
             plan={plan}
             currentPlanID={subscription.data.plan_id}
+            currentSubscriptionStatus={subscription.data.status}
             pending={checkout.isPending}
             onCheckout={(planID) => checkout.mutate(planID)}
           />
