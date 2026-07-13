@@ -115,10 +115,14 @@ kubectl -n vault exec vault-0 -- sh -c \
   존재해야 → EKS 의 external-secrets 가 api/keycloak 시크릿을 채운다.
 - Vault 가 비어 있으면(복원 누락) api 는 in-memory 폴백으로 뜨고 keycloak-pg 자격이
   없어 Keycloak 이 기동 실패한다 → **드릴 실패로 판정**(자동 통과처럼 보이지 않게 주의).
-- **라이브 터미널 필수 시드:** `cledyu/aws/api` 에 `api_tailscale_authkey`(api 파드 tsnet, tag:cledyu-api)가
-  있어야 `cledyu-api-tailscale` ExternalSecret 이 Healthy 하고 사용자가 EC2 세션에 명령을 입력할 수 있다.
-  온프렘 Vault 에 시드돼 있으면 스냅샷으로 함께 복원된다. 없으면 그 ExternalSecret 만 Degraded(필수 AWS
-  키·SSM 채점·api 는 정상) — 터미널이 안 뜨면 실습 진행 불가이므로 **온프렘에서 시드 상태를 유지**한다.
+- **라이브 터미널 필수 시드(2개):** `cledyu/aws/api` 에 Tailscale authkey **두 개**가 모두 있어야
+  `cledyu-api-tailscale` ExternalSecret 이 Healthy 하고 api 가 terminal_url 을 광고한다(session.go 는
+  두 조건 AND — 세션 키 설정 && api tsnet 가입).
+  - `tailscale_authkey` — 세션 EC2 인스턴스가 cloud-init 으로 tailnet 가입(ephemeral, tag:lab-ec2).
+  - `api_tailscale_authkey` — api 파드 자신이 tsnet 으로 tailnet 가입(tag:cledyu-api).
+  온프렘 Vault 에 시드돼 있으면 스냅샷으로 함께 복원된다. 어느 키든 없으면 그 ExternalSecret 만 Degraded
+  (필수 AWS 키 cledyu-api-aws·SSM 채점·api 기동은 정상 — 터미널 키는 별도 ExternalSecret 로 분리돼 있어
+  필수 키 동기화를 막지 않는다) — 터미널이 안 뜨면 실습 진행 불가이므로 **온프렘에서 시드 상태를 유지**한다.
 
 ### Vault k8s auth 를 EKS 용으로 재설정 (복원·unseal 후, ESO 인증 직전) — T6
 
@@ -310,9 +314,10 @@ aws ec2 describe-instances --region ap-northeast-2 \
   --query "Reservations[].Instances[].InstanceId" --output text          # 세션 인스턴스 존재(provisioner.go 태그: cledyu.io/managed-by=cledyu-session)
 
 # 2) 사용자 터미널 도달(tailnet) — api 가 tsnet 으로 인스턴스에 다이얼(라이브 터미널 WebSocket 200).
-#    CLEDYU_AWS_API_TAILSCALE_AUTH_KEY(=cledyu-api-tailscale.api_tailscale_authkey) 필요 — 라이브 터미널은
-#    DR 실습에 필요하므로 api_tailscale_authkey 는 부트스트랩 시드 필수(아래 '사전 Vault 시드' 참고). 시드되면
-#    cledyu-api-tailscale ExternalSecret Healthy. 미시드면 이 시크릿만 Degraded(필수 AWS 키·SSM 채점·api 는 정상).
+#    CLEDYU_AWS_TAILSCALE_AUTH_KEY(세션 tailnet 가입) + CLEDYU_AWS_API_TAILSCALE_AUTH_KEY(api tsnet) 둘 다
+#    필요(둘 다 cledyu-api-tailscale Secret) — 라이브 터미널은 DR 실습에 필요하므로 tailscale_authkey·
+#    api_tailscale_authkey 는 부트스트랩 시드 필수(위 '복원 후 정합성 체크' 참고). 둘 다 시드되면
+#    cledyu-api-tailscale ExternalSecret Healthy. 어느 키든 미시드면 이 시크릿만 Degraded(필수 AWS 키·SSM 채점·api 는 정상).
 
 # 3) 검증엔진 채점 — 각 스텝을 통과 상태로 만들고 /validate 호출 → validation-engine 이 SSM SendCommand 로
 #    EC2 를 채점 → validation-results → api 가 Postgres(session_steps/progress/completions)에 반영.

@@ -114,10 +114,13 @@ spec:
                   key: secret_access_key
             # Tailscale ephemeral authkey — 세션 인스턴스 cloud-init 의 tailscale up 에 쓰인다.
             # 미설정 시(optional) EC2 세션은 SSM 채점만 가능하고 라이브 터미널/IDE 는 비활성.
+            # 필수 AWS 키(cledyu-api-aws)가 아닌 터미널 키 Secret(cledyu-api-tailscale, ExternalSecret 분리)에서
+            # 온다 — cledyu-api-aws 의 필수 ref 로 두면 미시드 시 그 Secret 이 안 만들어져 위 AWS_ACCESS_KEY_ID
+            # (non-optional) 마운트 실패로 api 기동이 차단된다(Codex P2). 분리로 미시드=터미널만 비활성.
             - name: CLEDYU_AWS_TAILSCALE_AUTH_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.aws.secretName | quote }}
+                  name: cledyu-api-tailscale
                   key: tailscale_authkey
                   optional: true
             # api 파드 자신이 tsnet 으로 tailnet 가입(tag:cledyu-api) — EC2 세션에 라이브 터미널 SSH 부착용.
