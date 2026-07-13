@@ -17,6 +17,9 @@ spec:
     path: gitops/apps/kafka-cluster
     directory:
       recurse: true
+      # EKS DR 전용 nodepool(gp3)은 온프렘에 배포하지 않는다 — 온프렘은 kafka-nodepool.yaml(longhorn) 사용.
+      # (EKS data-kafka-cluster 는 반대로 longhorn 원본을 exclude 하고 kafka-nodepool-eks 를 include.)
+      exclude: kafka-nodepool-eks.yaml
   destination:
     server: https://kubernetes.default.svc
     namespace: kafka

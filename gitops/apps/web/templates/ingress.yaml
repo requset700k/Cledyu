@@ -3,8 +3,12 @@ kind: Ingress
 metadata:
   name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
-  ingressClassName: traefik
+  ingressClassName: {{ .Values.ingress.className | default "traefik" }}
   tls:
     - hosts:
         {{- range .Values.ingress.hosts }}

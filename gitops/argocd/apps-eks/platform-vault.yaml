@@ -1,40 +1,42 @@
 ---
+# Vault — 온프렘 platform-vault.yaml 미러, 2곳 변경:
+#  (1) valueFiles 를 values-awskms.yaml → values-eks.yaml(정적 크레드 배제, IRSA)
+#  (2) directory include 에서 ingress.yaml/serverstransport.yaml 제외(Traefik CRD 없음, B5)
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: platform-sloth
+  name: eks-platform-vault
   namespace: argocd
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
   project: default
   sources:
-    - repoURL: https://slok.github.io/sloth
-      chart: sloth
-      targetRevision: 0.16.0
+    - repoURL: https://helm.releases.hashicorp.com
+      chart: vault
+      targetRevision: 0.32.0
       helm:
-        releaseName: sloth
+        releaseName: vault
         valueFiles:
-          - $values/gitops/apps/sloth/values.yaml
+          - $values/gitops/apps/vault/values.yaml
+          - $values/gitops/apps/vault/values-eks.yaml
     - repoURL: https://github.com/requset700k/Cledyu.git
       targetRevision: main
       ref: values
     - repoURL: https://github.com/requset700k/Cledyu.git
       targetRevision: main
-      path: gitops/apps/sloth
+      path: gitops/apps/vault
       directory:
-        # values.yaml 은 helm $values 소스로만 쓰이므로 매니페스트 적용 대상에서 제외한다.
-        # Sloth CRD 와 SLO CR 들을 GitOps 로 관리하기 위해 명시 목록으로 포함한다.
-        include: "{namespace.yaml,crds.yaml,kubevirt-slo.yaml,kafka-slo.yaml,traefik-slo.yaml,lab-slo.yaml,api-slo.yaml}"
+        include: "{namespace.yaml,admin-serviceaccount.yaml,certificate.yaml}"
   destination:
     server: https://kubernetes.default.svc
-    namespace: sloth
+    namespace: vault
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
     syncOptions:
-      - CreateNamespace=false
+      - CreateNamespace=true
       - ServerSideApply=true
     retry:
       limit: 5

@@ -7,7 +7,10 @@ kind: ServiceAccount
 metadata:
   name: {{ .Release.Name }}
   namespace: {{ .Release.Namespace }}
-automountServiceAccountToken: true # in-cluster client 가 K8s API 호출에 토큰을 사용
+# kubevirt.enabled=false(EKS DR 등)면 세션 프로비저닝(session.go) 미사용 → 토큰 automount 안 함(최소권한, Codex P2).
+# 아래 ClusterRole/Binding 도 kubevirt 일 때만 렌더 → SA 는 남되 cluster-scoped 권한 0 (침해 시 namespace 삭제·secret 생성 노출 제거).
+automountServiceAccountToken: {{ .Values.kubevirt.enabled }} # in-cluster client 가 K8s API 호출에 토큰 사용(kubevirt 시에만)
+{{- if .Values.kubevirt.enabled }}
 
 ---
 # 세션 프로비저너 권한.
@@ -77,3 +80,4 @@ rules:
   - apiGroups: ["subresources.kubevirt.io"]
     resources: ["virtualmachineinstances/portforward"]
     verbs: ["get"]
+{{- end }}

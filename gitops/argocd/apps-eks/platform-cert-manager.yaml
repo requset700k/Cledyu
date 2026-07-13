@@ -1,0 +1,42 @@
+---
+# cert-manager — EKS DR 신설 앱. api/web/vault Certificate 가 cledyu-ca(ClusterIssuer, platform-pki)로
+# 발급되려면 CRD+webhook 이 가장 먼저 떠야 한다 → sync-wave -10(전 앱 중 최선두).
+# 소스 스타일은 apps-eks 관례(multi-source: upstream chart + $values git ref)와 동일.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eks-platform-cert-manager
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-10"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  sources:
+    - repoURL: https://charts.jetstack.io
+      chart: cert-manager
+      targetRevision: v1.20.2
+      helm:
+        releaseName: cert-manager
+        valueFiles:
+          - $values/gitops/apps/cert-manager/values.yaml
+    - repoURL: https://github.com/requset700k/Cledyu.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m

@@ -171,6 +171,36 @@ resource "aws_s3_bucket_lifecycle_configuration" "dr_backups" {
     }
   }
 
+  # DR 클러스터(eks-dr)의 CNPG가 복원 후 자기 새 백업을 쓰는 -dr 프리픽스. 원본과 분리해두면
+  # lifecycle이 없어 드릴/실전환마다 생성된 PII/계정 DB 백업이 무한 누적되므로, 원본과 동일 만료를 건다.
+  rule {
+    id     = "expire-postgres-dr-backups"
+    status = "Enabled"
+    filter {
+      prefix = "postgres-dr/"
+    }
+    expiration {
+      days = 35
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+  }
+
+  rule {
+    id     = "expire-keycloak-dr-backups"
+    status = "Enabled"
+    filter {
+      prefix = "keycloak-dr/"
+    }
+    expiration {
+      days = 35
+    }
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+  }
+
   rule {
     id     = "abort-incomplete-multipart"
     status = "Enabled"

@@ -1,0 +1,4 @@
+---
+# EKS DR overlay (Task 5) — 클러스터 무관 오퍼레이터. onprem values.yaml 대비 델타 없음.
+# ClusterSecretStore/ExternalSecret(Vault 연동)은 Task 6(Vault overlay) 범위.
+{}
