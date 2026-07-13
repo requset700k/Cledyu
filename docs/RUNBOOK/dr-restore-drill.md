@@ -293,3 +293,28 @@ psql 은 cledyu-pg 와 동일하게 소켓 peer auth 라 `-U postgres`(또는 `-
 - 자격증명: `gitops/apps/backup-secrets` (Task 2, `cledyu-backup-s3` Secret)
 - 계획 원문: `docs/superpowers/plans/2026-07-01-dr-backup-plan-a-backup-layer.md` Task 7
 - CNPG 복구 문서: https://cloudnative-pg.io/documentation/current/recovery/
+
+## Failback 드릴 (역복제·무손실·split-brain 실증)
+
+전제: real-DR failover 상태(EKS primary, backupEnabled=true, -dr 아카이브 축적). 진입 epoch=N.
+
+- [ ] **마커 주입** — quiesce **직전** EKS DR primary 에 고유 마커. `lab_completions` 는 PK(user_id,lab_id)
+      + `session_id TEXT NOT NULL`(default 없음) 이므로 **session_id 필수**(누락 시 not-null 위반):
+  ```bash
+  kubectl --context eks-dr -n postgres exec cledyu-pg-1 -- psql -d cledyu -tAc \
+    "INSERT INTO lab_completions(user_id,lab_id,session_id) VALUES('drill-marker','failback-N','drill-session') ON CONFLICT DO NOTHING;"
+  ```
+  (⚠️ `-d cledyu` 필수 — api 테이블은 cledyu DB 에 있음. 기본 postgres DB 로 붙으면 relation 없음. completed_at 은
+  DEFAULT now() 라 생략. 반복 드릴 대비 ON CONFLICT DO NOTHING — PK(user_id,lab_id) 중복 무시.)
+- [ ] **failback 수행** — dr-failback.md 0~9 전 절차.
+- [ ] **무손실 실증** — 온프렘에 마커 존재:
+  ```bash
+  kubectl --context onprem -n postgres exec cledyu-pg-1 -- psql -d cledyu -tAc \
+    "SELECT count(*) FROM lab_completions WHERE user_id='drill-marker';"   # → 1
+  ```
+- [ ] **quiesce 갭 실증** — quiesce 이후 EKS 쓰기 시도가 불가(api replicas=0)였고, recovery 데이터셋이
+      quiesce 시점 고정 → 정합 체크(step4)에서 EKS==온프렘 count 일치 확인(recovery 창 write-loss 없음).
+- [ ] **split-brain 부재 실증** — DNS 전환(step6) **전** 온프렘 미서빙 + quiesce 이후 양쪽 write 부재 확인.
+- [ ] **반복 성립 실증** — 재-failover(EKS recover ← f(N+1)=cledyu-pg-e{N+1}) → 재-failback(→epoch N+2)
+      1사이클 더. `-dr-e{N+2}` 새 경로라 Object Lock 충돌 없음 실측.
+- [ ] **failback RTO 실측** — step1(quiesce)~step6(DNS) 창 = write-downtime, 각 스텝 타임스탬프 기록.
