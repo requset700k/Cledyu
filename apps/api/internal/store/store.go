@@ -4,6 +4,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -101,6 +102,61 @@ func (s *Store) UpsertUser(ctx context.Context, id, email, name, role string) er
 		id, email, name, role)
 	if err != nil {
 		return fmt.Errorf("upsert user: %w", err)
+	}
+	return nil
+}
+
+// ── billing ─────────────────────────────────────────────────────────────────
+
+// Subscription은 사용자의 현재 결제 플랜 스냅샷이다.
+type Subscription struct {
+	UserID           string     `json:"user_id"`
+	PlanID           string     `json:"plan_id"`
+	Status           string     `json:"status"`
+	CurrentPeriodEnd *time.Time `json:"current_period_end,omitempty"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+}
+
+// CheckoutSession은 외부 결제 승인으로 보내기 전 생성한 checkout 시도다.
+type CheckoutSession struct {
+	ID          string    `json:"id"`
+	UserID      string    `json:"user_id"`
+	PlanID      string    `json:"plan_id"`
+	Provider    string    `json:"provider"`
+	Status      string    `json:"status"`
+	CheckoutURL string    `json:"checkout_url"`
+	CreatedAt   time.Time `json:"created_at"`
+	ExpiresAt   time.Time `json:"expires_at"`
+}
+
+// GetSubscription은 유저의 구독 상태를 반환한다. 아직 구독 행이 없으면 (nil, nil).
+func (s *Store) GetSubscription(ctx context.Context, userID string) (*Subscription, error) {
+	var sub Subscription
+	var periodEnd sql.NullTime
+	err := s.pool.QueryRow(ctx, `
+		SELECT user_id, plan_id, status, current_period_end, updated_at
+		FROM subscriptions WHERE user_id = $1`, userID).
+		Scan(&sub.UserID, &sub.PlanID, &sub.Status, &periodEnd, &sub.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get subscription: %w", err)
+	}
+	if periodEnd.Valid {
+		sub.CurrentPeriodEnd = &periodEnd.Time
+	}
+	return &sub, nil
+}
+
+// CreateCheckoutSession은 결제 provider로 넘기기 전 checkout 시도를 저장한다.
+func (s *Store) CreateCheckoutSession(ctx context.Context, cs CheckoutSession) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO checkout_sessions (id, user_id, plan_id, provider, status, checkout_url, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		cs.ID, cs.UserID, cs.PlanID, cs.Provider, cs.Status, cs.CheckoutURL, cs.ExpiresAt)
+	if err != nil {
+		return fmt.Errorf("create checkout session: %w", err)
 	}
 	return nil
 }
