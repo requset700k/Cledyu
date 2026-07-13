@@ -23,12 +23,12 @@ spec:
           - $values/gitops/apps/trust-manager/values.yaml
           - $values/gitops/apps/trust-manager/values-eks.yaml
     - repoURL: https://github.com/requset700k/Cledyu.git
-      targetRevision: feat/dr-pilot-light
+      targetRevision: main
       ref: values
     # Bundle CR + namespace — directory mode(온프렘 platform-trust-manager.yaml 과 동일).
     # cledyu-root-ca-bundle 이 라벨 ns 에 ConfigMap 분배 → api /etc/ssl/cledyu 비-optional 마운트 충족(F1).
     - repoURL: https://github.com/requset700k/Cledyu.git
-      targetRevision: feat/dr-pilot-light
+      targetRevision: main
       path: gitops/apps/trust-manager
       directory:
         include: "{namespace.yaml,cledyu-root-ca-bundle.yaml}"

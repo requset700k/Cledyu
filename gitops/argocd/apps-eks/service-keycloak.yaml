@@ -16,7 +16,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/requset700k/Cledyu.git
-    targetRevision: feat/dr-pilot-light
+    targetRevision: main
     path: gitops/apps/keycloak
     helm:
       releaseName: keycloak
