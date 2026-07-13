@@ -28,12 +28,16 @@ kubectl --context eks-dr -n keycloak patch keycloak cledyu-keycloak --type merge
 kubectl --context eks-dr -n keycloak rollout status statefulset/cledyu-keycloak --timeout=120s 2>/dev/null || true
 ```
 
-### 2. EKS write frontier flush (EKS primary)
+### 2. EKS write frontier flush + S3 도달 대기 (EKS primary) — 【승인 게이트】
+> ⚠️ `pg_switch_wal()` 은 세그먼트 **전환만** 트리거하고 barman 의 S3 업로드 완료를 보장하지 않는다. flush 직후
+> recovery(step3)를 시작하면 마지막 WAL 이 아직 `postgres-dr/`·`keycloak-dr/` 에 없어 PostgreSQL 이 그 이전을
+> end-of-archive 로 보고 승격 → quiesce 직전 쓰기가 누락된다. 따라서 **on-demand Backup(quiesce 상태 base)을
+> 양쪽 다 만들고 `completed` 까지 대기**해, flush 데이터가 S3(-dr)에 확실히 도달한 뒤에만 step3 로 넘어간다.
 ```bash
-# postgres·keycloak 각각의 primary pod 에서:
-kubectl --context eks-dr -n postgres exec -it cledyu-pg-1 -- psql -c "CHECKPOINT; SELECT pg_switch_wal();"
+# (a) postgres·keycloak primary 에서 flush.
+kubectl --context eks-dr -n postgres exec -it cledyu-pg-1  -- psql -c "CHECKPOINT; SELECT pg_switch_wal();"
 kubectl --context eks-dr -n keycloak exec -it keycloak-pg-1 -- psql -c "CHECKPOINT; SELECT pg_switch_wal();"
-# (선택·최적화) 최신 base backup 으로 WAL 재생 단축. delete-first 로 반복 failback 멱등(AlreadyExists 방지).
+# (b) quiesce 상태 최종 base backup 생성(양쪽 필수·대칭). delete-first 로 반복 failback 멱등(AlreadyExists 방지).
 kubectl --context eks-dr -n postgres delete backup failback-cutover --ignore-not-found
 kubectl --context eks-dr -n postgres create -f - <<'YAML'
 apiVersion: postgresql.cnpg.io/v1
@@ -41,6 +45,16 @@ kind: Backup
 metadata: { name: failback-cutover, namespace: postgres }
 spec: { cluster: { name: cledyu-pg } }
 YAML
+kubectl --context eks-dr -n keycloak delete backup failback-cutover --ignore-not-found
+kubectl --context eks-dr -n keycloak create -f - <<'YAML'
+apiVersion: postgresql.cnpg.io/v1
+kind: Backup
+metadata: { name: failback-cutover, namespace: keycloak }
+spec: { cluster: { name: keycloak-pg } }
+YAML
+# (c) 두 backup 모두 completed = flush 데이터가 -dr S3 에 도달. 이 대기 통과 전엔 step3 recovery 시작 금지.
+kubectl --context eks-dr -n postgres  wait --for=jsonpath='{.status.phase}'=completed backup/failback-cutover --timeout=900s
+kubectl --context eks-dr -n keycloak wait --for=jsonpath='{.status.phase}'=completed backup/failback-cutover --timeout=900s
 ```
 
 ### 3. 온프렘 recovery — 【승인 게이트: 삭제 전 -dr 건전성 확인 필수】
