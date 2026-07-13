@@ -57,6 +57,11 @@ spec:
     httpEnabled: true
   ingress:
     enabled: false
+  # EKS DR 엔 Prometheus Operator(ServiceMonitor CRD) 없음 → 오퍼레이터가 ServiceMonitor 를 만들지 않게 명시 off.
+  # CRD 기본은 enabled:true 지만 spec.serviceMonitor 를 통째로 생략하면 CRD defaulting 미적용이라 실측상 Ready=True 였음
+  # (parent 부재 시 default 미적용). 방어적으로 명시([B3] api ServiceMonitor off 와 동일 취지).
+  serviceMonitor:
+    enabled: false
   proxy:
     # ALB 가 X-Forwarded-* 를 주입 → Keycloak 이 이를 신뢰해 올바른 issuer/redirect URL 생성.
     headers: xforwarded
