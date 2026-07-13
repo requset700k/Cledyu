@@ -199,6 +199,23 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	)
 	defer span.End()
 
+	if err := h.ensureLabEntitlement(ctx, uid, lc); err != nil {
+		recordSpanError(span, err)
+		switch {
+		case errors.Is(err, errSubscriptionRequired):
+			span.SetAttributes(attribute.String("session.create.result", "subscription_required"))
+			c.JSON(http.StatusPaymentRequired, gin.H{
+				"error":         "active subscription required",
+				"code":          "subscription_required",
+				"required_plan": requiredPaidPlanID,
+			})
+		default:
+			h.log.Error("check lab entitlement", zap.Error(err))
+			h.err(c, http.StatusInternalServerError, "check lab entitlement failed")
+		}
+		return
+	}
+
 	// 한 유저당 활성 세션 1개로 제한한다. uid가 있으면 유저별 락으로 동시요청을 직렬화하고
 	// (락은 생성 완료까지 유지), 이미 활성 세션이 있으면 409로 거부한다.
 	if uid != "" {
