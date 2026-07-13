@@ -16,6 +16,7 @@ import type {
   Subscription,
   User,
 } from './types';
+import { pathWithSearch } from './auth-return.mjs';
 import { refreshSession } from './auth-session.mjs';
 
 interface Paginated<T> {
@@ -91,7 +92,7 @@ async function request<T>(path: string, options?: RequestInit, retried = false):
       return request<T>(path, options, true);
     }
     if (typeof window !== 'undefined') {
-      window.location.href = `/login?from=${encodeURIComponent(window.location.pathname)}`;
+      window.location.href = `/login?from=${encodeURIComponent(pathWithSearch(window.location))}`;
     }
     return new Promise<never>(() => {});
   }

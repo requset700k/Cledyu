@@ -2,13 +2,26 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { normalizeReturnPath, POST_LOGIN_RETURN_KEY } from '@/lib/auth-return.mjs';
 
 export default function CallbackPage() {
   const router = useRouter();
 
   useEffect(() => {
     // 백엔드가 설정한 쿠키가 브라우저에 저장될 시간을 준 뒤 이동.
-    const timer = setTimeout(() => router.replace('/labs'), 500);
+    const timer = setTimeout(() => {
+      let target = '/labs';
+      try {
+        const stored = window.sessionStorage.getItem(POST_LOGIN_RETURN_KEY);
+        if (stored) {
+          target = normalizeReturnPath(stored);
+          window.sessionStorage.removeItem(POST_LOGIN_RETURN_KEY);
+        }
+      } catch {
+        target = '/labs';
+      }
+      router.replace(target);
+    }, 500);
     return () => clearTimeout(timer);
   }, [router]);
 
