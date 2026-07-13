@@ -192,7 +192,7 @@ variable "alert_email" {
 # ─────────────────────────────────────────────────────────────────────────
 
 variable "enable_eks_dr" {
-  description = "DR 드릴/재해 시에만 true. 평시 false 로 EKS 리소스 0."
+  description = "pilot-light: 평시 true 로 warm 스택(컨트롤플레인·노드그룹 0) 상시. false 는 완전 폐기 시만."
   type        = bool
   default     = false
 }
@@ -215,7 +215,28 @@ variable "eks_dr_node_instance_type" {
 }
 
 variable "eks_dr_node_desired" {
-  description = "DR EKS 워커 노드 개수(고정 크기, min=max=desired)."
+  description = "DR EKS 워커 노드 개수. pilot-light: 평시 0(비용 0), 재해 시 N 으로 스케일. min=0, max=eks_dr_node_max."
   type        = number
-  default     = 3
+  default     = 0
+}
+
+variable "eks_dr_node_max" {
+  description = "DR EKS 노드그룹 max_size. 재해 시 eks_dr_node_desired 를 이 상한 내에서 올린다."
+  type        = number
+  default     = 6
+}
+
+variable "eks_dr_active" {
+  description = <<-EOT
+    pilot-light hot 리소스 스위치. 평시 false — NAT·VPC 인터페이스 엔드포인트·bastion 인스턴스 미생성(비용은
+    컨트롤플레인만). 재해 시 true — 이들 생성(+ eks_dr_node_desired 로 노드 스케일). warm 스택(VPC·EKS·IRSA·SG·
+    bastion 롤)은 enable_eks_dr 로 상시 유지되고 이 값과 무관.
+  EOT
+  type        = bool
+  default     = false
+
+  validation {
+    condition     = !var.eks_dr_active || var.enable_eks_dr
+    error_message = "eks_dr_active=true 는 warm 스택(enable_eks_dr=true)을 전제한다 — hot 리소스가 warm 리소스의 [0] 인덱스를 참조하기 때문. 두 변수는 함께 true 로만 apply 한다."
+  }
 }

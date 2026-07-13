@@ -1,6 +1,7 @@
 # EKS Cold DR 기반. enable_eks_dr=false 면 count=0 → 평시 리소스 없음(비용 0).
 locals {
   eks_dr_enabled = var.enable_eks_dr ? 1 : 0
+  eks_dr_active  = var.eks_dr_active ? 1 : 0 # pilot-light hot(NAT·엔드포인트·bastion 인스턴스)
   eks_dr_name    = "cledyu-dr"
   eks_dr_tags    = { Project = "cledyu", Purpose = "dr", ManagedBy = "terraform" }
 }
@@ -17,8 +18,8 @@ module "eks_dr_vpc" {
   private_subnets = ["10.90.1.0/24", "10.90.2.0/24", "10.90.3.0/24"]
   public_subnets  = ["10.90.101.0/24", "10.90.102.0/24", "10.90.103.0/24"]
 
-  enable_nat_gateway = true
-  single_nat_gateway = true # 드릴 비용 절감(가용성 요구 낮음)
+  enable_nat_gateway = var.eks_dr_active # pilot-light: 평시 미생성(노드 0이라 egress 불요), 재해 시 생성
+  single_nat_gateway = true
 
   # ALB Controller / EKS 서브넷 자동 발견 태그
   public_subnet_tags  = { "kubernetes.io/role/elb" = "1" }
@@ -68,9 +69,9 @@ module "eks_dr" {
     dr = {
       instance_types = [var.eks_dr_node_instance_type]
       capacity_type  = "ON_DEMAND"
-      desired_size   = var.eks_dr_node_desired
-      min_size       = var.eks_dr_node_desired
-      max_size       = var.eks_dr_node_desired
+      desired_size   = var.eks_dr_node_desired # 최초 생성값(기본 0). 모듈이 이후 desired 변경을 ignore → 실제 스케일은 CLI(§Global P1)
+      min_size       = 0
+      max_size       = var.eks_dr_node_max
     }
   }
 
@@ -180,7 +181,7 @@ resource "aws_security_group" "eks_dr_bastion" {
 module "eks_dr_endpoints" {
   source  = "terraform-aws-modules/vpc/aws//modules/vpc-endpoints"
   version = "~> 5.13"
-  count   = local.eks_dr_enabled
+  count   = local.eks_dr_active
 
   vpc_id = module.eks_dr_vpc[0].vpc_id
   endpoints = {
