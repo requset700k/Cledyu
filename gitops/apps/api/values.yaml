@@ -102,7 +102,8 @@ kafka:
 # AWS EC2 오버플로우 — 온프렘 KubeVirt 풀이 가득 차면 세션을 EC2로 버스트한다(Phase 13).
 # enabled=false 가 기본 — EC2 비활성(KubeVirt 전용, 현행 동작 보존). 활성화 절차:
 #   1) infra/terraform/aws apply → launchTemplateId/region 확보
-#   2) AWS 최소권한 키·Tailscale authkey 를 Vault 등록 → cledyu-api-aws-externalsecret.yaml
+#   2) AWS 최소권한 키(cledyu-api-aws-externalsecret.yaml)·Tailscale authkey 2종(cledyu-api-tailscale-
+#      externalsecret.yaml — 세션 cloud-init 용 + api 파드 tsnet 용, 라이브 터미널)을 Vault 등록
 #   3) enabled=true, launchTemplateId 설정, maxActiveSessions>0
 aws:
   enabled: true
@@ -110,7 +111,9 @@ aws:
   launchTemplateId: "lt-03243d5c74802ddfd"    # terraform output launch_template_id (cledyu 504284203153)
   instanceType: "t3.medium"
   maxActiveSessions: 2     # EC2 오버플로우 용량(0이면 비활성). 글로벌 상한 = 온프렘 + 이 값.
-  # AWS 액세스 키·Tailscale authkey 는 Vault(cledyu/aws/api)→ESO(cledyu-api-aws)에서 주입.
+  # AWS 액세스 키는 Vault(cledyu/aws/api)→ESO(cledyu-api-aws)에서 주입. Tailscale authkey 2종은
+  # 같은 Vault 경로지만 별도 Secret(cledyu-api-tailscale, deployment 에 직접 명시)로 분리 — 미시드가
+  # 필수 AWS 키 동기화·api 기동을 막지 않게(Codex P1·P2).
   secretName: "cledyu-api-aws"
 
 # D3 강사 분석 — API 가 D2의 cledyu_analytics BigQuery 뷰를 읽어 /api/v1/instructor/analytics 로 제공.

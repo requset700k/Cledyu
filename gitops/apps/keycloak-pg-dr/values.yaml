@@ -1,0 +1,20 @@
+# EKS Cold DR — keycloak-pg 복원 차트 values.
+# 라이브 구DB(keycloak-db-postgresql)를 참조하지 않고 S3(keycloak/ 프리픽스) 백업에서만 복원한다(설계 §5.1).
+# 운영 keycloak-pg 는 EKS(apps-eks)에 배포되지 않으므로 import-bootstrap 앱과 충돌하지 않는다.
+
+storage:
+  # 운영 keycloak-pg 와 동일 규격(20Gi). durability 는 barman S3 가 담당.
+  size: 20Gi
+
+# CNPG 가 Cluster 명(keycloak-pg)으로 자동 생성하는 SA(keycloak:keycloak-pg)에 붙일 IRSA 롤 ARN.
+# barman 이 inheritFromIAMRole 로 assume → S3 recovery-read(keycloak/) + backup-write(keycloak-dr/).
+# 롤 이름(cledyu-dr-cnpg-restore-keycloak)·계정이 결정적이라 verbatim 하드코딩(vault values-eks 선례).
+# terraform: eks_dr_name=cledyu-dr → ${eks_dr_name}-cnpg-restore-keycloak (eks-dr-irsa.tf).
+restoreRoleArn: "arn:aws:iam::504284203153:role/cledyu-dr-cnpg-restore-keycloak"
+
+# recovery 클러스터의 자체 -dr 백업 아카이빙 스위치(default off).
+# ⚠ 반복 드릴/재해(30일 내): 이전 recovery 가 -dr 에 쓴 아카이브가 Object Lock(GOVERNANCE 30d)로 삭제 불가라,
+#   같은 serverName 으로 다시 쓰면 CNPG "WAL archive check: Expected empty archive" 로 recovery 가 막힌다(실측 2026-07-13).
+#   → default off: recovery 클러스터는 복원만 하고 자체 아카이빙을 안 해 충돌을 원천 회피(드릴/재해 반복 성립).
+#   real-DR 에서 새 primary 자체보호가 필요하면 안정화 후 true(post-failover 스텝). 복원 데이터 자체는 원본 백업이 보호.
+backupEnabled: false

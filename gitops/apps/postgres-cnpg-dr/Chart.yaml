@@ -1,0 +1,5 @@
+apiVersion: v2
+name: postgres-cnpg-dr
+description: EKS Cold DR 전용 — cledyu-pg 를 S3(barman) 백업에서 bootstrap.recovery 로 복원하는 CNPG Cluster. 운영 postgres-cnpg(import fail-safe)와 완전 별개 경로.
+type: application
+version: 0.1.0

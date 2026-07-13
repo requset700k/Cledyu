@@ -1,0 +1,47 @@
+---
+# EKS Cold DR — cledyu-pg 복원(bootstrap.recovery) CNPG Cluster.
+# 운영 data-postgres-cnpg.yaml(import-bootstrap)은 온프렘 apps/ 에만 있고 apps-eks 엔 없다 →
+# EKS 엔 경쟁 import 앱이 없어, 이 -dr 차트의 recovery 가 곧 GitOps 정의(Plan C "recovery→adopt" 등가).
+# sync-wave 1 — data-cnpg-operator(wave 0, CRD/오퍼레이터) 뒤, 소비자 eks-service-api(wave 2) 앞.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eks-data-postgres-cnpg-dr
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/requset700k/Cledyu.git
+    targetRevision: feat/dr-eks-overlay-cnpg-keycloak
+    path: gitops/apps/postgres-cnpg-dr
+    helm:
+      releaseName: postgres-cnpg-dr
+      valueFiles:
+        - values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: postgres
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    # CRD 전파·복원(recovery Job) 지연 흡수 위해 retry 높게.
+    retry:
+      limit: 10
+      backoff:
+        duration: 30s
+        factor: 2
+        maxDuration: 5m
+  ignoreDifferences:
+    # CNPG 가 status 를 지속 갱신 → 소스에 없어 영구 OutOfSync 방지(kafka-cluster 선례).
+    - group: postgresql.cnpg.io
+      kind: Cluster
+      jsonPointers:
+        - /status

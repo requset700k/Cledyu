@@ -1,0 +1,5 @@
+apiVersion: v2
+name: keycloak-pg-dr
+description: EKS Cold DR 전용 — keycloak-pg 를 S3(barman) 백업에서 bootstrap.recovery 로 복원하는 CNPG Cluster. 운영 keycloak-pg(import fail-safe)와 완전 별개 경로. Keycloak DB role 비번 드리프트 방지를 위해 managed.roles + ESO(keycloak-pg-credentials) 동반.
+type: application
+version: 0.1.0

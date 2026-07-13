@@ -114,12 +114,31 @@ spec:
                   key: secret_access_key
             # Tailscale ephemeral authkey — 세션 인스턴스 cloud-init 의 tailscale up 에 쓰인다.
             # 미설정 시(optional) EC2 세션은 SSM 채점만 가능하고 라이브 터미널/IDE 는 비활성.
+            # 필수 AWS 키(cledyu-api-aws)가 아닌 터미널 키 Secret(cledyu-api-tailscale, ExternalSecret 분리)에서
+            # 온다 — cledyu-api-aws 의 필수 ref 로 두면 미시드 시 그 Secret 이 안 만들어져 위 AWS_ACCESS_KEY_ID
+            # (non-optional) 마운트 실패로 api 기동이 차단된다(Codex P2). 분리로 미시드=터미널만 비활성.
             - name: CLEDYU_AWS_TAILSCALE_AUTH_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.aws.secretName | quote }}
+                  name: cledyu-api-tailscale
                   key: tailscale_authkey
                   optional: true
+            # api 파드 자신이 tsnet 으로 tailnet 가입(tag:cledyu-api) — EC2 세션에 라이브 터미널 SSH 부착용.
+            # 세션 cloud-init 용 CLEDYU_AWS_TAILSCALE_AUTH_KEY 와 별개 키(config AWSConfig.APITailscaleAuthKey).
+            # 별도 Secret(cledyu-api-tailscale, ExternalSecret 분리)에서 온다 — 부재가 필수 AWS 키 동기화를
+            # 막지 않게(Codex P1). 라이브 터미널은 DR 실습에 필수라 이 authkey 는 부트스트랩 필수 시드(런북).
+            # optional 은 파드 방어용(미시드여도 크래시 대신 터미널만 비활성).
+            - name: CLEDYU_AWS_API_TAILSCALE_AUTH_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: cledyu-api-tailscale
+                  key: api_tailscale_authkey
+                  optional: true
+            # tsnet 상태 디렉터리 — 명시 필수. 이미지가 distroless(static-debian12)+UID65532 라 홈/config 기본경로가
+            # 쓰기 불가 → Dir 미지정 시 tsnet 이 기본 config 경로에 쓰려다 srv.Up 실패 → authkey 시드돼도 터미널
+            # 비활성(Codex P1). 아래 tsnet-state emptyDir(쓰기 가능)에 매핑. config.APITailnetStateDir 매핑.
+            - name: CLEDYU_AWS_API_TAILNET_STATE_DIR
+              value: /var/lib/tsnet
             {{- end }}
             {{- if .Values.analytics.enabled }}
             # D3 강사 분석 — BigQuery 뷰 읽기전용. projectId 설정 시 /api/v1/instructor/analytics 활성(미설정 시 503).
@@ -136,6 +155,11 @@ spec:
             - name: kafka-certs
               mountPath: /etc/kafka-certs
               readOnly: true
+            {{- end }}
+            {{- if .Values.aws.enabled }}
+            # api tsnet(라이브 터미널) 상태 저장 — 쓰기 가능해야 srv.Up 성공(Codex P1). CLEDYU_AWS_API_TAILNET_STATE_DIR 과 동일 경로.
+            - name: tsnet-state
+              mountPath: /var/lib/tsnet
             {{- end }}
             - name: cledyu-ca
               mountPath: /etc/ssl/cledyu
@@ -174,6 +198,12 @@ spec:
         - name: kafka-certs
           secret:
             secretName: api-kafka-client-tls
+        {{- end }}
+        {{- if .Values.aws.enabled }}
+        # api tsnet(라이브 터미널) 상태 — 쓰기 가능 emptyDir. 이미지가 distroless+UID65532 라 기본 config 경로
+        # 쓰기 불가 → 이 볼륨을 명시하고 CLEDYU_AWS_API_TAILNET_STATE_DIR 로 가리켜야 srv.Up 성공(Codex P1).
+        - name: tsnet-state
+          emptyDir: {}
         {{- end }}
         - name: cledyu-ca
           configMap:

@@ -115,6 +115,14 @@ kubectl -n vault exec vault-0 -- sh -c \
   존재해야 → EKS 의 external-secrets 가 api/keycloak 시크릿을 채운다.
 - Vault 가 비어 있으면(복원 누락) api 는 in-memory 폴백으로 뜨고 keycloak-pg 자격이
   없어 Keycloak 이 기동 실패한다 → **드릴 실패로 판정**(자동 통과처럼 보이지 않게 주의).
+- **라이브 터미널 필수 시드(2개):** `cledyu/aws/api` 에 Tailscale authkey **두 개**가 모두 있어야
+  `cledyu-api-tailscale` ExternalSecret 이 Healthy 하고 api 가 terminal_url 을 광고한다(session.go 는
+  두 조건 AND — 세션 키 설정 && api tsnet 가입).
+  - `tailscale_authkey` — 세션 EC2 인스턴스가 cloud-init 으로 tailnet 가입(ephemeral, tag:lab-ec2).
+  - `api_tailscale_authkey` — api 파드 자신이 tsnet 으로 tailnet 가입(tag:cledyu-api).
+  온프렘 Vault 에 시드돼 있으면 스냅샷으로 함께 복원된다. 어느 키든 없으면 그 ExternalSecret 만 Degraded
+  (필수 AWS 키 cledyu-api-aws·SSM 채점·api 기동은 정상 — 터미널 키는 별도 ExternalSecret 로 분리돼 있어
+  필수 키 동기화를 막지 않는다) — 터미널이 안 뜨면 실습 진행 불가이므로 **온프렘에서 시드 상태를 유지**한다.
 
 ### Vault k8s auth 를 EKS 용으로 재설정 (복원·unseal 후, ESO 인증 직전) — T6
 
@@ -246,9 +254,11 @@ kubectl -n api get configmap cledyu-root-ca-bundle   # trust-manager Bundle 분�
 > 권한이 있는 운영자 자격의 머신에서 실행한다(kubectl 로 ALB DNS 취득만 bastion, AWS API 전환은 운영자 머신).
 
 공개 DNS(`aws_route53_record.public`)는 온프렘 프록시 ALB 를 alias 로 가리킨다. 온프렘 장애 시에도 그대로면
-EKS ALB target 이 Healthy 여도 사용자가 도달하지 못한다. **api/app 만** EKS ALB 로 돌린다.
-**주의: `auth.cledyu.com` 은 제외** — 이 PR 엔 Keycloak(T8) Ingress 가 없어 auth 를 EKS ALB 로 넘기면 매칭 규칙 없이
-404/503 이 된다. auth 전환은 **T8(Keycloak) 배포 후** 같은 방식으로 추가한다(그 전엔 로그인 검증도 T8 몫).
+EKS ALB target 이 Healthy 여도 사용자가 도달하지 못한다. api/app 은 즉시 EKS ALB 로 돌린다.
+**`auth.cledyu.com` 은 T8(Keycloak) Ingress 가 이 오버레이에 포함**되어 같은 `cledyu-dr` ALB 로 노출되므로 함께 전환한다.
+단 auth 는 **Keycloak CR Ready(issuer 응답 가능) 이후**에만 넘긴다 — 그 전에 넘기면 ALB keycloak 타겟 unhealthy 로
+404/503 이 되고, 반대로 미전환 시 auth 레코드가 죽은 온프렘 ALB 에 남아 API OIDC discovery(issuer `https://auth.cledyu.com`)
+·브라우저 로그인/토큰 갱신이 계속 실패한다.
 
 ```bash
 # EKS ALB DNS 이름·zone 취득 (ALB Controller 가 api/web Ingress 로 생성)
@@ -266,15 +276,19 @@ aws wafv2 get-web-acl-for-resource --resource-arn "$ALB_ARN" --region ap-northea
   --query "WebACL.Name" --output text          # → cledyu-lab-public (비어 있으면 values-eks ARN stale → 갱신 후 재sync)
 # 확인: curl https://api.cledyu.com/metrics → 403(WAF block)
 
-# (A) 실제 페일오버 — api/app.cledyu.com alias 를 EKS ALB 로 UPSERT (auth 는 T8 후)
+# (A) 실제 페일오버 — api/app 은 즉시, auth 는 Keycloak Ready 후 같은 cledyu-dr ALB 로 UPSERT
 for h in api app; do
   aws route53 change-resource-record-sets --hosted-zone-id "$ZONE" --change-batch \
     "{\"Changes\":[{\"Action\":\"UPSERT\",\"ResourceRecordSet\":{\"Name\":\"$h.cledyu.com\",\"Type\":\"A\",\"AliasTarget\":{\"HostedZoneId\":\"$ALB_ZONE\",\"DNSName\":\"$ALB\",\"EvaluateTargetHealth\":false}}}]}"
 done
-# ⚠️ 이 레코드는 terraform aws_route53_record.public 관리분 — 온프렘 복구 후 terraform apply 로 원복(failback).
+# auth: Keycloak CR 이 Ready(issuer https://auth.cledyu.com 응답 가능)된 뒤에만 전환 — 조기 전환 시 keycloak 타겟 unhealthy → 503.
+kubectl -n keycloak wait --for=condition=Ready keycloak/cledyu-keycloak --timeout=600s
+aws route53 change-resource-record-sets --hosted-zone-id "$ZONE" --change-batch \
+  "{\"Changes\":[{\"Action\":\"UPSERT\",\"ResourceRecordSet\":{\"Name\":\"auth.cledyu.com\",\"Type\":\"A\",\"AliasTarget\":{\"HostedZoneId\":\"$ALB_ZONE\",\"DNSName\":\"$ALB\",\"EvaluateTargetHealth\":false}}}]}"
+# ⚠️ 이 레코드(api·app·auth)는 terraform aws_route53_record.public 관리분 — 온프렘 복구 후 terraform apply 로 원복(failback).
 
-# (B) 라이브 DNS 미전환 로컬 드릴 검증(F3) — 운영자 머신에서만
-for h in api app; do
+# (B) 라이브 DNS 미전환 로컬 드릴 검증(F3) — 운영자 머신에서만 (auth 는 Keycloak Ready 후 함께 검증)
+for h in api app auth; do
   curl -sk --resolve $h.cledyu.com:443:$(dig +short $ALB|head -1) https://$h.cledyu.com/ -o /dev/null -w "%{http_code} $h\n"
 done
 ```
@@ -292,6 +306,35 @@ kubectl -n web rollout restart deploy/web && kubectl -n web rollout status deplo
 # 재기동 후 api 로그에 "db 연결 — 유저/진행 상태 영속화 활성"(in-memory 폴백 아님)·/ready checks 의 keycloak=connected 확인.
 kubectl -n api logs deploy/api | grep -E "db 연결|in-memory"
 ```
+
+### 실습 fidelity 검증 (EC2 채점 == 온프렘 KubeVirt) — A3
+
+풀서비스 DR 의 실습이 온프렘과 동등한지 라이브로 확인한다. 대표 랩 6종(lab-linux-basics 등)에 대해:
+
+```bash
+# 1) 로컬 테스트유저로 세션 생성 → api 가 EC2 인스턴스를 띄우는지
+#    (kubevirt=false·aws=true 이므로 sessions=EC2 provisioner, validator=validation-engine(A2) 로 non-nil → 503 안 뜸)
+kubectl -n api logs deploy/api | grep -E "EC2|launch|instance"
+aws ec2 describe-instances --region ap-northeast-2 \
+  --filters "Name=tag:cledyu.io/managed-by,Values=cledyu-session" "Name=instance-state-name,Values=running" \
+  --query "Reservations[].Instances[].InstanceId" --output text          # 세션 인스턴스 존재(provisioner.go 태그: cledyu.io/managed-by=cledyu-session)
+
+# 2) 사용자 터미널 도달(tailnet) — api 가 tsnet 으로 인스턴스에 다이얼(라이브 터미널 WebSocket 200).
+#    CLEDYU_AWS_TAILSCALE_AUTH_KEY(세션 tailnet 가입) + CLEDYU_AWS_API_TAILSCALE_AUTH_KEY(api tsnet) 둘 다
+#    필요(둘 다 cledyu-api-tailscale Secret) — 라이브 터미널은 DR 실습에 필요하므로 tailscale_authkey·
+#    api_tailscale_authkey 는 부트스트랩 시드 필수(위 '복원 후 정합성 체크' 참고). 둘 다 시드되면
+#    cledyu-api-tailscale ExternalSecret Healthy. 어느 키든 미시드면 이 시크릿만 Degraded(필수 AWS 키·SSM 채점·api 는 정상).
+
+# 3) 검증엔진 채점 — 각 스텝을 통과 상태로 만들고 /validate 호출 → validation-engine 이 SSM SendCommand 로
+#    EC2 를 채점 → validation-results → api 가 Postgres(session_steps/progress/completions)에 반영.
+kubectl -n validation-engine logs deploy/validation-engine | grep -E "SSM|SendCommand|passed|failed"
+# 수용기준: 온프렘에서 통과하는 정답 입력이 DR(EC2)에서도 passed, 오답은 failed. 6종 랩 각 최소 1스텝 정답/오답 대조가 온프렘과 일치.
+
+# 4) mock-pass 미발생 확인(보안) — validator non-nil 이므로 "mock" 응답이 없어야 한다.
+kubectl -n api logs deploy/api | grep -c "mock"                          # 0
+```
+
+수용기준 요약: (a) 세션=EC2 인스턴스 생성, (b) 터미널 tailnet 도달, (c) SSM 채점 결과가 온프렘과 동일 판정(정답 passed/오답 failed), (d) mock-pass 0건.
 
 ### destroy (고아 방지)
 

@@ -1,5 +1,7 @@
 ---
 # EKS DR 오버레이 — deltas only, values.yaml 위에 레이어.
+# EKS DR 은 validation-engine 네임스페이스를 eso-store 가 선행(wave -5) 생성 → 차트 namespace.yaml 미렌더(Codex P1 #2).
+skipNamespace: true
 # 네트워크 정책 둘 다 미렌더:
 #   - cilium: CiliumNetworkPolicy(cilium.io/v2 CRD 없음 → sync 블로커)
 #   - k8s:    plain NetworkPolicy 는 egress 에 SSM(FQDN) 규칙이 없어(plain NetworkPolicy 는 FQDN 미지원),

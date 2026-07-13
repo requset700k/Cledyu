@@ -1,0 +1,40 @@
+---
+# Keycloak 오퍼레이터 v26.6.1 — 업스트림 raw 매니페스트 vendoring(keycloak 은 공식 helm 차트 없음).
+#   keycloaks-crd.yaml / keycloakrealmimports-crd.yaml (CRD, 서빙 v2beta1+v2alpha1)
+#   operator.yaml (SA·ClusterRole/Binding·Role/Binding·Service·Deployment, ns=keycloak 로 pre-baked)
+# ⚠ ServerSideApply=true 필수 — keycloaks CRD 가 ~519KB 라 client-side apply 는
+#   last-applied-configuration 주석 크기 한계(262144B)를 넘겨 "Too long" 으로 실패한다.
+# sync-wave 0 — CRD/오퍼레이터가 Keycloak CR(service-keycloak, wave 2)보다 먼저 서야 한다.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: eks-platform-keycloak-operator
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/requset700k/Cledyu.git
+    targetRevision: feat/dr-eks-overlay-cnpg-keycloak
+    path: gitops/apps/keycloak-operator
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keycloak
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 3m

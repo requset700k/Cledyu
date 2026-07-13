@@ -1,0 +1,76 @@
+## EKS Cold DR — keycloak-pg 복원 Cluster (bootstrap.recovery).
+##
+## 운영 keycloak-pg/templates/cluster.yaml 은 bootstrap.initdb.import(구 Bitnami 논리 import) +
+## 아카이브 충돌 fail-safe 로 유지된다(건드리지 않는다). 이 차트는 그와 완전 별개 경로로,
+## S3 barman 백업(keycloak/ 프리픽스, serverName=keycloak-pg)에서 recovery 로 최신까지 복원한다.
+##
+## Cluster 명은 운영과 동일한 keycloak-pg — EKS(apps-eks)엔 운영 import 앱이 없어 충돌하지 않고,
+## Keycloak(T8)이 서비스명 keycloak-pg-rw 를 그대로 쓴다. bootstrap 은 Cluster 생성 시 1회만 실행되므로
+## 복원 완료 후 ArgoCD selfHeal 이 재-bootstrap 하지 않는다(Plan C "recovery→adopt" 등가).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: keycloak-pg
+  namespace: {{ .Release.Namespace }}
+spec:
+  instances: 1
+  # 원본(운영 keycloak-pg)과 동일 major 18 — CNPG recovery 는 target major ≥ source 필수.
+  # -system- 플레이버(barman-cloud CLI 포함) + digest 고정. 운영 cluster.yaml 과 동일하게 유지
+  # (오퍼레이터 상향으로 CNPG Postgres 버전이 바뀌면 함께 갱신).
+  imageName: "ghcr.io/cloudnative-pg/postgresql:18.2-system-trixie@sha256:3f44daf4c2ddea3481b018b3b004f91a439b93fc995a387f9aff69058bef19ac"
+  storage:
+    size: {{ .Values.storage.size | quote }}
+    # EKS 는 EBS CSI gp3. 수량은 반드시 quote(미quote 시 bare int → ArgoCD 영구 OutOfSync).
+    storageClass: gp3
+  # CNPG 가 Cluster 명(keycloak-pg)으로 자동 생성하는 SA 에 IRSA 롤 annotation 을 얹는다.
+  # 이름·롤 하나만 어긋나도 barman inheritFromIAMRole 의 web identity assume 가 무음 실패한다([F-C]).
+  serviceAccountTemplate:
+    metadata:
+      annotations:
+        eks.amazonaws.com/role-arn: "{{ .Values.restoreRoleArn }}"
+  bootstrap:
+    # 원본 아카이브(serverName=keycloak-pg, keycloak/ 프리픽스)에서 최신 WAL 까지 복원.
+    # recoveryTarget 미지정 = 아카이빙된 WAL 끝까지 재생(최신 복원).
+    recovery:
+      source: keycloak-pg-origin
+  externalClusters:
+    # 복원 소스 = 원본 백업(read-only). 라이브 구DB svc 를 참조하지 않으므로 구DB 폐기와 무관.
+    - name: keycloak-pg-origin
+      barmanObjectStore:
+        destinationPath: "s3://cledyu-lab-dr-backups/keycloak"
+        serverName: keycloak-pg
+        endpointURL: "https://s3.ap-northeast-2.amazonaws.com"
+        s3Credentials:
+          inheritFromIAMRole: true
+        wal:
+          compression: gzip
+  managed:
+    # DR 은 Vault(keycloak/postgres)와 DB(S3 백업)를 독립 복원하므로 비번 드리프트 위험이 최대다.
+    # CNPG 가 keycloak role 비번을 keycloak-pg-credentials(ESO←Vault)에 맞춰 지속 ALTER ROLE 해
+    # 항상 Secret=DBrole 을 보장 → 복원 시점 스큐가 있어도 Keycloak(T8) DB 인증이 깨지지 않는다.
+    roles:
+      - name: keycloak
+        ensure: present
+        login: true
+        superuser: false
+        passwordSecret:
+          name: keycloak-pg-credentials
+  # recovery 클러스터의 자체 -dr 아카이빙. default off(values backupEnabled=false) — 반복 드릴/재해 시
+  # 이전 -dr 아카이브(Object Lock 30d)와의 "Expected empty archive" 충돌을 원천 회피. real-DR 새 primary
+  # 자체보호가 필요하면 안정화 후 backupEnabled=true(post-failover). backup 부재여도 recovery 와 단일 인스턴스 운영엔 지장 없다.
+  {{- if .Values.backupEnabled }}
+  backup:
+    barmanObjectStore:
+      destinationPath: "s3://cledyu-lab-dr-backups/keycloak-dr"
+      # serverName 이 원본(keycloak-pg)과 같으면 "Expected empty archive" — 반드시 -dr 접미.
+      serverName: keycloak-pg-dr
+      endpointURL: "https://s3.ap-northeast-2.amazonaws.com"
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+    # retentionPolicy 미설정 — 무-delete IAM + Object Lock(운영 차트와 동일 사유). 삭제는 S3 lifecycle(keycloak-dr 만료).
+  {{- end }}
+  monitoring:
+    # EKS DR 엔 kube-prometheus CRD(PodMonitor)가 없다 → false(운영 true 와 다름, [B4]).
+    enablePodMonitor: false
