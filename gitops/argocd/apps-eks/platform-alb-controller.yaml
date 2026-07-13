@@ -23,7 +23,7 @@ spec:
         valueFiles:
           - $values/gitops/apps/alb-controller/values.yaml
     - repoURL: https://github.com/requset700k/Cledyu.git
-      targetRevision: feat/dr-eks-overlay-cnpg-keycloak
+      targetRevision: feat/dr-pilot-light
       ref: values
   destination:
     server: https://kubernetes.default.svc

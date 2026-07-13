@@ -10,7 +10,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/requset700k/Cledyu.git
-    targetRevision: feat/dr-eks-overlay-cnpg-keycloak
+    targetRevision: feat/dr-pilot-light
     path: gitops/argocd/apps-eks
     directory:
       recurse: true

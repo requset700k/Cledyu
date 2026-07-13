@@ -1,7 +1,7 @@
 ---
 # EKS DR — Strimzi Kafka Operator. 온프렘 data-strimzi-operator.yaml 과 동일 패턴(multi-source).
 # wave 0 — kafka-cluster(data-kafka-cluster, wave 1)보다 먼저 CRD·오퍼레이터가 서야 한다.
-# targetRevision: feat/dr-eks-overlay-cnpg-keycloak — apps-eks 형제 앱 규약 일치(#284 는 main 머지 후 드릴 모델).
+# targetRevision: feat/dr-pilot-light — apps-eks 형제 앱 규약 일치(#284 는 main 머지 후 드릴 모델).
 #   머지 전 드릴이 필요하면 apps-eks 전체를 일괄 flip(2934d31)→revert(d1bd981)로 처리.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -28,10 +28,10 @@ spec:
         valueFiles:
           - $values/gitops/apps/strimzi-operator/values.yaml
     - repoURL: https://github.com/requset700k/Cledyu.git
-      targetRevision: feat/dr-eks-overlay-cnpg-keycloak
+      targetRevision: feat/dr-pilot-light
       ref: values
     - repoURL: https://github.com/requset700k/Cledyu.git
-      targetRevision: feat/dr-eks-overlay-cnpg-keycloak
+      targetRevision: feat/dr-pilot-light
       path: gitops/apps/strimzi-operator
       directory:
         include: namespace.yaml
@@ -41,7 +41,7 @@ spec:
     # 실패 → operator 가 안 healthy → wave 1 미진행 → deadlock(fresh 부트스트랩). ns(-1)를 여기서 선행 생성해 차단.
     # (data-kafka-cluster 는 namespace.yaml 을 exclude — 이중 소유 방지. CreateNamespace=true 는 no-op 로 남음.)
     - repoURL: https://github.com/requset700k/Cledyu.git
-      targetRevision: feat/dr-eks-overlay-cnpg-keycloak
+      targetRevision: feat/dr-pilot-light
       path: gitops/apps/kafka-cluster
       directory:
         include: namespace.yaml

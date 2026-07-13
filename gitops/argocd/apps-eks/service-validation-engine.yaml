@@ -2,7 +2,7 @@
 # EKS DR — validation-engine. service-api 패턴(로컬 helm 차트 + values-eks).
 # wave 2 — A1 Kafka(strimzi wave 0, kafka wave 1) 뒤. KafkaUser·client cert(kafka-clients-ca)·브로커 선재.
 # AWS SSM 키(cledyu-validation-engine-aws)는 Vault 복원→ESO(data-eso-store) 후 주입되어 파드 기동.
-# targetRevision: feat/dr-eks-overlay-cnpg-keycloak — apps-eks 형제 앱 규약 일치.
+# targetRevision: feat/dr-pilot-light — apps-eks 형제 앱 규약 일치.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -16,7 +16,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/requset700k/Cledyu.git
-    targetRevision: feat/dr-eks-overlay-cnpg-keycloak
+    targetRevision: feat/dr-pilot-light
     path: gitops/apps/validation-engine
     helm:
       releaseName: validation-engine

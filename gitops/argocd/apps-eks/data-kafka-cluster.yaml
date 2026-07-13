@@ -9,7 +9,7 @@
 # nodepool 은 EKS 전용 kafka-nodepool-eks.yaml(class: gp3)을 사용(longhorn 원본은 exclude).
 #   공유 nodepool 의 class 변경은 배포된 온프렘 Kafka storage spec 을 바꿔 Strimzi 경고를 유발(Codex P1)하므로 분리.
 # 온프렘 원본의 cilium.io/CiliumIdentity ignoreDifferences 는 제거 — EKS 는 VPC CNI(Cilium 없음).
-# targetRevision: feat/dr-eks-overlay-cnpg-keycloak — apps-eks 형제 앱 규약 일치
+# targetRevision: feat/dr-pilot-light — apps-eks 형제 앱 규약 일치
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -24,7 +24,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/requset700k/Cledyu.git
-    targetRevision: feat/dr-eks-overlay-cnpg-keycloak
+    targetRevision: feat/dr-pilot-light
     path: gitops/apps/kafka-cluster
     directory:
       recurse: true
