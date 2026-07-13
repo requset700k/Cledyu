@@ -1,6 +1,8 @@
 'use client';
 
 import { useMutation, useQuery } from '@tanstack/react-query';
+import { useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
 import { api } from '@/lib/api';
 import type { BillingPlan, CheckoutSession } from '@/lib/types';
 
@@ -61,6 +63,17 @@ function PlanCard({
 }
 
 export default function BillingPage() {
+  return (
+    <Suspense fallback={<p className="text-slate-400">불러오는 중...</p>}>
+      <BillingPageContent />
+    </Suspense>
+  );
+}
+
+function BillingPageContent() {
+  const searchParams = useSearchParams();
+  const checkoutSessionID = searchParams.get('checkout_session_id');
+  const checkoutProvider = searchParams.get('provider');
   const plans = useQuery({
     queryKey: ['billing-plans'],
     queryFn: () => api.billing.plans(),
@@ -81,6 +94,11 @@ export default function BillingPage() {
   }
 
   const created = checkout.data as CheckoutSession | undefined;
+  const visibleCheckout = created
+    ? { id: created.id, provider: created.provider }
+    : checkoutSessionID
+      ? { id: checkoutSessionID, provider: checkoutProvider ?? 'mock' }
+      : null;
 
   return (
     <div className="space-y-8">
@@ -97,11 +115,12 @@ export default function BillingPage() {
         <p className="mt-1 text-slate-500 text-xs">상태: {subscription.data.status}</p>
       </section>
 
-      {created && (
+      {visibleCheckout && (
         <section className="rounded-lg border border-sky-500/40 bg-sky-500/10 p-4">
           <h2 className="text-sky-200 text-sm font-semibold">Mock checkout session 생성됨</h2>
           <p className="mt-1 text-sky-100/80 text-xs">
-            실제 PG 승인/웹훅은 후속 PR에서 연결합니다. session: {created.id}
+            실제 PG 승인/웹훅은 후속 PR에서 연결합니다. provider: {visibleCheckout.provider} ·
+            session: {visibleCheckout.id}
           </p>
         </section>
       )}
