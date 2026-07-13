@@ -193,6 +193,27 @@ func (s *Store) CompleteCheckoutSession(ctx context.Context, id, userID string) 
 	if cs.Status != "pending" && cs.Status != "completed" {
 		return nil, ErrCheckoutInvalidStatus
 	}
+	if cs.Status == "completed" {
+		var sub Subscription
+		var existingPeriodEnd sql.NullTime
+		err = tx.QueryRow(ctx, `
+			SELECT user_id, plan_id, status, current_period_end, updated_at
+			FROM subscriptions WHERE user_id = $1`, userID).
+			Scan(&sub.UserID, &sub.PlanID, &sub.Status, &existingPeriodEnd, &sub.UpdatedAt)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrCheckoutInvalidStatus
+		}
+		if err != nil {
+			return nil, fmt.Errorf("get completed checkout subscription: %w", err)
+		}
+		if existingPeriodEnd.Valid {
+			sub.CurrentPeriodEnd = &existingPeriodEnd.Time
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit completed checkout read: %w", err)
+		}
+		return &sub, nil
+	}
 	if cs.Status == "pending" && cs.ExpiresAt.Before(now) {
 		if _, err := tx.Exec(ctx, `UPDATE checkout_sessions SET status = 'expired' WHERE id = $1`, id); err != nil {
 			return nil, fmt.Errorf("expire checkout session: %w", err)
@@ -202,10 +223,8 @@ func (s *Store) CompleteCheckoutSession(ctx context.Context, id, userID string) 
 		}
 		return nil, ErrCheckoutExpired
 	}
-	if cs.Status == "pending" {
-		if _, err := tx.Exec(ctx, `UPDATE checkout_sessions SET status = 'completed' WHERE id = $1`, id); err != nil {
-			return nil, fmt.Errorf("mark checkout completed: %w", err)
-		}
+	if _, err := tx.Exec(ctx, `UPDATE checkout_sessions SET status = 'completed' WHERE id = $1`, id); err != nil {
+		return nil, fmt.Errorf("mark checkout completed: %w", err)
 	}
 
 	periodEnd := now.AddDate(0, 1, 0)

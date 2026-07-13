@@ -91,7 +91,11 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions session.Provider, v
 		v1.GET("/leaderboard", h.GetLeaderboard)
 		v1.GET("/billing/plans", h.GetBillingPlans)
 		v1.POST("/billing/checkout", h.CreateCheckout)
-		v1.POST("/billing/checkout/:id/complete", h.CompleteCheckout)
+		if cfg.Server.Mode != "release" {
+			// Mock checkout completion is a local QA path only. In release, paid plan
+			// activation must come from a verified provider callback/webhook.
+			v1.POST("/billing/checkout/:id/complete", h.CompleteCheckout)
+		}
 		v1.GET("/labs", h.ListLabs)
 		v1.GET("/labs/:id", h.GetLab)
 

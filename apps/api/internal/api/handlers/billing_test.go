@@ -50,6 +50,7 @@ func TestCompleteCheckout_ActivatesSubscription(t *testing.T) {
 
 func TestCompleteCheckout_CompletedSessionIsIdempotentAfterExpiry(t *testing.T) {
 	fake := newFakePersistence()
+	periodEnd := time.Now().Add(7 * 24 * time.Hour)
 	fake.checkouts["chk_done"] = store.CheckoutSession{
 		ID:        "chk_done",
 		UserID:    "u1",
@@ -57,6 +58,13 @@ func TestCompleteCheckout_CompletedSessionIsIdempotentAfterExpiry(t *testing.T) 
 		Provider:  checkoutProviderMock,
 		Status:    "completed",
 		ExpiresAt: time.Now().Add(-time.Minute),
+	}
+	fake.subscriptions["u1"] = store.Subscription{
+		UserID:           "u1",
+		PlanID:           "team-monthly",
+		Status:           "active",
+		CurrentPeriodEnd: &periodEnd,
+		UpdatedAt:        time.Now().Add(-time.Hour),
 	}
 	h := &Handler{log: zap.NewNop(), db: fake}
 
@@ -77,5 +85,8 @@ func TestCompleteCheckout_CompletedSessionIsIdempotentAfterExpiry(t *testing.T) 
 	}
 	if got := fake.subscriptions["u1"].PlanID; got != "team-monthly" {
 		t.Fatalf("subscription plan = %q, want team-monthly", got)
+	}
+	if got := fake.subscriptions["u1"].CurrentPeriodEnd; got == nil || !got.Equal(periodEnd) {
+		t.Fatalf("completed checkout must not extend period_end, got %v want %v", got, periodEnd)
 	}
 }

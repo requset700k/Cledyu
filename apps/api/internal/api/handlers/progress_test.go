@@ -176,15 +176,20 @@ func (f *fakePersistence) CompleteCheckoutSession(_ context.Context, id, userID 
 	if cs.Status != "pending" && cs.Status != "completed" {
 		return nil, store.ErrCheckoutInvalidStatus
 	}
+	if cs.Status == "completed" {
+		sub, ok := f.subscriptions[userID]
+		if !ok {
+			return nil, store.ErrCheckoutInvalidStatus
+		}
+		return &sub, nil
+	}
 	if cs.Status == "pending" && cs.ExpiresAt.Before(time.Now()) {
 		cs.Status = "expired"
 		f.checkouts[id] = cs
 		return nil, store.ErrCheckoutExpired
 	}
-	if cs.Status == "pending" {
-		cs.Status = "completed"
-		f.checkouts[id] = cs
-	}
+	cs.Status = "completed"
+	f.checkouts[id] = cs
 	periodEnd := time.Now().AddDate(0, 1, 0)
 	sub := store.Subscription{
 		UserID:           userID,
