@@ -3,6 +3,8 @@
 // WebSocket은 rewrite 대상이 아니므로 Terminal 컴포넌트에서 NEXT_PUBLIC_WS_URL로 직접 연결.
 
 import type {
+  BillingPlan,
+  CheckoutSession,
   DashboardResponse,
   HintResponse,
   InstructorAnalytics,
@@ -11,6 +13,7 @@ import type {
   MyProgress,
   Session,
   StepProgress,
+  Subscription,
   User,
 } from './types';
 import { refreshSession } from './auth-session.mjs';
@@ -151,6 +154,16 @@ export const api = {
 
   leaderboard: {
     get: () => request<LeaderboardResponse>('/api/v1/leaderboard'),
+  },
+
+  billing: {
+    plans: () => request<Paginated<BillingPlan>>('/api/v1/billing/plans'),
+    subscription: () => request<Subscription>('/api/v1/me/subscription'),
+    checkout: (planId: string) =>
+      request<CheckoutSession>('/api/v1/billing/checkout', {
+        method: 'POST',
+        body: JSON.stringify({ plan_id: planId }),
+      }),
   },
 
   me: {
