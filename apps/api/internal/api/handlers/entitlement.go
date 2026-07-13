@@ -12,8 +12,7 @@ import (
 const requiredPaidPlanID = "pro-monthly"
 
 var (
-	errSubscriptionRequired        = errors.New("active subscription required")
-	errEntitlementStoreUnavailable = errors.New("entitlement store not configured")
+	errSubscriptionRequired = errors.New("active subscription required")
 )
 
 func labRequiresPaidPlan(lab content.LabContent) bool {
@@ -33,14 +32,17 @@ func hasActivePaidSubscription(sub *store.Subscription, now time.Time) bool {
 }
 
 func (h *Handler) ensureLabEntitlement(ctx context.Context, userID string, lab content.LabContent) error {
+	// Release에는 아직 실제 결제 provider callback/webhook이 없으므로 유료 Lab을 차단하지 않는다.
+	// Mock checkout 완료 라우트가 등록되는 non-release 환경에서만 1차 entitlement 계약을 검증한다.
+	if h.cfg == nil || h.cfg.Server.Mode == "release" {
+		return nil
+	}
+
 	if !labRequiresPaidPlan(lab) {
 		return nil
 	}
 
 	if h.db == nil {
-		if h.cfg != nil && h.cfg.Server.Mode == "release" {
-			return errEntitlementStoreUnavailable
-		}
 		return nil
 	}
 

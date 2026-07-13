@@ -54,7 +54,7 @@ func (p *entitlementSessionProvider) VMIAddress(context.Context, string) (string
 }
 func (p *entitlementSessionProvider) Capacity() int { return 0 }
 
-func newEntitlementRouter(t *testing.T, db *fakePersistence, provider *entitlementSessionProvider) *gin.Engine {
+func newEntitlementRouter(t *testing.T, mode string, db *fakePersistence, provider *entitlementSessionProvider) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	labs, err := content.Load()
@@ -62,7 +62,7 @@ func newEntitlementRouter(t *testing.T, db *fakePersistence, provider *entitleme
 		t.Fatalf("load labs: %v", err)
 	}
 	h := &Handler{
-		cfg:      &config.Config{Server: config.ServerConfig{Mode: "release"}},
+		cfg:      &config.Config{Server: config.ServerConfig{Mode: mode}},
 		log:      zap.NewNop(),
 		labs:     labs,
 		sessions: provider,
@@ -97,7 +97,7 @@ func postSession(t *testing.T, r *gin.Engine, labID string) (*httptest.ResponseR
 func TestCreateSessionRequiresSubscriptionForPaidLabs(t *testing.T) {
 	db := newFakePersistence()
 	provider := &entitlementSessionProvider{}
-	r := newEntitlementRouter(t, db, provider)
+	r := newEntitlementRouter(t, "debug", db, provider)
 
 	w, body := postSession(t, r, "lab-k8s-basics")
 	if w.Code != http.StatusPaymentRequired {
@@ -114,7 +114,7 @@ func TestCreateSessionRequiresSubscriptionForPaidLabs(t *testing.T) {
 func TestCreateSessionAllowsBeginnerLabsWithoutSubscription(t *testing.T) {
 	db := newFakePersistence()
 	provider := &entitlementSessionProvider{}
-	r := newEntitlementRouter(t, db, provider)
+	r := newEntitlementRouter(t, "debug", db, provider)
 
 	w, body := postSession(t, r, "lab-docker-basics")
 	if w.Code != http.StatusCreated {
@@ -135,7 +135,7 @@ func TestCreateSessionAllowsPaidLabsForActiveSubscription(t *testing.T) {
 		CurrentPeriodEnd: &periodEnd,
 	}
 	provider := &entitlementSessionProvider{}
-	r := newEntitlementRouter(t, db, provider)
+	r := newEntitlementRouter(t, "debug", db, provider)
 
 	w, body := postSession(t, r, "lab-k8s-basics")
 	if w.Code != http.StatusCreated {
@@ -143,5 +143,19 @@ func TestCreateSessionAllowsPaidLabsForActiveSubscription(t *testing.T) {
 	}
 	if provider.createCount != 1 {
 		t.Fatalf("active paid subscription should create VM session, createCount=%d", provider.createCount)
+	}
+}
+
+func TestCreateSessionDoesNotGatePaidLabsInReleaseBeforeProviderCallback(t *testing.T) {
+	db := newFakePersistence()
+	provider := &entitlementSessionProvider{}
+	r := newEntitlementRouter(t, "release", db, provider)
+
+	w, body := postSession(t, r, "lab-k8s-basics")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%v, want 201", w.Code, body)
+	}
+	if provider.createCount != 1 {
+		t.Fatalf("release should not block paid labs before provider callback exists, createCount=%d", provider.createCount)
 	}
 }

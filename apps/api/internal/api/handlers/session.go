@@ -209,8 +209,6 @@ func (h *Handler) CreateSession(c *gin.Context) {
 				"code":          "subscription_required",
 				"required_plan": requiredPaidPlanID,
 			})
-		case errors.Is(err, errEntitlementStoreUnavailable):
-			h.err(c, http.StatusServiceUnavailable, "entitlement store not configured")
 		default:
 			h.log.Error("check lab entitlement", zap.Error(err))
 			h.err(c, http.StatusInternalServerError, "check lab entitlement failed")
