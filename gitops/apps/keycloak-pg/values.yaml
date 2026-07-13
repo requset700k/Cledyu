@@ -18,3 +18,7 @@ resources:
   limits:
     cpu: "1"
     memory: 2Gi
+
+# failback 아카이브 계보 epoch(완료된 failback 횟수). 0=현행(접미 없음). failback 런북이 lockstep bump.
+# backup serverName = keycloak-pg{-e{drEpoch}} → 매 failback 후 빈 새 아카이브 경로(Object Lock 충돌 회피).
+drEpoch: 0
