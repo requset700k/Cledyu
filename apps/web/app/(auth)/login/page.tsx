@@ -4,6 +4,9 @@
 // enabled_social_idps(생성된 IdP 목록)와 정렬 — 미프로비저닝 alias 로 라우팅돼
 // "Identity Provider not found" 로 실패하는 것을 막는다. 빈 값이면 소셜 섹션 자체를
 // 숨긴다. 런타임 env 를 읽으려면 동적 렌더가 필요하다.
+import { Suspense } from 'react';
+import { LoginReturnTarget } from '@/components/auth/LoginReturnTarget';
+
 export const dynamic = 'force-dynamic';
 
 export default function LoginPage() {
@@ -16,6 +19,9 @@ export default function LoginPage() {
   const anySocial = socialProviders.size > 0;
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex items-center justify-center p-4">
+      <Suspense fallback={null}>
+        <LoginReturnTarget />
+      </Suspense>
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-500/20 rounded-2xl mb-4 border border-blue-500/30">

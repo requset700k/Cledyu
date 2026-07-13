@@ -4,6 +4,7 @@
 
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { pathWithSearch } from './lib/auth-return.mjs';
 
 // 인증 없이 접근 가능한 경로
 const PUBLIC_PATHS = ['/login', '/callback'];
@@ -27,7 +28,7 @@ export function middleware(request: NextRequest) {
   const token = request.cookies.get('access_token') ?? request.cookies.get('refresh_token');
   if (!token) {
     const loginUrl = new URL('/login', request.url);
-    loginUrl.searchParams.set('from', pathname); // 로그인 후 원래 경로로 복귀
+    loginUrl.searchParams.set('from', pathWithSearch(request.nextUrl)); // 로그인 후 원래 경로로 복귀
     return NextResponse.redirect(loginUrl);
   }
 
