@@ -34,19 +34,20 @@ type dashboardLab struct {
 	Title       string     `json:"title"`
 	Difficulty  string     `json:"difficulty"`
 	Status      string     `json:"status"` // completed | in_progress | not_started
+	SessionID   string     `json:"session_id,omitempty"`
 	CompletedAt *time.Time `json:"completed_at"`
 }
 
 // buildDashboard는 카탈로그·완료·진행중을 대조해 요약과 랩별 상태를 만든다(순수 함수).
 // Score/Rank 는 채우지 않는다(DB 랭킹 필요 — 핸들러가 설정).
-func buildDashboard(labs map[string]content.LabContent, completions []store.Completion, inProgress []string) (dashboardSummary, []dashboardLab) {
+func buildDashboard(labs map[string]content.LabContent, completions []store.Completion, inProgress []store.InProgressLab) (dashboardSummary, []dashboardLab) {
 	completedAt := make(map[string]time.Time, len(completions))
 	for _, c := range completions {
 		completedAt[c.LabID] = c.CompletedAt
 	}
-	started := make(map[string]bool, len(inProgress))
-	for _, id := range inProgress {
-		started[id] = true
+	started := make(map[string]string, len(inProgress))
+	for _, row := range inProgress {
+		started[row.LabID] = row.SessionID
 	}
 
 	ids := make([]string, 0, len(labs))
@@ -68,8 +69,9 @@ func buildDashboard(labs map[string]content.LabContent, completions []store.Comp
 			row.Status = "completed"
 			t := ts
 			row.CompletedAt = &t
-		} else if started[id] {
+		} else if sessionID, ok := started[id]; ok {
 			row.Status = "in_progress"
+			row.SessionID = sessionID
 		}
 		rows = append(rows, row)
 
@@ -127,7 +129,7 @@ func (h *Handler) GetMyDashboard(c *gin.Context) {
 		return
 	}
 	// 진행중은 부가 정보 — 실패해도 치명적이지 않으니 빈 목록으로 강등.
-	inProgress, err := h.db.ListInProgressLabIDsByUser(ctx, uid)
+	inProgress, err := h.db.ListInProgressLabsByUser(ctx, uid)
 	if err != nil {
 		h.log.Warn("list in-progress labs", zap.Error(err), zap.String("user_id", uid))
 		inProgress = nil

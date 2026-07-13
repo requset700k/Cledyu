@@ -241,6 +241,12 @@ type Completion struct {
 	CompletedAt time.Time `json:"completed_at"`
 }
 
+// InProgressLab는 사용자가 진행 중인 랩과 이어갈 세션 ID다.
+type InProgressLab struct {
+	LabID     string `json:"lab_id"`
+	SessionID string `json:"session_id"`
+}
+
 // ListCompletionsByUser는 유저의 랩 완료 이력을 최신 순으로 반환한다(관리자 활동 조회).
 func (s *Store) ListCompletionsByUser(ctx context.Context, userID string) ([]Completion, error) {
 	rows, err := s.pool.Query(ctx, `
@@ -262,24 +268,27 @@ func (s *Store) ListCompletionsByUser(ctx context.Context, userID string) ([]Com
 	return out, rows.Err()
 }
 
-// ListInProgressLabIDsByUser는 유저가 진행기록(session_progress)을 가진 lab_id 목록을 반환한다.
+// ListInProgressLabsByUser는 유저가 진행기록(session_progress)을 가진 lab_id/session_id 목록을 반환한다.
 // 완료된 랩도 진행기록이 남아 있을 수 있으므로, 호출부는 완료 여부를 먼저 판정한 뒤
 // 이 목록을 'in_progress' 후보로 사용한다.
-func (s *Store) ListInProgressLabIDsByUser(ctx context.Context, userID string) ([]string, error) {
-	rows, err := s.pool.Query(ctx,
-		`SELECT DISTINCT lab_id FROM session_progress WHERE user_id = $1`, userID)
+func (s *Store) ListInProgressLabsByUser(ctx context.Context, userID string) ([]InProgressLab, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT DISTINCT ON (lab_id) lab_id, session_id
+		FROM session_progress
+		WHERE user_id = $1
+		ORDER BY lab_id, updated_at DESC`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list in-progress labs: %w", err)
 	}
 	defer rows.Close()
 
-	out := make([]string, 0)
+	out := make([]InProgressLab, 0)
 	for rows.Next() {
-		var labID string
-		if err := rows.Scan(&labID); err != nil {
+		var row InProgressLab
+		if err := rows.Scan(&row.LabID, &row.SessionID); err != nil {
 			return nil, fmt.Errorf("scan in-progress lab: %w", err)
 		}
-		out = append(out, labID)
+		out = append(out, row)
 	}
 	return out, rows.Err()
 }

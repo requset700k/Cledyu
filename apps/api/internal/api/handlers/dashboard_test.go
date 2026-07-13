@@ -21,7 +21,7 @@ func TestBuildDashboard_StatusAndSummary(t *testing.T) {
 		"lab-c": {ID: "lab-c", Title: "C", Difficulty: "intermediate"},
 	}
 	completions := []store.Completion{{LabID: "lab-a", CompletedAt: at}}
-	inProgress := []string{"lab-b"}
+	inProgress := []store.InProgressLab{{LabID: "lab-b", SessionID: "s2"}}
 
 	summary, rows := buildDashboard(labs, completions, inProgress)
 
@@ -44,6 +44,9 @@ func TestBuildDashboard_StatusAndSummary(t *testing.T) {
 	if rows[1].LabID != "lab-b" || rows[1].Status != "in_progress" || rows[1].CompletedAt != nil {
 		t.Fatalf("row1 mismatch: %+v", rows[1])
 	}
+	if rows[1].SessionID != "s2" {
+		t.Fatalf("row1 session_id mismatch: %+v", rows[1])
+	}
 	if rows[2].LabID != "lab-c" || rows[2].Status != "not_started" {
 		t.Fatalf("row2 mismatch: %+v", rows[2])
 	}
@@ -63,7 +66,7 @@ func TestGetMyDashboard_PostgresOnly(t *testing.T) {
 	fake := newFakePersistence()
 	fake.completions["u1|lab-docker-basics"] = "s1"
 	fake.completionAt = map[string]string{"u1|lab-docker-basics": at.Format(time.RFC3339)}
-	fake.inProgress["u1"] = []string{"lab-k8s-basics"}
+	fake.inProgress["u1"] = []store.InProgressLab{{LabID: "lab-k8s-basics", SessionID: "s2"}}
 	fake.leaderboard = []store.LeaderboardRow{
 		{UserID: "u1", Name: "U1", LabID: "lab-docker-basics", CompletedAt: at},
 	}
@@ -88,8 +91,9 @@ func TestGetMyDashboard_PostgresOnly(t *testing.T) {
 			TotalLabs     int `json:"total_labs"`
 		} `json:"summary"`
 		Labs []struct {
-			LabID  string `json:"lab_id"`
-			Status string `json:"status"`
+			LabID     string `json:"lab_id"`
+			Status    string `json:"status"`
+			SessionID string `json:"session_id"`
 		} `json:"labs"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
@@ -103,10 +107,15 @@ func TestGetMyDashboard_PostgresOnly(t *testing.T) {
 		t.Fatalf("total_labs want 6, got %d", body.Summary.TotalLabs)
 	}
 	statusByLab := map[string]string{}
+	sessionByLab := map[string]string{}
 	for _, l := range body.Labs {
 		statusByLab[l.LabID] = l.Status
+		sessionByLab[l.LabID] = l.SessionID
 	}
 	if statusByLab["lab-docker-basics"] != "completed" || statusByLab["lab-k8s-basics"] != "in_progress" {
 		t.Fatalf("status mismatch: %+v", statusByLab)
+	}
+	if sessionByLab["lab-k8s-basics"] != "s2" {
+		t.Fatalf("session_id mismatch: %+v", sessionByLab)
 	}
 }
