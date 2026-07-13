@@ -93,11 +93,14 @@ module "eks_dr" {
   }
   tags = local.eks_dr_tags
 
+  # pilot-light warm(node0): coredns·aws-ebs-csi-driver 는 Deployment 라 스케줄할 노드가 없으면
+  # DEGRADED(InsufficientNumberOfReplicas) → terraform aws_eks_addon 이 ACTIVE 대기 중 ~20분 후
+  # 타임아웃해 warm apply 를 블록한다. 그래서 warm 에는 DaemonSet 애드온(kube-proxy·vpc-cni —
+  # node0 이면 desired 0 이라 ACTIVE)만 두고, coredns·ebs-csi 는 재해 시 노드 스케일 직후 CLI
+  # (aws eks create-addon)로 설치한다(노드 스케일이 이미 out-of-band CLI 인 것과 동일 패턴, §런북
+  # Phase 1). ebs-csi 는 warm 으로 상시 유지되는 IRSA(eks_dr_ebs_csi_irsa)를
+  # --service-account-role-arn 으로 참조한다(롤명 cledyu-dr-ebs-csi 결정적).
   cluster_addons = {
-    aws-ebs-csi-driver = {
-      service_account_role_arn = module.eks_dr_ebs_csi_irsa[0].iam_role_arn
-    }
-    coredns    = {}
     kube-proxy = {}
     vpc-cni    = {}
   }

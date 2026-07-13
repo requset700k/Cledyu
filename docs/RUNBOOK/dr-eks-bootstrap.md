@@ -232,8 +232,25 @@ terraform apply -var enable_eks_dr=true -var eks_dr_active=true -var eks_dr_node
 NG=$(aws eks list-nodegroups --cluster-name cledyu-dr --region ap-northeast-2 --query 'nodegroups[0]' --output text)
 aws eks update-nodegroup-config --cluster-name cledyu-dr --region ap-northeast-2 \
   --nodegroup-name "$NG" --scaling-config minSize=0,maxSize=6,desiredSize=3
-#   → 노드 3 생성(~3-5분).
+aws eks wait nodegroup-active --cluster-name cledyu-dr --region ap-northeast-2 --nodegroup-name "$NG"
+#   → 노드 3 생성·Ready(~3-5분).
+# (3) [P1] coredns·ebs-csi 관리형 애드온 설치 — CLI. warm(node0)에선 이 둘이 Deployment 라 DEGRADED 로
+#     terraform apply 를 블록하므로 cluster_addons 에서 빼두었다(eks-dr.tf). 노드가 뜬 지금(위 wait 통과)
+#     설치하면 즉시 ACTIVE 된다. ebs-csi 는 warm IRSA(cledyu-dr-ebs-csi, 롤명 결정적)를 참조.
+ACCT=$(aws sts get-caller-identity --query Account --output text)
+aws eks create-addon --cluster-name cledyu-dr --region ap-northeast-2 --addon-name coredns \
+  --resolve-conflicts OVERWRITE
+aws eks create-addon --cluster-name cledyu-dr --region ap-northeast-2 --addon-name aws-ebs-csi-driver \
+  --resolve-conflicts OVERWRITE \
+  --service-account-role-arn "arn:aws:iam::${ACCT}:role/cledyu-dr-ebs-csi"
+aws eks wait addon-active --cluster-name cledyu-dr --region ap-northeast-2 --addon-name coredns
+aws eks wait addon-active --cluster-name cledyu-dr --region ap-northeast-2 --addon-name aws-ebs-csi-driver
+#   → 둘 다 ACTIVE. (gp3 StorageClass·CNPG/Kafka PVC 프로비저닝, 클러스터 DNS 확보.)
 ```
+
+> **failback/destroy 시:** 이 두 애드온은 CLI 로 설치돼 terraform state 밖이다. 노드를 0 으로 내리면(failback)
+> 다시 DEGRADED 가 되지만 warm 에 무해하다. 완전 폐기(destroy)는 클러스터 삭제로 함께 사라진다. 굳이 정리하려면
+> `aws eks delete-addon --addon-name coredns|aws-ebs-csi-driver` 로 명시 삭제.
 
 이후 **아래 "apps-eks 부트스트랩"부터 기존 절차를 매 failover 동일하게 수행**한다(seed 안 했으므로 여기서
 처음부터 설치·sync): bastion 진입 → `helm upgrade --install argocd`(멱등) → root-app apply → Vault 복원 →
