@@ -45,6 +45,11 @@ kubectl -n api get secret cledyu-api-tailscale -o jsonpath='{.data}' | tr ',' '\
 `cledyu-api-tailscale` 에 `tailscale_authkey`, `api_tailscale_authkey`(라이브 터미널 — 없으면 SSM 채점만 되고 터미널 비활성).
 없으면 Vault 등록(`vault kv put cledyu/aws/api ...`) → ESO 동기화를 확인한다.
 
+터미널 키 미시드 시 `cledyu-api-tailscale` ExternalSecret 만 Degraded(Not Ready) 로 남고 api 는 정상
+기동하나(deployment env `optional: true`) 라이브 터미널(브라우저 터미널→EC2 세션)이 비활성이다 —
+Degraded 는 '라이브 터미널 키 시드 누락' 신호다.
+`vault kv patch cledyu/aws/api tailscale_authkey=tskey-... api_tailscale_authkey=tskey-...` 로 시드하면 Healthy 로 전환된다.
+
 ### 2. EC2 세션 라우팅 확인
 
 api 로그에서 버스트 결정을 확인한다.

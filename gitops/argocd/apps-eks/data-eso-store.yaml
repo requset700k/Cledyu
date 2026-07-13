@@ -13,7 +13,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/requset700k/Cledyu.git
-    targetRevision: main
+    targetRevision: feat/dr-eks-overlay-cnpg-keycloak
     path: infra/kubernetes/external-secrets
     directory:
       # api-db DSN 은 cledyu-pg-rw.postgres.svc(서비스명 기반)라 DR 서도 동일 — T7 복원 CNPG 에 그대로 붙는다.

@@ -1,0 +1,77 @@
+## EKS Cold DR — cledyu-pg 복원 Cluster (bootstrap.recovery).
+##
+## 운영 postgres-cnpg/templates/cluster.yaml 은 bootstrap.initdb.import(구DB 논리 import) +
+## 아카이브 충돌 fail-safe 로 유지된다(건드리지 않는다). 이 차트는 그와 완전 별개 경로로,
+## S3 barman 백업(postgres/ 프리픽스, serverName=cledyu-pg)에서 recovery 로 최신까지 복원한다.
+##
+## Cluster 명은 운영과 동일한 cledyu-pg — EKS(apps-eks)엔 운영 import 앱이 없어 충돌하지 않고,
+## api 등 소비자가 서비스명 cledyu-pg-rw 를 그대로 쓴다. CNPG bootstrap 은 Cluster 생성 시 1회만
+## 실행되므로 복원 완료 후 ArgoCD selfHeal 이 재-bootstrap 하지 않는다(Plan C "recovery→adopt" 등가).
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: cledyu-pg
+  namespace: {{ .Release.Namespace }}
+spec:
+  instances: 1
+  # 원본(운영 cledyu-pg)과 동일 major 16 — CNPG recovery 는 target major ≥ source 필수.
+  # 운영 cluster.yaml 과 digest 동일하게 고정(오퍼레이터 상향으로 CNPG Postgres 버전이 바뀌면 함께 갱신).
+  imageName: "ghcr.io/cloudnative-pg/postgresql:16.4@sha256:99be063781d171d3971089b49c992706bdab9ccbd2b57cdf126c7542773aedfe"
+  storage:
+    size: {{ .Values.storage.size | quote }}
+    # EKS 는 EBS CSI gp3. 수량은 반드시 quote(미quote 시 bare int → ArgoCD 영구 OutOfSync).
+    storageClass: gp3
+  # CNPG 가 Cluster 명(cledyu-pg)으로 자동 생성하는 SA 에 IRSA 롤 annotation 을 얹는다.
+  # 이름·롤 하나만 어긋나도 barman inheritFromIAMRole 의 web identity assume 가 무음 실패한다([F-C]).
+  serviceAccountTemplate:
+    metadata:
+      annotations:
+        eks.amazonaws.com/role-arn: "{{ .Values.restoreRoleArn }}"
+  bootstrap:
+    # 원본 아카이브(serverName=cledyu-pg, postgres/ 프리픽스)에서 최신 WAL 까지 복원.
+    # recoveryTarget 미지정 = 아카이빙된 WAL 끝까지 재생(최신 복원, 드릴 §문제해결 반영).
+    recovery:
+      source: cledyu-pg-origin
+  externalClusters:
+    # 복원 소스 = 원본 백업(read-only). 라이브 구DB svc 를 참조하지 않으므로 구DB 폐기와 무관.
+    - name: cledyu-pg-origin
+      barmanObjectStore:
+        destinationPath: "s3://cledyu-lab-dr-backups/postgres"
+        serverName: cledyu-pg
+        endpointURL: "https://s3.ap-northeast-2.amazonaws.com"
+        s3Credentials:
+          inheritFromIAMRole: true
+        wal:
+          compression: gzip
+  managed:
+    # DR 은 Vault(db/postgres)와 DB(S3 백업)를 독립 복원하므로 비번 드리프트 위험이 최대다.
+    # CNPG 가 cledyu role 비번을 postgres-credentials-cnpg(ESO←Vault)에 맞춰 지속 ALTER ROLE 해
+    # 항상 Secret=DBrole 을 보장 → 복원 시점 스큐(S3 백업 vs Vault 스냅샷)가 있어도 api(cledyu/db/api
+    # DSN) DB 인증이 깨지지 않는다. keycloak-pg-dr 와 동일 패턴(Codex P2).
+    roles:
+      - name: cledyu
+        ensure: present
+        login: true
+        superuser: false
+        passwordSecret:
+          name: postgres-credentials-cnpg
+  # recovery 클러스터의 자체 -dr 아카이빙. default off(values backupEnabled=false) — 반복 드릴/재해 시
+  # 이전 -dr 아카이브(Object Lock 30d)와의 "Expected empty archive" 충돌을 원천 회피. real-DR 새 primary
+  # 자체보호가 필요하면 안정화 후 backupEnabled=true(post-failover). backup 부재여도 recovery(externalClusters
+  # 에서 복원)와 단일 인스턴스 운영엔 지장 없다(스트리밍 복제 없음).
+  {{- if .Values.backupEnabled }}
+  backup:
+    barmanObjectStore:
+      destinationPath: "s3://cledyu-lab-dr-backups/postgres-dr"
+      # serverName 이 원본(cledyu-pg)과 같으면 "Expected empty archive" — 반드시 -dr 접미.
+      serverName: cledyu-pg-dr
+      endpointURL: "https://s3.ap-northeast-2.amazonaws.com"
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+    # retentionPolicy 미설정 — 무-delete IAM + Object Lock(운영 차트와 동일 사유). 삭제는 S3 lifecycle(-dr 만료).
+  {{- end }}
+  monitoring:
+    # EKS DR 엔 kube-prometheus CRD(PodMonitor)가 없다 → false(운영 true 와 다름, [B4]).
+    enablePodMonitor: false

@@ -254,9 +254,11 @@ kubectl -n api get configmap cledyu-root-ca-bundle   # trust-manager Bundle 분�
 > 권한이 있는 운영자 자격의 머신에서 실행한다(kubectl 로 ALB DNS 취득만 bastion, AWS API 전환은 운영자 머신).
 
 공개 DNS(`aws_route53_record.public`)는 온프렘 프록시 ALB 를 alias 로 가리킨다. 온프렘 장애 시에도 그대로면
-EKS ALB target 이 Healthy 여도 사용자가 도달하지 못한다. **api/app 만** EKS ALB 로 돌린다.
-**주의: `auth.cledyu.com` 은 제외** — 이 PR 엔 Keycloak(T8) Ingress 가 없어 auth 를 EKS ALB 로 넘기면 매칭 규칙 없이
-404/503 이 된다. auth 전환은 **T8(Keycloak) 배포 후** 같은 방식으로 추가한다(그 전엔 로그인 검증도 T8 몫).
+EKS ALB target 이 Healthy 여도 사용자가 도달하지 못한다. api/app 은 즉시 EKS ALB 로 돌린다.
+**`auth.cledyu.com` 은 T8(Keycloak) Ingress 가 이 오버레이에 포함**되어 같은 `cledyu-dr` ALB 로 노출되므로 함께 전환한다.
+단 auth 는 **Keycloak CR Ready(issuer 응답 가능) 이후**에만 넘긴다 — 그 전에 넘기면 ALB keycloak 타겟 unhealthy 로
+404/503 이 되고, 반대로 미전환 시 auth 레코드가 죽은 온프렘 ALB 에 남아 API OIDC discovery(issuer `https://auth.cledyu.com`)
+·브라우저 로그인/토큰 갱신이 계속 실패한다.
 
 ```bash
 # EKS ALB DNS 이름·zone 취득 (ALB Controller 가 api/web Ingress 로 생성)
@@ -274,15 +276,19 @@ aws wafv2 get-web-acl-for-resource --resource-arn "$ALB_ARN" --region ap-northea
   --query "WebACL.Name" --output text          # → cledyu-lab-public (비어 있으면 values-eks ARN stale → 갱신 후 재sync)
 # 확인: curl https://api.cledyu.com/metrics → 403(WAF block)
 
-# (A) 실제 페일오버 — api/app.cledyu.com alias 를 EKS ALB 로 UPSERT (auth 는 T8 후)
+# (A) 실제 페일오버 — api/app 은 즉시, auth 는 Keycloak Ready 후 같은 cledyu-dr ALB 로 UPSERT
 for h in api app; do
   aws route53 change-resource-record-sets --hosted-zone-id "$ZONE" --change-batch \
     "{\"Changes\":[{\"Action\":\"UPSERT\",\"ResourceRecordSet\":{\"Name\":\"$h.cledyu.com\",\"Type\":\"A\",\"AliasTarget\":{\"HostedZoneId\":\"$ALB_ZONE\",\"DNSName\":\"$ALB\",\"EvaluateTargetHealth\":false}}}]}"
 done
-# ⚠️ 이 레코드는 terraform aws_route53_record.public 관리분 — 온프렘 복구 후 terraform apply 로 원복(failback).
+# auth: Keycloak CR 이 Ready(issuer https://auth.cledyu.com 응답 가능)된 뒤에만 전환 — 조기 전환 시 keycloak 타겟 unhealthy → 503.
+kubectl -n keycloak wait --for=condition=Ready keycloak/cledyu-keycloak --timeout=600s
+aws route53 change-resource-record-sets --hosted-zone-id "$ZONE" --change-batch \
+  "{\"Changes\":[{\"Action\":\"UPSERT\",\"ResourceRecordSet\":{\"Name\":\"auth.cledyu.com\",\"Type\":\"A\",\"AliasTarget\":{\"HostedZoneId\":\"$ALB_ZONE\",\"DNSName\":\"$ALB\",\"EvaluateTargetHealth\":false}}}]}"
+# ⚠️ 이 레코드(api·app·auth)는 terraform aws_route53_record.public 관리분 — 온프렘 복구 후 terraform apply 로 원복(failback).
 
-# (B) 라이브 DNS 미전환 로컬 드릴 검증(F3) — 운영자 머신에서만
-for h in api app; do
+# (B) 라이브 DNS 미전환 로컬 드릴 검증(F3) — 운영자 머신에서만 (auth 는 Keycloak Ready 후 함께 검증)
+for h in api app auth; do
   curl -sk --resolve $h.cledyu.com:443:$(dig +short $ALB|head -1) https://$h.cledyu.com/ -o /dev/null -w "%{http_code} $h\n"
 done
 ```
