@@ -65,8 +65,13 @@ export function LabSession({
       readyAtRef.current = Date.now();
       // ref 변경만으로는 렌더되지 않으므로 grace 진행 상태를 즉시 반영한다.
       forceTick((n) => n + 1);
+      // EC2(tailnet SSH) 세션은 KubeVirt 전용 TerminalReadinessProbe 가 안 돌아 grace 종료를
+      // 앞당길 주체가 없다. grace 경과 후 재렌더가 없으면 booting 이 영구히 true 로 남아 SessionBoot
+      // 화면에서 멈추고 LabTerminal 이 마운트되지 않는다. provider 불문 grace 만료 시 확실히 종료한다.
+      const graceTimer = setTimeout(completeBootGrace, BOOT_GRACE_MS);
+      return () => clearTimeout(graceTimer);
     }
-  }, [session?.status, skipBootGrace]);
+  }, [session?.status, skipBootGrace, completeBootGrace]);
 
   // 스텝 진행 — boot 단계에선 실제로 사용하지 않지만 hook 순서 일관성을 위해 항상 호출.
   // 검증 중(validating)인 단계가 있으면 검증엔진 결과가 올 때까지 2초 간격으로 폴링한다.
@@ -109,7 +114,7 @@ export function LabSession({
   if (booting && wantsLiveTerminal) {
     return (
       <>
-        {session?.terminal_url && session?.vm_provider === 'kubevirt' && (
+        {session?.terminal_url && (
           <TerminalReadinessProbe terminalPath={session.terminal_url} onReady={completeBootGrace} />
         )}
         <SessionBoot
