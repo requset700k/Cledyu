@@ -1,3 +1,6 @@
+{{- if not .Values.skipNamespace }}
+# EKS DR 은 values-eks 에서 skipNamespace=true → 이 ns 를 eso-store 가 선행(wave -5) 생성(Codex P1 #2).
+# 온프렘은 skipNamespace 미설정 → 아래대로 생성(변화 없음).
 ---
 apiVersion: v1
 kind: Namespace
@@ -7,3 +10,4 @@ metadata:
     app.kubernetes.io/name: {{ .Release.Name }}
     pod-security.kubernetes.io/enforce: restricted
     pod-security.kubernetes.io/enforce-version: latest
+{{- end }}

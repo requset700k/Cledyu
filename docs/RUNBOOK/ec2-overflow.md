@@ -36,11 +36,13 @@ kubectl -n api get deploy api -o jsonpath='{.spec.template.spec.containers[0].en
 ### 1. 오버플로우 설정 확인
 
 ```bash
-kubectl -n api get externalsecret cledyu-api-aws
+kubectl -n api get externalsecret cledyu-api-aws cledyu-api-tailscale
 kubectl -n api get secret cledyu-api-aws -o jsonpath='{.data}' | tr ',' '\n' | sed 's/:.*$//'
+kubectl -n api get secret cledyu-api-tailscale -o jsonpath='{.data}' | tr ',' '\n' | sed 's/:.*$//'
 ```
 
-예상 출력: `access_key_id`, `secret_access_key`, `tailscale_authkey` 키 존재.
+예상 출력: `cledyu-api-aws` 에 `access_key_id`, `secret_access_key`(필수 — 없으면 api 기동 차단),
+`cledyu-api-tailscale` 에 `tailscale_authkey`, `api_tailscale_authkey`(라이브 터미널 — 없으면 SSM 채점만 되고 터미널 비활성).
 없으면 Vault 등록(`vault kv put cledyu/aws/api ...`) → ESO 동기화를 확인한다.
 
 ### 2. EC2 세션 라우팅 확인

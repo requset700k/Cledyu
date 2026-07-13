@@ -1,0 +1,30 @@
+---
+# ESO 대상 네임스페이스 선행 생성 (Codex P1 #2).
+# eks-data-eso-store(wave 0)가 api/validation-engine 네임스페이스에 ExternalSecret 을 적용하는데,
+# 그 네임스페이스를 만드는 서비스 앱(eks-service-api/-validation-engine)은 wave 2 다.
+# fresh bootstrap 에서 ESO 가 namespace 없어 초기 Degraded → selfHeal 재시도로 수렴(드릴 실측)하지만,
+# 순서 취약성 제거를 위해 eso-store 가 이 네임스페이스를 wave -5(ExternalSecret 보다 먼저)로 선행 생성한다.
+# 서비스 앱 차트의 namespace.yaml 은 EKS 에서 skipNamespace=true(values-eks)로 미렌더 → 이중 소유 방지.
+# ⚠️ 차트 namespace 의 라벨을 그대로 복제한다(안 하면 기능/보안 회귀):
+#   - api: cledyu.io/trust-bundle=root-ca (trust-manager Root CA 번들 배포 대상)
+#   - validation-engine: PSA restricted enforce (VE 파드 보안)
+# (온프렘은 skipNamespace 미설정 → 차트가 그대로 생성, 변화 없음.)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: api
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+  labels:
+    cledyu.io/trust-bundle: root-ca
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: validation-engine
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+  labels:
+    app.kubernetes.io/name: validation-engine
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
