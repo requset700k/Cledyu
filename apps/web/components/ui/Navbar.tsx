@@ -5,12 +5,23 @@ import { usePathname } from 'next/navigation';
 import { useState } from 'react';
 import { api } from '@/lib/api';
 
+const DASHBOARD_LINK = { href: '/dashboard', label: '내 학습' };
+
 const NAV_LINKS = [
   { href: '/labs', label: 'Labs' },
-  { href: '/dashboard', label: '내 학습' },
   { href: '/leaderboard', label: '리더보드' },
   { href: '/instructor', label: '강사 모드' },
 ];
+
+const MOBILE_NAV_LINKS = [DASHBOARD_LINK, ...NAV_LINKS];
+
+function navLinkClass(pathname: string, href: string) {
+  return `px-3 py-1.5 rounded-md text-sm transition-colors ${
+    pathname.startsWith(href)
+      ? 'text-white bg-slate-800'
+      : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+  }`;
+}
 
 export function Navbar() {
   const pathname = usePathname();
@@ -31,15 +42,7 @@ export function Navbar() {
           </Link>
           <div className="hidden sm:flex items-center gap-1">
             {NAV_LINKS.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={`px-3 py-1.5 rounded-md text-sm transition-colors ${
-                  pathname.startsWith(link.href)
-                    ? 'text-white bg-slate-800'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
-                }`}
-              >
+              <Link key={link.href} href={link.href} className={navLinkClass(pathname, link.href)}>
                 {link.label}
               </Link>
             ))}
@@ -47,6 +50,12 @@ export function Navbar() {
         </div>
 
         <div className="flex items-center gap-2">
+          <Link
+            href={DASHBOARD_LINK.href}
+            className={`hidden sm:inline-flex ${navLinkClass(pathname, DASHBOARD_LINK.href)}`}
+          >
+            {DASHBOARD_LINK.label}
+          </Link>
           <button
             onClick={handleLogout}
             className="text-slate-400 hover:text-white text-sm transition-colors px-3 py-1.5 rounded-md hover:bg-slate-800/50"
@@ -70,7 +79,7 @@ export function Navbar() {
       {/* 모바일 드롭다운 — 햄버거 클릭 시 nav 링크를 세로로 펼침 */}
       {mobileOpen && (
         <div id="mobile-nav" className="sm:hidden border-t border-slate-800 px-4 py-2 space-y-1">
-          {NAV_LINKS.map((link) => (
+          {MOBILE_NAV_LINKS.map((link) => (
             <Link
               key={link.href}
               href={link.href}
