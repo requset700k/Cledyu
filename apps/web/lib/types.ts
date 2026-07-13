@@ -184,3 +184,29 @@ export interface InstructorAnalytics {
   step_funnel: { lab_id: string; step_id: number; validation_failures: number }[];
   hint_usage: { lab_id: string; step_id: number; hint_source: string; hint_count: number }[];
 }
+
+/** 결제 페이지 요금제 — GET /api/v1/billing/plans */
+export interface BillingPlan {
+  id: string;
+  name: string;
+  price_krw: number;
+  interval: 'none' | 'month';
+  features: string[];
+  recommended: boolean;
+}
+
+/** 현재 사용자 구독 상태 — GET /api/v1/me/subscription */
+export interface Subscription {
+  plan_id: string;
+  status: 'free' | 'active' | 'past_due' | 'canceled';
+  current_period_end?: string;
+}
+
+/** mock checkout 생성 응답 — POST /api/v1/billing/checkout */
+export interface CheckoutSession {
+  id: string;
+  provider: 'mock';
+  status: 'pending';
+  checkout_url: string;
+  expires_at: string;
+}
