@@ -238,19 +238,25 @@ aws eks wait nodegroup-active --cluster-name cledyu-dr --region ap-northeast-2 -
 #     terraform apply 를 블록하므로 cluster_addons 에서 빼두었다(eks-dr.tf). 노드가 뜬 지금(위 wait 통과)
 #     설치하면 즉시 ACTIVE 된다. ebs-csi 는 warm IRSA(cledyu-dr-ebs-csi, 롤명 결정적)를 참조.
 ACCT=$(aws sts get-caller-identity --query Account --output text)
-aws eks create-addon --cluster-name cledyu-dr --region ap-northeast-2 --addon-name coredns \
-  --resolve-conflicts OVERWRITE
-aws eks create-addon --cluster-name cledyu-dr --region ap-northeast-2 --addon-name aws-ebs-csi-driver \
-  --resolve-conflicts OVERWRITE \
-  --service-account-role-arn "arn:aws:iam::${ACCT}:role/cledyu-dr-ebs-csi"
+# 멱등 설치: 애드온이 이미 있으면(failback 이 삭제 안 하고 warm 에 남겨 반복 failover) create-addon 은
+# 409 ResourceInUseException 으로 죽는다 → describe 로 존재 확인 후 있으면 update-addon, 없으면 create-addon.
+install_addon() {
+  local name="$1"; shift
+  local verb=create-addon
+  aws eks describe-addon --cluster-name cledyu-dr --region ap-northeast-2 --addon-name "$name" >/dev/null 2>&1 && verb=update-addon
+  aws eks "$verb" --cluster-name cledyu-dr --region ap-northeast-2 --addon-name "$name" --resolve-conflicts OVERWRITE "$@"
+}
+install_addon coredns
+install_addon aws-ebs-csi-driver --service-account-role-arn "arn:aws:iam::${ACCT}:role/cledyu-dr-ebs-csi"
 aws eks wait addon-active --cluster-name cledyu-dr --region ap-northeast-2 --addon-name coredns
 aws eks wait addon-active --cluster-name cledyu-dr --region ap-northeast-2 --addon-name aws-ebs-csi-driver
 #   → 둘 다 ACTIVE. (gp3 StorageClass·CNPG/Kafka PVC 프로비저닝, 클러스터 DNS 확보.)
 ```
 
 > **failback/destroy 시:** 이 두 애드온은 CLI 로 설치돼 terraform state 밖이다. 노드를 0 으로 내리면(failback)
-> 다시 DEGRADED 가 되지만 warm 에 무해하다. 완전 폐기(destroy)는 클러스터 삭제로 함께 사라진다. 굳이 정리하려면
-> `aws eks delete-addon --addon-name coredns|aws-ebs-csi-driver` 로 명시 삭제.
+> 다시 DEGRADED 가 되지만 warm 에 무해하다 — **남겨둬도 다음 failover 의 `install_addon` 이 멱등(update-addon)이라
+> 안전**하다. 완전 폐기(destroy)는 클러스터 삭제로 함께 사라진다. warm 을 깨끗한 Phase-0 상태(kube-proxy·vpc-cni 만)로
+> 되돌리려면 `aws eks delete-addon --addon-name coredns|aws-ebs-csi-driver` 로 명시 삭제(선택).
 
 이후 **아래 "apps-eks 부트스트랩"부터 기존 절차를 매 failover 동일하게 수행**한다(seed 안 했으므로 여기서
 처음부터 설치·sync): bastion 진입 → `helm upgrade --install argocd`(멱등) → root-app apply → Vault 복원 →
