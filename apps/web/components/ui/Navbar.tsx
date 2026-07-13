@@ -10,8 +10,6 @@ const DASHBOARD_LINK = { href: '/dashboard', label: '내 학습' };
 const NAV_LINKS = [
   { href: '/labs', label: 'Labs' },
   { href: '/billing', label: '요금제' },
-  { href: '/leaderboard', label: '리더보드' },
-  { href: '/instructor', label: '강사 모드' },
 ];
 
 const MOBILE_NAV_LINKS = [DASHBOARD_LINK, ...NAV_LINKS];
