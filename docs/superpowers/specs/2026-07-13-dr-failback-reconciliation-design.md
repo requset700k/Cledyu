@@ -107,7 +107,7 @@ EKS primary → 아카이브 postgres-dr/cledyu-pg-dr-e2
 - 매 epoch의 serverName이 고유 → **Object Lock 충돌 원천 소거**, 반복 재해 성립.
 - 각 전환이 직전 primary의 아카이브를 소스로 삼음 → **DR-창 데이터 무손실**(재검증 필요한 Kafka in-flight 제외).
 - 계보가 git values 히스토리로 **감사 가능**.
-- **각 새 epoch 경로의 anchor 보장**: 온프렘 운영 `ScheduledBackup(cledyu-pg-daily, immediate:true)`가 adopt 직후 새 epoch(`postgres/cledyu-pg-e{N}`)에 base backup을 1회 즉시 생성 → 다음 failover의 EKS recovery(소스 f(N))가 anchor를 갖는다. EKS 측 새 epoch(`postgres-dr/`)의 anchor는 §6 DR `ScheduledBackup(immediate:true)`가 담당. 즉 **양방향 모두 전환 직후 anchor가 선다.**
+- **각 새 epoch 경로의 anchor 보장**: 온프렘 adopt 후 **명시적 on-demand `Backup` CR**로 새 epoch(`postgres/cledyu-pg-e{N}`)에 base backup을 확보 → 다음 failover의 EKS recovery(소스 f(N))가 anchor를 갖는다. (운영 `ScheduledBackup(immediate:true)`의 즉시백업은 CR *생성* 시에만 발화 — adopt 시 path-swap prune→recreate 로 발화하긴 하나 그 부수효과에 **의존하지 않고** 명시 Backup으로 결정론화. 없으면 새 epoch에 WAL만 있고 base가 없어 그 창의 재해가 f(N) recovery 불가.) EKS 측 새 epoch(`postgres-dr/`)의 anchor는 §6 DR `ScheduledBackup(immediate:true)`가 담당 — 이쪽은 `backupEnabled` false→true flip으로 ScheduledBackup이 신규 *생성*되므로 immediate가 정상 발화. 즉 **양방향 모두 전환 직후 anchor가 선다.**
 
 ### 3.3 값 배선 (drEpoch를 어디에 두나)
 
@@ -222,7 +222,7 @@ blast-radius 영향: postgres 키가 자기 DR 형제 프리픽스(동일 데이
    - on-demand `Backup` CR — **최적화(선택)**: 최신 base backup으로 WAL 재생 구간 단축(정합성 필수 아님). (`pg_switch_wal` 실패 시 RPO = 마지막 성공 WAL 아카이브 시점.)
 3. **온프렘 recovery** — **선-확인**: 삭제 전 `-dr/` 아카이브 건전성(base backup + WAL 존재, barman-cloud-check-wal-archive/backup list)을 먼저 검증(§4.3 안전장치) → 그다음 path-swap(→failback 차트) + stale cluster 삭제 + sync(§4.3 Step 1~3). `cledyu-pg-rw`·`keycloak-pg-rw` Ready(자동 S3 복원).
 4. **데이터 정합 체크** — EKS vs 온프렘: `session_progress`·`session_steps`·`lab_completions` row count·`max(updated_at)`, keycloak user count 일치. (드릴 마커 row로 무손실 실증.) **불일치 시 cutover 중단** — quiesce 유지한 채 원인 규명(stale 클러스터는 이미 삭제됐으나 pre-disaster 상태는 `postgres/`(f(N))에, DR-창은 `postgres-dr/`에 남아 재복원 가능).
-5. **drEpoch bump + adopt** — §3.3 lockstep bump 커밋 + path-swap 원복(→운영 차트). 전진 아카이빙(새 epoch) 개시 확인.
+5. **drEpoch bump + adopt + 새 epoch anchor** — §3.3 lockstep bump 커밋 + path-swap 원복(→운영 차트) → 전진 아카이빙(새 epoch WAL) 개시. **명시적 on-demand `Backup` CR로 새 epoch(`cledyu-pg-e{N+1}`)에 base backup 확보**(§3.2 — ScheduledBackup immediate 부수효과에 의존 안 함). base backup completed 확인(없으면 다음 failover recovery 불가).
 6. **수동 승인 → DNS 원복** — `terraform apply -var enable_public_ingress=true -target=aws_route53_record.public`로 온프렘 프록시로 원복(§7-1, **var 생략 시 레코드 destroy 주의**). (여기서 서비스 권한이 온프렘으로 넘어감 = write-downtime 종료 지점.)
 7. **온프렘 앱 재개** — `rollout restart` api·web·keycloak. 로그인·진도 영속(in-memory 폴백 아님) 검증(§8).
 8. **EKS 축소** — `eks_dr_active=false`+`eks_dr_node_desired=0`(§7-2). EKS 아카이빙 중지. (quiesce로 내린 EKS api 파드는 노드 소멸과 함께 정리.)
