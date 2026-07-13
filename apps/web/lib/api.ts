@@ -165,6 +165,10 @@ export const api = {
         method: 'POST',
         body: JSON.stringify({ plan_id: planId }),
       }),
+    completeCheckout: (checkoutId: string) =>
+      request<Subscription>(`/api/v1/billing/checkout/${checkoutId}/complete`, {
+        method: 'POST',
+      }),
   },
 
   me: {

@@ -24,6 +24,7 @@ type persistence interface {
 	ListInProgressLabsByUser(ctx context.Context, userID string) ([]store.InProgressLab, error)
 	GetSubscription(ctx context.Context, userID string) (*store.Subscription, error)
 	CreateCheckoutSession(ctx context.Context, session store.CheckoutSession) error
+	CompleteCheckoutSession(ctx context.Context, id, userID string) (*store.Subscription, error)
 }
 
 // dbTimeout은 요청 경로에서 허용하는 DB 왕복 상한이다.
