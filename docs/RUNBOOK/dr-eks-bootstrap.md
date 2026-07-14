@@ -253,9 +253,15 @@ aws eks wait nodegroup-active --cluster-name cledyu-dr --region ap-northeast-2 -
 BID=$(aws ec2 describe-instances --region ap-northeast-2 \
   --filters "Name=tag:Name,Values=cledyu-dr-bastion" "Name=instance-state-name,Values=running" \
   --query "Reservations[].Instances[].InstanceId" --output text)
-aws ssm send-command --region ap-northeast-2 --instance-ids "$BID" --document-name AWS-RunShellScript \
-  --parameters 'commands=["aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2","kubectl delete mutatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found","kubectl delete validatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found"]'
-#   (bastion SSM 세션에 이미 진입해 있으면 위 두 kubectl delete 를 직접 실행해도 된다.)
+CID=$(aws ssm send-command --region ap-northeast-2 --instance-ids "$BID" --document-name AWS-RunShellScript \
+  --parameters 'commands=["aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2","kubectl delete mutatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found","kubectl delete validatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found"]' \
+  --query "Command.CommandId" --output text)
+# ⚠️ send-command 는 제출 즉시 반환한다 → 완료를 기다리지 않고 아래 (3) coredns 를 설치하면 webhook 이
+#   아직 안 지워진 채(또는 bastion 준비 실패) 다시 AdmissionRequestDenied 로 막힐 수 있다. 반드시 대기:
+aws ssm wait command-executed --region ap-northeast-2 --command-id "$CID" --instance-id "$BID"   # Success 까지 blocking
+aws ssm get-command-invocation --region ap-northeast-2 --command-id "$CID" --instance-id "$BID" \
+  --query "Status" --output text   # Success 확인 후에만 다음 단계. Failed/TimedOut 이면 bastion kubeconfig·권한 점검 후 재시도.
+#   (bastion SSM 세션에 이미 진입해 있으면 위 두 kubectl delete 를 직접 실행하고 이 블록은 생략.)
 # (3) [P1] coredns·ebs-csi 관리형 애드온 설치 — CLI. warm(node0)에선 이 둘이 Deployment 라 DEGRADED 로
 #     terraform apply 를 블록하므로 cluster_addons 에서 빼두었다(eks-dr.tf). 노드가 뜬 지금(위 wait 통과)
 #     설치하면 즉시 ACTIVE 된다. ebs-csi 는 warm IRSA(cledyu-dr-ebs-csi, 롤명 결정적)를 참조.
