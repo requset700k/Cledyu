@@ -1,0 +1,5 @@
+apiVersion: v2
+name: dr-heartbeat
+description: 온프렘 생존 신호를 us-east-1 CloudWatch에 기록하는 dead man's switch(DR 감지)
+type: application
+version: 0.1.0

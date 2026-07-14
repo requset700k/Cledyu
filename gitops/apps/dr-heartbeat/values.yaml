@@ -1,0 +1,18 @@
+# 온프렘 → us-east-1 CloudWatch 하트비트. 키는 Vault aws/dr-heartbeat 에서 ESO로 주입.
+# 키 발급: infra/terraform/aws Task 1 Step 4 참고.
+region: us-east-1
+namespace: Cledyu/DR
+metricName: OnPremHeartbeat
+schedule: "* * * * *"   # 매 1분
+# push 신호 유일 경로라 mutable 태그 금지 — patch 고정(vault-backup 과 동일 버전, 64Mi 동작 실측 완료).
+image: amazon/aws-cli:2.32.7
+vaultKey: aws/dr-heartbeat
+
+# 초경량 잡 — BestEffort(무제한) 대신 작은 Burstable QoS 로 둔다.
+resources:
+  requests:
+    cpu: 25m
+    memory: 32Mi
+  limits:
+    cpu: 50m
+    memory: 64Mi
