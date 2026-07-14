@@ -130,6 +130,12 @@ function BillingPageContent() {
       void subscription.refetch();
     },
   });
+  const recoverCheckout = useMutation({
+    mutationFn: (checkoutID: string) => api.billing.recoverCheckout(checkoutID),
+    onSuccess: () => {
+      void subscription.refetch();
+    },
+  });
 
   if (plans.isLoading || subscription.isLoading) {
     return <p className="text-slate-400">불러오는 중...</p>;
@@ -168,12 +174,32 @@ function BillingPageContent() {
       {checkoutResult === 'failed' && (
         <section className="rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-red-200 text-sm">
           결제 승인에 실패했습니다.{checkoutMessage ? ` (${checkoutMessage})` : ''}
+          {checkoutProvider === 'toss' && checkoutSessionID && (
+            <div className="mt-3">
+              <button
+                type="button"
+                disabled={recoverCheckout.isPending}
+                onClick={() => recoverCheckout.mutate(checkoutSessionID)}
+                className="rounded-md bg-red-500 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-red-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+              >
+                {recoverCheckout.isPending ? '구독 복구 중...' : '구독 활성화 다시 시도'}
+              </button>
+              {recoverCheckout.isSuccess && (
+                <p className="mt-2 text-emerald-300 text-xs">구독 상태를 active 로 반영했습니다.</p>
+              )}
+              {recoverCheckout.isError && (
+                <p className="mt-2 text-red-300 text-xs">구독 활성화 재시도에 실패했습니다.</p>
+              )}
+            </div>
+          )}
         </section>
       )}
       {visibleCheckout && (
         <section className="rounded-lg border border-sky-500/40 bg-sky-500/10 p-4">
           <h2 className="text-sky-200 text-sm font-semibold">
-            {visibleCheckout.provider === 'mock' ? 'Mock checkout session 생성됨' : 'Checkout session 생성됨'}
+            {visibleCheckout.provider === 'mock'
+              ? 'Mock checkout session 생성됨'
+              : 'Checkout session 생성됨'}
           </h2>
           <p className="mt-1 text-sky-100/80 text-xs">
             provider: {visibleCheckout.provider} · session: {visibleCheckout.id}
@@ -254,7 +280,9 @@ function loadTossPaymentsSDK() {
     const existing = document.querySelector<HTMLScriptElement>('script[data-toss-payments-sdk]');
     if (existing) {
       existing.addEventListener('load', () => resolve(), { once: true });
-      existing.addEventListener('error', () => reject(new Error('toss sdk load failed')), { once: true });
+      existing.addEventListener('error', () => reject(new Error('toss sdk load failed')), {
+        once: true,
+      });
       return;
     }
     const script = document.createElement('script');

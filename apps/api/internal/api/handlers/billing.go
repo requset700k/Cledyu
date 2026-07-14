@@ -65,6 +65,12 @@ type checkoutResponse struct {
 	FailURL     string    `json:"fail_url,omitempty"`
 }
 
+type checkoutRecoverResponse struct {
+	PlanID           string     `json:"plan_id"`
+	Status           string     `json:"status"`
+	CurrentPeriodEnd *time.Time `json:"current_period_end,omitempty"`
+}
+
 type tossConfirmPayload struct {
 	PaymentKey string
 	OrderID    string
@@ -272,6 +278,54 @@ func (h *Handler) CompleteCheckout(c *gin.Context) {
 	})
 }
 
+// RecoverCheckout은 Toss confirm 이후 confirmed 상태로 남은 checkout을 사용자가 다시 완료하게 한다.
+// 실제 결제 승인은 이미 ConfirmTossCheckout에서 끝났으므로 여기서는 소유자와 상태만 확인하고 구독 upsert를 재시도한다.
+func (h *Handler) RecoverCheckout(c *gin.Context) {
+	if h.db == nil {
+		h.err(c, http.StatusServiceUnavailable, "billing store not configured")
+		return
+	}
+	userID := c.GetString("user_id")
+	if userID == "" {
+		h.err(c, http.StatusUnauthorized, "missing user")
+		return
+	}
+
+	checkoutID := c.Param("id")
+	ctx, cancel := context.WithTimeout(c.Request.Context(), dbTimeout)
+	cs, err := h.db.GetCheckoutSession(ctx, checkoutID, userID)
+	cancel()
+	if errors.Is(err, store.ErrCheckoutNotFound) {
+		h.err(c, http.StatusNotFound, "checkout session not found")
+		return
+	}
+	if err != nil {
+		h.err(c, http.StatusInternalServerError, "checkout session lookup failed")
+		return
+	}
+	if cs.Provider != checkoutProviderToss || cs.Status != checkoutStatusConfirmed {
+		h.err(c, http.StatusConflict, "checkout session cannot be recovered")
+		return
+	}
+
+	completeCtx, cancel := context.WithTimeout(c.Request.Context(), dbTimeout)
+	sub, err := h.db.CompleteCheckoutSession(completeCtx, checkoutID, userID)
+	cancel()
+	if errors.Is(err, store.ErrCheckoutInvalidStatus) || errors.Is(err, store.ErrCheckoutNotFound) {
+		h.err(c, http.StatusConflict, "checkout session cannot be recovered")
+		return
+	}
+	if err != nil || sub == nil {
+		h.err(c, http.StatusInternalServerError, "checkout recovery failed")
+		return
+	}
+	c.JSON(http.StatusOK, checkoutRecoverResponse{
+		PlanID:           sub.PlanID,
+		Status:           sub.Status,
+		CurrentPeriodEnd: sub.CurrentPeriodEnd,
+	})
+}
+
 // ConfirmTossCheckout은 Toss success redirect를 받아 서버에서 최종 승인(confirm)을 수행한다.
 // 브라우저가 전달한 amount/orderId는 DB에 저장된 checkout 세션과 다시 대조한다.
 func (h *Handler) ConfirmTossCheckout(c *gin.Context) {
@@ -352,7 +406,7 @@ func (h *Handler) ConfirmTossCheckout(c *gin.Context) {
 		return
 	}
 	if err != nil || sub == nil {
-		h.redirectBilling(c, "failed", "checkout completion failed")
+		h.redirectBillingWithCheckout(c, "failed", "checkout completion failed", orderID, checkoutProviderToss)
 		return
 	}
 	c.Redirect(http.StatusFound, h.frontendURL("/billing?checkout_result=success&checkout_session_id="+url.QueryEscape(orderID)+"&provider=toss"))
@@ -419,10 +473,20 @@ func (h *Handler) frontendURL(path string) string {
 }
 
 func (h *Handler) redirectBilling(c *gin.Context, result, message string) {
+	h.redirectBillingWithCheckout(c, result, message, "", "")
+}
+
+func (h *Handler) redirectBillingWithCheckout(c *gin.Context, result, message, checkoutID, provider string) {
 	q := url.Values{}
 	q.Set("checkout_result", result)
 	if message != "" {
 		q.Set("message", message)
+	}
+	if checkoutID != "" {
+		q.Set("checkout_session_id", checkoutID)
+	}
+	if provider != "" {
+		q.Set("provider", provider)
 	}
 	c.Redirect(http.StatusFound, h.frontendURL("/billing?"+q.Encode()))
 }

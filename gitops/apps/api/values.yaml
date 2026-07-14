@@ -37,6 +37,16 @@ db:
   secretName: "cledyu-api-db"
   secretKey: "dsn"
 
+# 결제 provider. release 에서는 mock provider가 차단되므로 운영 결제는 toss로 둔다.
+# Toss key는 Vault(api/toss)→ESO(cledyu-api-billing)에서 주입한다. Secret 미시드 시 Pod는 기동하지만
+# checkout은 "toss billing provider not configured"로 닫힌다.
+billing:
+  provider: "toss"
+  tossAPIBaseURL: "https://api.tosspayments.com"
+  secretName: "cledyu-api-billing"
+  clientKey: "toss_client_key"
+  secretKey: "toss_secret_key"
+
 # Keycloak OIDC (학습자 realm). client_secret 은 Vault→ESO(cledyu-web-oidc-externalsecret.yaml)
 # 가 만든 Secret cledyu-api-oidc 에서 주입. 운영자 SSO realm(cledyu)과 분리됨.
 keycloak:

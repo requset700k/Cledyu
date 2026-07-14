@@ -169,6 +169,10 @@ export const api = {
       request<Subscription>(`/api/v1/billing/checkout/${checkoutId}/complete`, {
         method: 'POST',
       }),
+    recoverCheckout: (checkoutId: string) =>
+      request<Subscription>(`/api/v1/billing/checkout/${checkoutId}/recover`, {
+        method: 'POST',
+      }),
   },
 
   me: {

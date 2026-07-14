@@ -205,6 +205,40 @@ func TestConfirmTossCheckout_ConfirmedSessionCompletesWithoutReconfirm(t *testin
 	}
 }
 
+func TestRecoverCheckout_CompletesConfirmedTossSession(t *testing.T) {
+	fake := newFakePersistence()
+	fake.checkouts["chk_confirmed"] = store.CheckoutSession{
+		ID:        "chk_confirmed",
+		UserID:    "u1",
+		PlanID:    "pro-monthly",
+		Provider:  checkoutProviderToss,
+		Status:    checkoutStatusConfirmed,
+		ExpiresAt: time.Now().Add(-10 * time.Minute),
+	}
+	h := &Handler{log: zap.NewNop(), db: fake}
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/billing/checkout/:id/recover", func(c *gin.Context) {
+		c.Set("user_id", "u1")
+		h.RecoverCheckout(c)
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/billing/checkout/chk_confirmed/recover", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	if got := fake.checkouts["chk_confirmed"].Status; got != checkoutStatusDone {
+		t.Fatalf("checkout status = %q, want completed", got)
+	}
+	sub := fake.subscriptions["u1"]
+	if sub.PlanID != "pro-monthly" || sub.Status != "active" {
+		t.Fatalf("subscription mismatch: %+v", sub)
+	}
+}
+
 func TestConfirmTossCheckout_RejectsAmountMismatchBeforeConfirm(t *testing.T) {
 	fake := newFakePersistence()
 	fake.checkouts["chk_toss"] = store.CheckoutSession{
