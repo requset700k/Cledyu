@@ -104,8 +104,13 @@ Expected: `Plan: 2 to add, 0 to change, 0 to destroy` (사용자 1 + user_policy
 ```bash
 cd infra/terraform/aws && terraform apply \
   -target=aws_iam_user.dr_heartbeat -target=aws_iam_user_policy.dr_heartbeat
-aws iam create-access-key --user-name cledyu-lab-dr-heartbeat   # 출력값을 아래에 사용
-vault kv put cledyu/aws/dr-heartbeat access_key_id=<AccessKeyId> secret_access_key=<SecretAccessKey>
+# SecretAccessKey 를 화면·history·argv 에 남기지 않고 변수→stdin 으로 Vault 에 저장(런북 §7.2 와 동일).
+umask 077
+CREDS=$(aws iam create-access-key --user-name cledyu-lab-dr-heartbeat --output json)
+NEW_ID=$(printf '%s' "$CREDS" | python3 -c "import sys,json;print(json.load(sys.stdin)['AccessKey']['AccessKeyId'])")
+printf '%s' "$CREDS" | python3 -c "import sys,json;sys.stdout.write(json.load(sys.stdin)['AccessKey']['SecretAccessKey'])" \
+  | vault kv put cledyu/aws/dr-heartbeat access_key_id="$NEW_ID" secret_access_key=-
+unset CREDS
 ```
 Expected: Vault 경로 `cledyu/aws/dr-heartbeat`에 두 키 저장.
 
@@ -400,7 +405,7 @@ kubectl -n dr-system patch cronjob dr-heartbeat -p '{"spec":{"suspend":true}}'
 # 4분 후
 aws cloudwatch describe-alarms --region us-east-1 \
   --alarm-names cledyu-lab-dr-push --query 'MetricAlarms[].StateValue'
-aws cloudwatch describe-alarms --region us-east-1 \
+aws cloudwatch describe-alarms --region us-east-1 --alarm-types CompositeAlarm \
   --alarm-names cledyu-lab-dr-disaster --query 'CompositeAlarms[].StateValue'
 kubectl -n dr-system patch cronjob dr-heartbeat -p '{"spec":{"suspend":false}}'   # 원복
 ```
