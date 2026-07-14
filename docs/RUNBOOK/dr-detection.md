@@ -325,6 +325,10 @@ unset WEBHOOK_URL
 
 # 3) Lambda가 다음 invocation 때 새 URL을 읽음 (캐싱 없음)
 #    따라서 추가 배포 필요 없음
+
+# 4) 새 웹훅이 실제로 배달되는지 검증 — §8.4 "실배달 스모크 테스트" 로 확인.
+#    put-secret-value 는 형식만 맞추면 성공하므로, 웹훅이 폐기·오타여도
+#    이 스모크 테스트 전에는 드러나지 않는다.
 ```
 
 **주기:** 분기별 또는 웹훅 URL 유출 시마다
@@ -455,6 +459,18 @@ TF_VAR_dr_detection_armed=true terraform apply -target=aws_cloudwatch_composite_
 
 ### 8.4 Discord 알림이 오지 않음
 
+**먼저 실배달 스모크 테스트** — 알람 로직과 무관하게 SNS→Lambda→Discord 배달 경로만 격리
+검증한다. 알람을 인위로 뒤집을 필요 없이 토픽에 테스트 메시지를 직접 publish 한다:
+```bash
+# AlarmName=TEST 라 수신자가 실제 재해와 혼동하지 않는다
+aws sns publish --region us-east-1 \
+  --topic-arn "$(aws sns list-topics --region us-east-1 \
+    --query "Topics[?ends_with(TopicArn, ':cledyu-lab-dr-alert')].TopicArn" --output text)" \
+  --message '{"AlarmName":"TEST","NewStateValue":"ALARM","NewStateReason":"배달 스모크 테스트"}'
+# → Discord 채널에 "🚨 DR 재해 감지 — TEST" 가 뜨면 배달 경로 정상.
+#   안 뜨면 아래 원인을 순서대로 확인한다(특히 4번 403).
+```
+
 **원인 가능성:**
 1. SNS 토픽이 Lambda 구독을 갖지 않음
    ```bash
@@ -479,6 +495,11 @@ TF_VAR_dr_detection_armed=true terraform apply -target=aws_cloudwatch_composite_
    ```bash
    aws logs tail /aws/lambda/cledyu-lab-dr-alert --region us-east-1 --follow
    ```
+4. Lambda 로그에 `HTTP Error 403: Forbidden` (urlopen, index.py handler)
+   Discord API 는 Cloudflare 뒤에 있어 기본 User-Agent(`Python-urllib/*`)를 403 으로 차단한다.
+   `index.py` 는 명시적 `User-Agent` 헤더를 붙여 이를 회피하므로 **그 헤더를 제거하지 말 것**.
+   - 403 이 아니라 401(Invalid Webhook Token)·404(Unknown Webhook) 면 UA 문제가 아니라
+     웹훅 URL/토큰 자체가 틀린 것 → §7.1 로 URL 재설정.
 
 ---
 
@@ -496,3 +517,4 @@ TF_VAR_dr_detection_armed=true terraform apply -target=aws_cloudwatch_composite_
 | 날짜 | 담당 | 변경사항 |
 |---|---|---|
 | 2026-07-14 | 김찬영 | 최초 작성 (Task 5: 감지 드릴 + 런북) |
+| 2026-07-15 | 김찬영 | 실배달 검증에서 Discord 403(Cloudflare가 기본 UA 차단) 발견 — Lambda User-Agent 헤더 추가. §7.1 배달 검증 스텝·§8.4 실배달 스모크 테스트·403 원인 추가 |

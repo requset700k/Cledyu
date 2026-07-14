@@ -50,7 +50,12 @@ def handler(event, context):
         req = urllib.request.Request(  # noqa: S310
             _webhook_url(),
             data=payload,
-            headers={"Content-Type": "application/json"},
+            # Discord API 는 Cloudflare 뒤에 있어 기본 UA(Python-urllib/*)를 403 Forbidden
+            # 으로 차단한다. 명시적 User-Agent 를 붙여야 웹훅 POST 가 통과한다.
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "Cledyu-DR-Alert/1.0 (+https://cledyu.com)",
+            },
             method="POST",
         )
         # 실패 시 예외를 그대로 올려 Lambda 재시도(at-least-once)로 알림 유실을 막는다.

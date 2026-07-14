@@ -45,7 +45,15 @@ resource "aws_iam_user_policy" "dr_heartbeat" {
 
 # pull 프로브: 공개 엔드포인트를 딥 HTTP 로 감시. 온프렘이 죽으면 ALB→tailnet 프록시
 # 업스트림이 끊겨 5xx → search_string 불일치로 health check 실패.
+# pull 은 공개 진입점(auth.cledyu.com)을 딥 HTTP 로 감시하므로 공개 진입점이 없으면 대상 자체가
+# 없다. 예전엔 precondition(var.enable_public_ingress)으로 막았으나, 항상 존재하는 리소스에 건
+# precondition 은 enable_public_ingress=false 인 plan/apply(기본값·데모 철거) 전체를 중단시켜
+# 공개 진입점 destroy 나 다른 변경까지 막았다. 그래서 pull·복합알람(공개 진입점 의존분)을
+# public-ingress 와 동일한 local.pub 로 count 게이트한다 — 공개 진입점을 끄면 이 감지 리소스도
+# 함께 깨끗이 제거되고, terraform 을 인질로 잡지 않는다. push·SNS·Lambda(온프렘·알림 substrate,
+# 공개 진입점 비의존)는 그대로 둔다.
 resource "aws_route53_health_check" "onprem_pull" {
+  count             = local.pub
   fqdn              = var.public_keycloak_host # auth.cledyu.com
   type              = "HTTPS_STR_MATCH"
   resource_path     = "/realms/cledyu-learn"
@@ -54,17 +62,13 @@ resource "aws_route53_health_check" "onprem_pull" {
   request_interval  = 30
   failure_threshold = 5 # 제안값(드릴 튜닝)
   tags              = { Name = "${var.name_prefix}-dr-pull" }
+}
 
-  # 이 감지 스택은 공개 진입점(auth.cledyu.com ALB/Route53, public-ingress.tf)을 전제한다.
-  # enable_public_ingress=false 면 pull 대상이 존재하지 않아 pull 알람이 상시 ALARM 이 되고,
-  # heartbeat 동기화 전 push 도 missing→breaching 이라 복합알람이 "구성 미완료"를 재해로 오탐한다.
-  # 그래서 공개 진입점이 켜져 있을 때만 감지 스택을 apply 하도록 강제한다.
-  lifecycle {
-    precondition {
-      condition     = var.enable_public_ingress
-      error_message = "DR 감지 스택은 enable_public_ingress=true(auth.cledyu.com 공개 진입점)를 전제한다. 공개 진입점 없이 배포하면 pull 알람이 상시 ALARM 이 되어 복합알람이 구성 미완료를 재해로 오탐한다. 공개 진입점을 먼저 켜라."
-    }
-  }
+# count 도입(단일 → [0])에 따른 state 이전 — 기존 리소스를 destroy/recreate 하지 않고
+# 인덱스 주소로 옮긴다(count=1 일 때 no-op 이동).
+moved {
+  from = aws_route53_health_check.onprem_pull
+  to   = aws_route53_health_check.onprem_pull[0]
 }
 
 # 알림 허브. 복합알람 → SNS → (Task 4) Lambda → Discord.
@@ -75,17 +79,23 @@ resource "aws_sns_topic" "dr_alert" {
 
 # pull 알람: Route53 HealthCheckStatus(<1=비정상). 이 메트릭은 us-east-1 전용.
 resource "aws_cloudwatch_metric_alarm" "pull" {
+  count               = local.pub
   provider            = aws.use1
   alarm_name          = "${var.name_prefix}-dr-pull"
   namespace           = "AWS/Route53"
   metric_name         = "HealthCheckStatus"
-  dimensions          = { HealthCheckId = aws_route53_health_check.onprem_pull.id }
+  dimensions          = { HealthCheckId = aws_route53_health_check.onprem_pull[0].id }
   comparison_operator = "LessThanThreshold"
   threshold           = 1
   evaluation_periods  = 1
   period              = 60
   statistic           = "Minimum"
   treat_missing_data  = "breaching"
+}
+
+moved {
+  from = aws_cloudwatch_metric_alarm.pull
+  to   = aws_cloudwatch_metric_alarm.pull[0]
 }
 
 # push 알람: heartbeat 지표가 M분(=evaluation_periods) 없으면 breaching.
@@ -107,9 +117,15 @@ resource "aws_cloudwatch_metric_alarm" "push" {
 # pull 미준비)에 복합알람이 ALARM 이 돼도 알림을 안 쏜다. 두 신호 healthy 확인 후 armed=true 로
 # 재apply 해 무장한다(§ 배포 arming 절차).
 resource "aws_cloudwatch_composite_alarm" "disaster" {
+  count           = local.pub # pull 에 의존하므로 공개 진입점과 생사를 같이한다.
   provider        = aws.use1
   alarm_name      = "${var.name_prefix}-dr-disaster"
-  alarm_rule      = "ALARM(${aws_cloudwatch_metric_alarm.pull.alarm_name}) AND ALARM(${aws_cloudwatch_metric_alarm.push.alarm_name})"
+  alarm_rule      = "ALARM(${aws_cloudwatch_metric_alarm.pull[0].alarm_name}) AND ALARM(${aws_cloudwatch_metric_alarm.push.alarm_name})"
   alarm_actions   = [aws_sns_topic.dr_alert.arn]
   actions_enabled = var.dr_detection_armed
+}
+
+moved {
+  from = aws_cloudwatch_composite_alarm.disaster
+  to   = aws_cloudwatch_composite_alarm.disaster[0]
 }
