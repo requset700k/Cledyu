@@ -70,6 +70,7 @@ func TestGetMyDashboard_PostgresOnly(t *testing.T) {
 	fake.leaderboard = []store.LeaderboardRow{
 		{UserID: "u1", Name: "U1", LabID: "lab-docker-basics", CompletedAt: at},
 	}
+	fake.hidden["u1"] = true
 	h := dashboardTestHandler(t, fake)
 
 	gin.SetMode(gin.TestMode)
@@ -95,12 +96,16 @@ func TestGetMyDashboard_PostgresOnly(t *testing.T) {
 			Status    string `json:"status"`
 			SessionID string `json:"session_id"`
 		} `json:"labs"`
+		LeaderboardHidden bool `json:"leaderboard_hidden"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
 	if body.Summary.Score != 10 || body.Summary.Rank != 1 || body.Summary.LabsCompleted != 1 {
 		t.Fatalf("summary mismatch: %+v", body.Summary)
+	}
+	if !body.LeaderboardHidden {
+		t.Fatalf("leaderboard_hidden: want true, got false")
 	}
 	// 실제 임베드 카탈로그는 6개 랩(lab-helm-advanced 포함).
 	if body.Summary.TotalLabs != 6 {

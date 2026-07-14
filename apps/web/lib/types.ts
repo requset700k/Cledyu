@@ -177,6 +177,7 @@ export interface DashboardResponse {
   summary: DashboardSummary;
   labs: DashboardLab[];
   recent_completions: { lab_id: string; session_id: string; completed_at: string }[];
+  leaderboard_hidden: boolean;
 }
 
 /** GET /api/v1/instructor/analytics 응답 (강사 분석) */

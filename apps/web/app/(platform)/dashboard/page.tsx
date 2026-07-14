@@ -93,10 +93,6 @@ export default function DashboardPage() {
     queryKey: ['my-dashboard'],
     queryFn: () => api.me.dashboard(),
   });
-  const { data: leaderboard } = useQuery({
-    queryKey: ['leaderboard'],
-    queryFn: () => api.leaderboard.get(),
-  });
   const toggleLeaderboardHidden = useMutation({
     mutationFn: (hidden: boolean) => api.me.setPreferences(hidden),
     onSuccess: () => {
@@ -123,12 +119,6 @@ export default function DashboardPage() {
           <div>
             <div className="text-slate-400">점수</div>
             <div className="text-white text-xl font-bold">{s.score}</div>
-          </div>
-          <div>
-            <div className="text-slate-400">순위</div>
-            <div className="text-white text-xl font-bold">
-              {s.rank === 0 ? '비공개' : `#${s.rank}`}
-            </div>
           </div>
           <div>
             <div className="text-slate-400">완료율</div>
@@ -167,9 +157,9 @@ export default function DashboardPage() {
         <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
           <input
             type="checkbox"
-            checked={leaderboard ? !leaderboard.me.leaderboard_hidden : false}
+            checked={!data.leaderboard_hidden}
             onChange={(e) => toggleLeaderboardHidden.mutate(!e.target.checked)}
-            disabled={!leaderboard || toggleLeaderboardHidden.isPending}
+            disabled={toggleLeaderboardHidden.isPending}
           />
           리더보드에 내 이름 표시
         </label>

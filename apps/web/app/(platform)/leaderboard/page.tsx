@@ -60,6 +60,11 @@ export default function LeaderboardPage() {
 
   const isHidden = data.me.leaderboard_hidden;
   const hofRows = mergeMyRank(data.hall_of_fame, data.me);
+  const rankLabel = isHidden
+    ? '비공개'
+    : data.me.rank === 0
+      ? '아직 순위 없음'
+      : `#${data.me.rank}`;
 
   return (
     <div className="space-y-8">
@@ -77,9 +82,7 @@ export default function LeaderboardPage() {
           </div>
           <div>
             <div className="text-slate-400">순위</div>
-            <div className="text-white text-xl font-bold">
-              {data.me.rank === 0 ? '비공개' : `#${data.me.rank}`}
-            </div>
+            <div className="text-white text-xl font-bold">{rankLabel}</div>
           </div>
           <div>
             <div className="text-slate-400">완료한 랩</div>
