@@ -67,9 +67,6 @@ func TestGetMyDashboard_PostgresOnly(t *testing.T) {
 	fake.completions["u1|lab-docker-basics"] = "s1"
 	fake.completionAt = map[string]string{"u1|lab-docker-basics": at.Format(time.RFC3339)}
 	fake.inProgress["u1"] = []store.InProgressLab{{LabID: "lab-k8s-basics", SessionID: "s2"}}
-	fake.leaderboard = []store.LeaderboardRow{
-		{UserID: "u1", Name: "U1", LabID: "lab-docker-basics", CompletedAt: at},
-	}
 	fake.hidden["u1"] = true
 	h := dashboardTestHandler(t, fake)
 
@@ -101,7 +98,7 @@ func TestGetMyDashboard_PostgresOnly(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
 		t.Fatal(err)
 	}
-	if body.Summary.Score != 10 || body.Summary.Rank != 1 || body.Summary.LabsCompleted != 1 {
+	if body.Summary.Score != 10 || body.Summary.Rank != 0 || body.Summary.LabsCompleted != 1 {
 		t.Fatalf("summary mismatch: %+v", body.Summary)
 	}
 	if !body.LeaderboardHidden {
