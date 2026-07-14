@@ -121,7 +121,15 @@ type AWSConfig struct {
 	// (auth_keys write 스코프 + tag:lab-ec2 발급 권한). 설정 시 프로비저너가 세션마다 비재사용·
 	// ephemeral·짧은만료 키를 발급해 user-data 에 넣어, 정적 reusable 키가 세션(sudo lab 계정)으로
 	// 유출되는 위험을 없앤다(issue #307). Vault→ESO 주입. 미설정 시 TailscaleAuthKey 폴백.
+	//
+	// 이 값이 OAuth **client secret**(권장, tag 스코프)이면 TailscaleOAuthClientID 도 함께 설정한다.
+	// 그러면 프로비저너가 client_credentials 로 짧은수명(1h) 액세스 토큰을 교환·자동갱신해 쓴다.
+	// TailscaleOAuthClientID 가 비면 이 값을 API 액세스 토큰으로 보고 직접 Bearer 로 쓴다.
 	TailscaleAPIKey string `mapstructure:"tailscale_api_key"`
+	// TailscaleOAuthClientID: TailscaleAPIKey 가 OAuth client secret 일 때의 client id. 설정되면
+	// 발급 요청 전 /api/v2/oauth/token 에서 액세스 토큰을 교환(자동 갱신)한다. OAuth 액세스 토큰은
+	// 1시간 만료라 정적으로 baked 하면 배포 1시간 뒤 발급이 끊기므로, 교환 방식이어야 지속 동작한다.
+	TailscaleOAuthClientID string `mapstructure:"tailscale_oauth_client_id"`
 	// SessionKeyTTLSeconds: 동적 발급 세션 authkey 의 만료(초). 인스턴스 부팅+가입 시간만 커버하면
 	// 되므로 짧게 둔다. 기본 600(10분).
 	SessionKeyTTLSeconds int `mapstructure:"session_key_ttl_seconds"`
@@ -224,9 +232,10 @@ func Load() (*Config, error) {
 	// aws.tailscale_api_key 는 기본 빈 값 — env CLEDYU_AWS_TAILSCALE_API_KEY(Secret)로 주입. 미설정 시 정적 authkey 폴백.
 	v.SetDefault("aws.max_active_sessions", 0) // 0 = EC2 오버플로우 비활성(현행 KubeVirt 전용 동작 보존)
 	v.SetDefault("aws.tailnet_hostname_prefix", "lab")
-	v.SetDefault("aws.tailscale_auth_key", "")     // env CLEDYU_AWS_TAILSCALE_AUTH_KEY(Secret)로 주입
-	v.SetDefault("aws.api_tailscale_auth_key", "") // env CLEDYU_AWS_API_TAILSCALE_AUTH_KEY(Secret)로 주입
-	v.SetDefault("aws.api_tailnet_state_dir", "")  // 비면 tsnet 기본; k8s 는 emptyDir 경로 주입
+	v.SetDefault("aws.tailscale_oauth_client_id", "") // env CLEDYU_AWS_TAILSCALE_OAUTH_CLIENT_ID(선택)
+	v.SetDefault("aws.tailscale_auth_key", "")        // env CLEDYU_AWS_TAILSCALE_AUTH_KEY(Secret)로 주입
+	v.SetDefault("aws.api_tailscale_auth_key", "")    // env CLEDYU_AWS_API_TAILSCALE_AUTH_KEY(Secret)로 주입
+	v.SetDefault("aws.api_tailnet_state_dir", "")     // 비면 tsnet 기본; k8s 는 emptyDir 경로 주입
 	v.SetDefault("aws.live_terminal_ssh_user", "lab")
 	v.SetDefault("aws.live_terminal_ssh_password", "lab")
 	v.SetDefault("kafka.brokers", "cledyu-kafka-kafka-bootstrap.kafka.svc:9093")

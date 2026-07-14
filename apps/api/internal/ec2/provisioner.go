@@ -80,7 +80,7 @@ func NewProvisioner(ctx context.Context, cfg *config.AWSConfig, met *vmmetrics.R
 		if tag == "" {
 			tag = "tag:lab-ec2"
 		}
-		p.minter = newTailscaleKeyMinter(cfg.TailscaleAPIKey, "-", tag, ttl)
+		p.minter = newTailscaleKeyMinter(cfg.TailscaleOAuthClientID, cfg.TailscaleAPIKey, "-", tag, ttl)
 	}
 	return p, nil
 }
@@ -181,7 +181,7 @@ func (p *Provisioner) Get(ctx context.Context, sessionID string) (*session.Sessi
 	if inst == nil {
 		return nil, session.ErrNotFound
 	}
-	sess := instanceToSession(inst, p.cfg.Region)
+	sess := p.instanceToSession(inst)
 	// KubeVirt Get()의 ready-at 최초 관측 시점 기록과 대응
 	// running 전이를 처음 본 폴링에서 vm_boot_total{result=success,env=ec2}를 1회 기록
 	if sess.Status == "ready" {
@@ -301,10 +301,22 @@ func (p *Provisioner) VMIAddress(ctx context.Context, sessionID string) (string,
 		return "", session.ErrNotFound
 	}
 	// 정적 키 유무가 아니라 이 세션이 실제로 tailnet 에 가입했는지(동적 발급 성공 포함)로 판단한다.
-	if tagValue(inst, tagTailnet) != "1" {
+	if !p.sessionTailnetEnabled(inst) {
 		return "", session.ErrNotFound
 	}
 	return tailnetHostname(p.cfg, sessionID), nil
+}
+
+// sessionTailnetEnabled는 세션 EC2 가 tailnet 에 가입돼 라이브 터미널로 도달 가능한지 판단한다.
+//   - cledyu.io/tailnet 태그가 있으면 그 값("1")을 신뢰한다(신버전 인스턴스: 동적/정적 가입 실측).
+//   - 태그가 없으면(구버전 코드가 만든 레거시 인스턴스) 정적 authkey 설정 여부로 폴백한다. 레거시
+//     세션은 정적 키로 이미 가입해 있을 수 있으므로, 이 PR 롤아웃 중 활성 세션의 터미널이 끊기지
+//     않게 태그 부재를 곧바로 미가입으로 단정하지 않는다.
+func (p *Provisioner) sessionTailnetEnabled(inst *ectypes.Instance) bool {
+	if v, ok := tagLookup(inst, tagTailnet); ok {
+		return v == "1"
+	}
+	return p.cfg.TailscaleAuthKey != ""
 }
 
 // --- 내부 헬퍼 ---
@@ -421,7 +433,7 @@ func (p *Provisioner) terminate(ctx context.Context, instanceID string) error {
 }
 
 // instanceToSession은 EC2 인스턴스(태그·상태)를 프로바이더 중립 Session 으로 변환한다.
-func instanceToSession(inst *ectypes.Instance, region string) *session.Session {
+func (p *Provisioner) instanceToSession(inst *ectypes.Instance) *session.Session {
 	startedAt, _ := time.Parse(time.RFC3339, tagValue(inst, tagStartedAt))
 	expiresAt, _ := time.Parse(time.RFC3339, tagValue(inst, tagExpiresAt))
 	return &session.Session{
@@ -433,8 +445,8 @@ func instanceToSession(inst *ectypes.Instance, region string) *session.Session {
 		ExpiresAt:      expiresAt,
 		Provider:       session.ProviderEC2,
 		InstanceID:     aws.ToString(inst.InstanceId),
-		Region:         region,
-		TailnetEnabled: tagValue(inst, tagTailnet) == "1",
+		Region:         p.cfg.Region,
+		TailnetEnabled: p.sessionTailnetEnabled(inst),
 	}
 }
 
@@ -454,10 +466,16 @@ func instanceStatus(inst *ectypes.Instance) string {
 }
 
 func tagValue(inst *ectypes.Instance, key string) string {
+	v, _ := tagLookup(inst, key)
+	return v
+}
+
+// tagLookup은 tagValue 와 달리 태그 부재("0"과 구분)를 ok=false 로 알려준다.
+func tagLookup(inst *ectypes.Instance, key string) (string, bool) {
 	for _, t := range inst.Tags {
 		if aws.ToString(t.Key) == key {
-			return aws.ToString(t.Value)
+			return aws.ToString(t.Value), true
 		}
 	}
-	return ""
+	return "", false
 }

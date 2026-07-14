@@ -143,6 +143,15 @@ spec:
                   name: cledyu-api-tailscale
                   key: tailscale_api_key
                   optional: true
+            # tailscale_api_key 가 OAuth client secret 일 때의 client id. 설정 시 provisioner 가
+            # client_credentials 로 짧은수명(1h) 액세스 토큰을 교환·자동갱신한다(OAuth 토큰은 1h
+            # 만료라 정적 baked 불가). 비면 tailscale_api_key 를 API 토큰으로 보고 직접 Bearer. optional.
+            - name: CLEDYU_AWS_TAILSCALE_OAUTH_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: cledyu-api-tailscale
+                  key: tailscale_oauth_client_id
+                  optional: true
             # tsnet 상태 디렉터리 — 명시 필수. 이미지가 distroless(static-debian12)+UID65532 라 홈/config 기본경로가
             # 쓰기 불가 → Dir 미지정 시 tsnet 이 기본 config 경로에 쓰려다 srv.Up 실패 → authkey 시드돼도 터미널
             # 비활성(Codex P1). 아래 tsnet-state emptyDir(쓰기 가능)에 매핑. config.APITailnetStateDir 매핑.

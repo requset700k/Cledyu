@@ -91,12 +91,20 @@ error: ... Tailscale SSH requires an additional check   (또는 초기엔 no suc
   - **권장(정식, 구현됨 — issue #307)**: api 가 세션 프로비저닝 시 Tailscale API
     (`POST /api/v2/tailnet/-/keys`)로 **세션별 one-off(비재사용)+ephemeral+짧은 만료** authkey 를
     **동적 발급**한다(코드 반영: `apps/api/internal/ec2/authkey.go`, provisioner 배선, deployment
-    env `CLEDYU_AWS_TAILSCALE_API_KEY`). **활성화 절차**:
-    1) Tailscale에서 **OAuth client**(scope `auth_keys`, `tag:lab-ec2` 발급 권한) 생성 → 토큰 확보.
+    env `CLEDYU_AWS_TAILSCALE_API_KEY` + `CLEDYU_AWS_TAILSCALE_OAUTH_CLIENT_ID`). **활성화 절차**:
+    1) Tailscale에서 **OAuth client**(scope `auth_keys`, `tag:lab-ec2` 발급 권한) 생성 → **client id** 와
+       **client secret**(`tskey-client-...`) 확보.
        (tagOwners 에 `"tag:lab-ec2": ["<oauth-client 소유자>"]` 형태로 그 client 가 태그를 찍을 수 있어야 함.)
-    2) `vault kv patch cledyu/aws/api tailscale_api_key='<OAuth client token>'`.
-    3) ESO `cledyu-api-tailscale-externalsecret.yaml` 의 `tailscale_api_key` 항목 주석 해제
-       (**반드시 (2) 이후** — Vault 에 없으면 ES 전체가 SyncError). → api 재시작.
+    2) `vault kv patch cledyu/aws/api tailscale_api_key='<client secret>' tailscale_oauth_client_id='<client id>'`.
+       - 코드는 client secret 을 `/api/v2/oauth/token` 에서 **client_credentials 로 교환**해 짧은수명(1h)
+         액세스 토큰을 얻고 만료 시 **자동 갱신**한다. OAuth 액세스 토큰을 직접 넣으면 안 된다 —
+         1시간 뒤 발급이 끊긴다(이 교환 배선이 그 문제를 없앤 이유다).
+       - 대안(비권장): tag 스코프가 아닌 **API 액세스 토큰**을 쓸 거면 `tailscale_api_key` 에 그 토큰만
+         넣고 `tailscale_oauth_client_id` 는 비운다(코드가 직접 Bearer). 단 API 토큰은 사용자 소유·90일
+         만료라 담당자 이탈·회전 부담이 있어 OAuth client 를 권장.
+    3) ESO `cledyu-api-tailscale-externalsecret.yaml` 의 `tailscale_api_key`(및 OAuth 방식이면
+       `tailscale_oauth_client_id`) 항목 주석 해제(**반드시 (2) 이후** — Vault 에 없으면 ES 전체가
+       SyncError). → api 재시작.
     4) 설정되면 정적 `tailscale_authkey` 는 폴백으로만 남고 세션은 동적 키를 쓴다. 발급 실패 시
        fail-secure(그 세션만 터미널 비활성, 정적 키로 폴백 안 함).
   - **잠정(정식 활성화 전, 정적 키 유지 시)**: 정적 `tailscale_authkey` 를 **짧은 만료 + ephemeral**
