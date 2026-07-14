@@ -252,7 +252,8 @@ aws eks wait nodegroup-active --cluster-name cledyu-dr --region ap-northeast-2 -
 #      자연 해소되므로 손대지 않는다 — Service 를 가로채는 ALB webhook 만 애드온을 막는다.)
 BID=$(aws ec2 describe-instances --region ap-northeast-2 \
   --filters "Name=tag:Name,Values=cledyu-dr-bastion" "Name=instance-state-name,Values=running" \
-  --query "Reservations[].Instances[].InstanceId" --output text)
+  --query "Reservations[0].Instances[0].InstanceId" --output text)   # [0]로 단일화 — 이전 사이클 bastion 이
+  # 완전 종료 안 돼 2개 running 이면 flat 쿼리가 id 를 공백결합해 아래 --instance-ids 가 InvalidInstanceId(ALB 조회와 동일 계열).
 # ⚠️ bastion 은 방금 Phase1 에서 생성돼 (a) 아직 SSM 미등록이거나 (b) user_data(kubectl·awscli 설치, egress
 #   대기 최대 5분·retry) 미완일 수 있다 → 바로 send-command 하면 InvalidInstanceId 또는 원격 "kubectl: command
 #   not found" 로 삭제가 실패한 채 coredns 로 넘어간다. 먼저 SSM 등록(Online)을 기다리고, 원격 명령 첫 줄에
@@ -431,21 +432,25 @@ EKS ALB target 이 Healthy 여도 사용자가 도달하지 못한다. api/app �
 ·브라우저 로그인/토큰 갱신이 계속 실패한다.
 
 ```bash
-# EKS ALB DNS 이름·zone 취득 (ALB Controller 가 api/web Ingress 로 생성)
+# EKS ALB DNS 이름·zone 취득 (ALB Controller 가 api/web/keycloak Ingress 로 생성)
 # ALB DNS 는 운영자 머신 aws 로 취득한다 — kubectl(=bastion)로 $ALB 를 잡으면 이 블록의 나머지 aws 명령
-#   (운영자 머신)과 실행 위치가 갈려, 별도 셸일 때 $ALB 가 빈 값이 된다. DR VPC 의 group ALB(api/web/keycloak
-#   공유 1개)를 잡는다. (아래 keycloak Ready 대기만 kubectl=bastion — 변수 공유 없는 단발.)
-VPCID=$(aws eks describe-cluster --name cledyu-dr --region ap-northeast-2 --query 'cluster.resourcesVpcConfig.vpcId' --output text)
-ALB=$(aws elbv2 describe-load-balancers --region ap-northeast-2 --query "LoadBalancers[?VpcId=='$VPCID'].DNSName" --output text); echo "$ALB"
-ALB_ZONE=$(aws elbv2 describe-load-balancers --region ap-northeast-2 \
-  --query "LoadBalancers[?DNSName=='$ALB'].CanonicalHostedZoneId" --output text)
+#   (운영자 머신)과 실행 위치가 갈려, 별도 셸일 때 $ALB 가 빈 값이 된다.
+# ⚠️ VPC 로만 필터하면 안 된다 — 재-failover 시 이전 사이클 고아 ALB([P1c]와 동일 warm-etcd/AWS 잔존 패턴)가
+#   같은 VPC 에 남아 있으면 `LoadBalancers[?VpcId==..].DNSName` 이 DNSName 을 공백으로 이어붙여 $ALB 에 쓰레깃값을
+#   넣고, 아래 UPSERT 가 빈/잘못된 대상을 잡는다. api/web/keycloak 은 전부 group.name=cledyu-dr 공유 ALB 이므로
+#   ALB Controller 가 그 ALB 에 붙이는 태그(ingress.k8s.aws/stack=cledyu-dr)로 정확히 1개만 선택한다.
+ALB_ARN=$(aws resourcegroupstaggingapi get-resources --region ap-northeast-2 \
+  --resource-type-filters elasticloadbalancing:loadbalancer \
+  --tag-filters Key=ingress.k8s.aws/stack,Values=cledyu-dr \
+  --query 'ResourceTagMappingList[0].ResourceARN' --output text)
+[ -n "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ] || { echo "❌ group.name=cledyu-dr ALB 미발견 — Ingress/ALB Controller 상태 확인"; }
+read -r ALB ALB_ZONE < <(aws elbv2 describe-load-balancers --region ap-northeast-2 --load-balancer-arns "$ALB_ARN" \
+  --query 'LoadBalancers[0].[DNSName,CanonicalHostedZoneId]' --output text); echo "$ALB $ALB_ZONE"
 ZONE=$(aws route53 list-hosted-zones-by-name --dns-name cledyu.com --query "HostedZones[0].Id" --output text)
 
 # /metrics 차단 WAF(cledyu-lab-public, block-public-metrics 룰)는 api·web values-eks 의 wafv2-acl-arn
 # annotation 으로 ALB 생성과 동시에 자동 연결된다 → 수동 associate-web-acl 불요(프로비저닝~연결 노출 창 제거).
-# 여기서는 실제로 붙었는지 + /metrics 차단만 확인한다.
-ALB_ARN=$(aws elbv2 describe-load-balancers --region ap-northeast-2 \
-  --query "LoadBalancers[?DNSName=='$ALB'].LoadBalancerArn" --output text)
+# 여기서는 실제로 붙었는지 + /metrics 차단만 확인한다($ALB_ARN 는 위에서 태그로 정확히 취득).
 aws wafv2 get-web-acl-for-resource --resource-arn "$ALB_ARN" --region ap-northeast-2 \
   --query "WebACL.Name" --output text          # → cledyu-lab-public (비어 있으면 values-eks ARN stale → 갱신 후 재sync)
 # 확인: curl https://api.cledyu.com/metrics → 403(WAF block)
@@ -498,8 +503,16 @@ done
 
 kubectl -n api rollout restart deploy/api && kubectl -n api rollout status deploy/api
 kubectl -n web rollout restart deploy/web && kubectl -n web rollout status deploy/web
-# 재기동 후 api 로그에 "db 연결 — 유저/진행 상태 영속화 활성"(in-memory 폴백 아님)·"running WITHOUT auth" 0건 확인.
-kubectl -n api logs deploy/api | grep -E "db 연결|in-memory|WITHOUT auth"
+# 재기동 후 검증 — ⚠️ 실패 로그를 성공 조건 grep 에 섞지 않는다. 긍정/부정을 분리해 각각 fail-closed 로 판정한다.
+#   (하나의 grep -E "db 연결|…|WITHOUT auth" 는 실패 로그만 떠도 exit 0 이라 장애를 놓친다. 또한 "db 연결" 은
+#    실패 로그 "db 연결 실패 — …in-memory 전용" 의 부분문자열이라 긍정 확인마저 신뢰 불가 → 완전 문자열 앵커.)
+# (1) DB 영속화 활성(in-memory 폴백 아님):
+kubectl -n api logs deploy/api | grep -q "db 연결 — 유저/진행 상태 영속화 활성" \
+  && echo "✅ DB 영속화 활성" || { echo "❌ DB 미연결(in-memory 폴백) — CNPG cledyu-pg-rw Ready 확인 후 재-restart"; exit 1; }
+# (2) auth provider 정상(Route53 전환 후 api 가 auth 없이 뜨는 장애 = 이 가드가 잡을 대상):
+kubectl -n api logs deploy/api | grep -q "running WITHOUT auth" \
+  && { echo "❌ auth provider 없이 기동(OIDC discovery 실패) — auth.cledyu.com 전환·Keycloak Ready 확인 후 재-restart"; exit 1; } \
+  || echo "✅ auth provider 정상"
 ```
 
 ### 실습 fidelity 검증 (EC2 채점 == 온프렘 KubeVirt) — A3
@@ -525,8 +538,16 @@ aws ec2 describe-instances --region ap-northeast-2 \
 kubectl -n validation-engine logs deploy/validation-engine | grep -E "SSM|SendCommand|passed|failed"
 # 수용기준: 온프렘에서 통과하는 정답 입력이 DR(EC2)에서도 passed, 오답은 failed. 6종 랩 각 최소 1스텝 정답/오답 대조가 온프렘과 일치.
 
-# 4) mock-pass 미발생 확인(보안) — validator non-nil 이므로 "mock" 응답이 없어야 한다.
-kubectl -n api logs deploy/api | grep -c "mock"                          # 0
+# 4) mock-pass 미발생 확인(보안) — ⚠️ 로그 grep "mock" 은 무효하다:
+#    (a) mock-pass 는 stdout 로그가 아니라 span attribute(validation.request.result=mock_passed) + 응답 본문
+#        "…(mock)" 으로만 남는다(session.go) → 로그엔 "mock" 이 안 찍혀 false negative.
+#    (b) 무관한 로그("kafka … (mock 모드)"·billing "mock")가 카운트를 올려 false positive.
+#    실제 보안은 코드가 강제한다: release 모드 + validator=nil 이면 /validate 가 mock 통과가 아니라 503
+#    (session.go 의 release 게이팅). 따라서 런북은 아래 2개로 검증한다.
+# (a) api 가 release 모드인지 — debug 면 mock 경로가 열린다.
+kubectl -n api exec deploy/api -- printenv CLEDYU_SERVER_MODE 2>/dev/null    # release 여야 함(빈 값/ debug 면 ❌)
+# (b) 오답 입력이 실제로 failed 로 확정되고 응답 본문에 "(mock)" 이 없는지 — 위 3) 오답 대조와 동일 경로.
+#     (mock 통과라면 응답이 {"status":"passed","message":"…(mock)"} 로 온다 — 정상 DR 에선 나오면 안 됨.)
 ```
 
 수용기준 요약: (a) 세션=EC2 인스턴스 생성, (b) 터미널 tailnet 도달, (c) SSM 채점 결과가 온프렘과 동일 판정(정답 passed/오답 failed), (d) mock-pass 0건.
