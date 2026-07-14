@@ -55,5 +55,6 @@ def handler(event, context):
         )
         # 실패 시 예외를 그대로 올려 Lambda 재시도(at-least-once)로 알림 유실을 막는다.
         # SNS→Lambda 는 호출당 1 레코드라 배치 재시도 중복 위험은 사실상 없다.
-        urllib.request.urlopen(req, timeout=10)  # noqa: S310
+        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+            resp.read()
     return {"ok": True}
