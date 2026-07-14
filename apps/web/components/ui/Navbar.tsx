@@ -33,9 +33,7 @@ export function Navbar() {
     queryFn: () => api.auth.me(),
     retry: false,
   });
-  const navLinks = canAccessInstructor(me?.role)
-    ? [...NAV_LINKS, INSTRUCTOR_LINK]
-    : NAV_LINKS;
+  const navLinks = canAccessInstructor(me?.role) ? [...NAV_LINKS, INSTRUCTOR_LINK] : NAV_LINKS;
   const mobileNavLinks = [DASHBOARD_LINK, ...navLinks];
 
   function handleLogout() {
