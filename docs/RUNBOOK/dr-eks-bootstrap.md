@@ -234,6 +234,24 @@ aws eks update-nodegroup-config --cluster-name cledyu-dr --region ap-northeast-2
   --nodegroup-name "$NG" --scaling-config minSize=0,maxSize=6,desiredSize=3
 aws eks wait nodegroup-active --cluster-name cledyu-dr --region ap-northeast-2 --nodegroup-name "$NG"
 #   → 노드 3 생성·Ready(~3-5분).
+# (2.5) [P1c] ⚠️ 재-failover 전용 가드 — warm etcd 고아 admission webhook 제거(coredns 설치 前 필수).
+#   증상(2026-07-14 드릴 실측): 아래 (3) coredns 애드온이 CREATE_FAILED. health issue =
+#     AdmissionRequestDenied: webhook "mservice.elbv2.k8s.aws" 호출 실패 — service
+#     "aws-load-balancer-webhook-service" no endpoints available.
+#   메커니즘: apps-eks 가 배포하는 AWS LB Controller 의 webhook(MutatingWebhookConfiguration/
+#     ValidatingWebhookConfiguration "aws-load-balancer-webhook")은 cluster-scoped 라 failback 노드
+#     회수(node→0) 시 백엔드 파드는 사라져도 webhook config 자체는 warm etcd 에 잔존한다. mutating
+#     webhook 은 v1 Service 를 failurePolicy=Fail 로 가로채므로, coredns 애드온이 kube-dns Service 를
+#     만들 때(그리고 이후 Phase 4 의 ArgoCD helm 이 만드는 모든 Service) 백엔드 없는 webhook 이 거부 →
+#     설치 실패. 첫 failover 는 webhook 이 없어 no-op(이 갭은 재-failover 에서만 발현).
+#   연쇄: coredns 가 안 뜨면 클러스터 DNS 부재로 ebs-csi-controller 사이드카(provisioner/attacher/
+#     resizer/snapshotter)가 API·STS 를 resolve 못 해 CrashLoopBackOff 한다 → coredns 를 살리면 함께 안정화.
+#   조치: kubectl(=bastion, private 엔드포인트)로 그 두 webhook 을 삭제한다. apps-eks 가 LB Controller 를
+#     배포하면 Helm 이 살아있는 백엔드로 재생성하므로 삭제해도 안전. bastion 에서(또는 운영자 머신 SSM):
+#       kubectl delete mutatingwebhookconfiguration   aws-load-balancer-webhook --ignore-not-found
+#       kubectl delete validatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found
+#     (백엔드 없는 다른 잔존 webhook[cnpg·cert-manager·ESO 등]은 apps-eks sync 웨이브가 백엔드를
+#      먼저 세워 자연 해소되므로 손대지 않는다 — Service 를 가로채는 ALB webhook 만 애드온을 막는다.)
 # (3) [P1] coredns·ebs-csi 관리형 애드온 설치 — CLI. warm(node0)에선 이 둘이 Deployment 라 DEGRADED 로
 #     terraform apply 를 블록하므로 cluster_addons 에서 빼두었다(eks-dr.tf). 노드가 뜬 지금(위 wait 통과)
 #     설치하면 즉시 ACTIVE 된다. ebs-csi 는 warm IRSA(cledyu-dr-ebs-csi, 롤명 결정적)를 참조.
@@ -423,10 +441,31 @@ api 는 startup 에 `store.Open`(DB)·auth provider 를 **1회만** 초기화하
 로그인 불가)로 남는다. → 의존성이 모두 Ready 된 뒤 **반드시 rollout restart** 로 재초기화한다.
 
 ```bash
+# [P1d] ⚠️ 재-failover 전용 가드 — stale hostAlias 제거(Route53 전환 경로에서 필수, restart 前).
+#   증상(2026-07-14 드릴 실측): DNS 전환·재기동을 다 해도 api 가 "running WITHOUT auth provider" 로 남고
+#     로그에 oidc discovery(https://auth.cledyu.com/...) "context deadline exceeded"(정확히 10s 타임아웃).
+#     같은 네임스페이스 debug 파드(netshoot)는 DNS 로 auth.cledyu.com→ALB 도달 200(0.1s) — 즉 네트워크·DNS·
+#     NetworkPolicy 문제 아님, api 파드만 실패.
+#   근본원인: api Deployment 에 이전 no-Route53 드릴의 워크어라운드(hostAliases: auth.cledyu.com→그 사이클 DR
+#     ALB IP, [[project_dr_app_tier_lab_findings]] 참조)가 warm etcd 에 잔존한다. ALB 는 failover 마다 재생성돼
+#     IP 가 로테이션하므로 그 하드코딩 IP 는 다음 사이클엔 죽은 주소 → api 서버사이드 oidc 가 죽은 IP 로 hang.
+#     git 차트엔 hostAliases 가 없어(수동 patch 잔존) ArgoCD selfHeal 도 안 지운다(§Phase1 [P1c] ALB webhook 과
+#     동일한 warm-etcd 교차오염 패턴).
+#   조치: Route53 을 실제로 전환(위 §공개 DNS 전환)했다면 hostAlias override 는 불필요하다(정상 DNS 로 도달) →
+#     제거한다. web/keycloak 도 점검(대칭). 단발(첫) failover 는 hostAlias 가 없어 no-op.
+for ns in api web keycloak; do
+  for d in $(kubectl -n "$ns" get deploy -o name 2>/dev/null); do
+    kubectl -n "$ns" get "$d" -o jsonpath='{.spec.template.spec.hostAliases}' 2>/dev/null | grep -q 'cledyu.com' \
+      && kubectl -n "$ns" patch "$d" --type=json -p '[{"op":"remove","path":"/spec/template/spec/hostAliases"}]' \
+      && echo "removed stale hostAlias: $ns/$d" || true
+  done
+done
+#   (no-Route53 드릴 경로를 일부러 쓸 때만 hostAlias 를 현재 ALB IP 로 재주입한다 — 그 땐 DNS 전환을 건너뛰므로.)
+
 kubectl -n api rollout restart deploy/api && kubectl -n api rollout status deploy/api
 kubectl -n web rollout restart deploy/web && kubectl -n web rollout status deploy/web
-# 재기동 후 api 로그에 "db 연결 — 유저/진행 상태 영속화 활성"(in-memory 폴백 아님)·/ready checks 의 keycloak=connected 확인.
-kubectl -n api logs deploy/api | grep -E "db 연결|in-memory"
+# 재기동 후 api 로그에 "db 연결 — 유저/진행 상태 영속화 활성"(in-memory 폴백 아님)·"running WITHOUT auth" 0건 확인.
+kubectl -n api logs deploy/api | grep -E "db 연결|in-memory|WITHOUT auth"
 ```
 
 ### 실습 fidelity 검증 (EC2 채점 == 온프렘 KubeVirt) — A3
