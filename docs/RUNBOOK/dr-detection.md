@@ -301,14 +301,20 @@ vault kv put cledyu/aws/dr-heartbeat \
   access_key_id='<NEW_ID>' \
   secret_access_key='<NEW_SECRET>'
 
-# 3) ESO(ExternalSecret)이 자동으로 Kubernetes Secret 동기화
-#    (2~3분 이내)
-kubectl -n dr-system get secret dr-heartbeat-creds
+# 3) ESO 강제 즉시 동기화 — refreshInterval=1h 를 기다리지 않는다.
+#    (이 강제 sync 가 없으면 새 Vault 값 반영이 최대 1시간 지연될 수 있다)
+kubectl -n dr-system annotate externalsecret dr-heartbeat-creds \
+  force-sync=$(date +%s) --overwrite
 
-# 4) CronJob이 다음 실행 시 새 키를 env에서 읽음
-#    (자동 재시작 필요 없음 — CronJob은 매번 파드 신규 생성)
+# 4) Kubernetes Secret 에 새 키가 실제로 반영됐는지 검증.
+#    이 출력이 <NEW_ID> 와 일치해야만 다음 단계로 넘어간다. (일치 전에 옛 키를 지우면
+#    매분 새로 뜨는 heartbeat Job 이 옛 Secret 으로 PutMetricData 에 실패해
+#    push 알람이 재해 신호로 뒤집힐 수 있다.)
+kubectl -n dr-system get secret dr-heartbeat-creds \
+  -o jsonpath='{.data.ACCESS_KEY_ID}' | base64 -d; echo
+#    (CronJob 은 매번 파드 신규 생성이라 별도 재시작 불필요)
 
-# 5) 기존 액세스 키 삭제 (확인 후, IAM은 global 서비스, 리전 무관)
+# 5) 새 키 반영을 확인한 뒤에만 기존 액세스 키 삭제 (IAM은 global, 리전 무관)
 aws iam delete-access-key \
   --user-name cledyu-lab-dr-heartbeat \
   --access-key-id '<OLD_ID>'
@@ -379,9 +385,15 @@ aws iam delete-access-key \
    ```
 2. Secrets Manager 웹훅 시크릿이 없거나 손상됨
    ```bash
-   aws secretsmanager get-secret-value \
+   # 존재·메타데이터만 확인 (값=웹훅 토큰을 stdout에 노출하지 않는다)
+   aws secretsmanager describe-secret \
      --region us-east-1 \
      --secret-id cledyu-lab-dr-discord-webhook
+
+   # 값 형식 검증이 필요하면 — URL 자체는 찍지 않고 형식만 확인:
+   aws secretsmanager get-secret-value --region us-east-1 \
+     --secret-id cledyu-lab-dr-discord-webhook --query SecretString --output text \
+     | python3 -c "import sys,json; d=json.load(sys.stdin); print('url present:', 'url' in d, '| https:', d.get('url','').startswith('https://'))"
    ```
 3. Lambda 실행 로그 확인
    ```bash
