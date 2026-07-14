@@ -411,6 +411,15 @@ kubectl -n dr-system patch cronjob dr-heartbeat -p '{"spec":{"suspend":false}}' 
 ```
 Expected: push=`ALARM`, disaster=`OK`. (둘 다 죽어야 disaster=ALARM — Task 5 전체 드릴에서 실증)
 
+> **배포 순서·무장(arming):** 복합알람은 `dr_detection_armed=false`(기본)로 생성돼 알림을 안 쏜다.
+> ① heartbeat 지표 도달(Task 2 Step 8) + pull=OK(steady) 실측 확인 → ② `dr_detection_armed=true`로
+> 재apply 해 무장 → ③ 그 뒤 Task 5 드릴(Discord 도착 실증)을 돌린다. bring-up 거짓 알림을 원천 차단.
+> ```bash
+> TF_VAR_dr_detection_armed=true terraform apply -target=aws_cloudwatch_composite_alarm.disaster
+> ```
+> ※ Route53 checker 의 ALB 443 접근은 이제 자동 허용(`public-ingress.tf` checker 대역 SG 규칙)이라
+>   `public_ingress_allowed_cidrs` 를 좁혀도 pull 이 죽지 않는다.
+
 - [ ] **Step 5: README 재생성 + Commit (운영자)**
 
 ```bash
