@@ -36,6 +36,10 @@ push 알람·복합알람·SNS·Lambda까지 **전부 us-east-1**에 배포된�
 
 ## 2. 감지 드릴 절차 (운영자)
 
+> ⚠️ **전제 — 복합알람이 무장돼 있어야 한다.** Step 3의 Discord 도착은 `dr_detection_armed=true`
+> (무장) 상태에서만 발생한다. 미무장(기본)이면 복합알람은 ALARM 이 돼도 알림을 안 쏘므로, 배포
+> 직후엔 두 신호 healthy 확인 → 무장(§ 배포 arming) 후에 이 드릴을 돌린다.
+>
 > ⚠️ **이 드릴은 Step 3에서 실제 Discord 알림(복합알람 ALARM)을 발생시킨다.**
 > 운영 온콜 채널을 실수로 깨우지 않도록 — **사전에 팀에 공지하고 점검창에서 실행**하거나,
 > 웹훅을 임시로 테스트 채널로 돌린 뒤 진행한다. 또한 Step 3는 운영 `auth.cledyu.com`
@@ -371,6 +375,27 @@ aws iam delete-access-key \
 ```
 
 **주기:** 분기별 또는 키 유출 시마다
+
+---
+
+### 7.3 복합알람 무장/해제 (arming)
+
+복합알람은 `dr_detection_armed=false`(기본)로 배포돼 알림을 안 쏜다. bring-up 중 heartbeat 동기화
+지연이나 pull 미준비로 ALARM 이 돼도 거짓 알림이 안 나가게 하기 위함이다.
+
+```bash
+# 무장 전 필수 확인 — 두 신호가 steady 하게 healthy 여야 한다:
+#   pull=OK (auth.cledyu.com 200), push=OK (heartbeat 지표 도달)
+aws cloudwatch describe-alarms --region us-east-1 --alarm-types CompositeAlarm MetricAlarm \
+  --alarm-names cledyu-lab-dr-pull cledyu-lab-dr-push \
+  --query 'MetricAlarms[].{name:AlarmName,state:StateValue}'
+# 둘 다 OK 확인 후에만 무장:
+TF_VAR_dr_detection_armed=true terraform apply -target=aws_cloudwatch_composite_alarm.disaster
+```
+
+- **무장 해제(disarm)**가 필요하면(예: 대규모 점검·오탐 폭주) `dr_detection_armed=false`로 재apply.
+- **런타임 `aws cloudwatch disable/enable-alarm-actions`는 쓰지 말 것** — 다음 `terraform apply`에
+  변수값으로 되돌려진다. 반드시 변수로 토글한다.
 
 ---
 
