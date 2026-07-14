@@ -140,6 +140,12 @@ func (h *Handler) GetMyDashboard(c *gin.Context) {
 		summary.Score += h.weightForLab(comp.LabID)
 	}
 	summary.Rank = h.userRank(ctx, uid)
+	hidden, err := h.db.LeaderboardHidden(ctx, uid)
+	if err != nil {
+		h.log.Error("dashboard preference", zap.Error(err), zap.String("user_id", uid))
+		h.err(c, http.StatusInternalServerError, "load dashboard failed")
+		return
+	}
 
 	recent := completions
 	if len(recent) > leaderboardTopN {
@@ -150,5 +156,6 @@ func (h *Handler) GetMyDashboard(c *gin.Context) {
 		"summary":            summary,
 		"labs":               rows,
 		"recent_completions": recent,
+		"leaderboard_hidden": hidden,
 	})
 }

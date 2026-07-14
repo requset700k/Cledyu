@@ -2,19 +2,19 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '@/lib/api';
+import type { UserRole } from '@/lib/types';
 
 const DASHBOARD_LINK = { href: '/dashboard', label: '내 학습' };
 
 const NAV_LINKS = [
   { href: '/labs', label: 'Labs' },
   { href: '/billing', label: '요금제' },
-  { href: '/leaderboard', label: '리더보드' },
-  { href: '/instructor', label: '강사 모드' },
 ];
 
-const MOBILE_NAV_LINKS = [DASHBOARD_LINK, ...NAV_LINKS];
+const INSTRUCTOR_LINK = { href: '/instructor', label: '강사 모드' };
 
 function navLinkClass(pathname: string, href: string) {
   return `px-3 py-1.5 rounded-md text-sm transition-colors ${
@@ -28,6 +28,13 @@ export function Navbar() {
   const pathname = usePathname();
   // 모바일(xs) 햄버거 메뉴 토글 상태. sm 이상에서는 항상 데스크톱 네비를 노출.
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { data: me } = useQuery({
+    queryKey: ['me'],
+    queryFn: () => api.auth.me(),
+    retry: false,
+  });
+  const navLinks = canAccessInstructor(me?.role) ? [...NAV_LINKS, INSTRUCTOR_LINK] : NAV_LINKS;
+  const mobileNavLinks = [DASHBOARD_LINK, ...navLinks];
 
   function handleLogout() {
     // 백엔드 GET /auth/logout 으로 전체 페이지 이동 → 쿠키 삭제 + Keycloak SSO 로그아웃.
@@ -42,7 +49,7 @@ export function Navbar() {
             Cledyu
           </Link>
           <div className="hidden sm:flex items-center gap-1">
-            {NAV_LINKS.map((link) => (
+            {navLinks.map((link) => (
               <Link key={link.href} href={link.href} className={navLinkClass(pathname, link.href)}>
                 {link.label}
               </Link>
@@ -80,7 +87,7 @@ export function Navbar() {
       {/* 모바일 드롭다운 — 햄버거 클릭 시 nav 링크를 세로로 펼침 */}
       {mobileOpen && (
         <div id="mobile-nav" className="sm:hidden border-t border-slate-800 px-4 py-2 space-y-1">
-          {MOBILE_NAV_LINKS.map((link) => (
+          {mobileNavLinks.map((link) => (
             <Link
               key={link.href}
               href={link.href}
@@ -98,6 +105,10 @@ export function Navbar() {
       )}
     </nav>
   );
+}
+
+function canAccessInstructor(role?: UserRole) {
+  return role === 'instructor' || role === 'admin';
 }
 
 function MenuIcon({ open }: { open: boolean }) {

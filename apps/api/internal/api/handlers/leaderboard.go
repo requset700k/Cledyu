@@ -86,9 +86,10 @@ type leaderboardItem struct {
 }
 
 type myRank struct {
-	Rank          int `json:"rank"` // 0 = 미공개/완료 없음
-	Score         int `json:"score"`
-	LabsCompleted int `json:"labs_completed"`
+	Rank              int  `json:"rank"` // 0 = 공개 랭킹에 없음
+	Score             int  `json:"score"`
+	LabsCompleted     int  `json:"labs_completed"`
+	LeaderboardHidden bool `json:"leaderboard_hidden"`
 }
 
 func toItems(entries []leaderboardEntry, n int) []leaderboardItem {
@@ -112,6 +113,13 @@ func (h *Handler) GetLeaderboard(c *gin.Context) {
 	ctx := c.Request.Context()
 	uid := c.GetString("user_id")
 
+	hidden, err := h.db.LeaderboardHidden(ctx, uid)
+	if err != nil {
+		h.log.Error("leaderboard preference", zap.Error(err))
+		h.err(c, http.StatusInternalServerError, "load leaderboard failed")
+		return
+	}
+
 	allRows, err := h.db.LeaderboardRows(ctx, nil)
 	if err != nil {
 		h.log.Error("leaderboard rows", zap.Error(err))
@@ -130,10 +138,15 @@ func (h *Handler) GetLeaderboard(c *gin.Context) {
 	recent := rankEntries(recentRows, h.weightForLab)
 
 	// 본인 순위 — Top N 밖이어도 항상 포함. 옵트아웃이면 공개 랭킹에 없어 Rank=0.
-	me := myRank{}
+	me := myRank{LeaderboardHidden: hidden}
 	for _, e := range ranked {
 		if e.UserID == uid {
-			me = myRank{Rank: e.Rank, Score: e.Score, LabsCompleted: e.LabsCompleted}
+			me = myRank{
+				Rank:              e.Rank,
+				Score:             e.Score,
+				LabsCompleted:     e.LabsCompleted,
+				LeaderboardHidden: hidden,
+			}
 			break
 		}
 	}

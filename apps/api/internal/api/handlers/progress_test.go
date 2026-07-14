@@ -136,6 +136,12 @@ func (f *fakePersistence) LeaderboardRows(_ context.Context, since *time.Time) (
 	return out, nil
 }
 
+func (f *fakePersistence) LeaderboardHidden(_ context.Context, userID string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.hidden[userID], nil
+}
+
 func (f *fakePersistence) SetLeaderboardHidden(_ context.Context, userID string, hidden bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
