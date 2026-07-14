@@ -379,9 +379,10 @@ aws iam delete-access-key \
 **원인 가능성:**
 1. SNS 토픽이 Lambda 구독을 갖지 않음
    ```bash
-   aws sns list-subscriptions-by-topic \
-     --topic-arn arn:aws:sns:us-east-1:ACCOUNT:cledyu-lab-dr-alert \
-     --region us-east-1
+   # ARN 을 동적으로 조회(계정 ID 를 손으로 넣지 않는다)
+   TOPIC_ARN=$(aws sns list-topics --region us-east-1 \
+     --query "Topics[?ends_with(TopicArn, ':cledyu-lab-dr-alert')].TopicArn" --output text)
+   aws sns list-subscriptions-by-topic --topic-arn "$TOPIC_ARN" --region us-east-1
    ```
 2. Secrets Manager 웹훅 시크릿이 없거나 손상됨
    ```bash
