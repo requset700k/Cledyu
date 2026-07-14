@@ -161,11 +161,22 @@ kubectl --context onprem -n api logs deploy/api | grep -E "db 연결|in-memory" 
 
 ### 8. EKS 축소
 ```bash
-# [P1] 노드그룹은 EKS 모듈이 desired_size 를 최초 생성값으로만 쓰고 이후 변경을 ignore_changes 한다
-#   (eks-dr.tf:72). 따라서 terraform 의 eks_dr_node_desired=0 로는 기존 노드가 안 줄어든다 → DNS 원복돼도
-#   DR 노드가 desired=3/running 으로 남아 과금·stale workload 유지. CLI 로 먼저 0 으로 내린다.
-# ⚠️ 노드 0 전에 in-cluster 정리(ArgoCD selfHeal 정지 → Ingress→ALB, PVC→EBS, ENI) 필수 — 안 하면
-#   ALB/gp3 EBS 가 고아로 남아 과금·삭제 블록. 상세는 dr-eks-bootstrap.md §failback / §destroy(step 0~4.5).
+# ⚠️ 순서 = in-cluster 정리 → 노드 N→0 → terraform. selfHeal 은 step1 에서 application-controller scale-0 로
+#   이미 정지돼 아래 delete 가 재생성되지 않는다. 이 정리를 건너뛰고 노드를 내리면 ALB(~$16/mo)·gp3 EBS·
+#   VPC CNI 보조 ENI 가 고아로 남아 과금·서브넷 삭제 블록(available ENI 처리 등 상세는 dr-eks-bootstrap.md §destroy).
+# (a) PVC 를 물고 있는 워크로드 먼저 종료 — 안 하면 PVC 가 pvc-protection 으로 Terminating 고착(EBS 고아).
+kubectl --context eks-dr -n vault delete statefulset vault --ignore-not-found
+kubectl --context eks-dr delete clusters.postgresql.cnpg.io -A --all --ignore-not-found
+kubectl --context eks-dr delete kafkas.kafka.strimzi.io -A --all --ignore-not-found
+kubectl --context eks-dr delete kafkanodepool.kafka.strimzi.io -A --all --ignore-not-found   # 브로커 파드 실소유자(StrimziPodSet)
+kubectl --context eks-dr wait --for=delete pod -n kafka -l strimzi.io/cluster=cledyu-kafka --timeout=300s 2>/dev/null || true
+# (b) Ingress 삭제 → ALB Controller 가 ALB/TG/SG 회수.
+kubectl --context eks-dr delete ingress -A --all
+# (c) PVC 삭제 → EBS CSI 가 gp3 볼륨 삭제(PV 소멸까지 대기).
+kubectl --context eks-dr delete pvc -A --all
+for i in $(seq 1 24); do [ -z "$(kubectl --context eks-dr get pv -o name 2>/dev/null)" ] && break; sleep 10; done
+# (d) 노드그룹 N→0 — 모듈이 desired 를 ignore_changes(eks-dr.tf:72) 하므로 terraform(eks_dr_node_desired=0)
+#   으로는 기존 노드가 안 줄어든다 → CLI 필수. 안 하면 DNS 원복돼도 DR 노드가 desired=3/running 잔존(과금·stale).
 NG=$(aws eks list-nodegroups --cluster-name cledyu-dr --region ap-northeast-2 --query 'nodegroups[0]' --output text)
 aws eks update-nodegroup-config --cluster-name cledyu-dr --region ap-northeast-2 \
   --nodegroup-name "$NG" --scaling-config minSize=0,maxSize=6,desiredSize=0
