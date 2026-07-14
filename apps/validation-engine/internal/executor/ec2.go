@@ -2,12 +2,14 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
+	ssmtypes "github.com/aws/aws-sdk-go-v2/service/ssm/types"
 	"github.com/requset700k/cledyu/validation-engine/internal/model"
 )
 
@@ -77,6 +79,21 @@ func (e *EC2Executor) Exec(ctx context.Context, cmd string) (string, error) {
 			InstanceId: aws.String(e.instanceID),
 		})
 		if err != nil {
+			// SendCommand 직후엔 invocation 이 아직 전파되지 않아 GetCommandInvocation 이
+			// InvocationDoesNotExist 를 반환한다(SSM eventual consistency, 통상 ~1-2s). 이는
+			// 실패가 아니라 "아직 준비 안 됨"이므로 Pending/InProgress 와 동일하게 재시도한다.
+			// 이걸 치명적 에러로 처리하면(과거 동작) 명령이 인스턴스에서 실제로 성공/실패해도
+			// 결과를 못 읽어 모든 EC2 채점이 항상 fail 로 떨어진다 — 2026-07-14 DR 드릴서 발견
+			// (SSM 이력은 Success 인데 검증 결과는 passed=false, duration<0.5s 로 폴링 대기 없이 즉시 실패).
+			var notReady *ssmtypes.InvocationDoesNotExist
+			if errors.As(err, &notReady) {
+				select {
+				case <-ctx.Done():
+					return "", ctx.Err()
+				case <-time.After(2 * time.Second):
+				}
+				continue
+			}
 			return "", fmt.Errorf("SSM GetCommandInvocation 실패: %w", err)
 		}
 
