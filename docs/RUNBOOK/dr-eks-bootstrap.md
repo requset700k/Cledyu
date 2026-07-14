@@ -180,7 +180,9 @@ kubectl -n external-secrets rollout status deploy/external-secrets --timeout=120
 # 검증: store Ready → ExternalSecret SecretSynced → 시크릿 생성 → api 기동
 kubectl get clustersecretstore vault-backend \
   -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'   # True
-kubectl get externalsecret -A                                     # 전부 STATUS SecretSynced
+kubectl get externalsecret -A                                     # 필수 시크릿(cledyu-api-oidc/db/aws 등) SecretSynced.
+#   단 라이브 터미널 키(cledyu-api-tailscale)는 authkey 미시드면 이것만 Degraded 여도 정상 — 필수 키 동기화·api 기동은 무관
+#   (위 '복원 후 정합성 체크' 참고). 즉 "전부 Synced"가 아니라 "필수 키 Synced + 터미널 키는 시드 여부에 달림".
 kubectl -n api get secret cledyu-api-oidc cledyu-api-db            # 생성 확인
 ```
 
@@ -329,8 +331,11 @@ CNPG → api/web restart → DNS 전환.
 cloud-init status --wait                                             # user_data 완료까지 대기
 command -v kubectl git helm aws >/dev/null && echo "tools OK" \
   || echo "⚠ user_data 미완/실패 → sudo cat /var/log/cloud-init-output.log 로 원인 확인"
-# repo 가 private 면 인증 필요: git clone https://<GITHUB_PAT>@github.com/requset700k/Cledyu.git ~/Cledyu
-git clone https://github.com/requset700k/Cledyu.git ~/Cledyu && cd ~/Cledyu
+# ⚠️ repo 가 private 면 비인증 clone 은 비대화형 bastion 에서 그냥 실패한다 → PAT 필수. 아래는 GITHUB_PAT 가
+#   설정돼 있으면 인증 URL, 없으면(=public) 익명 URL 로 clone 한다. private 인데 PAT 없으면 여기서 중단.
+GITHUB_PAT="${GITHUB_PAT:-}"   # export GITHUB_PAT=ghp_... (private repo 접근 시)
+git clone "https://${GITHUB_PAT:+$GITHUB_PAT@}github.com/requset700k/Cledyu.git" ~/Cledyu && cd ~/Cledyu \
+  || { echo "❌ clone 실패 — private repo 면 export GITHUB_PAT=... 후 재시도"; exit 1; }
 aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2   # (Vault 복원 때 이미 했으면 생략)
 
 # 0) 사전 확인 — apps-eks 앱은 targetRevision=main 을 sync. 치환할 placeholder 는 없다:
@@ -381,6 +386,10 @@ kubectl -n api get configmap cledyu-root-ca-bundle   # trust-manager Bundle 분�
 [P1b] failback 후 온프렘이 다시 primary 로 전진하므로, warm etcd 에 잔존하는 이전 사이클 CNPG CR 은 stale
 데이터를 가리킨다. root-app 적용(위) 직후, CNPG 차트가 `Cluster` CR 을 만들기 전에 구 CR 을 지워 ArgoCD 가
 새로 만들게 하면 `bootstrap.recovery` 가 최신 S3 로 재실행된다. 단발(첫) failover 는 CR 이 없어 아래는 no-op.
+
+> **정상 failback 후엔 사실 잔존 CR 이 없다** — failback 은 destroy step1(`delete clusters.postgresql.cnpg.io --all`)을
+> 수행하므로 CNPG CR 을 이미 지웠다. 이 가드는 그 삭제가 누락된 **부분 failback**(operator 가 중단됐거나 selfHeal
+> 이 재생성한 경우)에 대비한 방어다 — 정상 경로에선 아래가 no-op 이어도 무방(멱등, `--ignore-not-found`).
 
 ```bash
 # [P1b] 재-failover 시 잔존 CNPG CR 제거 → ArgoCD 재생성 → bootstrap.recovery 최신 S3. 단발 failover 는 CR 이 없어 no-op.
@@ -437,15 +446,23 @@ EKS ALB target 이 Healthy 여도 사용자가 도달하지 못한다. api/app �
 #   (운영자 머신)과 실행 위치가 갈려, 별도 셸일 때 $ALB 가 빈 값이 된다.
 # ⚠️ VPC 로만 필터하면 안 된다 — 재-failover 시 이전 사이클 고아 ALB([P1c]와 동일 warm-etcd/AWS 잔존 패턴)가
 #   같은 VPC 에 남아 있으면 `LoadBalancers[?VpcId==..].DNSName` 이 DNSName 을 공백으로 이어붙여 $ALB 에 쓰레깃값을
-#   넣고, 아래 UPSERT 가 빈/잘못된 대상을 잡는다. api/web/keycloak 은 전부 group.name=cledyu-dr 공유 ALB 이므로
-#   ALB Controller 가 그 ALB 에 붙이는 태그(ingress.k8s.aws/stack=cledyu-dr)로 정확히 1개만 선택한다.
-ALB_ARN=$(aws resourcegroupstaggingapi get-resources --region ap-northeast-2 \
+#   넣고, 아래 UPSERT 가 빈/잘못된 대상을 잡는다. api/web/keycloak 은 전부 group.name=cledyu-dr 공유 ALB 라
+#   ALB Controller 가 그 ALB 에 ingress.k8s.aws/stack=cledyu-dr 태그를 붙인다.
+# ⚠️ 단 태그로 좁혀도 stale ALB 는 걸러지지 않는다 — 정상 회수 실패로 남은 이전 사이클 ALB 도 같은 IngressGroup
+#   태그를 그대로 갖는다. 그래서 [0] 을 임의로 고르지 않고 **매치가 정확히 1개인지 검사**해, 0개(미생성/권한/태그
+#   불일치)나 2개+(stale 잔존)면 DNS 전환을 fail-closed(exit 1)한다. 2개+면 아래 kubectl 로 현재 Ingress 가
+#   실제 쓰는 ALB(status.loadBalancer)를 확인하고 나머지(stale)를 정리한 뒤 재시도한다.
+ALB_ARNS=$(aws resourcegroupstaggingapi get-resources --region ap-northeast-2 \
   --resource-type-filters elasticloadbalancing:loadbalancer \
   --tag-filters Key=ingress.k8s.aws/stack,Values=cledyu-dr \
-  --query 'ResourceTagMappingList[0].ResourceARN' --output text)
-[ -n "$ALB_ARN" ] && [ "$ALB_ARN" != "None" ] || { echo "❌ group.name=cledyu-dr ALB 미발견 — Ingress/ALB Controller 상태 확인"; }
+  --query 'ResourceTagMappingList[].ResourceARN' --output text)
+N=$(printf '%s\n' $ALB_ARNS | grep -c .)
+[ "$N" = "1" ] || { echo "❌ group.name=cledyu-dr ALB 가 ${N}개(0=미생성/권한/태그불일치, 2+=이전 사이클 stale ALB 잔존). DNS 전환 중단."; \
+  echo "   현재 Ingress 실사용 ALB: kubectl -n api get ingress api -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' (bastion) 로 확인 후 stale ALB 정리하고 재시도"; exit 1; }
+ALB_ARN=$ALB_ARNS
 read -r ALB ALB_ZONE < <(aws elbv2 describe-load-balancers --region ap-northeast-2 --load-balancer-arns "$ALB_ARN" \
   --query 'LoadBalancers[0].[DNSName,CanonicalHostedZoneId]' --output text); echo "$ALB $ALB_ZONE"
+[ -n "$ALB" ] && [ "$ALB" != "None" ] && [ -n "$ALB_ZONE" ] || { echo "❌ ALB DNS/zone 취득 실패 — 중단"; exit 1; }
 ZONE=$(aws route53 list-hosted-zones-by-name --dns-name cledyu.com --query "HostedZones[0].Id" --output text)
 
 # /metrics 차단 WAF(cledyu-lab-public, block-public-metrics 룰)는 api·web values-eks 의 wafv2-acl-arn
