@@ -232,6 +232,7 @@ func Load() (*Config, error) {
 	// aws.tailscale_api_key 는 기본 빈 값 — env CLEDYU_AWS_TAILSCALE_API_KEY(Secret)로 주입. 미설정 시 정적 authkey 폴백.
 	v.SetDefault("aws.max_active_sessions", 0) // 0 = EC2 오버플로우 비활성(현행 KubeVirt 전용 동작 보존)
 	v.SetDefault("aws.tailnet_hostname_prefix", "lab")
+	v.SetDefault("aws.tailscale_api_key", "")         // env CLEDYU_AWS_TAILSCALE_API_KEY(Secret)로 주입 — 등록해야 Unmarshal 이 바인딩
 	v.SetDefault("aws.tailscale_oauth_client_id", "") // env CLEDYU_AWS_TAILSCALE_OAUTH_CLIENT_ID(선택)
 	v.SetDefault("aws.tailscale_auth_key", "")        // env CLEDYU_AWS_TAILSCALE_AUTH_KEY(Secret)로 주입
 	v.SetDefault("aws.api_tailscale_auth_key", "")    // env CLEDYU_AWS_API_TAILSCALE_AUTH_KEY(Secret)로 주입
