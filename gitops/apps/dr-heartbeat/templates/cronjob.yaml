@@ -1,0 +1,54 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dr-heartbeat
+  namespace: {{ .Release.Namespace }}
+spec:
+  schedule: {{ .Values.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 50
+      template:
+        spec:
+          restartPolicy: Never
+          # 파드가 K8s API 를 쓰지 않으므로 SA 토큰 자동 마운트를 끈다(공격면 축소).
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: heartbeat
+              image: {{ .Values.image }}
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                {{- toYaml .Values.resources | nindent 16 }}
+              env:
+                - name: HOME
+                  value: /tmp
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef: { name: dr-heartbeat-creds, key: ACCESS_KEY_ID }
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef: { name: dr-heartbeat-creds, key: ACCESS_SECRET_KEY }
+                - name: AWS_DEFAULT_REGION
+                  value: {{ .Values.region | quote }}
+              command: ["aws"]
+              args:
+                - cloudwatch
+                - put-metric-data
+                - --namespace
+                - {{ .Values.namespace | quote }}
+                - --metric-name
+                - {{ .Values.metricName | quote }}
+                - --value
+                - "1"
