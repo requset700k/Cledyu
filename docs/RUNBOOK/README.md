@@ -43,6 +43,7 @@
 
 - [x] `ec2-overflow.md`
 - [x] `dr-restore-drill.md`
+- [DR Failback](dr-failback.md) — 온프렘 복귀·split-brain 방지·무손실 역복제
 - [ ] `k8s-drain-node.md`
 - [ ] `velero-restore.md`
 - [ ] `dr-drill-gke-autopilot.md`

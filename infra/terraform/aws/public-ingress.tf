@@ -238,6 +238,11 @@ resource "aws_lb_target_group_attachment" "proxy" {
 }
 
 # ── Route53 A(ALIAS) → ALB (auth/app/api 3-host) ──────────────────────────
+# failback: 재해 중 이 레코드는 CLI(route53 change-resource-record-sets)로 EKS ALB 를 가리키게
+# 바뀐다(state 밖 드리프트). 온프렘 복구 후 원복 =
+#   terraform apply -var enable_public_ingress=true -target=aws_route53_record.public
+# ⚠️ -var enable_public_ingress=true 필수 — 생략 시 count/for_each=0 으로 평가돼 레코드가 destroy 된다.
+# 데이터 정합 확인 후 최후 단계(split-brain 단일 권한 스위치). 상세: docs/RUNBOOK/dr-failback.md.
 resource "aws_route53_record" "public" {
   for_each = local.public_hosts
 

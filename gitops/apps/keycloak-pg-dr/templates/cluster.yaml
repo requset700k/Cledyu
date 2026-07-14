@@ -38,7 +38,8 @@ spec:
     - name: keycloak-pg-origin
       barmanObjectStore:
         destinationPath: "s3://cledyu-lab-dr-backups/keycloak"
-        serverName: keycloak-pg
+        # 운영이 f(N) 으로 쓴 아카이브를 읽는다(drEpoch=0 → keycloak-pg, 현행 동일).
+        serverName: "keycloak-pg{{- if gt (int .Values.drEpoch) 0 }}-e{{ .Values.drEpoch }}{{- end }}"
         endpointURL: "https://s3.ap-northeast-2.amazonaws.com"
         s3Credentials:
           inheritFromIAMRole: true
@@ -62,8 +63,8 @@ spec:
   backup:
     barmanObjectStore:
       destinationPath: "s3://cledyu-lab-dr-backups/keycloak-dr"
-      # serverName 이 원본(keycloak-pg)과 같으면 "Expected empty archive" — 반드시 -dr 접미.
-      serverName: keycloak-pg-dr
+      # 진입 epoch 의 -dr 아카이브(빈 새 경로). drEpoch=0 → keycloak-pg-dr-e1.
+      serverName: "keycloak-pg-dr-e{{ add (int .Values.drEpoch) 1 }}"
       endpointURL: "https://s3.ap-northeast-2.amazonaws.com"
       s3Credentials:
         inheritFromIAMRole: true

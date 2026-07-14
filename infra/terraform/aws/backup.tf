@@ -224,6 +224,9 @@ resource "aws_s3_bucket_lifecycle_configuration" "dr_backups" {
 locals {
   # 프리픽스명 = IAM 사용자 suffix. 각 writer 는 자기 프리픽스만 read/write(교차 프리픽스 차단).
   backup_writers = toset(["postgres", "vault", "velero", "keycloak"])
+
+  # -dr/ 프리픽스 read 확장 대상(failback recovery 소스). vault/velero 는 -dr 개념 없어 제외.
+  dr_readers = toset(["postgres", "keycloak"])
 }
 
 resource "aws_iam_user" "backup" {
@@ -252,6 +255,17 @@ data "aws_iam_policy_document" "backup" {
     resources = ["${aws_s3_bucket.dr_backups.arn}/${each.key}/*"]
   }
 
+  # failback: 온프렘 recovery 가 자기 DR 형제 프리픽스(-dr/)에서 base backup+WAL 을 읽는다(read 전용).
+  # PutObject/AbortMultipart 부여 안 함 — 온프렘은 -dr 에 쓰지 않는다(최소권한). postgres/keycloak 만.
+  dynamic "statement" {
+    for_each = contains(local.dr_readers, each.key) ? [1] : []
+    content {
+      sid       = "ReadDrPrefix"
+      actions   = ["s3:GetObject"]
+      resources = ["${aws_s3_bucket.dr_backups.arn}/${each.key}-dr/*"]
+    }
+  }
+
   # 버킷 레벨 액션(리스트/위치). 프리픽스 조건으로 자기 경로 목록만 보게 한다.
   statement {
     sid       = "ListOwnPrefix"
@@ -260,7 +274,8 @@ data "aws_iam_policy_document" "backup" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = ["${each.key}/*", each.key]
+      # failback: dr_readers 는 자기 -dr/ 목록도 허용(barman backup catalog 조회).
+      values = contains(local.dr_readers, each.key) ? ["${each.key}/*", each.key, "${each.key}-dr/*", "${each.key}-dr"] : ["${each.key}/*", each.key]
     }
   }
 
@@ -300,7 +315,7 @@ data "aws_iam_policy_document" "backup" {
     condition {
       test     = "StringNotLike"
       variable = "s3:prefix"
-      values   = ["${each.key}/*", each.key]
+      values   = contains(local.dr_readers, each.key) ? ["${each.key}/*", each.key, "${each.key}-dr/*", "${each.key}-dr"] : ["${each.key}/*", each.key]
     }
   }
   statement {

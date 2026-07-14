@@ -1,0 +1,5 @@
+apiVersion: v2
+name: postgres-cnpg-failback
+description: 온프렘 failback 전용 — EKS DR 아카이브(postgres-dr/)에서 cledyu-pg 를 bootstrap.recovery 로 복원. 운영 postgres-cnpg(import fail-safe)와 별개, 온프렘 정적 키·longhorn. path-swap 으로 transient 적용 후 adopt.
+type: application
+version: 0.1.0

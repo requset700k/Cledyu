@@ -77,6 +77,8 @@ spec:
   backup:
     barmanObjectStore:
       destinationPath: "s3://cledyu-lab-dr-backups/keycloak"
+      # failback 계보: drEpoch=0 은 keycloak-pg(현행 동일), ≥1 은 keycloak-pg-e{N}(빈 새 경로).
+      serverName: "keycloak-pg{{- if gt (int .Values.drEpoch) 0 }}-e{{ .Values.drEpoch }}{{- end }}"
       endpointURL: "https://s3.ap-northeast-2.amazonaws.com"
       # keycloak ns에 뿌린 Secret(프리픽스 keycloak/ 한정 IAM 키).
       s3Credentials:
