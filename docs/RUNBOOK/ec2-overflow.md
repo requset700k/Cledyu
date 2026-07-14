@@ -48,7 +48,14 @@ kubectl -n api get secret cledyu-api-tailscale -o jsonpath='{.data}' | tr ',' '\
 터미널 키 미시드 시 `cledyu-api-tailscale` ExternalSecret 만 Degraded(Not Ready) 로 남고 api 는 정상
 기동하나(deployment env `optional: true`) 라이브 터미널(브라우저 터미널→EC2 세션)이 비활성이다 —
 Degraded 는 '라이브 터미널 키 시드 누락' 신호다.
-`vault kv patch cledyu/aws/api tailscale_authkey=tskey-... api_tailscale_authkey=tskey-...` 로 시드하면 Healthy 로 전환된다.
+
+> **주의(#307 전):** 세션 키 `tailscale_authkey`(정적, `tag:lab-ec2`)는 **시드하지 말 것.**
+> 학습자(sudo)가 세션 user-data 에서 읽어 잔존 접근을 만들 수 있고, `renderCloudInit` 이 한 키를 모든
+> 세션에 반복 bake 하므로 one-off 로 넣어도 두 번째 세션부터 깨진다 —
+> [`tailnet-tag-ec2-terminal.md`](tailnet-tag-ec2-terminal.md) §5.2/§5.3(이슈 #307) 참조. api 파드용
+> `api_tailscale_authkey`(`tag:cledyu-api`, 학습자 미노출) **한 개만** 시드한다:
+> `vault kv patch cledyu/aws/api api_tailscale_authkey=tskey-...` → Degraded 는 세션 키 미시드로 남지만
+> 이는 **의도된 상태**(EC2 라이브 터미널은 #307 후 동적 발급으로 활성). 온프렘 KubeVirt 터미널은 무관하게 정상.
 
 ### 2. EC2 세션 라우팅 확인
 

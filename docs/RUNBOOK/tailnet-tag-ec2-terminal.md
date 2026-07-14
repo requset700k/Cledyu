@@ -119,14 +119,26 @@ export VAULT_ADDR=...   # 브레이크글래스 절차대로 로그인
 vault kv patch cledyu/aws/api \
   api_tailscale_authkey='<키 A: tag:cledyu-api>' \
   tailscale_authkey=''
-# 2) Tailscale admin 에서 기존 세션 키 B 자체를 revoke — 이미 새어나간(세션에 baked 된) 사본 무력화
+# 2) Tailscale admin 에서 기존 세션 키 B 자체를 revoke — 새 장치 등록만 막는다(기등록 장치는 유지됨)
 #    login.tailscale.com/admin/settings/keys → 해당 키 Revoke
+# 3) 이미 그 키로 등록된 장치를 삭제 — authkey revoke 는 기존 등록 노드의 접근을 끊지 못한다.
+#    학습자가 키를 읽어 외부 장치를 tag:lab-ec2 로 등록했을 수 있으므로 반드시 조회 후 삭제/만료.
+TS_APIKEY=<auth_keys 아닌 device write 권한 API 토큰>
+curl -sS -H "Authorization: Bearer $TS_APIKEY" \
+  https://api.tailscale.com/api/v2/tailnet/-/devices \
+ | python3 -c "import sys,json;[print(d['id'],d['hostname'],d.get('tags')) for d in json.load(sys.stdin)['devices'] if 'tag:lab-ec2' in (d.get('tags') or []) or d['hostname'].startswith('lab-')]"
+#   위 목록에서 정당한 활성 세션이 아닌(드릴 잔존·외부 등록) device 를 삭제:
+curl -sS -X DELETE -H "Authorization: Bearer $TS_APIKEY" \
+  https://api.tailscale.com/api/v2/device/<deviceID>
 ```
 
 > `tailscale_authkey=''`(빈 값)이면 ESO 가 Secret 값을 빈 값으로 덮고, `cloudinit.go:61` /
-> `session.go:159` 의 `!= ""` 조건이 거짓이 되어 bake·터미널 광고가 멈춘다. #307(동적 발급) 구현
-> 후 api 가 세션별로 발급하며(정적 property 미사용), 그때 api 에 Tailscale API 키(`auth_keys`
-> write)를 Vault→ESO 로 별도 주입한다(#307 범위).
+> `session.go:159` 의 `!= ""` 조건이 거짓이 되어 bake·터미널 광고가 멈춘다. **단 authkey revoke 만으로는
+> 부족** — Tailscale authkey 는 장치 등록용이라, 그 키로 이미 승인된 장치는 키 폐기 후에도 node key 만료
+> 또는 device 삭제 전까지 tailnet 접근을 유지한다([공식 문서](https://tailscale.com/kb/1085/auth-keys)).
+> 그래서 위 3) 에서 기등록 device 를 명시적으로 삭제한다. #307(동적 발급) 구현 후 api 가 세션별로
+> 발급하며(정적 property 미사용), 그때 api 에 Tailscale API 키(`auth_keys` write)를 Vault→ESO 로
+> 별도 주입한다(#307 범위).
 
 ### 5.4 동기화 + api 재시작
 
