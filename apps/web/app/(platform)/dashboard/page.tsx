@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { buildActiveSessionResumeHref } from '@/lib/active-session-resume.mjs';
 import { labStatusLabel } from '@/lib/dashboard.mjs';
@@ -88,17 +88,9 @@ function LabGrid({ labs }: { labs: DashboardLab[] }) {
 }
 
 export default function DashboardPage() {
-  const queryClient = useQueryClient();
   const { data, isLoading, isError } = useQuery({
     queryKey: ['my-dashboard'],
     queryFn: () => api.me.dashboard(),
-  });
-  const toggleLeaderboardHidden = useMutation({
-    mutationFn: (hidden: boolean) => api.me.setPreferences(hidden),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['leaderboard'] });
-      queryClient.invalidateQueries({ queryKey: ['my-dashboard'] });
-    },
   });
 
   if (isLoading) return <p className="text-slate-400">불러오는 중...</p>;
@@ -147,22 +139,6 @@ export default function DashboardPage() {
             );
           })}
         </div>
-      </section>
-
-      <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-5">
-        <h2 className="text-white font-semibold">공개 설정</h2>
-        <p className="mt-1 text-sm text-slate-400">
-          리더보드 메뉴는 숨기지만, 이름 공개 여부는 여기에서 변경할 수 있습니다.
-        </p>
-        <label className="mt-4 flex items-center gap-2 text-sm text-slate-300">
-          <input
-            type="checkbox"
-            checked={!data.leaderboard_hidden}
-            onChange={(e) => toggleLeaderboardHidden.mutate(!e.target.checked)}
-            disabled={toggleLeaderboardHidden.isPending}
-          />
-          리더보드에 내 이름 표시
-        </label>
       </section>
 
       <section>
