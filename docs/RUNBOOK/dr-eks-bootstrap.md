@@ -313,9 +313,9 @@ if grep -REn '^[[:space:]]*targetRevision:' gitops/argocd/root-app-eks.yaml gito
 fi
 ```
 
-> 참고: 현재 main 의 `root-app-eks.yaml`·일부 apps-eks 에 `feat/dr-eks-overlay-cnpg-keycloak` 핀이 잔존
-> (#290 머지 전 revert 누락)한다 — 이 가드가 첫 드릴에서 그걸 잡을 것이므로, 사전에 main 을 정리해 둘 것
-> (별도 프로덕션 이슈).
+> 참고: EKS 오버레이(`root-app-eks.yaml`·apps-eks)를 main 에 들여올 때 이미 git-source targetRevision 을
+> 전부 `main` 으로 정리해 머지했다(과거 `feat/dr-eks-overlay-cnpg-keycloak` 브랜치핀 잔존 우려는 해소).
+> 이 가드는 이후 브랜치핀이 재유입되지 않는지 확인하는 회귀 방어로 남겨둔다 — 현재는 통과(no-op)가 정상.
 
 ```bash
 # 1) root-app 적용 — 이제 ArgoCD 가 존재하므로 wave 순서(cert-manager -10 → pki -8 → ... → api/web 0)로 sync
