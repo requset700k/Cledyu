@@ -55,6 +55,10 @@ func (p *entitlementSessionProvider) VMIAddress(context.Context, string) (string
 func (p *entitlementSessionProvider) Capacity() int { return 0 }
 
 func newEntitlementRouter(t *testing.T, mode string, db *fakePersistence, provider *entitlementSessionProvider) *gin.Engine {
+	return newEntitlementRouterWithBilling(t, mode, checkoutProviderMock, db, provider)
+}
+
+func newEntitlementRouterWithBilling(t *testing.T, mode, billingProvider string, db *fakePersistence, provider *entitlementSessionProvider) *gin.Engine {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	labs, err := content.Load()
@@ -62,7 +66,7 @@ func newEntitlementRouter(t *testing.T, mode string, db *fakePersistence, provid
 		t.Fatalf("load labs: %v", err)
 	}
 	h := &Handler{
-		cfg:      &config.Config{Server: config.ServerConfig{Mode: mode}},
+		cfg:      &config.Config{Server: config.ServerConfig{Mode: mode}, Billing: config.BillingConfig{Provider: billingProvider}},
 		log:      zap.NewNop(),
 		labs:     labs,
 		sessions: provider,
@@ -157,5 +161,22 @@ func TestCreateSessionDoesNotGatePaidLabsInReleaseBeforeProviderCallback(t *test
 	}
 	if provider.createCount != 1 {
 		t.Fatalf("release should not block paid labs before provider callback exists, createCount=%d", provider.createCount)
+	}
+}
+
+func TestCreateSessionRequiresSubscriptionForPaidLabsInReleaseWithTossProvider(t *testing.T) {
+	db := newFakePersistence()
+	provider := &entitlementSessionProvider{}
+	r := newEntitlementRouterWithBilling(t, "release", checkoutProviderToss, db, provider)
+
+	w, body := postSession(t, r, "lab-k8s-basics")
+	if w.Code != http.StatusPaymentRequired {
+		t.Fatalf("status=%d body=%v, want 402", w.Code, body)
+	}
+	if body["code"] != "subscription_required" {
+		t.Fatalf("unexpected entitlement error payload: %v", body)
+	}
+	if provider.createCount != 0 {
+		t.Fatalf("release+toss must not create paid lab without subscription, createCount=%d", provider.createCount)
 	}
 }

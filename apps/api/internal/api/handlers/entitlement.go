@@ -32,9 +32,12 @@ func hasActivePaidSubscription(sub *store.Subscription, now time.Time) bool {
 }
 
 func (h *Handler) ensureLabEntitlement(ctx context.Context, userID string, lab content.LabContent) error {
-	// Release에는 아직 실제 결제 provider callback/webhook이 없으므로 유료 Lab을 차단하지 않는다.
-	// Mock checkout 완료 라우트가 등록되는 non-release 환경에서만 1차 entitlement 계약을 검증한다.
-	if h.cfg == nil || h.cfg.Server.Mode == "release" {
+	if h.cfg == nil {
+		return nil
+	}
+	// 실제 결제 provider가 없는 release 배포에서는 운영 데모를 막지 않기 위해 임시 우회한다.
+	// Toss provider가 설정된 release부터는 결제 활성화 경로가 있으므로 유료 Lab 구독 검사를 적용한다.
+	if h.cfg.Server.Mode == "release" && h.billingProvider() != checkoutProviderToss {
 		return nil
 	}
 

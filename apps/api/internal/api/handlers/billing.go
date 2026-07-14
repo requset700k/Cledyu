@@ -282,12 +282,6 @@ func (h *Handler) ConfirmTossCheckout(c *gin.Context) {
 		h.redirectBilling(c, "failed", "toss billing provider not configured")
 		return
 	}
-	userID := c.GetString("user_id")
-	if userID == "" {
-		h.redirectBilling(c, "failed", "missing user")
-		return
-	}
-
 	paymentKey := strings.TrimSpace(c.Query("paymentKey"))
 	orderID := strings.TrimSpace(c.Query("orderId"))
 	amount, err := strconv.Atoi(strings.TrimSpace(c.Query("amount")))
@@ -298,7 +292,7 @@ func (h *Handler) ConfirmTossCheckout(c *gin.Context) {
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), dbTimeout)
 	defer cancel()
-	cs, err := h.db.GetCheckoutSession(ctx, orderID, userID)
+	cs, err := h.db.GetCheckoutSessionByID(ctx, orderID)
 	if errors.Is(err, store.ErrCheckoutNotFound) {
 		h.redirectBilling(c, "failed", "checkout session not found")
 		return
@@ -321,7 +315,11 @@ func (h *Handler) ConfirmTossCheckout(c *gin.Context) {
 		return
 	}
 	if cs.Status == checkoutStatusPending {
-		if err := h.toss.Confirm(ctx, h.cfg.Billing, tossConfirmPayload{
+		confirmer := h.toss
+		if confirmer == nil {
+			confirmer = defaultTossConfirmer{}
+		}
+		if err := confirmer.Confirm(ctx, h.cfg.Billing, tossConfirmPayload{
 			PaymentKey: paymentKey,
 			OrderID:    orderID,
 			Amount:     amount,
@@ -331,7 +329,7 @@ func (h *Handler) ConfirmTossCheckout(c *gin.Context) {
 		}
 	}
 
-	sub, err := h.db.CompleteCheckoutSession(ctx, orderID, userID)
+	sub, err := h.db.CompleteCheckoutSession(ctx, orderID, cs.UserID)
 	if errors.Is(err, store.ErrCheckoutExpired) {
 		h.redirectBilling(c, "failed", "checkout session expired")
 		return
@@ -357,7 +355,7 @@ func findBillingPlan(planID string) (billingPlan, bool) {
 }
 
 func newCheckoutID() string {
-	b := make([]byte, 8)
+	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		return "chk_" + strings.ReplaceAll(time.Now().UTC().Format("20060102150405.000000000"), ".", "")
 	}

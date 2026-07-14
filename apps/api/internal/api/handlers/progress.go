@@ -25,6 +25,7 @@ type persistence interface {
 	ListInProgressLabsByUser(ctx context.Context, userID string) ([]store.InProgressLab, error)
 	GetSubscription(ctx context.Context, userID string) (*store.Subscription, error)
 	CreateCheckoutSession(ctx context.Context, session store.CheckoutSession) error
+	GetCheckoutSessionByID(ctx context.Context, id string) (*store.CheckoutSession, error)
 	GetCheckoutSession(ctx context.Context, id, userID string) (*store.CheckoutSession, error)
 	CompleteCheckoutSession(ctx context.Context, id, userID string) (*store.Subscription, error)
 }

@@ -167,6 +167,23 @@ func (s *Store) CreateCheckoutSession(ctx context.Context, cs CheckoutSession) e
 	return nil
 }
 
+// GetCheckoutSessionByID은 provider callback 처럼 사용자 JWT 없이 orderId만 있는 경로에서
+// checkout 시도 1건을 반환한다. 호출부가 provider/amount/status 검증을 이어서 수행해야 한다.
+func (s *Store) GetCheckoutSessionByID(ctx context.Context, id string) (*CheckoutSession, error) {
+	var cs CheckoutSession
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, user_id, plan_id, provider, status, checkout_url, created_at, expires_at
+		FROM checkout_sessions WHERE id = $1`, id).
+		Scan(&cs.ID, &cs.UserID, &cs.PlanID, &cs.Provider, &cs.Status, &cs.CheckoutURL, &cs.CreatedAt, &cs.ExpiresAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrCheckoutNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get checkout session by id: %w", err)
+	}
+	return &cs, nil
+}
+
 // GetCheckoutSession은 사용자가 소유한 checkout 시도 1건을 반환한다.
 func (s *Store) GetCheckoutSession(ctx context.Context, id, userID string) (*CheckoutSession, error) {
 	var cs CheckoutSession

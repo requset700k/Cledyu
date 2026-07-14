@@ -134,10 +134,7 @@ func TestConfirmTossCheckout_ConfirmsPaymentAndActivatesSubscription(t *testing.
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.GET("/billing/toss/success", func(c *gin.Context) {
-		c.Set("user_id", "u1")
-		h.ConfirmTossCheckout(c)
-	})
+	r.GET("/billing/toss/success", h.ConfirmTossCheckout)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/billing/toss/success?paymentKey=pay_1&orderId=chk_toss&amount=9900", nil)
@@ -188,10 +185,7 @@ func TestConfirmTossCheckout_RejectsAmountMismatchBeforeConfirm(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.GET("/billing/toss/success", func(c *gin.Context) {
-		c.Set("user_id", "u1")
-		h.ConfirmTossCheckout(c)
-	})
+	r.GET("/billing/toss/success", h.ConfirmTossCheckout)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/billing/toss/success?paymentKey=pay_1&orderId=chk_toss&amount=100", nil)

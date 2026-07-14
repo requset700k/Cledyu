@@ -73,6 +73,9 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions session.Provider, v
 	r.GET("/api/v1/auth/logout", h.Logout)
 	// silent refresh — access_token 만료 시 프론트가 호출(쿠키의 refresh_token grant).
 	r.POST("/api/v1/auth/refresh", h.Refresh)
+	// Toss success redirect는 결제창 체류 중 access_token 이 만료될 수 있으므로 JWT 밖에서 처리한다.
+	// 권한은 orderId checkout 조회 + Toss confirm API + 금액 검증으로 보장한다.
+	r.GET("/api/v1/billing/toss/success", h.ConfirmTossCheckout)
 
 	if cfg.Server.Mode == "release" && authProvider == nil {
 		log.Warn("running WITHOUT auth provider in release mode — protected routes will 503")
@@ -90,7 +93,6 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions session.Provider, v
 		v1.PATCH("/me/preferences", h.SetMyPreferences)
 		v1.GET("/billing/plans", h.GetBillingPlans)
 		v1.POST("/billing/checkout", h.CreateCheckout)
-		v1.GET("/billing/toss/success", h.ConfirmTossCheckout)
 		if cfg.Server.Mode != "release" {
 			// Mock checkout completion is a local QA path only. In release, paid plan
 			// activation must come from a verified provider callback/webhook.
