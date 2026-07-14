@@ -329,8 +329,10 @@ CNPG → api/web restart → DNS 전환.
 #     ⚠️ 부팅 직후 NAT 준비 전이면 예전엔 kubectl 설치가 깨졌다(드릴 실측) → user_data 에 대기/retry 를 넣어 해소.
 #     여기선 cloud-init 완료를 기다린 뒤 도구 존재만 검증한다(없으면 user_data 실패 → cloud-init 로그 확인).
 cloud-init status --wait                                             # user_data 완료까지 대기
-command -v kubectl git helm aws >/dev/null && echo "tools OK" \
-  || echo "⚠ user_data 미완/실패 → sudo cat /var/log/cloud-init-output.log 로 원인 확인"
+# ⚠️ `command -v kubectl git helm aws` 는 첫 인자(kubectl)만 검사한다(나머지 무시) → 도구별로 개별 확인해야 한다.
+MISSING=""; for t in kubectl git helm aws; do command -v "$t" >/dev/null 2>&1 || MISSING="$MISSING $t"; done
+[ -z "$MISSING" ] && echo "tools OK" \
+  || { echo "❌ user_data 미완/실패 — 누락 도구:$MISSING → sudo cat /var/log/cloud-init-output.log 로 원인 확인 후 재시도"; exit 1; }
 # ⚠️ repo 가 private 면 비인증 clone 은 비대화형 bastion 에서 그냥 실패한다 → PAT 필수. 아래는 GITHUB_PAT 가
 #   설정돼 있으면 인증 URL, 없으면(=public) 익명 URL 로 clone 한다. private 인데 PAT 없으면 여기서 중단.
 GITHUB_PAT="${GITHUB_PAT:-}"   # export GITHUB_PAT=ghp_... (private repo 접근 시)
@@ -460,10 +462,17 @@ N=$(printf '%s\n' $ALB_ARNS | grep -c .)
 [ "$N" = "1" ] || { echo "❌ group.name=cledyu-dr ALB 가 ${N}개(0=미생성/권한/태그불일치, 2+=이전 사이클 stale ALB 잔존). DNS 전환 중단."; \
   echo "   현재 Ingress 실사용 ALB: kubectl -n api get ingress api -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' (bastion) 로 확인 후 stale ALB 정리하고 재시도"; exit 1; }
 ALB_ARN=$ALB_ARNS
-read -r ALB ALB_ZONE < <(aws elbv2 describe-load-balancers --region ap-northeast-2 --load-balancer-arns "$ALB_ARN" \
-  --query 'LoadBalancers[0].[DNSName,CanonicalHostedZoneId]' --output text); echo "$ALB $ALB_ZONE"
+# DNSName·zone 을 각각 스칼라로 취득(process substitution 등 bash 전용 구문 회피 — sh 로 붙여넣어도 안전).
+ALB=$(aws elbv2 describe-load-balancers --region ap-northeast-2 --load-balancer-arns "$ALB_ARN" \
+  --query 'LoadBalancers[0].DNSName' --output text)
+ALB_ZONE=$(aws elbv2 describe-load-balancers --region ap-northeast-2 --load-balancer-arns "$ALB_ARN" \
+  --query 'LoadBalancers[0].CanonicalHostedZoneId' --output text); echo "$ALB $ALB_ZONE"
 [ -n "$ALB" ] && [ "$ALB" != "None" ] && [ -n "$ALB_ZONE" ] || { echo "❌ ALB DNS/zone 취득 실패 — 중단"; exit 1; }
-ZONE=$(aws route53 list-hosted-zones-by-name --dns-name cledyu.com --query "HostedZones[0].Id" --output text)
+# ⚠️ public zone 만 — cledyu.com private hosted zone 이 생기면 HostedZones[0] 이 그걸 임의로 잡아 UPSERT 가
+#   조용히 무효가 될 수 있다(현재는 public 만 존재하나 fragile). PrivateZone==false + 정확한 이름으로 좁힌다.
+ZONE=$(aws route53 list-hosted-zones-by-name --dns-name cledyu.com \
+  --query 'HostedZones[?Name==`cledyu.com.` && Config.PrivateZone==`false`].Id | [0]' --output text)
+[ -n "$ZONE" ] && [ "$ZONE" != "None" ] || { echo "❌ 공개 hosted zone(cledyu.com) 미발견 — 중단"; exit 1; }
 
 # /metrics 차단 WAF(cledyu-lab-public, block-public-metrics 룰)는 api·web values-eks 의 wafv2-acl-arn
 # annotation 으로 ALB 생성과 동시에 자동 연결된다 → 수동 associate-web-acl 불요(프로비저닝~연결 노출 창 제거).
