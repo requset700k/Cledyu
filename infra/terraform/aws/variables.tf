@@ -107,6 +107,18 @@ variable "enable_public_ingress" {
   default     = false
 }
 
+variable "dr_detection_armed" {
+  description = <<-EOT
+    DR 복합알람(<prefix>-dr-disaster)의 알림 발동(SNS→Lambda→Discord) 무장 여부.
+    false(기본): 알람은 상태를 평가하되 알림을 쏘지 않는다 — 최초 배포·bring-up 중 heartbeat
+    동기화 지연이나 pull 미준비로 복합알람이 ALARM 이 돼도 거짓 재해 알림이 안 나간다.
+    두 신호(pull·push)가 healthy 임을 실측 확인한 뒤 true 로 바꿔 재apply 해 무장한다.
+    (런타임 enable-alarm-actions 대신 변수로 둬 이후 apply 에 되돌려지지 않게 한다.)
+  EOT
+  type        = bool
+  default     = false
+}
+
 variable "public_domain" {
   description = "공개 루트 도메인(Route53 hosted zone 으로 관리). 예 cledyu.com. NS 를 도메인 등록기관에 위임해야 한다."
   type        = string

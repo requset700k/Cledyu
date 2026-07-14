@@ -103,9 +103,13 @@ resource "aws_cloudwatch_metric_alarm" "push" {
 }
 
 # 복합알람: 둘 다 ALARM 일 때만(AND) → 단일 신호 오탐 차단.
+# actions_enabled=var.dr_detection_armed: 최초 배포 시 false 라 bring-up(heartbeat 동기화 지연·
+# pull 미준비)에 복합알람이 ALARM 이 돼도 알림을 안 쏜다. 두 신호 healthy 확인 후 armed=true 로
+# 재apply 해 무장한다(§ 배포 arming 절차).
 resource "aws_cloudwatch_composite_alarm" "disaster" {
-  provider      = aws.use1
-  alarm_name    = "${var.name_prefix}-dr-disaster"
-  alarm_rule    = "ALARM(${aws_cloudwatch_metric_alarm.pull.alarm_name}) AND ALARM(${aws_cloudwatch_metric_alarm.push.alarm_name})"
-  alarm_actions = [aws_sns_topic.dr_alert.arn]
+  provider        = aws.use1
+  alarm_name      = "${var.name_prefix}-dr-disaster"
+  alarm_rule      = "ALARM(${aws_cloudwatch_metric_alarm.pull.alarm_name}) AND ALARM(${aws_cloudwatch_metric_alarm.push.alarm_name})"
+  alarm_actions   = [aws_sns_topic.dr_alert.arn]
+  actions_enabled = var.dr_detection_armed
 }
