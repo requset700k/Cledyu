@@ -18,3 +18,6 @@ restoreRoleArn: "arn:aws:iam::504284203153:role/cledyu-dr-cnpg-restore-postgres"
 #   → default off: recovery 클러스터는 복원만 하고 자체 아카이빙을 안 해 충돌을 원천 회피(드릴/재해 반복 성립).
 #   real-DR 에서 새 primary 자체보호가 필요하면 안정화 후 true(post-failover 스텝). 복원 데이터 자체는 원본 백업이 보호.
 backupEnabled: false
+
+# 운영 차트와 lockstep 되는 failback epoch. recovery 소스=f(N), 자체 -dr 아카이브=f_dr(N+1).
+drEpoch: 0

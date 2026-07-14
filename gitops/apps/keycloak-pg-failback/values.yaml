@@ -1,0 +1,14 @@
+# 온프렘 failback recovery 차트 values. recovery 소스 = EKS 가 쓴 -dr 아카이브(f_dr(N+1)).
+# drEpoch = failback 진입 시점의 epoch N(운영/DR과 lockstep). 소스 serverName = keycloak-pg-dr-e{N+1}.
+drEpoch: 0
+storage:
+  # 운영 미러(durability 는 S3 barman, PV 는 워킹셋).
+  className: longhorn
+  size: 20Gi
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "1"
+    memory: 2Gi

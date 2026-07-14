@@ -1,0 +1,18 @@
+## 복원된 DR 클러스터의 base backup(신 -dr 프리픽스). Cluster backup stanza(backupEnabled)에 종속되므로
+## backupEnabled=false(default)면 렌더 안 함 — barmanObjectStore 없이 ScheduledBackup 만 있으면 실패한다.
+## real-DR post-failover 에서 backupEnabled=true 로 켜면 활성. immediate:true = 복원 직후 1회 base backup
+## → failback recovery 가 항상 anchor 를 갖는다(WAL 만 있고 base 없으면 recovery 불가). keycloak-pg-dr 와 대칭.
+## CNPG cron 6필드(초 분 시 일 월 요일). "0 0 2 * * *" = 매일 02:00:00.
+{{- if .Values.backupEnabled }}
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: cledyu-pg-daily
+  namespace: {{ .Release.Namespace }}
+spec:
+  schedule: "0 0 2 * * *"
+  immediate: true
+  backupOwnerReference: self
+  cluster:
+    name: cledyu-pg
+{{- end }}

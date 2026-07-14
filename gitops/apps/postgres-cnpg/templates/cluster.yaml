@@ -70,6 +70,8 @@ spec:
   backup:
     barmanObjectStore:
       destinationPath: "s3://cledyu-lab-dr-backups/postgres"
+      # failback 계보: drEpoch=0 은 cledyu-pg(현행 동일), ≥1 은 cledyu-pg-e{N}(빈 새 경로).
+      serverName: "cledyu-pg{{- if gt (int .Values.drEpoch) 0 }}-e{{ .Values.drEpoch }}{{- end }}"
       endpointURL: "https://s3.ap-northeast-2.amazonaws.com"
       # Task 2가 postgres ns에 뿌린 Secret(프리픽스 postgres/ 한정 IAM 키).
       s3Credentials:

@@ -37,7 +37,8 @@ spec:
     - name: cledyu-pg-origin
       barmanObjectStore:
         destinationPath: "s3://cledyu-lab-dr-backups/postgres"
-        serverName: cledyu-pg
+        # 운영이 f(N) 으로 쓴 아카이브를 읽는다(drEpoch=0 → cledyu-pg, 현행 동일).
+        serverName: "cledyu-pg{{- if gt (int .Values.drEpoch) 0 }}-e{{ .Values.drEpoch }}{{- end }}"
         endpointURL: "https://s3.ap-northeast-2.amazonaws.com"
         s3Credentials:
           inheritFromIAMRole: true
@@ -63,8 +64,8 @@ spec:
   backup:
     barmanObjectStore:
       destinationPath: "s3://cledyu-lab-dr-backups/postgres-dr"
-      # serverName 이 원본(cledyu-pg)과 같으면 "Expected empty archive" — 반드시 -dr 접미.
-      serverName: cledyu-pg-dr
+      # 진입 epoch 의 -dr 아카이브(빈 새 경로). drEpoch=0 → cledyu-pg-dr-e1.
+      serverName: "cledyu-pg-dr-e{{ add (int .Values.drEpoch) 1 }}"
       endpointURL: "https://s3.ap-northeast-2.amazonaws.com"
       s3Credentials:
         inheritFromIAMRole: true
