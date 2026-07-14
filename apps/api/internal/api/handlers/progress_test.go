@@ -192,6 +192,25 @@ func (f *fakePersistence) GetCheckoutSession(_ context.Context, id, userID strin
 	return &cs, nil
 }
 
+func (f *fakePersistence) MarkCheckoutConfirmed(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cs, ok := f.checkouts[id]
+	if !ok {
+		return store.ErrCheckoutNotFound
+	}
+	switch cs.Status {
+	case checkoutStatusPending:
+		cs.Status = checkoutStatusConfirmed
+		f.checkouts[id] = cs
+		return nil
+	case checkoutStatusConfirmed, checkoutStatusDone:
+		return nil
+	default:
+		return store.ErrCheckoutInvalidStatus
+	}
+}
+
 func (f *fakePersistence) CompleteCheckoutSession(_ context.Context, id, userID string) (*store.Subscription, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -199,22 +218,22 @@ func (f *fakePersistence) CompleteCheckoutSession(_ context.Context, id, userID 
 	if !ok || cs.UserID != userID {
 		return nil, store.ErrCheckoutNotFound
 	}
-	if cs.Status != "pending" && cs.Status != "completed" {
+	if cs.Status != checkoutStatusPending && cs.Status != checkoutStatusConfirmed && cs.Status != checkoutStatusDone {
 		return nil, store.ErrCheckoutInvalidStatus
 	}
-	if cs.Status == "completed" {
+	if cs.Status == checkoutStatusDone {
 		sub, ok := f.subscriptions[userID]
 		if !ok {
 			return nil, store.ErrCheckoutInvalidStatus
 		}
 		return &sub, nil
 	}
-	if cs.Status == "pending" && cs.ExpiresAt.Before(time.Now()) {
+	if cs.Status == checkoutStatusPending && cs.ExpiresAt.Before(time.Now()) {
 		cs.Status = "expired"
 		f.checkouts[id] = cs
 		return nil, store.ErrCheckoutExpired
 	}
-	cs.Status = "completed"
+	cs.Status = checkoutStatusDone
 	f.checkouts[id] = cs
 	periodEnd := time.Now().AddDate(0, 1, 0)
 	sub := store.Subscription{

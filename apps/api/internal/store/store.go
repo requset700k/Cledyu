@@ -129,6 +129,13 @@ type CheckoutSession struct {
 	ExpiresAt   time.Time `json:"expires_at"`
 }
 
+const (
+	checkoutStatusPending   = "pending"
+	checkoutStatusConfirmed = "confirmed"
+	checkoutStatusCompleted = "completed"
+	checkoutStatusExpired   = "expired"
+)
+
 var (
 	ErrCheckoutNotFound      = errors.New("checkout session not found")
 	ErrCheckoutExpired       = errors.New("checkout session expired")
@@ -200,9 +207,43 @@ func (s *Store) GetCheckoutSession(ctx context.Context, id, userID string) (*Che
 	return &cs, nil
 }
 
-// CompleteCheckoutSession은 mock checkout 완료를 원자적으로 반영한다.
-// 실제 PG 웹훅 도입 전까지는 checkout 완료와 구독 활성화를 같은 트랜잭션으로 묶어
-// "결제 완료처럼 보이지만 구독은 그대로" 남는 상태를 방지한다.
+// MarkCheckoutConfirmed는 PG 승인 성공 직후 checkout을 confirmed로 남긴다.
+// 이후 구독 upsert가 실패해도 재시도는 PG confirm을 다시 호출하지 않고 completed로 복구할 수 있다.
+func (s *Store) MarkCheckoutConfirmed(ctx context.Context, id string) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin checkout confirmation: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck // Commit 성공 시 Rollback 은 no-op.
+
+	var status string
+	err = tx.QueryRow(ctx, `SELECT status FROM checkout_sessions WHERE id = $1 FOR UPDATE`, id).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrCheckoutNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("get checkout status: %w", err)
+	}
+
+	switch status {
+	case checkoutStatusPending:
+		if _, err := tx.Exec(ctx, `UPDATE checkout_sessions SET status = $2 WHERE id = $1`, id, checkoutStatusConfirmed); err != nil {
+			return fmt.Errorf("mark checkout confirmed: %w", err)
+		}
+	case checkoutStatusConfirmed, checkoutStatusCompleted:
+		// idempotent retry path
+	default:
+		return ErrCheckoutInvalidStatus
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit checkout confirmation: %w", err)
+	}
+	return nil
+}
+
+// CompleteCheckoutSession은 checkout 완료를 원자적으로 반영한다.
+// confirmed 상태는 이미 PG 승인이 끝난 상태이므로 checkout 만료와 무관하게 구독 upsert를 재시도한다.
 func (s *Store) CompleteCheckoutSession(ctx context.Context, id, userID string) (*Subscription, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -223,10 +264,10 @@ func (s *Store) CompleteCheckoutSession(ctx context.Context, id, userID string) 
 	}
 
 	now := time.Now().UTC()
-	if cs.Status != "pending" && cs.Status != "completed" {
+	if cs.Status != checkoutStatusPending && cs.Status != checkoutStatusConfirmed && cs.Status != checkoutStatusCompleted {
 		return nil, ErrCheckoutInvalidStatus
 	}
-	if cs.Status == "completed" {
+	if cs.Status == checkoutStatusCompleted {
 		var sub Subscription
 		var existingPeriodEnd sql.NullTime
 		err = tx.QueryRow(ctx, `
@@ -247,8 +288,8 @@ func (s *Store) CompleteCheckoutSession(ctx context.Context, id, userID string) 
 		}
 		return &sub, nil
 	}
-	if cs.Status == "pending" && cs.ExpiresAt.Before(now) {
-		if _, err := tx.Exec(ctx, `UPDATE checkout_sessions SET status = 'expired' WHERE id = $1`, id); err != nil {
+	if cs.Status == checkoutStatusPending && cs.ExpiresAt.Before(now) {
+		if _, err := tx.Exec(ctx, `UPDATE checkout_sessions SET status = $2 WHERE id = $1`, id, checkoutStatusExpired); err != nil {
 			return nil, fmt.Errorf("expire checkout session: %w", err)
 		}
 		if err := tx.Commit(ctx); err != nil {
@@ -256,7 +297,7 @@ func (s *Store) CompleteCheckoutSession(ctx context.Context, id, userID string) 
 		}
 		return nil, ErrCheckoutExpired
 	}
-	if _, err := tx.Exec(ctx, `UPDATE checkout_sessions SET status = 'completed' WHERE id = $1`, id); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE checkout_sessions SET status = $2 WHERE id = $1`, id, checkoutStatusCompleted); err != nil {
 		return nil, fmt.Errorf("mark checkout completed: %w", err)
 	}
 

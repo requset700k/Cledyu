@@ -65,13 +65,17 @@ func newEntitlementRouterWithBilling(t *testing.T, mode, billingProvider string,
 	if err != nil {
 		t.Fatalf("load labs: %v", err)
 	}
+	var persistenceDB persistence
+	if db != nil {
+		persistenceDB = db
+	}
 	h := &Handler{
 		cfg:      &config.Config{Server: config.ServerConfig{Mode: mode}, Billing: config.BillingConfig{Provider: billingProvider}},
 		log:      zap.NewNop(),
 		labs:     labs,
 		sessions: provider,
-		steps:    newStepStore(db, zap.NewNop()),
-		db:       db,
+		steps:    newStepStore(persistenceDB, zap.NewNop()),
+		db:       persistenceDB,
 		locks:    lock.NewMemLocker(),
 	}
 	r := gin.New()
@@ -178,5 +182,21 @@ func TestCreateSessionRequiresSubscriptionForPaidLabsInReleaseWithTossProvider(t
 	}
 	if provider.createCount != 0 {
 		t.Fatalf("release+toss must not create paid lab without subscription, createCount=%d", provider.createCount)
+	}
+}
+
+func TestCreateSessionFailsClosedForPaidLabsInReleaseWithTossProviderAndNoStore(t *testing.T) {
+	provider := &entitlementSessionProvider{}
+	r := newEntitlementRouterWithBilling(t, "release", checkoutProviderToss, nil, provider)
+
+	w, body := postSession(t, r, "lab-k8s-basics")
+	if w.Code != http.StatusPaymentRequired {
+		t.Fatalf("status=%d body=%v, want 402", w.Code, body)
+	}
+	if body["code"] != "subscription_required" {
+		t.Fatalf("unexpected entitlement error payload: %v", body)
+	}
+	if provider.createCount != 0 {
+		t.Fatalf("release+toss without DB must fail closed for paid labs, createCount=%d", provider.createCount)
 	}
 }

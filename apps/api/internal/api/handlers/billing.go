@@ -23,11 +23,12 @@ import (
 )
 
 const (
-	checkoutProviderMock  = "mock"
-	checkoutProviderToss  = "toss"
-	checkoutStatusPending = "pending"
-	checkoutStatusDone    = "completed"
-	defaultPlanID         = "free"
+	checkoutProviderMock    = "mock"
+	checkoutProviderToss    = "toss"
+	checkoutStatusPending   = "pending"
+	checkoutStatusConfirmed = "confirmed"
+	checkoutStatusDone      = "completed"
+	defaultPlanID           = "free"
 )
 
 type billingPlan struct {
@@ -290,9 +291,9 @@ func (h *Handler) ConfirmTossCheckout(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), dbTimeout)
-	defer cancel()
-	cs, err := h.db.GetCheckoutSessionByID(ctx, orderID)
+	lookupCtx, cancel := context.WithTimeout(c.Request.Context(), dbTimeout)
+	cs, err := h.db.GetCheckoutSessionByID(lookupCtx, orderID)
+	cancel()
 	if errors.Is(err, store.ErrCheckoutNotFound) {
 		h.redirectBilling(c, "failed", "checkout session not found")
 		return
@@ -306,7 +307,7 @@ func (h *Handler) ConfirmTossCheckout(c *gin.Context) {
 		h.redirectBilling(c, "failed", "checkout verification failed")
 		return
 	}
-	if cs.Status != checkoutStatusPending && cs.Status != checkoutStatusDone {
+	if cs.Status != checkoutStatusPending && cs.Status != checkoutStatusConfirmed && cs.Status != checkoutStatusDone {
 		h.redirectBilling(c, "failed", "checkout session cannot be completed")
 		return
 	}
@@ -319,17 +320,29 @@ func (h *Handler) ConfirmTossCheckout(c *gin.Context) {
 		if confirmer == nil {
 			confirmer = defaultTossConfirmer{}
 		}
-		if err := confirmer.Confirm(ctx, h.cfg.Billing, tossConfirmPayload{
+		confirmCtx, cancel := context.WithTimeout(c.Request.Context(), 15*time.Second)
+		err := confirmer.Confirm(confirmCtx, h.cfg.Billing, tossConfirmPayload{
 			PaymentKey: paymentKey,
 			OrderID:    orderID,
 			Amount:     amount,
-		}); err != nil {
+		})
+		cancel()
+		if err != nil {
 			h.redirectBilling(c, "failed", "toss payment confirm failed")
+			return
+		}
+		recordCtx, cancel := context.WithTimeout(c.Request.Context(), dbTimeout)
+		err = h.db.MarkCheckoutConfirmed(recordCtx, orderID)
+		cancel()
+		if err != nil {
+			h.redirectBilling(c, "failed", "checkout confirmation record failed")
 			return
 		}
 	}
 
-	sub, err := h.db.CompleteCheckoutSession(ctx, orderID, cs.UserID)
+	completeCtx, cancel := context.WithTimeout(c.Request.Context(), dbTimeout)
+	sub, err := h.db.CompleteCheckoutSession(completeCtx, orderID, cs.UserID)
+	cancel()
 	if errors.Is(err, store.ErrCheckoutExpired) {
 		h.redirectBilling(c, "failed", "checkout session expired")
 		return

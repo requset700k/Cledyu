@@ -157,6 +157,54 @@ func TestConfirmTossCheckout_ConfirmsPaymentAndActivatesSubscription(t *testing.
 	}
 }
 
+func TestConfirmTossCheckout_ConfirmedSessionCompletesWithoutReconfirm(t *testing.T) {
+	fake := newFakePersistence()
+	fake.checkouts["chk_confirmed"] = store.CheckoutSession{
+		ID:        "chk_confirmed",
+		UserID:    "u1",
+		PlanID:    "pro-monthly",
+		Provider:  checkoutProviderToss,
+		Status:    checkoutStatusConfirmed,
+		ExpiresAt: time.Now().Add(-10 * time.Minute),
+	}
+	confirmer := &fakeTossConfirmer{}
+	h := &Handler{
+		cfg: &config.Config{
+			FrontendURL: "https://app.cledyu.local",
+			Billing: config.BillingConfig{
+				Provider:       checkoutProviderToss,
+				TossClientKey:  "test_ck",
+				TossSecretKey:  "test_sk",
+				TossAPIBaseURL: "https://api.tosspayments.com",
+			},
+		},
+		log:  zap.NewNop(),
+		db:   fake,
+		toss: confirmer,
+	}
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/billing/toss/success", h.ConfirmTossCheckout)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/billing/toss/success?paymentKey=pay_1&orderId=chk_confirmed&amount=9900", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusFound {
+		t.Fatalf("expected 302, got %d body=%s", w.Code, w.Body.String())
+	}
+	if confirmer.calls != 0 {
+		t.Fatalf("confirmed checkout must not call toss confirm again, got %d calls", confirmer.calls)
+	}
+	if got := fake.checkouts["chk_confirmed"].Status; got != checkoutStatusDone {
+		t.Fatalf("checkout status = %q, want completed", got)
+	}
+	sub := fake.subscriptions["u1"]
+	if sub.PlanID != "pro-monthly" || sub.Status != "active" {
+		t.Fatalf("subscription mismatch: %+v", sub)
+	}
+}
+
 func TestConfirmTossCheckout_RejectsAmountMismatchBeforeConfirm(t *testing.T) {
 	fake := newFakePersistence()
 	fake.checkouts["chk_toss"] = store.CheckoutSession{

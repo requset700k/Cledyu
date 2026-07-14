@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS checkout_sessions (
     user_id      TEXT NOT NULL,
     plan_id      TEXT NOT NULL,
     provider     TEXT NOT NULL,
-    status       TEXT NOT NULL, -- pending | completed | expired | canceled
+    status       TEXT NOT NULL, -- pending | confirmed | completed | expired | canceled
     checkout_url TEXT NOT NULL,
     created_at   timestamptz NOT NULL DEFAULT now(),
     expires_at   timestamptz NOT NULL

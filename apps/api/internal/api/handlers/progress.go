@@ -27,6 +27,7 @@ type persistence interface {
 	CreateCheckoutSession(ctx context.Context, session store.CheckoutSession) error
 	GetCheckoutSessionByID(ctx context.Context, id string) (*store.CheckoutSession, error)
 	GetCheckoutSession(ctx context.Context, id, userID string) (*store.CheckoutSession, error)
+	MarkCheckoutConfirmed(ctx context.Context, id string) error
 	CompleteCheckoutSession(ctx context.Context, id, userID string) (*store.Subscription, error)
 }
 

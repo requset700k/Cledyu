@@ -35,17 +35,24 @@ func (h *Handler) ensureLabEntitlement(ctx context.Context, userID string, lab c
 	if h.cfg == nil {
 		return nil
 	}
-	// 실제 결제 provider가 없는 release 배포에서는 운영 데모를 막지 않기 위해 임시 우회한다.
-	// Toss provider가 설정된 release부터는 결제 활성화 경로가 있으므로 유료 Lab 구독 검사를 적용한다.
-	if h.cfg.Server.Mode == "release" && h.billingProvider() != checkoutProviderToss {
-		return nil
-	}
-
 	if !labRequiresPaidPlan(lab) {
 		return nil
 	}
 
+	enforcePaidPlan := true
+	// 실제 결제 provider가 없는 release 배포에서는 운영 데모를 막지 않기 위해 임시 우회한다.
+	// Toss provider가 설정된 release부터는 결제 활성화 경로가 있으므로 유료 Lab 구독 검사를 적용한다.
+	if h.cfg.Server.Mode == "release" && h.billingProvider() != checkoutProviderToss {
+		enforcePaidPlan = false
+	}
+	if !enforcePaidPlan {
+		return nil
+	}
+
 	if h.db == nil {
+		if enforcePaidPlan && h.cfg.Server.Mode == "release" && h.billingProvider() == checkoutProviderToss {
+			return errSubscriptionRequired
+		}
 		return nil
 	}
 
