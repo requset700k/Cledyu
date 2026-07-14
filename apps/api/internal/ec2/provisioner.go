@@ -290,9 +290,6 @@ func (p *Provisioner) ReapExpiredSessions(ctx context.Context) ([]string, error)
 // VMIAddress는 세션 인스턴스의 tailnet MagicDNS 호스트네임을 반환한다(라이브 터미널/IDE 프록시용).
 // 인스턴스가 아직 running 이 아니거나 tailnet 미가입(authkey 미설정)이면 ErrNotFound.
 func (p *Provisioner) VMIAddress(ctx context.Context, sessionID string) (string, error) {
-	if !p.cfg.LiveTerminalEnabled() {
-		return "", session.ErrNotFound // 라이브 터미널 기능 off(정적·동적 authkey 모두 미설정)
-	}
 	inst, err := p.findActiveInstance(ctx, tagFilter(tagSessionID, sessionID))
 	if err != nil {
 		return "", err
@@ -300,7 +297,10 @@ func (p *Provisioner) VMIAddress(ctx context.Context, sessionID string) (string,
 	if inst == nil || inst.State == nil || inst.State.Name != ectypes.InstanceStateNameRunning {
 		return "", session.ErrNotFound
 	}
-	// 정적 키 유무가 아니라 이 세션이 실제로 tailnet 에 가입했는지(동적 발급 성공 포함)로 판단한다.
+	// 도달성은 현재 config(정적/동적 키 설정 여부)가 아니라 이 세션이 실제로 tailnet 에 가입했는지로
+	// 판단한다 — sessionResponse/instanceToSession 과 동일 기준(sessionTailnetEnabled). config 로 먼저
+	// 게이트하면, Secret 이 일시적으로 빠진 채 api 가 재시작될 때 이미 tag=1 로 부팅돼 tailnet 에 붙어
+	// 있는 세션이 광고(sessionResponse)는 되는데 여기서만 ErrNotFound(→503)가 나는 불일치가 생긴다(Codex).
 	if !p.sessionTailnetEnabled(inst) {
 		return "", session.ErrNotFound
 	}

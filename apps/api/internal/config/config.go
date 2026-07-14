@@ -148,13 +148,6 @@ type AWSConfig struct {
 	LiveTerminalSSHPassword string `mapstructure:"live_terminal_ssh_password"`
 }
 
-// LiveTerminalEnabled은 세션이 tailnet 에 가입해 라이브 터미널/IDE 를 붙일 수 있는 구성인지 —
-// 정적 세션 authkey(TailscaleAuthKey) 또는 동적 발급용 API 키(TailscaleAPIKey) 중 하나라도
-// 설정됐는지 — 를 반환한다. 개별 세션의 실제 가입 성공 여부는 인스턴스 태그로 별도 판단한다.
-func (c AWSConfig) LiveTerminalEnabled() bool {
-	return c.TailscaleAuthKey != "" || c.TailscaleAPIKey != ""
-}
-
 type KeycloakConfig struct {
 	URL          string `mapstructure:"url"`
 	Realm        string `mapstructure:"realm"`
