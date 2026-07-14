@@ -29,11 +29,23 @@
 #    selfHeal 을 꺼도 root-app 이 되살리므로, application-controller 를 scale 0 으로 내려 selfHeal 엔진 자체를
 #    멈춘다(dr-eks-bootstrap.md §destroy step0 과 동일 패턴). EKS 는 §8 에서 축소되므로 복원 불요.
 kubectl --context eks-dr -n argocd scale statefulset argocd-application-controller --replicas=0
-kubectl --context eks-dr -n argocd rollout status statefulset argocd-application-controller --timeout=60s
+# ⚠️ rollout status 는 scale-0 에서 실제 Pod 삭제를 안 기다린다(rolling-update 상태만 판단) → 컨트롤러 Pod 가
+#   Terminating 인 채로 넘어가면 살아있는 controller 가 아래 api scale-0/keycloak patch 를 selfHeal 로 되살려
+#   quiesce 가 깨진다. Pod 소멸을 직접 확인하고(fail-closed) 진행한다.
+kubectl --context eks-dr -n argocd wait --for=delete pod -l app.kubernetes.io/name=argocd-application-controller --timeout=120s 2>/dev/null || true
+[ -z "$(kubectl --context eks-dr -n argocd get pod -l app.kubernetes.io/name=argocd-application-controller -o name 2>/dev/null)" ] \
+  || { echo "❌ application-controller Pod 잔존 — selfHeal 미정지, quiesce 진행 금지"; exit 1; }
 kubectl --context eks-dr -n api scale deploy/api --replicas=0   # 진도/과금 쓰기 정지
 # Keycloak 은 operator CR(instances)로 SS 를 관리하므로 SS 직접 scale 은 되돌려진다 → CR instances=0 으로 정지.
 kubectl --context eks-dr -n keycloak patch keycloak cledyu-keycloak --type merge -p '{"spec":{"instances":0}}'   # auth(로그인/계정) 쓰기 정지
-kubectl --context eks-dr -n keycloak rollout status statefulset/cledyu-keycloak --timeout=120s 2>/dev/null || true
+# ⚠️ scale/patch 는 파드 종료를 기다리지 않는다(rollout status 도 scale-0 실제 삭제 미대기) → flush(step2) 전에
+#   api·keycloak 파드가 실제로 사라졌는지 확인해야 in-flight 쓰기까지 멎는다(무손실). 파드 소멸 대기 + fail-closed.
+kubectl --context eks-dr -n api      wait --for=delete pod -l app=api      --timeout=120s 2>/dev/null || true
+kubectl --context eks-dr -n keycloak wait --for=delete pod -l app=keycloak --timeout=180s 2>/dev/null || true
+[ -z "$(kubectl --context eks-dr -n api get pod -l app=api -o name 2>/dev/null)" ] \
+  || { echo "❌ api 파드 잔존 — 쓰기 정지 미완, flush 진행 금지"; exit 1; }
+[ -z "$(kubectl --context eks-dr -n keycloak get pod -l app=keycloak -o name 2>/dev/null)" ] \
+  || { echo "❌ keycloak 파드 잔존 — 쓰기 정지 미완, flush 진행 금지"; exit 1; }
 ```
 
 ### 2. EKS write frontier flush + S3 도달 대기 (EKS primary) — 【승인 게이트】

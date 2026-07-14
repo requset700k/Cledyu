@@ -584,7 +584,11 @@ VPCID=$(aws eks describe-cluster --name cledyu-dr --region ap-northeast-2 --quer
 #    스케일 0** 으로 내려 selfHeal 엔진 자체를 정지시키는 게 확실하다(self-managed 삭제-cascade 데드락도 회피 —
 #    삭제가 아니라 스케일다운이라 컨트롤러가 자기 자신을 prune 하지 않는다). ALB controller·EBS CSI 는 계속 떠서 정리 담당.
 kubectl -n argocd scale statefulset argocd-application-controller --replicas=0
-kubectl -n argocd rollout status statefulset argocd-application-controller --timeout=60s
+# ⚠️ rollout status 는 scale-0 의 실제 Pod 삭제를 안 기다린다 → Pod 소멸을 직접 확인(fail-closed). 안 그러면
+#   잔존 controller 가 아래 지운 Ingress/PVC 를 selfHeal 로 되살려 ALB/EBS 가 고아가 된다(위 드릴 실측).
+kubectl -n argocd wait --for=delete pod -l app.kubernetes.io/name=argocd-application-controller --timeout=120s 2>/dev/null || true
+[ -z "$(kubectl -n argocd get pod -l app.kubernetes.io/name=argocd-application-controller -o name 2>/dev/null)" ] \
+  || { echo "❌ application-controller Pod 잔존 — selfHeal 미정지, 정리 진행 금지"; exit 1; }
 
 # 1) PVC 를 물고 있는 워크로드 먼저 종료 — vault StatefulSet + CNPG Cluster(T7) + Kafka 브로커(실습 스택 A1).
 #    파드가 PVC 를 마운트한 채 delete pvc 하면 pvc-protection 으로 PVC 가 Terminating 에 묶여 EBS CSI 가 볼륨을
