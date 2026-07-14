@@ -22,6 +22,14 @@
 ```bash
 # api(진도·과금 쓰기)와 keycloak(로그인·세션·계정 쓰기) 양쪽 쓰기경로를 모두 정지 — 둘 다 failback 대상이라
 # 하나라도 열려 있으면 flush(step 2) 이후 그 DB 에 새 쓰기가 생겨 온프렘 recovery 데이터셋에 안 들어가고 소실된다(무손실 계약 위반).
+#
+# ⚠️ selfHeal 선정지(필수) — eks-service-api·eks-service-keycloak Application 은 automated.selfHeal=true 라
+#    (service-api.yaml·service-keycloak.yaml), 아래 scale-0/instances-0 을 ArgoCD 가 즉시 desired 로 되돌려
+#    quiesce 가 안 걸린다 → flush 후에도 쓰기가 다시 열려 recovery 데이터셋에 누락(무손실 계약 위반). 앱별
+#    selfHeal 을 꺼도 root-app 이 되살리므로, application-controller 를 scale 0 으로 내려 selfHeal 엔진 자체를
+#    멈춘다(dr-eks-bootstrap.md §destroy step0 과 동일 패턴). EKS 는 §8 에서 축소되므로 복원 불요.
+kubectl --context eks-dr -n argocd scale statefulset argocd-application-controller --replicas=0
+kubectl --context eks-dr -n argocd rollout status statefulset argocd-application-controller --timeout=60s
 kubectl --context eks-dr -n api scale deploy/api --replicas=0   # 진도/과금 쓰기 정지
 # Keycloak 은 operator CR(instances)로 SS 를 관리하므로 SS 직접 scale 은 되돌려진다 → CR instances=0 으로 정지.
 kubectl --context eks-dr -n keycloak patch keycloak cledyu-keycloak --type merge -p '{"spec":{"instances":0}}'   # auth(로그인/계정) 쓰기 정지
@@ -153,6 +161,16 @@ kubectl --context onprem -n api logs deploy/api | grep -E "db 연결|in-memory" 
 
 ### 8. EKS 축소
 ```bash
+# [P1] 노드그룹은 EKS 모듈이 desired_size 를 최초 생성값으로만 쓰고 이후 변경을 ignore_changes 한다
+#   (eks-dr.tf:72). 따라서 terraform 의 eks_dr_node_desired=0 로는 기존 노드가 안 줄어든다 → DNS 원복돼도
+#   DR 노드가 desired=3/running 으로 남아 과금·stale workload 유지. CLI 로 먼저 0 으로 내린다.
+# ⚠️ 노드 0 전에 in-cluster 정리(ArgoCD selfHeal 정지 → Ingress→ALB, PVC→EBS, ENI) 필수 — 안 하면
+#   ALB/gp3 EBS 가 고아로 남아 과금·삭제 블록. 상세는 dr-eks-bootstrap.md §failback / §destroy(step 0~4.5).
+NG=$(aws eks list-nodegroups --cluster-name cledyu-dr --region ap-northeast-2 --query 'nodegroups[0]' --output text)
+aws eks update-nodegroup-config --cluster-name cledyu-dr --region ap-northeast-2 \
+  --nodegroup-name "$NG" --scaling-config minSize=0,maxSize=6,desiredSize=0
+aws eks wait nodegroup-active --cluster-name cledyu-dr --region ap-northeast-2 --nodegroup-name "$NG"
+
 cd infra/terraform/aws && terraform apply \
   -var enable_eks_dr=true -var eks_dr_active=false -var eks_dr_node_desired=0 \
   -target=module.eks_dr_vpc -target=module.eks_dr -target=module.eks_dr_ebs_csi_irsa \
