@@ -41,8 +41,10 @@ push 알람·복합알람·SNS·Lambda까지 **전부 us-east-1**에 배포된�
 > 웹훅을 임시로 테스트 채널로 돌린 뒤 진행한다. 또한 Step 3는 운영 `auth.cledyu.com`
 > 서비스를 내리지 않고 **Route53 health check 설정만** 일시 변경해 pull 실패를 흉내내며,
 > Step 4에서 **반드시 원복**한다(원복 누락 시 감지가 계속 오동작).
-> 또한 이 앱은 ArgoCD `selfHeal=true`라 suspend drift 를 되돌리므로, 드릴은 **Step 2에서
-> 자동 sync 를 껐다가 Step 4에서 다시 켠다**(안 끄면 push 알람이 재현되지 않는다).
+> 또한 app-of-apps + `selfHeal=true` 구조라, 드릴은 **Step 2에서 root-apps·자식 앱의 자동
+> sync 를 껐다가 Step 4에서 되켠다**(안 끄면 suspend 가 되돌려져 push 알람이 재현 안 됨).
+> ⚠️ root-apps 를 끄면 드릴 동안 **클러스터 전체 GitOps self-heal 이 멈추니** Step 4 원복 필수.
+> (대안: cronjob 에 `suspend` 값을 두어 GitOps 로 suspend — 이 PR 범위 밖, 후속.)
 
 각 단계의 **벽시계 시각**을 기록하여 실제 감지 지연을 실측한다.
 
@@ -70,12 +72,15 @@ heartbeat CronJob을 suspend해 push 신호만 끊는다 (pull은 정상).
 3~4분 후 `push=ALARM`이지만 `composite=OK` 상태 확인 → **AND 로직이 오탐을 차단**하는지 증명.
 
 ```bash
-# 0) ArgoCD self-heal 차단 — 이 앱은 automated.selfHeal=true 라, cronjob 에 없는
-#    suspend=true 를 patch 하면 drift 로 보고 다시 되돌려 heartbeat 를 재개시킨다.
-#    그러면 push 알람이 안 떠 드릴이 재현되지 않으므로 드릴 동안 자동 sync 를 끈다(Step 4 원복).
+# 0) ArgoCD self-heal 차단 (드릴 동안, Step 4 에서 원복). app-of-apps 구조라 2단계로 끈다:
+#    - root-apps(Ansible 배포·self-managed 아님)가 자식 Application spec 을 git 과 강제 일치시키므로,
+#      root-apps 를 먼저 꺼야 자식의 sync 정지가 몇 분 뒤 되돌려지지 않는다.
+#    - 그 다음 platform-dr-heartbeat 를 꺼야 cronjob suspend drift 가 되돌려지지 않는다.
+#    ⚠️ root-apps auto-sync 를 끄면 드릴 동안 클러스터 전체 GitOps self-heal 이 멈춘다 → Step 4 원복 필수.
+argocd app set root-apps --sync-policy none
 argocd app set platform-dr-heartbeat --sync-policy none
-#    argocd CLI 없으면:
-#    kubectl -n argocd patch application platform-dr-heartbeat --type merge \
+#    argocd CLI 없으면 각각:
+#    kubectl -n argocd patch application <app-이름> --type merge \
 #      -p '{"spec":{"syncPolicy":{"automated":null}}}'
 
 # heartbeat CronJob suspend (push 신호 차단)
@@ -167,9 +172,10 @@ aws route53 update-health-check \
   --health-check-id "$HC_ID" \
   --resource-path "/realms/cledyu-learn"
 
-# ArgoCD 자동 sync 재개 (Step 2에서 끈 것 원복 — 안 하면 이후 drift가 방치된다)
+# ArgoCD 자동 sync 재개 — Step 2 역순(자식 먼저, root-apps 나중). ⚠️ 반드시 실행(안 하면 전체 GitOps self-heal 이 멈춘 채 방치).
 argocd app set platform-dr-heartbeat --sync-policy automated --auto-prune --self-heal
-#   kubectl: kubectl -n argocd patch application platform-dr-heartbeat --type merge \
+argocd app set root-apps --sync-policy automated --auto-prune --self-heal
+#   kubectl 대안: kubectl -n argocd patch application <app-이름> --type merge \
 #     -p '{"spec":{"syncPolicy":{"automated":{"prune":true,"selfHeal":true}}}}'
 ```
 
