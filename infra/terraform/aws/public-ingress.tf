@@ -57,6 +57,14 @@ data "aws_acm_certificate" "wildcard" {
   most_recent = true
 }
 
+# DR 감지(dr-detection.tf)의 Route53 health check 는 AWS health checker IP 대역에서 온다.
+# public_ingress_allowed_cidrs 를 사무실 IP 등으로 좁히면 checker 가 차단돼 pull 알람이 상시
+# ALARM 이 되므로, ALB 443 에 checker 대역을 항상 별도 허용한다(공개 진입점 켜졌을 때).
+data "aws_ip_ranges" "route53_healthchecks" {
+  count    = local.pub
+  services = ["route53_healthchecks"]
+}
+
 # ── ALB 보안그룹(공개 443/80 인바운드) ────────────────────────────────────
 resource "aws_security_group" "alb" {
   count       = local.pub
@@ -77,6 +85,15 @@ resource "aws_security_group" "alb" {
     to_port     = 80
     protocol    = "tcp"
     cidr_blocks = var.public_ingress_allowed_cidrs
+  }
+  # DR pull 프로브(Route53 health check)가 항상 443 에 도달하도록 checker 대역 허용.
+  # public_ingress_allowed_cidrs 를 좁혀도 이 규칙이 있어야 pull 이 설정 이유로 죽지 않는다.
+  ingress {
+    description = "Route53 DR health checkers (443)"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = data.aws_ip_ranges.route53_healthchecks[0].cidr_blocks
   }
   egress {
     description = "To proxy targets"
