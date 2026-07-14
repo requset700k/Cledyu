@@ -36,6 +36,7 @@ const (
 	tagStartedAt          = "cledyu.io/started-at"
 	tagExpiresAt          = "cledyu.io/expires-at"
 	tagBootResultRecorded = "cledyu.io/boot-result-recorded"
+	tagTailnet            = "cledyu.io/tailnet" // "1"이면 이 세션이 tailnet 에 가입(라이브 터미널 가능)
 )
 
 // ec2API는 프로비저너가 쓰는 EC2 호출 표면이다. 단위 테스트에서 가짜 구현으로 대체한다.
@@ -111,7 +112,16 @@ func (p *Provisioner) Create(ctx context.Context, sessionID, labID, userID strin
 	now := time.Now().UTC()
 	expires := now.Add(time.Duration(p.cfg.SessionTTLHours) * time.Hour)
 
-	userData := base64.StdEncoding.EncodeToString([]byte(renderCloudInit(sessionID, p.cfg, init, p.resolveSessionAuthKey(ctx))))
+	authKey := p.resolveSessionAuthKey(ctx)
+	userData := base64.StdEncoding.EncodeToString([]byte(renderCloudInit(sessionID, p.cfg, init, authKey)))
+	// 이 세션이 실제로 tailnet 에 가입하는지(=authKey 가 있는지)를 태그로 남긴다. 라이브 터미널
+	// 광고·도달 판단(VMIAddress/sessionResponse)이 정적 cfg 키가 아니라 이 세션의 실제 가입 여부로
+	// 이뤄지게 한다 — 동적 키만 설정(정적 제거)이거나 세션별 발급 실패(fail-secure)인 경우까지 정확히
+	// 반영한다(Codex P1).
+	tailnetTagVal := "0"
+	if authKey != "" {
+		tailnetTagVal = "1"
+	}
 
 	in := &awsec2.RunInstancesInput{
 		LaunchTemplate: &ectypes.LaunchTemplateSpecification{
@@ -132,6 +142,7 @@ func (p *Provisioner) Create(ctx context.Context, sessionID, labID, userID strin
 				{Key: aws.String(tagLabID), Value: aws.String(labID)},
 				{Key: aws.String(tagStartedAt), Value: aws.String(now.Format(time.RFC3339))},
 				{Key: aws.String(tagExpiresAt), Value: aws.String(expires.Format(time.RFC3339))},
+				{Key: aws.String(tagTailnet), Value: aws.String(tailnetTagVal)},
 				{Key: aws.String("Name"), Value: aws.String(tailnetHostname(p.cfg, sessionID))},
 			},
 		}},
@@ -279,14 +290,18 @@ func (p *Provisioner) ReapExpiredSessions(ctx context.Context) ([]string, error)
 // VMIAddress는 세션 인스턴스의 tailnet MagicDNS 호스트네임을 반환한다(라이브 터미널/IDE 프록시용).
 // 인스턴스가 아직 running 이 아니거나 tailnet 미가입(authkey 미설정)이면 ErrNotFound.
 func (p *Provisioner) VMIAddress(ctx context.Context, sessionID string) (string, error) {
-	if p.cfg.TailscaleAuthKey == "" {
-		return "", session.ErrNotFound // tailnet 미사용 — 도달 주소 없음
+	if !p.cfg.LiveTerminalEnabled() {
+		return "", session.ErrNotFound // 라이브 터미널 기능 off(정적·동적 authkey 모두 미설정)
 	}
 	inst, err := p.findActiveInstance(ctx, tagFilter(tagSessionID, sessionID))
 	if err != nil {
 		return "", err
 	}
 	if inst == nil || inst.State == nil || inst.State.Name != ectypes.InstanceStateNameRunning {
+		return "", session.ErrNotFound
+	}
+	// 정적 키 유무가 아니라 이 세션이 실제로 tailnet 에 가입했는지(동적 발급 성공 포함)로 판단한다.
+	if tagValue(inst, tagTailnet) != "1" {
 		return "", session.ErrNotFound
 	}
 	return tailnetHostname(p.cfg, sessionID), nil
@@ -410,15 +425,16 @@ func instanceToSession(inst *ectypes.Instance, region string) *session.Session {
 	startedAt, _ := time.Parse(time.RFC3339, tagValue(inst, tagStartedAt))
 	expiresAt, _ := time.Parse(time.RFC3339, tagValue(inst, tagExpiresAt))
 	return &session.Session{
-		ID:         tagValue(inst, tagSessionID),
-		LabID:      tagValue(inst, tagLabID),
-		UserID:     tagValue(inst, tagUserID),
-		Status:     instanceStatus(inst),
-		StartedAt:  startedAt,
-		ExpiresAt:  expiresAt,
-		Provider:   session.ProviderEC2,
-		InstanceID: aws.ToString(inst.InstanceId),
-		Region:     region,
+		ID:             tagValue(inst, tagSessionID),
+		LabID:          tagValue(inst, tagLabID),
+		UserID:         tagValue(inst, tagUserID),
+		Status:         instanceStatus(inst),
+		StartedAt:      startedAt,
+		ExpiresAt:      expiresAt,
+		Provider:       session.ProviderEC2,
+		InstanceID:     aws.ToString(inst.InstanceId),
+		Region:         region,
+		TailnetEnabled: tagValue(inst, tagTailnet) == "1",
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awsec2 "github.com/aws/aws-sdk-go-v2/service/ec2"
 
 	"github.com/requset700k/cledyu/api/internal/session"
 )
@@ -42,6 +43,10 @@ func TestCreate_UsesMintedSessionKey(t *testing.T) {
 	if strings.Contains(ud, "tskey-auth-test") {
 		t.Errorf("발급 성공인데 정적 authkey 가 user-data 에 들어감:\n%s", ud)
 	}
+	// 이 세션이 tailnet 에 가입함을 태그로 남겨야 터미널 가드가 정적 키가 아니라 세션 실측으로 판단한다.
+	if got := runInputTag(f.runInputs[0], tagTailnet); got != "1" {
+		t.Errorf("가입 세션의 %s 태그=%q, want \"1\"", tagTailnet, got)
+	}
 }
 
 // 발급 실패 시 fail-secure: 정적 reusable 키로 폴백하지 않고 tailscale 자체를 생략한다
@@ -58,4 +63,20 @@ func TestCreate_MintFailure_FailSecure(t *testing.T) {
 	if strings.Contains(ud, "tailscale up") {
 		t.Errorf("발급 실패인데 tailscale 가입이 포함됨(정적 키 폴백?):\n%s", ud)
 	}
+	// 미가입 세션은 태그도 "0" — VMIAddress/sessionResponse 가 터미널을 광고하지 않게 한다.
+	if got := runInputTag(f.runInputs[0], tagTailnet); got != "0" {
+		t.Errorf("미가입 세션의 %s 태그=%q, want \"0\"", tagTailnet, got)
+	}
+}
+
+// runInputTag 는 RunInstances 입력의 instance TagSpecification 에서 key 의 값을 찾는다(없으면 "").
+func runInputTag(in *awsec2.RunInstancesInput, key string) string {
+	for _, spec := range in.TagSpecifications {
+		for _, tag := range spec.Tags {
+			if aws.ToString(tag.Key) == key {
+				return aws.ToString(tag.Value)
+			}
+		}
+	}
+	return ""
 }
