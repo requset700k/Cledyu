@@ -35,10 +35,10 @@ data "aws_iam_policy_document" "dr_alert" {
     resources = [aws_secretsmanager_secret.discord_webhook.arn]
   }
   statement {
-    sid     = "Logs"
-    actions = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
-    # 이 함수 전용 로그그룹으로 한정(계정 전체 로그 대신). CreateLogGroup=그룹 ARN,
-    # CreateLogStream/PutLogEvents=스트림(:*) ARN 둘 다 커버.
+    sid = "Logs"
+    # 로그그룹은 TF(aws_cloudwatch_log_group.dr_alert)가 생성하므로 CreateLogGroup 불요.
+    # 스트림 생성·이벤트 기록만 남긴다(이 함수 로그그룹으로 한정).
+    actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = [
       "arn:aws:logs:us-east-1:*:log-group:/aws/lambda/${var.name_prefix}-dr-alert",
       "arn:aws:logs:us-east-1:*:log-group:/aws/lambda/${var.name_prefix}-dr-alert:*",
