@@ -54,6 +54,17 @@ resource "aws_route53_health_check" "onprem_pull" {
   request_interval  = 30
   failure_threshold = 5 # 제안값(드릴 튜닝)
   tags              = { Name = "${var.name_prefix}-dr-pull" }
+
+  # 이 감지 스택은 공개 진입점(auth.cledyu.com ALB/Route53, public-ingress.tf)을 전제한다.
+  # enable_public_ingress=false 면 pull 대상이 존재하지 않아 pull 알람이 상시 ALARM 이 되고,
+  # heartbeat 동기화 전 push 도 missing→breaching 이라 복합알람이 "구성 미완료"를 재해로 오탐한다.
+  # 그래서 공개 진입점이 켜져 있을 때만 감지 스택을 apply 하도록 강제한다.
+  lifecycle {
+    precondition {
+      condition     = var.enable_public_ingress
+      error_message = "DR 감지 스택은 enable_public_ingress=true(auth.cledyu.com 공개 진입점)를 전제한다. 공개 진입점 없이 배포하면 pull 알람이 상시 ALARM 이 되어 복합알람이 구성 미완료를 재해로 오탐한다. 공개 진입점을 먼저 켜라."
+    }
+  }
 }
 
 # 알림 허브. 복합알람 → SNS → (Task 4) Lambda → Discord.

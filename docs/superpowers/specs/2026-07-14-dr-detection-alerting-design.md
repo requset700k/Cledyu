@@ -167,7 +167,9 @@ Terraform 컨벤션: `var.name_prefix`(`cledyu-lab`), 정책은 `data.aws_iam_po
   (auth.cledyu.com ALB 스택) 전제. 실측: `auth.cledyu.com`이 서울 리전 ALB IP 4개로 해석되고,
   `GET /realms/cledyu-learn` → `HTTP 200`(122ms) 본문에 `"realm":"cledyu-learn"` 포함 →
   health check의 `HTTPS_STR_MATCH("cledyu-learn")`가 현재 healthy로 성립. 온프렘 사망 시 이
-  200이 5xx로 바뀌어 pull 신호가 발동한다. (스택 미활성 환경에 배포할 땐 이 전제 재확인)
+  200이 5xx로 바뀌어 pull 신호가 발동한다. **이 전제는 `dr-detection.tf`의 `aws_route53_health_check.onprem_pull`
+  `lifecycle.precondition`으로 강제**한다 — `enable_public_ingress=false`면 apply 가 실패해, 공개 진입점 없이
+  감지 스택이 배포돼 복합알람이 "구성 미완료"를 재해로 오탐하는 것을 막는다.
 - **heartbeat 키 유출 반경 최소화:** heartbeat IAM 사용자는 `PutMetricData`(네임스페이스 조건)
   단일 권한만. 백업 writer 키와 분리(권한 분리).
 
