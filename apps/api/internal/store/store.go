@@ -122,6 +122,7 @@ type CheckoutSession struct {
 	ID          string    `json:"id"`
 	UserID      string    `json:"user_id"`
 	PlanID      string    `json:"plan_id"`
+	AmountKRW   int       `json:"amount_krw"`
 	Provider    string    `json:"provider"`
 	Status      string    `json:"status"`
 	CheckoutURL string    `json:"checkout_url"`
@@ -165,9 +166,9 @@ func (s *Store) GetSubscription(ctx context.Context, userID string) (*Subscripti
 // CreateCheckoutSession은 결제 provider로 넘기기 전 checkout 시도를 저장한다.
 func (s *Store) CreateCheckoutSession(ctx context.Context, cs CheckoutSession) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO checkout_sessions (id, user_id, plan_id, provider, status, checkout_url, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		cs.ID, cs.UserID, cs.PlanID, cs.Provider, cs.Status, cs.CheckoutURL, cs.ExpiresAt)
+		INSERT INTO checkout_sessions (id, user_id, plan_id, amount_krw, provider, status, checkout_url, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		cs.ID, cs.UserID, cs.PlanID, cs.AmountKRW, cs.Provider, cs.Status, cs.CheckoutURL, cs.ExpiresAt)
 	if err != nil {
 		return fmt.Errorf("create checkout session: %w", err)
 	}
@@ -179,9 +180,9 @@ func (s *Store) CreateCheckoutSession(ctx context.Context, cs CheckoutSession) e
 func (s *Store) GetCheckoutSessionByID(ctx context.Context, id string) (*CheckoutSession, error) {
 	var cs CheckoutSession
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, user_id, plan_id, provider, status, checkout_url, created_at, expires_at
+		SELECT id, user_id, plan_id, amount_krw, provider, status, checkout_url, created_at, expires_at
 		FROM checkout_sessions WHERE id = $1`, id).
-		Scan(&cs.ID, &cs.UserID, &cs.PlanID, &cs.Provider, &cs.Status, &cs.CheckoutURL, &cs.CreatedAt, &cs.ExpiresAt)
+		Scan(&cs.ID, &cs.UserID, &cs.PlanID, &cs.AmountKRW, &cs.Provider, &cs.Status, &cs.CheckoutURL, &cs.CreatedAt, &cs.ExpiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrCheckoutNotFound
 	}
@@ -195,9 +196,9 @@ func (s *Store) GetCheckoutSessionByID(ctx context.Context, id string) (*Checkou
 func (s *Store) GetCheckoutSession(ctx context.Context, id, userID string) (*CheckoutSession, error) {
 	var cs CheckoutSession
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, user_id, plan_id, provider, status, checkout_url, created_at, expires_at
+		SELECT id, user_id, plan_id, amount_krw, provider, status, checkout_url, created_at, expires_at
 		FROM checkout_sessions WHERE id = $1`, id).
-		Scan(&cs.ID, &cs.UserID, &cs.PlanID, &cs.Provider, &cs.Status, &cs.CheckoutURL, &cs.CreatedAt, &cs.ExpiresAt)
+		Scan(&cs.ID, &cs.UserID, &cs.PlanID, &cs.AmountKRW, &cs.Provider, &cs.Status, &cs.CheckoutURL, &cs.CreatedAt, &cs.ExpiresAt)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && cs.UserID != userID) {
 		return nil, ErrCheckoutNotFound
 	}
@@ -253,9 +254,9 @@ func (s *Store) CompleteCheckoutSession(ctx context.Context, id, userID string) 
 
 	var cs CheckoutSession
 	err = tx.QueryRow(ctx, `
-		SELECT id, user_id, plan_id, provider, status, checkout_url, created_at, expires_at
+		SELECT id, user_id, plan_id, amount_krw, provider, status, checkout_url, created_at, expires_at
 		FROM checkout_sessions WHERE id = $1 FOR UPDATE`, id).
-		Scan(&cs.ID, &cs.UserID, &cs.PlanID, &cs.Provider, &cs.Status, &cs.CheckoutURL, &cs.CreatedAt, &cs.ExpiresAt)
+		Scan(&cs.ID, &cs.UserID, &cs.PlanID, &cs.AmountKRW, &cs.Provider, &cs.Status, &cs.CheckoutURL, &cs.CreatedAt, &cs.ExpiresAt)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && cs.UserID != userID) {
 		return nil, ErrCheckoutNotFound
 	}

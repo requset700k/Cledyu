@@ -111,6 +111,7 @@ func TestConfirmTossCheckout_ConfirmsPaymentAndActivatesSubscription(t *testing.
 		ID:        "chk_toss",
 		UserID:    "u1",
 		PlanID:    "pro-monthly",
+		AmountKRW: 9900,
 		Provider:  checkoutProviderToss,
 		Status:    checkoutStatusPending,
 		ExpiresAt: time.Now().Add(10 * time.Minute),
@@ -163,6 +164,7 @@ func TestConfirmTossCheckout_ConfirmedSessionCompletesWithoutReconfirm(t *testin
 		ID:        "chk_confirmed",
 		UserID:    "u1",
 		PlanID:    "pro-monthly",
+		AmountKRW: 9900,
 		Provider:  checkoutProviderToss,
 		Status:    checkoutStatusConfirmed,
 		ExpiresAt: time.Now().Add(-10 * time.Minute),
@@ -211,6 +213,7 @@ func TestRecoverCheckout_CompletesConfirmedTossSession(t *testing.T) {
 		ID:        "chk_confirmed",
 		UserID:    "u1",
 		PlanID:    "pro-monthly",
+		AmountKRW: 9900,
 		Provider:  checkoutProviderToss,
 		Status:    checkoutStatusConfirmed,
 		ExpiresAt: time.Now().Add(-10 * time.Minute),
@@ -245,6 +248,7 @@ func TestConfirmTossCheckout_RejectsAmountMismatchBeforeConfirm(t *testing.T) {
 		ID:        "chk_toss",
 		UserID:    "u1",
 		PlanID:    "pro-monthly",
+		AmountKRW: 9900,
 		Provider:  checkoutProviderToss,
 		Status:    checkoutStatusPending,
 		ExpiresAt: time.Now().Add(10 * time.Minute),
@@ -280,6 +284,51 @@ func TestConfirmTossCheckout_RejectsAmountMismatchBeforeConfirm(t *testing.T) {
 	}
 	if got := fake.checkouts["chk_toss"].Status; got != "pending" {
 		t.Fatalf("checkout status = %q, want pending", got)
+	}
+}
+
+func TestConfirmTossCheckout_UsesCheckoutAmountSnapshot(t *testing.T) {
+	fake := newFakePersistence()
+	fake.checkouts["chk_toss_snapshot"] = store.CheckoutSession{
+		ID:        "chk_toss_snapshot",
+		UserID:    "u1",
+		PlanID:    "pro-monthly",
+		AmountKRW: 8800,
+		Provider:  checkoutProviderToss,
+		Status:    checkoutStatusPending,
+		ExpiresAt: time.Now().Add(10 * time.Minute),
+	}
+	confirmer := &fakeTossConfirmer{}
+	h := &Handler{
+		cfg: &config.Config{
+			FrontendURL: "https://app.cledyu.local",
+			Billing: config.BillingConfig{
+				Provider:       checkoutProviderToss,
+				TossClientKey:  "test_ck",
+				TossSecretKey:  "test_sk",
+				TossAPIBaseURL: "https://api.tosspayments.com",
+			},
+		},
+		log:  zap.NewNop(),
+		db:   fake,
+		toss: confirmer,
+	}
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/billing/toss/success", h.ConfirmTossCheckout)
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/billing/toss/success?paymentKey=pay_1&orderId=chk_toss_snapshot&amount=8800", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusFound {
+		t.Fatalf("expected 302, got %d body=%s", w.Code, w.Body.String())
+	}
+	if confirmer.payload.Amount != 8800 {
+		t.Fatalf("confirm payload amount = %d, want checkout snapshot 8800", confirmer.payload.Amount)
+	}
+	if got := fake.checkouts["chk_toss_snapshot"].Status; got != checkoutStatusDone {
+		t.Fatalf("checkout status = %q, want completed", got)
 	}
 }
 

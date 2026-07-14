@@ -205,6 +205,7 @@ func (h *Handler) CreateCheckout(c *gin.Context) {
 		ID:          id,
 		UserID:      userID,
 		PlanID:      plan.ID,
+		AmountKRW:   plan.PriceKRW,
 		Provider:    provider,
 		Status:      checkoutStatusPending,
 		CheckoutURL: checkoutURL,
@@ -356,8 +357,7 @@ func (h *Handler) ConfirmTossCheckout(c *gin.Context) {
 		h.redirectBilling(c, "failed", "checkout session lookup failed")
 		return
 	}
-	plan, ok := findBillingPlan(cs.PlanID)
-	if !ok || cs.Provider != checkoutProviderToss || amount != plan.PriceKRW {
+	if _, ok := findBillingPlan(cs.PlanID); !ok || cs.Provider != checkoutProviderToss || amount != cs.AmountKRW {
 		h.redirectBilling(c, "failed", "checkout verification failed")
 		return
 	}

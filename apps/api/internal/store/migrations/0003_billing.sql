@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS checkout_sessions (
     id           TEXT PRIMARY KEY,
     user_id      TEXT NOT NULL,
     plan_id      TEXT NOT NULL,
+    amount_krw   INTEGER NOT NULL DEFAULT 0,
     provider     TEXT NOT NULL,
     status       TEXT NOT NULL, -- pending | confirmed | completed | expired | canceled
     checkout_url TEXT NOT NULL,
