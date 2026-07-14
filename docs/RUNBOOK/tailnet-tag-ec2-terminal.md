@@ -77,14 +77,25 @@ error: ... Tailscale SSH requires an additional check   (또는 초기엔 no suc
 - 2026-07-14 임시로 넣은 `{users:["lab"], autogroup:self}` accept 규칙이 있으면 **삭제**(위 태그 규칙이 대체).
 - API 로 할 경우: `GET /api/v2/tailnet/-/acl` → 수정 → `POST .../acl/validate` → `POST .../acl`(If-Match).
 
-### 5.2 tagged reusable+ephemeral authkey 2개 발급
+### 5.2 tagged authkey 발급 — **세션 키(B)는 reusable 금지(Codex P1 보안)**
 
 `login.tailscale.com/admin/settings/keys` → Generate auth key:
 
-- 키 A: **Reusable + Ephemeral + Tags `tag:cledyu-api`** (api 파드 tsnet 용).
-- 키 B: **Reusable + Ephemeral + Tags `tag:lab-ec2`** (세션 EC2 cloud-init 용).
+- **키 A (api 파드 tsnet, `tag:cledyu-api`)**: **Reusable + Ephemeral**. api 파드 env(Secret)에만
+  들어가고 학습자에 노출되지 않으므로 reusable 안전.
+- **키 B (세션 EC2, `tag:lab-ec2`)**: **reusable 로 발급하지 말 것.** 이 키는 `renderCloudInit` 이
+  세션 EC2 **user-data 의 `tailscale up --authkey` 에 baked** 하는데, 세션 `lab` 계정은 sudo 라
+  학습자가 user-data/cloud-init 흔적(예: `/var/lib/cloud/`, IMDS)에서 키를 읽을 수 있다. reusable
+  이면 탈취한 키로 **세션 종료 후에도 외부 장치를 `tag:lab-ec2` 로 계속 등록**(tailnet 잔존 접근).
 
-> Ephemeral: 노드 종료 시 tailnet 목록에서 자동 정리. Reusable: 파드 재시작·세션 반복 생성에 재사용.
+  - **권장(정식)**: api 가 세션 프로비저닝 시 Tailscale API(`POST /api/v2/tailnet/-/keys`)로
+    **세션별 one-off(비재사용)+ephemeral+짧은 만료** authkey 를 **동적 발급**하도록 코드화한다.
+    현재는 정적 `cfg.AWSConfig.TailscaleAuthKey` 를 모든 세션에 baked → 구조적으로 reusable 을
+    강제한다. 이 코드 변경은 이슈 #307 로 추적.
+  - **잠정(정적 키 유지 시)**: **짧은 만료 + ephemeral** 로 발급하고 **자주 rotate**, 탈취 창을
+    최소화(잔여 위험 명시적 수용). 절대 만료 없는 reusable 로 두지 말 것.
+
+> Ephemeral: 노드 종료 시 tailnet 목록에서 자동 정리.
 
 ### 5.3 Vault 에 tagged authkey 주입
 
@@ -141,6 +152,7 @@ kubectl -n api set env deployment/api CLEDYU_KUBEVIRT_MAX_ACTIVE_SESSIONS-   # �
 
 ## 8. 참고 — 2026-07-14 남긴 것(적용 시 정리)
 
-- tailnet ACL 에 임시 `{action:accept, ..., autogroup:self, users:["lab"]}` 규칙(비작동) — 5.1 에서 삭제.
-- KubeVirt cap override 는 그날 원복 완료(기본 24).
-- 드릴에 쓴 Tailscale **API access token 은 폐기**할 것(있다면).
+- tailnet ACL 임시 `autogroup:self` accept 규칙(비작동) — **2026-07-14 제거 완료**(기본 check 로 복원).
+- KubeVirt cap override — **2026-07-14 원복 완료**(기본 24).
+- 드릴 테스트 EC2 세션(`i-0fe2cc639eca304fc`) — **terminate 완료**. 관련: 로그아웃 시 세션 미종료(이슈 #306).
+- 드릴에 쓴 Tailscale **API access token 은 폐기**할 것.
