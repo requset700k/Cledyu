@@ -5,20 +5,19 @@ import urllib.request
 import boto3
 
 _sm = boto3.client("secretsmanager")
-_webhook = None
 
 
 def _webhook_url():
-    global _webhook
-    if _webhook is None:
-        resp = _sm.get_secret_value(SecretId=os.environ["WEBHOOK_SECRET_ARN"])
-        url = json.loads(resp["SecretString"])["url"]
-        # 반드시 https Discord 웹훅만 허용. file:/커스텀 스킴을 차단해
-        # urlopen 오용(ruff S310)의 실제 우려를 제거한다.
-        if not url.startswith("https://"):
-            raise ValueError("webhook URL must be https")
-        _webhook = url
-    return _webhook
+    # 캐시하지 않고 매 invocation 마다 Secrets Manager 에서 읽는다. DR 알림은 드물게만
+    # (재해·드릴 시) 발생하므로 호출당 1회 조회의 비용·지연은 무시할 수준이고, 웹훅
+    # 로테이션·폐기가 warm Lambda 환경에서도 즉시 반영된다(런북 §7.1 "캐싱 없음" 과 일치).
+    resp = _sm.get_secret_value(SecretId=os.environ["WEBHOOK_SECRET_ARN"])
+    url = json.loads(resp["SecretString"])["url"]
+    # https Discord 웹훅만 허용. file:/커스텀 스킴을 차단해 urlopen 오용(ruff S310)의
+    # 실제 우려를 제거한다.
+    if not url.startswith("https://"):
+        raise ValueError("webhook URL must be https")
+    return url
 
 
 def handler(event, context):
