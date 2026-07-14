@@ -41,6 +41,8 @@ push 알람·복합알람·SNS·Lambda까지 **전부 us-east-1**에 배포된�
 > 웹훅을 임시로 테스트 채널로 돌린 뒤 진행한다. 또한 Step 3는 운영 `auth.cledyu.com`
 > 서비스를 내리지 않고 **Route53 health check 설정만** 일시 변경해 pull 실패를 흉내내며,
 > Step 4에서 **반드시 원복**한다(원복 누락 시 감지가 계속 오동작).
+> 또한 이 앱은 ArgoCD `selfHeal=true`라 suspend drift 를 되돌리므로, 드릴은 **Step 2에서
+> 자동 sync 를 껐다가 Step 4에서 다시 켠다**(안 끄면 push 알람이 재현되지 않는다).
 
 각 단계의 **벽시계 시각**을 기록하여 실제 감지 지연을 실측한다.
 
@@ -68,6 +70,14 @@ heartbeat CronJob을 suspend해 push 신호만 끊는다 (pull은 정상).
 3~4분 후 `push=ALARM`이지만 `composite=OK` 상태 확인 → **AND 로직이 오탐을 차단**하는지 증명.
 
 ```bash
+# 0) ArgoCD self-heal 차단 — 이 앱은 automated.selfHeal=true 라, cronjob 에 없는
+#    suspend=true 를 patch 하면 drift 로 보고 다시 되돌려 heartbeat 를 재개시킨다.
+#    그러면 push 알람이 안 떠 드릴이 재현되지 않으므로 드릴 동안 자동 sync 를 끈다(Step 4 원복).
+argocd app set platform-dr-heartbeat --sync-policy none
+#    argocd CLI 없으면:
+#    kubectl -n argocd patch application platform-dr-heartbeat --type merge \
+#      -p '{"spec":{"syncPolicy":{"automated":null}}}'
+
 # heartbeat CronJob suspend (push 신호 차단)
 kubectl -n dr-system patch cronjob dr-heartbeat \
   -p '{"spec":{"suspend":true}}'
@@ -156,6 +166,11 @@ HC_ID=${HC_ID:-$(aws route53 list-health-checks \
 aws route53 update-health-check \
   --health-check-id "$HC_ID" \
   --resource-path "/realms/cledyu-learn"
+
+# ArgoCD 자동 sync 재개 (Step 2에서 끈 것 원복 — 안 하면 이후 drift가 방치된다)
+argocd app set platform-dr-heartbeat --sync-policy automated --auto-prune --self-heal
+#   kubectl: kubectl -n argocd patch application platform-dr-heartbeat --type merge \
+#     -p '{"spec":{"syncPolicy":{"automated":{"prune":true,"selfHeal":true}}}}'
 ```
 
 **기록:** 원복 실행 시각 (`T5`)
