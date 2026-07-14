@@ -496,10 +496,8 @@ data "archive_file" "dr_alert" {
   output_path = "${path.module}/dr-alert-lambda/dr-alert.zip"
 }
 
-# Discord 웹훅 URL. 값은 TF 밖에서 넣는다(평문 state 회피):
-#   aws secretsmanager put-secret-value --region us-east-1 \
-#     --secret-id cledyu-lab-dr-discord-webhook \
-#     --secret-string '{"url":"https://discord.com/api/webhooks/XXX/YYY"}'
+# Discord 웹훅 URL. 값은 TF 밖에서 넣는다(평문 state 회피). 토큰이 history·ps·argv 에
+# 남지 않도록 0600 임시파일 + file:// 로 주입 — 절차는 런북 §7.1(웹훅 로테이션) 참고.
 resource "aws_secretsmanager_secret" "discord_webhook" {
   provider = aws.use1
   name     = "${var.name_prefix}-dr-discord-webhook"
@@ -589,9 +587,14 @@ cd infra/terraform/aws && terraform apply \
   -target=aws_secretsmanager_secret.discord_webhook -target=aws_iam_role.dr_alert \
   -target=aws_iam_role_policy.dr_alert -target=aws_lambda_function.dr_alert \
   -target=aws_lambda_permission.sns -target=aws_sns_topic_subscription.dr_alert
+# 웹훅 토큰을 shell history·ps·argv 에 남기지 않고 주입(0600 임시파일 + file://):
+umask 077; tmp=$(mktemp)
+read -rs -p "Discord webhook URL: " WEBHOOK_URL; echo
+printf '{"url":"%s"}' "$WEBHOOK_URL" > "$tmp"
 aws secretsmanager put-secret-value --region us-east-1 \
   --secret-id cledyu-lab-dr-discord-webhook \
-  --secret-string '{"url":"https://discord.com/api/webhooks/XXX/YYY"}'
+  --secret-string file://"$tmp"
+shred -u "$tmp" 2>/dev/null || rm -f "$tmp"; unset WEBHOOK_URL
 ```
 
 - [ ] **Step 5: SNS 테스트 발행 → Discord 도착 확인 (운영자)**

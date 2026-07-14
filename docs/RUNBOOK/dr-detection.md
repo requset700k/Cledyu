@@ -36,6 +36,12 @@ push 알람·복합알람·SNS·Lambda까지 **전부 us-east-1**에 배포된�
 
 ## 2. 감지 드릴 절차 (운영자)
 
+> ⚠️ **이 드릴은 Step 3에서 실제 Discord 알림(복합알람 ALARM)을 발생시킨다.**
+> 운영 온콜 채널을 실수로 깨우지 않도록 — **사전에 팀에 공지하고 점검창에서 실행**하거나,
+> 웹훅을 임시로 테스트 채널로 돌린 뒤 진행한다. 또한 Step 3는 운영 `auth.cledyu.com`
+> 서비스를 내리지 않고 **Route53 health check 설정만** 일시 변경해 pull 실패를 흉내내며,
+> Step 4에서 **반드시 원복**한다(원복 누락 시 감지가 계속 오동작).
+
 각 단계의 **벽시계 시각**을 기록하여 실제 감지 지연을 실측한다.
 
 ### 2.1 Step 1: 정상 확인
@@ -266,14 +272,23 @@ push:
 Secrets Manager에 저장된 웹훅 URL을 새로 발급·업데이트하는 절차:
 
 ```bash
-# 1) Discord 워크스페이스 관리자가 새 웹훅 생성
-#    → 새 URL 획득
+# 1) Discord 워크스페이스 관리자가 새 웹훅 생성 → 새 URL 획득
 
 # 2) Secrets Manager 업데이트 (AWS us-east-1 권한 필요)
+#    웹훅 토큰을 shell history·프로세스목록(ps)·argv 에 남기지 않는다:
+#    - read -rs: 입력이 화면·히스토리에 안 남음(에코 off)
+#    - printf 는 bash 빌트인이라 ps 에 인자가 안 뜬다
+#    - --secret-string file://: 값 대신 파일 경로만 argv 에 실린다(0600 임시파일)
+umask 077
+tmp=$(mktemp)
+read -rs -p "새 Discord webhook URL: " WEBHOOK_URL; echo
+printf '{"url":"%s"}' "$WEBHOOK_URL" > "$tmp"
 aws secretsmanager put-secret-value \
   --region us-east-1 \
   --secret-id cledyu-lab-dr-discord-webhook \
-  --secret-string '{"url":"https://discord.com/api/webhooks/new_id/new_token"}'
+  --secret-string file://"$tmp"
+shred -u "$tmp" 2>/dev/null || rm -f "$tmp"
+unset WEBHOOK_URL
 
 # 3) Lambda가 다음 invocation 때 새 URL을 읽음 (캐싱 없음)
 #    따라서 추가 배포 필요 없음
@@ -288,18 +303,20 @@ aws secretsmanager put-secret-value \
 heartbeat CronJob이 CloudWatch에 지표를 기록할 때 사용하는 IAM 액세스 키를 교체:
 
 ```bash
-# 1) 새 액세스 키 생성 (IAM은 global 서비스, 리전 무관)
-aws iam create-access-key \
-  --user-name cledyu-lab-dr-heartbeat
+# 1) 새 액세스 키 생성. SecretAccessKey 를 화면·history 에 찍지 않고 변수로 받는다.
+#    (IAM은 global 서비스, 리전 무관)
+umask 077
+CREDS=$(aws iam create-access-key --user-name cledyu-lab-dr-heartbeat --output json)
+NEW_ID=$(printf '%s' "$CREDS" | python3 -c "import sys,json;print(json.load(sys.stdin)['AccessKey']['AccessKeyId'])")
 
-# 출력:
-# AccessKeyId: <NEW_ID>
-# SecretAccessKey: <NEW_SECRET>
-
-# 2) Vault에 새 키 저장 (온프렘, Vault 관리자)
-vault kv put cledyu/aws/dr-heartbeat \
-  access_key_id='<NEW_ID>' \
-  secret_access_key='<NEW_SECRET>'
+# 2) Vault에 새 키 저장 (온프렘, Vault 관리자).
+#    SecretAccessKey 는 argv 에 싣지 않고 stdin(=-)으로 넘긴다 — history·ps·로그에 안 남는다.
+#    access_key_id 는 비밀이 아니라 그대로 둔다.
+# sys.stdout.write 로 개행 없이 넘긴다(print 의 trailing \n 이 secret 에 섞이면 인증 깨짐).
+printf '%s' "$CREDS" | python3 -c "import sys,json;sys.stdout.write(json.load(sys.stdin)['AccessKey']['SecretAccessKey'])" \
+  | vault kv put cledyu/aws/dr-heartbeat access_key_id="$NEW_ID" secret_access_key=-
+unset CREDS
+echo "새 AccessKeyId: $NEW_ID"   # 5단계에서 <OLD_ID> 삭제 시 참고(ID는 비밀 아님)
 
 # 3) ESO 강제 즉시 동기화 — refreshInterval=1h 를 기다리지 않는다.
 #    (이 강제 sync 가 없으면 새 Vault 값 반영이 최대 1시간 지연될 수 있다)
