@@ -42,6 +42,9 @@ def handler(event, context):
             )
         else:
             text = f":rotating_light: DR alert: {raw}"
+        # Discord 웹훅 content 는 2000자 제한. 긴 NewStateReason 등으로 초과하면 400 으로
+        # 거부돼 알림이 영구 실패하므로 안전 여유를 두고 자른다.
+        text = text[:1900]
         payload = json.dumps({"content": text}).encode("utf-8")
         # URL 은 _webhook_url() 에서 https 스킴 검증을 마친 값이라 안전하다.
         req = urllib.request.Request(  # noqa: S310
