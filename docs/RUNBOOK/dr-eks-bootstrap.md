@@ -246,12 +246,16 @@ aws eks wait nodegroup-active --cluster-name cledyu-dr --region ap-northeast-2 -
 #     설치 실패. 첫 failover 는 webhook 이 없어 no-op(이 갭은 재-failover 에서만 발현).
 #   연쇄: coredns 가 안 뜨면 클러스터 DNS 부재로 ebs-csi-controller 사이드카(provisioner/attacher/
 #     resizer/snapshotter)가 API·STS 를 resolve 못 해 CrashLoopBackOff 한다 → coredns 를 살리면 함께 안정화.
-#   조치: kubectl(=bastion, private 엔드포인트)로 그 두 webhook 을 삭제한다. apps-eks 가 LB Controller 를
-#     배포하면 Helm 이 살아있는 백엔드로 재생성하므로 삭제해도 안전. bastion 에서(또는 운영자 머신 SSM):
-#       kubectl delete mutatingwebhookconfiguration   aws-load-balancer-webhook --ignore-not-found
-#       kubectl delete validatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found
-#     (백엔드 없는 다른 잔존 webhook[cnpg·cert-manager·ESO 등]은 apps-eks sync 웨이브가 백엔드를
-#      먼저 세워 자연 해소되므로 손대지 않는다 — Service 를 가로채는 ALB webhook 만 애드온을 막는다.)
+#   조치: 그 두 webhook 을 삭제한다(apps-eks 가 LB Controller 배포 시 Helm 이 살아있는 백엔드로 재생성 →
+#     삭제 안전). kubectl 은 private 엔드포인트라 bastion 필요 → 운영자 머신에선 SSM 으로 bastion 에서 실행.
+#     (백엔드 없는 다른 잔존 webhook[cnpg·cert-manager·ESO]은 apps-eks sync 웨이브가 백엔드를 먼저 세워
+#      자연 해소되므로 손대지 않는다 — Service 를 가로채는 ALB webhook 만 애드온을 막는다.)
+BID=$(aws ec2 describe-instances --region ap-northeast-2 \
+  --filters "Name=tag:Name,Values=cledyu-dr-bastion" "Name=instance-state-name,Values=running" \
+  --query "Reservations[].Instances[].InstanceId" --output text)
+aws ssm send-command --region ap-northeast-2 --instance-ids "$BID" --document-name AWS-RunShellScript \
+  --parameters 'commands=["aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2","kubectl delete mutatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found","kubectl delete validatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found"]'
+#   (bastion SSM 세션에 이미 진입해 있으면 위 두 kubectl delete 를 직접 실행해도 된다.)
 # (3) [P1] coredns·ebs-csi 관리형 애드온 설치 — CLI. warm(node0)에선 이 둘이 Deployment 라 DEGRADED 로
 #     terraform apply 를 블록하므로 cluster_addons 에서 빼두었다(eks-dr.tf). 노드가 뜬 지금(위 wait 통과)
 #     설치하면 즉시 ACTIVE 된다. ebs-csi 는 warm IRSA(cledyu-dr-ebs-csi, 롤명 결정적)를 참조.
