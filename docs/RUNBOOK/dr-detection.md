@@ -48,7 +48,10 @@ push 알람·복합알람·SNS·Lambda까지 **전부 us-east-1**에 배포된�
 
 ```bash
 # 현재 상태 확인: 모두 OK여야 함
+# ※ --alarm-types 를 반드시 지정 — 없으면 describe-alarms 는 metric 알람만 반환하고
+#   복합알람(cledyu-lab-dr-disaster)은 응답에서 빠진다(AWS 기본 동작).
 aws cloudwatch describe-alarms --region us-east-1 \
+  --alarm-types CompositeAlarm MetricAlarm \
   --alarm-names "cledyu-lab-dr-pull" "cledyu-lab-dr-push" "cledyu-lab-dr-disaster"
 
 # 출력에서 StateValue: ALARM → 이미 문제 상태, 원인 파악 후 진행
@@ -79,6 +82,7 @@ kubectl -n dr-system get cronjob dr-heartbeat -o jsonpath='{.spec.suspend}'
 ```bash
 # 3분 경과 후 상태 확인 (T1+3분)
 aws cloudwatch describe-alarms --region us-east-1 \
+  --alarm-types CompositeAlarm MetricAlarm \
   --alarm-names "cledyu-lab-dr-push" "cledyu-lab-dr-disaster"
 
 # 기대값:
@@ -97,20 +101,19 @@ heartbeat suspend 유지 + pull 신호까지 차단하여 둘 다 ALARM 상태�
 
 #### 3a) pull 신호 차단 (짧은 시간)
 
-방법 1: health check의 경로를 임시로 존재하지 않는 경로로 변경
+방법: health check의 resource_path를 임시로 존재하지 않는 경로로 바꿔 pull 실패를
+흉내낸다(운영 `auth.cledyu.com` 서비스 자체는 안 내린다).
 ```bash
-cd infra/terraform/aws
+# auth.cledyu.com 의 health check ID 조회 (route53 는 global — --region 불필요)
+HC_ID=$(aws route53 list-health-checks \
+  --query "HealthChecks[?HealthCheckConfig.FullyQualifiedDomainName=='auth.cledyu.com'].Id | [0]" \
+  --output text)
+echo "HC_ID=$HC_ID"   # None/빈값이면 enable_public_ingress 미배포 — 조회 조건 확인
 
-# dr-detection.tf 에서 resource "aws_route53_health_check" "onprem_pull"의
-# resource_path를 수정 (예: "/realms/nonexistent")
-# or
-# Lambda/테라폼으로 health check 수정:
-
+# resource_path 를 없는 경로로 변경 → search_string 불일치로 pull 실패 유도
 aws route53 update-health-check \
-  --health-check-id <health-check-id> \
+  --health-check-id "$HC_ID" \
   --resource-path "/realms/nonexistent"
-
-# 또는 검증 창/프록시에서만 해당 경로 차단 (짧은 시간)
 ```
 
 **기록:** pull 차단 시각 (`T3`)
@@ -120,7 +123,8 @@ aws route53 update-health-check \
 ```bash
 # 1~2분 후 상태 확인 (pull failure_threshold=5@30s → ~2.5분)
 aws cloudwatch describe-alarms --region us-east-1 \
-  --alarm-names "cledyu-lab-dr-disaster"
+  --alarm-types CompositeAlarm MetricAlarm \
+  --alarm-names "cledyu-lab-dr-pull" "cledyu-lab-dr-push" "cledyu-lab-dr-disaster"
 
 # 기대값:
 # - cledyu-lab-dr-pull: StateValue=ALARM
@@ -145,9 +149,12 @@ heartbeat suspend 해제 + health check 경로 원복
 kubectl -n dr-system patch cronjob dr-heartbeat \
   -p '{"spec":{"suspend":false}}'
 
-# health check 경로 원복
+# health check 경로 원복 (새 셸이면 HC_ID 재조회)
+HC_ID=${HC_ID:-$(aws route53 list-health-checks \
+  --query "HealthChecks[?HealthCheckConfig.FullyQualifiedDomainName=='auth.cledyu.com'].Id | [0]" \
+  --output text)}
 aws route53 update-health-check \
-  --health-check-id <health-check-id> \
+  --health-check-id "$HC_ID" \
   --resource-path "/realms/cledyu-learn"
 ```
 
@@ -156,6 +163,7 @@ aws route53 update-health-check \
 ```bash
 # 2~3분 후 상태 확인 (평가 기간 고려)
 aws cloudwatch describe-alarms --region us-east-1 \
+  --alarm-types CompositeAlarm MetricAlarm \
   --alarm-names "cledyu-lab-dr-disaster"
 
 # 기대값:
@@ -332,6 +340,10 @@ kubectl -n dr-system get secret dr-heartbeat-creds \
 #    (CronJob 은 매번 파드 신규 생성이라 별도 재시작 불필요)
 
 # 5) 새 키 반영을 확인한 뒤에만 기존 액세스 키 삭제 (IAM은 global, 리전 무관)
+#    옛 키 ID 식별 — 아래 목록에서 위 $NEW_ID 가 아닌 것이 <OLD_ID>다.
+#    (새 키를 지우면 heartbeat 가 즉시 깨지므로 반드시 확인)
+aws iam list-access-keys --user-name cledyu-lab-dr-heartbeat \
+  --query "AccessKeyMetadata[].AccessKeyId" --output text
 aws iam delete-access-key \
   --user-name cledyu-lab-dr-heartbeat \
   --access-key-id '<OLD_ID>'
@@ -354,9 +366,11 @@ aws iam delete-access-key \
    ```
 2. dr-system ns 네트워크 egress가 CloudWatch로 차단됨
    ```bash
-   kubectl -n dr-system run test-curl --image=curlimages/curl -it --rm -- \
-     curl -v https://monitoring.us-east-1.amazonaws.com/
-   # HTTP 404 정상 (경로 없음) / 연결 거부 = egress 차단
+   # dr-system 은 Kyverno baseline-workload-security(runAsNonRoot Enforce) 대상이라
+   # bare pod 는 admission 에서 거부된다 → securityContext 를 --overrides 로 주입한다.
+   kubectl -n dr-system run test-curl --rm -i --restart=Never --image=curlimages/curl \
+     --overrides='{"spec":{"securityContext":{"runAsNonRoot":true,"runAsUser":100,"seccompProfile":{"type":"RuntimeDefault"}},"containers":[{"name":"test-curl","image":"curlimages/curl","securityContext":{"allowPrivilegeEscalation":false,"capabilities":{"drop":["ALL"]},"runAsNonRoot":true,"seccompProfile":{"type":"RuntimeDefault"}},"args":["curl","-sS","-m","10","-o","/dev/null","-w","HTTP %{http_code}\n","https://monitoring.us-east-1.amazonaws.com/"]}]}}'
+   # HTTP 404 등 아무 코드 = egress 정상(경로 없음) / 타임아웃·연결거부 = egress 차단
    ```
 3. IAM 키 유효기간 만료 또는 권한 부족
    ```bash
@@ -375,10 +389,12 @@ aws iam delete-access-key \
    ```
 2. health check의 조건이 맞지 않음 (resource_path, search_string)
    ```bash
-   aws route53 get-health-check \
-     --health-check-id <id> \
-     --region us-east-1
-   # ResourcePath, SearchString 확인
+   # route53 는 global 서비스 — --region 불필요
+   HC_ID=$(aws route53 list-health-checks \
+     --query "HealthChecks[?HealthCheckConfig.FullyQualifiedDomainName=='auth.cledyu.com'].Id | [0]" \
+     --output text)
+   aws route53 get-health-check --health-check-id "$HC_ID"
+   # ResourcePath=/realms/cledyu-learn, SearchString=cledyu-learn 인지 확인
    ```
 
 ### 8.3 복합알람 상태 응답이 느림
