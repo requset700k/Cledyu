@@ -118,6 +118,13 @@ error: ... Tailscale SSH requires an additional check   (또는 초기엔 no suc
        폴백 안 함). 정적 `tailscale_authkey` 는 **동적 모드에서 세션에 쓰이지 않는다**(dead). §5.3 대로
        기존 정적 세션 키 B 는 Vault 에서 비우고(동적 전용) ES 의 `tailscale_authkey` data 항목도 함께
        주석 처리한다 — 규칙: ES data 항목 존재 ⟺ Vault property 시드됨.
+       - **레거시 세션 배수(Codex)**: 정적 키를 비우기 **전에** pre-#309(태그 `cledyu.io/tailnet`
+         부재) EC2 세션이 실행 중이 아닌지 확인한다. 태그 없는 레거시 세션은 도달성 판단이 정적 키
+         유무로 폴백하는데, 정적 키를 비우면 만료(≤세션 TTL)까지 터미널을 잃는다. 활성 EC2 에
+         `cledyu.io/tailnet=1` 을 backfill 하거나, 그 세션들이 만료되도록 두고 전환한다.
+       - **TTL 확인(Codex)**: `session_key_ttl_seconds`(기본 1800) 가 EC2 부팅+cloud-init(apt)+SSM
+         지연보다 짧으면 키가 `tailscale up` 전에 만료돼 가입이 실패한다(인스턴스는 tag=1 이라 터미널이
+         광고돼도 dial 실패). 첫 세션에서 실제 접속까지 반드시 실검증하고, 부팅이 느리면 TTL 을 올린다.
 
   활성화(위 절차) 전까지는 §5.3 대로 정적 세션 키 B 를 비워 두고 EC2 라이브 터미널을 데모/운영
   경로로 두지 않는다(데모 필요 여부는 §9 참조).

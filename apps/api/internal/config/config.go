@@ -130,8 +130,13 @@ type AWSConfig struct {
 	// 발급 요청 전 /api/v2/oauth/token 에서 액세스 토큰을 교환(자동 갱신)한다. OAuth 액세스 토큰은
 	// 1시간 만료라 정적으로 baked 하면 배포 1시간 뒤 발급이 끊기므로, 교환 방식이어야 지속 동작한다.
 	TailscaleOAuthClientID string `mapstructure:"tailscale_oauth_client_id"`
-	// SessionKeyTTLSeconds: 동적 발급 세션 authkey 의 만료(초). 인스턴스 부팅+가입 시간만 커버하면
-	// 되므로 짧게 둔다. 기본 600(10분).
+	// SessionKeyTTLSeconds: 동적 발급 세션 authkey 의 만료(초). 키는 Create(RunInstances 전)에
+	// 발급되지만 실제 소비는 EC2 부팅→cloud-init(apt)→SSM→tailscale up 이후라, TTL 은 발급~가입
+	// 최악 경로(= provision_timeout + cloud-init 여유)보다 **길어야** 한다. 너무 짧으면 stock AMI
+	// 부팅 지연 시 키가 만료돼 가입이 실패하는데, 인스턴스는 이미 cledyu.io/tailnet=1 로 생성돼
+	// 터미널이 광고되므로 접속 시 깨진다(Codex). 기본 1800(30분): provision_timeout(10분)+cloud-init
+	// 여유를 넉넉히 덮는다. one-off+ephemeral 이라 미소비 창(학습자 race)은 정적 reusable 대비 짧다 —
+	// baked/빠른 AMI 라면 낮춰 창을 더 줄여도 된다.
 	SessionKeyTTLSeconds int `mapstructure:"session_key_ttl_seconds"`
 	// SessionKeyTag: 동적 발급 세션 authkey 에 붙일 태그. 기본 tag:lab-ec2.
 	SessionKeyTag string `mapstructure:"session_key_tag"`
@@ -220,7 +225,7 @@ func Load() (*Config, error) {
 	v.SetDefault("aws.instance_type", "t3.medium")
 	v.SetDefault("aws.session_ttl_hours", 3)
 	v.SetDefault("aws.provision_timeout_minutes", 10)
-	v.SetDefault("aws.session_key_ttl_seconds", 600)   // 동적 세션 authkey 만료(초)
+	v.SetDefault("aws.session_key_ttl_seconds", 1800)  // 동적 세션 authkey 만료(초) — provision_timeout+cloud-init 보다 길게
 	v.SetDefault("aws.session_key_tag", "tag:lab-ec2") // 동적 세션 authkey 태그
 	// aws.tailscale_api_key 는 기본 빈 값 — env CLEDYU_AWS_TAILSCALE_API_KEY(Secret)로 주입. 미설정 시 정적 authkey 폴백.
 	v.SetDefault("aws.max_active_sessions", 0) // 0 = EC2 오버플로우 비활성(현행 KubeVirt 전용 동작 보존)
