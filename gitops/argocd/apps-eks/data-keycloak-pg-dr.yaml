@@ -11,6 +11,9 @@ metadata:
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "1"
+    # CNPG defaulting webhook 주입 기본값 → 영구 OutOfSync. ServerSideDiff+IncludeMutationWebhook 로 상쇄.
+    # (온프렘 data-keycloak-pg.yaml 과 대칭 — [[project_cnpg_argocd_serversidediff]].)
+    argocd.argoproj.io/compare-options: ServerSideDiff=true,IncludeMutationWebhook=true
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:

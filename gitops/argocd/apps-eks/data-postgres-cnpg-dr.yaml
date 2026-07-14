@@ -10,6 +10,11 @@ metadata:
   namespace: argocd
   annotations:
     argocd.argoproj.io/sync-wave: "1"
+    # CNPG defaulting(mutating) webhook 이 채우는 spec 기본값(enablePDB·monitoring·failoverDelay·
+    # switchoverDelay·primaryUpdateStrategy 등)은 git 엔 없어 client-side diff 가 영구 OutOfSync 로 잡는다.
+    # ServerSideDiff(dry-run SSA)로 정규화 + IncludeMutationWebhook 으로 webhook 주입분까지 상쇄해야 Synced.
+    # (온프렘 data-postgres-cnpg.yaml 과 대칭 — [[project_cnpg_argocd_serversidediff]]. ServerSideApply≠ServerSideDiff.)
+    argocd.argoproj.io/compare-options: ServerSideDiff=true,IncludeMutationWebhook=true
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:

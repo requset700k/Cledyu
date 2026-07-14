@@ -7,6 +7,13 @@ kind: Application
 metadata:
   name: eks-platform-vault
   namespace: argocd
+  annotations:
+    # StatefulSet/vault 영구 OutOfSync 해소. syncOptions ServerSideApply=true 이면 API 서버가
+    # volumeClaimTemplates 에 volumeMode:Filesystem·persistentVolumeClaimRetentionPolicy 를 defaulting 하는데,
+    # 기본 client-side diff 는 git(그 필드 없음) vs live 를 drift 로 잡는다. ServerSideDiff 로 diff 도
+    # 서버사이드 dry-run 하면 API 기본값이 predicted 에 포함돼 상쇄된다. (webhook 주입이 아니라 순수 API
+    # defaulting 이므로 IncludeMutationWebhook 은 불필요 — CNPG -dr 앱과 원인이 다름.)
+    argocd.argoproj.io/compare-options: ServerSideDiff=true
   finalizers:
     - resources-finalizer.argocd.argoproj.io
 spec:
