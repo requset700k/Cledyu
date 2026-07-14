@@ -105,8 +105,13 @@ error: ... Tailscale SSH requires an additional check   (또는 초기엔 no suc
     3) ESO `cledyu-api-tailscale-externalsecret.yaml` 의 `tailscale_api_key`(및 OAuth 방식이면
        `tailscale_oauth_client_id`) 항목 주석 해제(**반드시 (2) 이후** — Vault 에 없으면 ES 전체가
        SyncError). → api 재시작.
-    4) 설정되면 정적 `tailscale_authkey` 는 폴백으로만 남고 세션은 동적 키를 쓴다. 발급 실패 시
-       fail-secure(그 세션만 터미널 비활성, 정적 키로 폴백 안 함).
+    4) 설정되면 세션은 동적 키를 쓴다(발급 실패 시 fail-secure — 그 세션만 터미널 비활성, 정적 키로
+       폴백 안 함). 정적 `tailscale_authkey` 는 **동적 모드에서 세션에 쓰이지 않는다**(dead). 두 방식:
+       - **정적 유지(간단)**: `tailscale_authkey` 를 Vault·ES 에 그대로 둔다. ES 관점에서만 존재(dead config).
+       - **동적 전용(정적 제거)**: Vault 에서 `tailscale_authkey` property 를 지우면 **반드시 ES
+         `cledyu-api-tailscale-externalsecret.yaml` 의 `tailscale_authkey` data 항목도 함께 주석 처리**한다.
+         미시드 property 를 참조한 채 두면 ES 전체가 SyncError 로 빠져 `tailscale_api_key` 동기화까지 막힌다.
+         (규칙: ES data 항목 존재 ⟺ Vault property 시드됨.)
   - **잠정(정식 활성화 전, 정적 키 유지 시)**: 정적 `tailscale_authkey` 를 **짧은 만료 + ephemeral**
     로 발급하고 **자주 rotate**, 탈취 창을 최소화(잔여 위험 명시적 수용). 절대 만료 없는 reusable 금지.
 
