@@ -147,14 +147,16 @@ kubectl -n vault exec vault-0 -- sh -c \
   존재해야 → EKS 의 external-secrets 가 api/keycloak 시크릿을 채운다.
 - Vault 가 비어 있으면(복원 누락) api 는 in-memory 폴백으로 뜨고 keycloak-pg 자격이
   없어 Keycloak 이 기동 실패한다 → **드릴 실패로 판정**(자동 통과처럼 보이지 않게 주의).
-- **라이브 터미널 필수 시드(2개):** `cledyu/aws/api` 에 Tailscale authkey **두 개**가 모두 있어야
-  `cledyu-api-tailscale` ExternalSecret 이 Healthy 하고 api 가 terminal_url 을 광고한다(session.go 는
-  두 조건 AND — 세션 키 설정 && api tsnet 가입).
-  - `tailscale_authkey` — 세션 EC2 인스턴스가 cloud-init 으로 tailnet 가입(ephemeral, tag:lab-ec2).
-  - `api_tailscale_authkey` — api 파드 자신이 tsnet 으로 tailnet 가입(tag:cledyu-api).
-  온프렘 Vault 에 시드돼 있으면 스냅샷으로 함께 복원된다. 어느 키든 없으면 그 ExternalSecret 만 Degraded
-  (필수 AWS 키 cledyu-api-aws·SSM 채점·api 기동은 정상 — 터미널 키는 별도 ExternalSecret 로 분리돼 있어
-  필수 키 동기화를 막지 않는다) — 터미널이 안 뜨면 실습 진행 불가이므로 **온프렘에서 시드 상태를 유지**한다.
+- **라이브 터미널 키 시드 — api 키(1개)만, 세션 키는 #307 전 금지:**
+  - `api_tailscale_authkey` — api 파드가 tsnet 으로 tailnet 가입(tag:cledyu-api, 학습자 미노출). **시드 필요.**
+  - `tailscale_authkey`(세션 EC2, tag:lab-ec2) — **정적 시드 금지(#307 전).** 학습자(sudo)가 세션
+    user-data 에서 읽어 잔존 접근을 만들 수 있고, `renderCloudInit` 이 한 키를 모든 세션에 반복 bake 하므로
+    one-off 로 넣어도 두 번째 세션부터 깨진다. 근거·절차: [`tailnet-tag-ec2-terminal.md`](tailnet-tag-ec2-terminal.md)
+    §5.2/§5.3(이슈 #307).
+  온프렘 Vault 에 `api_tailscale_authkey` 만 시드돼 있으면 스냅샷으로 복원된다. 세션 키 미시드로
+  `cledyu-api-tailscale` ExternalSecret 이 Degraded 로 남는 것은 **의도된 상태**(EC2 라이브 터미널은
+  #307 후 동적 발급으로 활성; 필수 AWS 키·SSM 채점·api 기동은 정상). **DR 드릴에서 세션 터미널 실습은
+  온프렘 KubeVirt 경로(virtctl)로 검증**하고, EC2 라이브 터미널은 #307 완료 전까지 드릴 합격 기준에서 제외한다.
 
 ### Vault k8s auth 를 EKS 용으로 재설정 (복원·unseal 후, ESO 인증 직전) — T6
 
@@ -442,10 +444,11 @@ aws ec2 describe-instances --region ap-northeast-2 \
   --query "Reservations[].Instances[].InstanceId" --output text          # 세션 인스턴스 존재(provisioner.go 태그: cledyu.io/managed-by=cledyu-session)
 
 # 2) 사용자 터미널 도달(tailnet) — api 가 tsnet 으로 인스턴스에 다이얼(라이브 터미널 WebSocket 200).
-#    CLEDYU_AWS_TAILSCALE_AUTH_KEY(세션 tailnet 가입) + CLEDYU_AWS_API_TAILSCALE_AUTH_KEY(api tsnet) 둘 다
-#    필요(둘 다 cledyu-api-tailscale Secret) — 라이브 터미널은 DR 실습에 필요하므로 tailscale_authkey·
-#    api_tailscale_authkey 는 부트스트랩 시드 필수(위 '복원 후 정합성 체크' 참고). 둘 다 시드되면
-#    cledyu-api-tailscale ExternalSecret Healthy. 어느 키든 미시드면 이 시크릿만 Degraded(필수 AWS 키·SSM 채점·api 는 정상).
+#    api_tailscale_authkey(api tsnet, tag:cledyu-api)만 시드한다. 세션 키 tailscale_authkey(정적)는
+#    #307 전 시드 금지(학습자 잔존 접근 + 정적 one-off 는 2번째 세션부터 파손) — tailnet-tag-ec2-terminal.md
+#    §5.2/§5.3 참고. 세션 키 미시드로 cledyu-api-tailscale 이 Degraded 로 남는 것은 의도된 상태
+#    (필수 AWS 키·SSM 채점·api 는 정상). EC2 라이브 터미널 실습은 #307 완료 전까지 드릴 합격 기준에서
+#    제외하고, 세션 터미널은 온프렘 KubeVirt(virtctl) 경로로 검증한다.
 
 # 3) 검증엔진 채점 — 각 스텝을 통과 상태로 만들고 /validate 호출 → validation-engine 이 SSM SendCommand 로
 #    EC2 를 채점 → validation-results → api 가 Postgres(session_steps/progress/completions)에 반영.
