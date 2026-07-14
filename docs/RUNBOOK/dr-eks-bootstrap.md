@@ -253,8 +253,17 @@ aws eks wait nodegroup-active --cluster-name cledyu-dr --region ap-northeast-2 -
 BID=$(aws ec2 describe-instances --region ap-northeast-2 \
   --filters "Name=tag:Name,Values=cledyu-dr-bastion" "Name=instance-state-name,Values=running" \
   --query "Reservations[].Instances[].InstanceId" --output text)
+# ⚠️ bastion 은 방금 Phase1 에서 생성돼 (a) 아직 SSM 미등록이거나 (b) user_data(kubectl·awscli 설치, egress
+#   대기 최대 5분·retry) 미완일 수 있다 → 바로 send-command 하면 InvalidInstanceId 또는 원격 "kubectl: command
+#   not found" 로 삭제가 실패한 채 coredns 로 넘어간다. 먼저 SSM 등록(Online)을 기다리고, 원격 명령 첫 줄에
+#   cloud-init status --wait 를 넣어 도구 설치 완료 후에 kubectl 이 실행되게 한다.
+for i in $(seq 1 30); do
+  [ "$(aws ssm describe-instance-information --region ap-northeast-2 \
+      --filters "Key=InstanceIds,Values=$BID" --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null)" = "Online" ] && break
+  echo "bastion SSM 등록 대기($i/30)..."; sleep 10
+done
 CID=$(aws ssm send-command --region ap-northeast-2 --instance-ids "$BID" --document-name AWS-RunShellScript \
-  --parameters 'commands=["aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2","kubectl delete mutatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found","kubectl delete validatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found"]' \
+  --parameters 'commands=["cloud-init status --wait","aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2","kubectl delete mutatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found","kubectl delete validatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found"]' \
   --query "Command.CommandId" --output text)
 # ⚠️ send-command 는 제출 즉시 반환한다 → 완료를 기다리지 않고 아래 (3) coredns 를 설치하면 webhook 이
 #   아직 안 지워진 채(또는 bastion 준비 실패) 다시 AdmissionRequestDenied 로 막힐 수 있다. 반드시 대기:
@@ -412,7 +421,11 @@ EKS ALB target 이 Healthy 여도 사용자가 도달하지 못한다. api/app �
 
 ```bash
 # EKS ALB DNS 이름·zone 취득 (ALB Controller 가 api/web Ingress 로 생성)
-ALB=$(kubectl -n api get ingress api -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'); echo "$ALB"
+# ALB DNS 는 운영자 머신 aws 로 취득한다 — kubectl(=bastion)로 $ALB 를 잡으면 이 블록의 나머지 aws 명령
+#   (운영자 머신)과 실행 위치가 갈려, 별도 셸일 때 $ALB 가 빈 값이 된다. DR VPC 의 group ALB(api/web/keycloak
+#   공유 1개)를 잡는다. (아래 keycloak Ready 대기만 kubectl=bastion — 변수 공유 없는 단발.)
+VPCID=$(aws eks describe-cluster --name cledyu-dr --region ap-northeast-2 --query 'cluster.resourcesVpcConfig.vpcId' --output text)
+ALB=$(aws elbv2 describe-load-balancers --region ap-northeast-2 --query "LoadBalancers[?VpcId=='$VPCID'].DNSName" --output text); echo "$ALB"
 ALB_ZONE=$(aws elbv2 describe-load-balancers --region ap-northeast-2 \
   --query "LoadBalancers[?DNSName=='$ALB'].CanonicalHostedZoneId" --output text)
 ZONE=$(aws route53 list-hosted-zones-by-name --dns-name cledyu.com --query "HostedZones[0].Id" --output text)

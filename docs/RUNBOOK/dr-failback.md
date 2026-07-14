@@ -102,6 +102,8 @@ done
 
 ### 5. drEpoch bump + adopt — 【승인 게이트】
 ```bash
+N=<진입 epoch 정수>   # ⚠️ step3 과 동일 값으로 재설정 — 승인 게이트로 셸이 끊겼으면 $N 이 없어 아래
+                      #    e$((N+1)) anchor 검증이 항상 e1 로 오산된다(2회차+ failback 에서 잘못된 경로 확인).
 # (a) lockstep bump: 운영·DR·failback 6개 values drEpoch N→N+1 + DR backupEnabled true→false 를 한 커밋.
 #     사후 가드: grep -rn 'drEpoch:' gitops/apps/postgres-cnpg*/ gitops/apps/keycloak-pg*/ → 전부 N+1 동일 확인.
 # (b) path-swap 원복: data-postgres-cnpg·data-keycloak-pg source.path 를 운영 차트로. (git 커밋)
@@ -170,8 +172,14 @@ kubectl --context eks-dr delete clusters.postgresql.cnpg.io -A --all --ignore-no
 kubectl --context eks-dr delete kafkas.kafka.strimzi.io -A --all --ignore-not-found
 kubectl --context eks-dr delete kafkanodepool.kafka.strimzi.io -A --all --ignore-not-found   # 브로커 파드 실소유자(StrimziPodSet)
 kubectl --context eks-dr wait --for=delete pod -n kafka -l strimzi.io/cluster=cledyu-kafka --timeout=300s 2>/dev/null || true
-# (b) Ingress 삭제 → ALB Controller 가 ALB/TG/SG 회수.
+# (b) Ingress 삭제 → ALB Controller 가 ALB/TG/SG 회수. ⚠️ ALB 삭제 완료를 (d) 노드 0 前에 반드시 기다린다 —
+#   ALB Controller 파드가 노드에 떠 있어, 삭제가 끝나기 전에 노드가 0 되면 컨트롤러가 죽어 ALB/TG 가 고아로 남는다.
 kubectl --context eks-dr delete ingress -A --all
+VPCID=$(aws eks describe-cluster --name cledyu-dr --region ap-northeast-2 --query 'cluster.resourcesVpcConfig.vpcId' --output text)
+for i in $(seq 1 18); do
+  [ -z "$(aws elbv2 describe-load-balancers --region ap-northeast-2 --query "LoadBalancers[?VpcId=='$VPCID'].LoadBalancerArn" --output text)" ] && break
+  echo "ALB 삭제 대기($i/18)..."; sleep 10
+done
 # (c) PVC 삭제 → EBS CSI 가 gp3 볼륨 삭제(PV 소멸까지 대기).
 kubectl --context eks-dr delete pvc -A --all
 for i in $(seq 1 24); do [ -z "$(kubectl --context eks-dr get pv -o name 2>/dev/null)" ] && break; sleep 10; done
