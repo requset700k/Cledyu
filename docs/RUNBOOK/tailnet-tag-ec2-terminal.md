@@ -103,36 +103,50 @@ error: ... Tailscale SSH requires an additional check   (또는 초기엔 no suc
 
 > Ephemeral: 노드 종료 시 tailnet 목록에서 자동 정리.
 
-### 5.3 Vault 에 tagged authkey 주입 (키 A 만)
+### 5.3 Vault — 키 A 주입 + **기존 세션 키 B 는 폐기·제거**
 
-api authkey(A)=`api_tailscale_authkey`. **`kv patch`** 로 기존 AWS 키(access_key_id/
-secret_access_key)와 세션 키 property 를 보존:
+api authkey(A)=`api_tailscale_authkey` 를 주입하되, **세션 키 B(`tailscale_authkey`)는 보존하지
+말고 반드시 비운다.** 현재 Vault 엔 2026-07-14 드릴 배선으로 세션 키가 이미 들어 있는데, 이걸
+그대로 두면 Secret→env(`CLEDYU_AWS_TAILSCALE_AUTH_KEY`, `deployment.yaml:120`)로 계속 주입되어
+api 가 **세션 cloud-init 에 그 키를 다시 bake**(`cloudinit.go:61`, 값이 비어있지 않으면 bake)하고
+**EC2 `terminal_url` 도 계속 광고**(`session.go:159`, `TailscaleAuthKey != ""` 조건)한다. 즉
+"키 B 를 정적 배선하지 않는다"는 §5.2 목표는 **키를 안 넣는 것만으로는 달성되지 않고, 이미 있는
+값을 비워야** 성립한다. (Codex PR #308 P1.)
 
 ```bash
 export VAULT_ADDR=...   # 브레이크글래스 절차대로 로그인
+# 1) 키 A 주입 + 세션 키 B 를 빈 값으로 (기존 AWS 키 access_key_id/secret_access_key 는 patch 라 보존)
 vault kv patch cledyu/aws/api \
-  api_tailscale_authkey='<키 A: tag:cledyu-api>'
+  api_tailscale_authkey='<키 A: tag:cledyu-api>' \
+  tailscale_authkey=''
+# 2) Tailscale admin 에서 기존 세션 키 B 자체를 revoke — 이미 새어나간(세션에 baked 된) 사본 무력화
+#    login.tailscale.com/admin/settings/keys → 해당 키 Revoke
 ```
 
-> **`tailscale_authkey`(세션 키 B)는 여기서 정적 주입하지 않는다** — §5.2 참조. #307(동적 발급)
-> 구현 후 api 가 세션별로 발급하며, api 가 Tailscale API 로 키를 만들 권한(`auth_keys` write)을
-> 갖도록 별도 Tailscale API 키를 Vault→ESO 로 주입한다(#307 범위).
+> `tailscale_authkey=''`(빈 값)이면 ESO 가 Secret 값을 빈 값으로 덮고, `cloudinit.go:61` /
+> `session.go:159` 의 `!= ""` 조건이 거짓이 되어 bake·터미널 광고가 멈춘다. #307(동적 발급) 구현
+> 후 api 가 세션별로 발급하며(정적 property 미사용), 그때 api 에 Tailscale API 키(`auth_keys`
+> write)를 Vault→ESO 로 별도 주입한다(#307 범위).
 
 ### 5.4 동기화 + api 재시작
 
 ```bash
 # ESO 강제 재동기화(또는 refreshInterval 대기)
 kubectl -n api annotate externalsecret cledyu-api-tailscale force-sync=$(date +%s) --overwrite
-# 새 authkey 반영 확인
-kubectl -n api get secret cledyu-api-tailscale -o go-template='{{range $k,$v := .data}}{{$k}}{{"\n"}}{{end}}'
+# 키 A 반영 + 세션 키 B 가 빈 값으로 덮였는지 확인(값 길이 0 이어야 함)
+kubectl -n api get secret cledyu-api-tailscale \
+  -o jsonpath='{.data.api_tailscale_authkey}' | base64 -d | wc -c   # > 0 이어야
+kubectl -n api get secret cledyu-api-tailscale \
+  -o jsonpath='{.data.tailscale_authkey}' | base64 -d | wc -c       # 0 이어야(키 B 비움)
 # api 재시작 → tsnet 이 tagged api authkey 로 재가입(ephemeral 이라 새 노드 = 태그 적용)
 kubectl -n api rollout restart deployment/api
 kubectl -n api rollout status deployment/api
 ```
 
-이 단계로 **api 파드(키 A)** 만 tagged 노드가 된다. **세션 EC2(키 B) 태깅·라이브 터미널은 #307
-구현 후** 동적 발급된 tagged authkey 로 가입한다. #307 전에는 §6 검증의 터미널 실검증도 성립하지
-않는다(정적 키로는 첫 세션만 뜨거나 아예 미기동).
+이 단계로 **api 파드(키 A)** 만 tagged 노드가 되고, **세션 키 B 는 비워져** api 가 더 이상 세션
+cloud-init 에 bake 하지 않으며 EC2 `terminal_url` 도 광고하지 않는다(프론트는 placeholder 유지).
+**세션 EC2(키 B) 태깅·라이브 터미널은 #307 구현 후** 동적 발급된 tagged authkey 로 가입한다.
+#307 전에는 §6 검증의 터미널 실검증도 성립하지 않는다(정적 키로는 첫 세션만 뜨거나 아예 미기동).
 
 ## 6. 검증
 
