@@ -130,6 +130,19 @@ POST한다. 기존 Discord 알림은 온프렘 Alertmanager → `alertmanager-di
    egress가 막혀 있으면 pull을 ap-northeast-2 CloudWatch Synthetics canary로 바꿔 전 스택을
    ap-northeast-2로 되돌리는 폴백을 택한다.
 
+6. **거짓 재해 방지 — 무장(arming) + pull 경로 보강 (2026-07-14).**
+   `treat_missing_data=breaching`+AND 는 "미배포/설정 미완료"와 "진짜 재해"를 구분 못 한다. AND 가
+   *단일* 신호 설정실패는 이미 막지만(한쪽 healthy면 OK), **두 신호가 동시에 설정 이유로 unhealthy**
+   (주로 초기 bring-up: heartbeat 동기화 지연 + pull 미준비)면 거짓 알림이 나갈 수 있다. 두 축으로 막는다:
+   - **무장:** 복합알람을 `actions_enabled = var.dr_detection_armed`(기본 false)로 생성 → bring-up 에
+     ALARM 이 돼도 알림 안 감. 두 신호 healthy 실측 후 `dr_detection_armed=true` 재apply 로 무장.
+     (런타임 `enable-alarm-actions` 는 다음 apply 에 되돌려지므로 변수로 둔다.)
+   - **pull 경로 보강:** `public_ingress_allowed_cidrs` 를 좁혀도 Route53 health checker 가 ALB 443 에
+     도달하도록, `data.aws_ip_ranges`(route53_healthchecks)로 checker 대역을 ALB SG 에 항상 허용
+     (`public-ingress.tf`). pull 이 설정 이유로 상시 ALARM 이 되는 것을 막는다.
+   - **잔여(문서 경고):** 프록시 인스턴스 SPOF·WAF managed rule·ACM·realm 개명은 pull 을 unhealthy 로
+     만들 수 있으나, 무장 상태에선 push 가 healthy 면 복합알람이 OK 라 오발동하지 않는다.
+
 ## 컴포넌트 / 파일
 
 | # | 위치 | 종류 | 내용 |
