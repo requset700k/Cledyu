@@ -257,19 +257,30 @@ BID=$(aws ec2 describe-instances --region ap-northeast-2 \
 #   대기 최대 5분·retry) 미완일 수 있다 → 바로 send-command 하면 InvalidInstanceId 또는 원격 "kubectl: command
 #   not found" 로 삭제가 실패한 채 coredns 로 넘어간다. 먼저 SSM 등록(Online)을 기다리고, 원격 명령 첫 줄에
 #   cloud-init status --wait 를 넣어 도구 설치 완료 후에 kubectl 이 실행되게 한다.
-for i in $(seq 1 30); do
-  [ "$(aws ssm describe-instance-information --region ap-northeast-2 \
-      --filters "Key=InstanceIds,Values=$BID" --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null)" = "Online" ] && break
+ONLINE=""; for i in $(seq 1 30); do
+  ONLINE=$(aws ssm describe-instance-information --region ap-northeast-2 \
+      --filters "Key=InstanceIds,Values=$BID" --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null)
+  [ "$ONLINE" = "Online" ] && break
   echo "bastion SSM 등록 대기($i/30)..."; sleep 10
 done
+# fail-closed — 5분 내 SSM 미등록이면 send-command 가 무의미(InvalidInstanceId) → 중단(bastion user_data/SSM agent 점검).
+[ "$ONLINE" = "Online" ] || { echo "❌ bastion SSM 미등록 — cloud-init/ssm-agent 로그 점검 후 재시도"; exit 1; }
 CID=$(aws ssm send-command --region ap-northeast-2 --instance-ids "$BID" --document-name AWS-RunShellScript \
   --parameters 'commands=["cloud-init status --wait","aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2","kubectl delete mutatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found","kubectl delete validatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found"]' \
   --query "Command.CommandId" --output text)
-# ⚠️ send-command 는 제출 즉시 반환한다 → 완료를 기다리지 않고 아래 (3) coredns 를 설치하면 webhook 이
-#   아직 안 지워진 채(또는 bastion 준비 실패) 다시 AdmissionRequestDenied 로 막힐 수 있다. 반드시 대기:
-aws ssm wait command-executed --region ap-northeast-2 --command-id "$CID" --instance-id "$BID"   # Success 까지 blocking
-aws ssm get-command-invocation --region ap-northeast-2 --command-id "$CID" --instance-id "$BID" \
-  --query "Status" --output text   # Success 확인 후에만 다음 단계. Failed/TimedOut 이면 bastion kubeconfig·권한 점검 후 재시도.
+# ⚠️ send-command 는 제출 즉시 반환 → 완료 대기 필수(안 그러면 webhook 안 지워진 채 coredns 진행). 단
+#   `aws ssm wait command-executed` 는 5s×20=100s 상한이라, 원격 cloud-init status --wait(최대 5분)를 못
+#   기다리고 255 로 조기 종료할 수 있다 → 자체 루프로 Success 까지(≥10분) 폴링하고, 실패/미완이면 중단(fail-closed).
+ST=""; for i in $(seq 1 40); do
+  ST=$(aws ssm get-command-invocation --region ap-northeast-2 --command-id "$CID" --instance-id "$BID" --query "Status" --output text 2>/dev/null)
+  case "$ST" in
+    Success) break ;;
+    Failed|Cancelled|TimedOut|Undeliverable|Terminated)
+      echo "❌ webhook 삭제 원격 명령 $ST — bastion kubeconfig/권한/cloud-init 점검 후 재시도"; exit 1 ;;
+  esac
+  echo "webhook 삭제 대기($i/40, status=$ST)..."; sleep 15
+done
+[ "$ST" = "Success" ] || { echo "❌ webhook 삭제 미완(10분 timeout) — 재시도(coredns 진행 금지)"; exit 1; }
 #   (bastion SSM 세션에 이미 진입해 있으면 위 두 kubectl delete 를 직접 실행하고 이 블록은 생략.)
 # (3) [P1] coredns·ebs-csi 관리형 애드온 설치 — CLI. warm(node0)에선 이 둘이 Deployment 라 DEGRADED 로
 #     terraform apply 를 블록하므로 cluster_addons 에서 빼두었다(eks-dr.tf). 노드가 뜬 지금(위 wait 통과)

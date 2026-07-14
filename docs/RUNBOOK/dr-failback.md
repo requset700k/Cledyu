@@ -176,13 +176,20 @@ kubectl --context eks-dr wait --for=delete pod -n kafka -l strimzi.io/cluster=cl
 #   ALB Controller 파드가 노드에 떠 있어, 삭제가 끝나기 전에 노드가 0 되면 컨트롤러가 죽어 ALB/TG 가 고아로 남는다.
 kubectl --context eks-dr delete ingress -A --all
 VPCID=$(aws eks describe-cluster --name cledyu-dr --region ap-northeast-2 --query 'cluster.resourcesVpcConfig.vpcId' --output text)
-for i in $(seq 1 18); do
+for i in $(seq 1 30); do
   [ -z "$(aws elbv2 describe-load-balancers --region ap-northeast-2 --query "LoadBalancers[?VpcId=='$VPCID'].LoadBalancerArn" --output text)" ] && break
-  echo "ALB 삭제 대기($i/18)..."; sleep 10
+  echo "ALB 삭제 대기($i/30)..."; sleep 10
 done
+# fail-closed — 5분 안에 ALB 가 안 지워졌으면 (d) 노드 0 으로 넘어가면 안 된다(컨트롤러 죽어 ALB/TG/SG 고아).
+#   중단하고 ALB Controller reconcile(로그·이벤트) 확인 후 재시도한다.
+[ -z "$(aws elbv2 describe-load-balancers --region ap-northeast-2 --query "LoadBalancers[?VpcId=='$VPCID'].LoadBalancerArn" --output text)" ] \
+  || { echo "❌ ALB 미삭제 — ALB Controller 상태 확인 후 재시도(노드 0 진행 금지)"; exit 1; }
 # (c) PVC 삭제 → EBS CSI 가 gp3 볼륨 삭제(PV 소멸까지 대기).
 kubectl --context eks-dr delete pvc -A --all
-for i in $(seq 1 24); do [ -z "$(kubectl --context eks-dr get pv -o name 2>/dev/null)" ] && break; sleep 10; done
+for i in $(seq 1 30); do [ -z "$(kubectl --context eks-dr get pv -o name 2>/dev/null)" ] && break; echo "PV/EBS 삭제 대기($i/30)..."; sleep 10; done
+# fail-closed — PV(=gp3 EBS)가 안 지워졌으면 (d) 노드 0 진행 금지(EBS CSI 파드가 죽어 볼륨 회수 불가 → 고아).
+[ -z "$(kubectl --context eks-dr get pv -o name 2>/dev/null)" ] \
+  || { echo "❌ PV 잔존 — Retain PV/finalizer 확인 후 재시도(노드 0 진행 금지)"; kubectl --context eks-dr get pv; exit 1; }
 # (d) 노드그룹 N→0 — 모듈이 desired 를 ignore_changes(eks-dr.tf:72) 하므로 terraform(eks_dr_node_desired=0)
 #   으로는 기존 노드가 안 줄어든다 → CLI 필수. 안 하면 DNS 원복돼도 DR 노드가 desired=3/running 잔존(과금·stale).
 NG=$(aws eks list-nodegroups --cluster-name cledyu-dr --region ap-northeast-2 --query 'nodegroups[0]' --output text)
