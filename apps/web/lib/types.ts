@@ -204,11 +204,18 @@ export interface Subscription {
   current_period_end?: string;
 }
 
-/** mock checkout 생성 응답 — POST /api/v1/billing/checkout */
+/** checkout 생성 응답 — POST /api/v1/billing/checkout */
 export interface CheckoutSession {
   id: string;
-  provider: 'mock';
+  provider: 'mock' | 'toss';
   status: 'pending';
   checkout_url: string;
   expires_at: string;
+  client_key?: string;
+  customer_key?: string;
+  amount?: number;
+  order_id?: string;
+  order_name?: string;
+  success_url?: string;
+  fail_url?: string;
 }

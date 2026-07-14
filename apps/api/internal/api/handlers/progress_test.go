@@ -172,6 +172,16 @@ func (f *fakePersistence) CreateCheckoutSession(_ context.Context, session store
 	return nil
 }
 
+func (f *fakePersistence) GetCheckoutSession(_ context.Context, id, userID string) (*store.CheckoutSession, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cs, ok := f.checkouts[id]
+	if !ok || cs.UserID != userID {
+		return nil, store.ErrCheckoutNotFound
+	}
+	return &cs, nil
+}
+
 func (f *fakePersistence) CompleteCheckoutSession(_ context.Context, id, userID string) (*store.Subscription, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

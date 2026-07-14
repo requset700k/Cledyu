@@ -50,6 +50,7 @@ type Handler struct {
 	vmFiles   vmFileService                 // 세션 VM 파일 목록·미리보기 서비스. 미설정이면 endpoint만 503.
 	bq        bqAnalytics                   // D3 강사 분석 BigQuery 조회. nil 허용 — 미설정 시 503.
 	met       *handlerMetrics               // Prometheus 도메인 메트릭 수집기. nil 허용 — 로컬/CI 폴백.
+	toss      tossConfirmer                 // Toss Payments confirm API 호출부. 테스트에서는 fake 주입.
 }
 
 // SetEC2Dial는 EC2 세션(tailnet MagicDNS)에 닿는 다이얼러를 주입한다. main이 tsnet 노드를
@@ -136,6 +137,7 @@ func New(cfg *config.Config, log *zap.Logger, sessions session.Provider, validat
 			})
 			return defaultHandlerMetrics
 		}(),
+		toss: defaultTossConfirmer{},
 	}
 }
 

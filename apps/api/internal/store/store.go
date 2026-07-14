@@ -167,6 +167,22 @@ func (s *Store) CreateCheckoutSession(ctx context.Context, cs CheckoutSession) e
 	return nil
 }
 
+// GetCheckoutSession은 사용자가 소유한 checkout 시도 1건을 반환한다.
+func (s *Store) GetCheckoutSession(ctx context.Context, id, userID string) (*CheckoutSession, error) {
+	var cs CheckoutSession
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, user_id, plan_id, provider, status, checkout_url, created_at, expires_at
+		FROM checkout_sessions WHERE id = $1`, id).
+		Scan(&cs.ID, &cs.UserID, &cs.PlanID, &cs.Provider, &cs.Status, &cs.CheckoutURL, &cs.CreatedAt, &cs.ExpiresAt)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && cs.UserID != userID) {
+		return nil, ErrCheckoutNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get checkout session: %w", err)
+	}
+	return &cs, nil
+}
+
 // CompleteCheckoutSession은 mock checkout 완료를 원자적으로 반영한다.
 // 실제 PG 웹훅 도입 전까지는 checkout 완료와 구독 활성화를 같은 트랜잭션으로 묶어
 // "결제 완료처럼 보이지만 구독은 그대로" 남는 상태를 방지한다.

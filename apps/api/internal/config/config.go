@@ -20,9 +20,19 @@ type Config struct {
 	Kafka       KafkaConfig     `mapstructure:"kafka"`
 	AI          AIConfig        `mapstructure:"ai"`
 	DB          DBConfig        `mapstructure:"db"`
+	Billing     BillingConfig   `mapstructure:"billing"`
 	Analytics   AnalyticsConfig `mapstructure:"analytics"`
 	OTel        OTelConfig      `mapstructure:"otel"`
 	FrontendURL string          `mapstructure:"frontend_url"`
+}
+
+// BillingConfig는 유료 플랜 checkout provider 설정이다.
+// Provider=mock 은 로컬 QA 전용, Provider=toss 는 Toss Payments 승인 API를 사용한다.
+type BillingConfig struct {
+	Provider       string `mapstructure:"provider"`        // mock | toss
+	TossClientKey  string `mapstructure:"toss_client_key"` // 브라우저 SDK public client key
+	TossSecretKey  string `mapstructure:"toss_secret_key"` // 서버 confirm API secret key
+	TossAPIBaseURL string `mapstructure:"toss_api_base_url"`
 }
 
 // AnalyticsConfig는 D3 강사 분석용 BigQuery 설정이다.
@@ -219,6 +229,10 @@ func Load() (*Config, error) {
 	v.SetDefault("ai.base_url", "") // 빈 기본값 — env CLEDYU_AI_BASE_URL 로 주입(미설정 시 정적 힌트 폴백)
 	v.SetDefault("ai.timeout_seconds", 15)
 	v.SetDefault("db.dsn", "") // 빈 기본값 — env CLEDYU_DB_DSN(Secret)으로 주입. 미설정 시 in-memory 전용
+	v.SetDefault("billing.provider", "mock")
+	v.SetDefault("billing.toss_client_key", "")
+	v.SetDefault("billing.toss_secret_key", "")
+	v.SetDefault("billing.toss_api_base_url", "https://api.tosspayments.com")
 	// BigQuery 분석 — 빈 기본값. env CLEDYU_ANALYTICS_PROJECT_ID 설정 시 강사 분석 활성.
 	v.SetDefault("analytics.project_id", "") // env CLEDYU_ANALYTICS_PROJECT_ID 로 주입
 	v.SetDefault("analytics.dataset", "cledyu_analytics")

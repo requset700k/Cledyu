@@ -2,9 +2,32 @@
 
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useSearchParams } from 'next/navigation';
-import { Suspense } from 'react';
+import { Suspense, useState } from 'react';
 import { api } from '@/lib/api';
 import type { BillingPlan, CheckoutSession, Subscription } from '@/lib/types';
+
+interface TossPayment {
+  requestPayment(options: {
+    method: 'CARD';
+    amount: { currency: 'KRW'; value: number };
+    orderId: string;
+    orderName: string;
+    successUrl: string;
+    failUrl: string;
+  }): Promise<void>;
+}
+
+interface TossPaymentsRoot {
+  payment(options: { customerKey: string }): TossPayment;
+}
+
+type TossPaymentsFactory = (clientKey: string) => TossPaymentsRoot;
+
+declare global {
+  interface Window {
+    TossPayments?: TossPaymentsFactory;
+  }
+}
 
 function formatPrice(plan: BillingPlan) {
   if (plan.price_krw === 0) return '무료';
@@ -77,6 +100,9 @@ function BillingPageContent() {
   const searchParams = useSearchParams();
   const checkoutSessionID = searchParams.get('checkout_session_id');
   const checkoutProvider = searchParams.get('provider');
+  const checkoutResult = searchParams.get('checkout_result');
+  const checkoutMessage = searchParams.get('message');
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const plans = useQuery({
     queryKey: ['billing-plans'],
     queryFn: () => api.billing.plans(),
@@ -87,6 +113,16 @@ function BillingPageContent() {
   });
   const checkout = useMutation({
     mutationFn: (planID: string) => api.billing.checkout(planID),
+    onMutate: () => {
+      setCheckoutError(null);
+    },
+    onSuccess: (session) => {
+      if (session.provider === 'toss') {
+        void requestTossPayment(session).catch(() => {
+          setCheckoutError('Toss 결제창을 열지 못했습니다. 잠시 후 다시 시도해주세요.');
+        });
+      }
+    },
   });
   const completeCheckout = useMutation({
     mutationFn: (checkoutID: string) => api.billing.completeCheckout(checkoutID),
@@ -124,14 +160,25 @@ function BillingPageContent() {
         <p className="mt-1 text-slate-500 text-xs">상태: {subscription.data.status}</p>
       </section>
 
+      {checkoutResult === 'success' && (
+        <section className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 p-4 text-emerald-200 text-sm">
+          결제가 승인되어 구독 상태를 갱신했습니다.
+        </section>
+      )}
+      {checkoutResult === 'failed' && (
+        <section className="rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-red-200 text-sm">
+          결제 승인에 실패했습니다.{checkoutMessage ? ` (${checkoutMessage})` : ''}
+        </section>
+      )}
       {visibleCheckout && (
         <section className="rounded-lg border border-sky-500/40 bg-sky-500/10 p-4">
-          <h2 className="text-sky-200 text-sm font-semibold">Mock checkout session 생성됨</h2>
+          <h2 className="text-sky-200 text-sm font-semibold">
+            {visibleCheckout.provider === 'mock' ? 'Mock checkout session 생성됨' : 'Checkout session 생성됨'}
+          </h2>
           <p className="mt-1 text-sky-100/80 text-xs">
-            실제 PG 승인/웹훅은 후속 PR에서 연결합니다. provider: {visibleCheckout.provider} ·
-            session: {visibleCheckout.id}
+            provider: {visibleCheckout.provider} · session: {visibleCheckout.id}
           </p>
-          {mockCheckoutEnabled && (
+          {visibleCheckout.provider === 'mock' && mockCheckoutEnabled && (
             <>
               <button
                 type="button"
@@ -151,9 +198,9 @@ function BillingPageContent() {
           )}
         </section>
       )}
-      {checkout.isError && (
+      {(checkout.isError || checkoutError) && (
         <section className="rounded-lg border border-red-500/40 bg-red-500/10 p-4 text-red-200 text-sm">
-          Checkout 세션을 만들지 못했습니다.
+          {checkoutError ?? 'Checkout 세션을 만들지 못했습니다.'}
         </section>
       )}
 
@@ -171,4 +218,51 @@ function BillingPageContent() {
       </section>
     </div>
   );
+}
+
+async function requestTossPayment(session: CheckoutSession) {
+  if (
+    !session.client_key ||
+    !session.customer_key ||
+    !session.amount ||
+    !session.order_id ||
+    !session.order_name ||
+    !session.success_url ||
+    !session.fail_url
+  ) {
+    throw new Error('missing toss checkout fields');
+  }
+  await loadTossPaymentsSDK();
+  const tossPayments = window.TossPayments?.(session.client_key);
+  if (!tossPayments) {
+    throw new Error('toss sdk unavailable');
+  }
+  await tossPayments.payment({ customerKey: session.customer_key }).requestPayment({
+    method: 'CARD',
+    amount: { currency: 'KRW', value: session.amount },
+    orderId: session.order_id,
+    orderName: session.order_name,
+    successUrl: session.success_url,
+    failUrl: session.fail_url,
+  });
+}
+
+function loadTossPaymentsSDK() {
+  if (typeof window === 'undefined') return Promise.reject(new Error('browser only'));
+  if (window.TossPayments) return Promise.resolve();
+  return new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>('script[data-toss-payments-sdk]');
+    if (existing) {
+      existing.addEventListener('load', () => resolve(), { once: true });
+      existing.addEventListener('error', () => reject(new Error('toss sdk load failed')), { once: true });
+      return;
+    }
+    const script = document.createElement('script');
+    script.src = 'https://js.tosspayments.com/v2/standard';
+    script.async = true;
+    script.dataset.tossPaymentsSdk = 'true';
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('toss sdk load failed'));
+    document.head.appendChild(script);
+  });
 }
