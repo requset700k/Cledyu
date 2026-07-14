@@ -88,12 +88,19 @@ error: ... Tailscale SSH requires an additional check   (또는 초기엔 no suc
   학습자가 user-data/cloud-init 흔적(예: `/var/lib/cloud/`, IMDS)에서 키를 읽을 수 있다. reusable
   이면 탈취한 키로 **세션 종료 후에도 외부 장치를 `tag:lab-ec2` 로 계속 등록**(tailnet 잔존 접근).
 
-  - **권장(정식)**: api 가 세션 프로비저닝 시 Tailscale API(`POST /api/v2/tailnet/-/keys`)로
-    **세션별 one-off(비재사용)+ephemeral+짧은 만료** authkey 를 **동적 발급**하도록 코드화한다.
-    현재는 정적 `cfg.AWSConfig.TailscaleAuthKey` 를 모든 세션에 baked → 구조적으로 reusable 을
-    강제한다. 이 코드 변경은 이슈 #307 로 추적.
-  - **잠정(정적 키 유지 시)**: **짧은 만료 + ephemeral** 로 발급하고 **자주 rotate**, 탈취 창을
-    최소화(잔여 위험 명시적 수용). 절대 만료 없는 reusable 로 두지 말 것.
+  - **권장(정식, 구현됨 — issue #307)**: api 가 세션 프로비저닝 시 Tailscale API
+    (`POST /api/v2/tailnet/-/keys`)로 **세션별 one-off(비재사용)+ephemeral+짧은 만료** authkey 를
+    **동적 발급**한다(코드 반영: `apps/api/internal/ec2/authkey.go`, provisioner 배선, deployment
+    env `CLEDYU_AWS_TAILSCALE_API_KEY`). **활성화 절차**:
+    1) Tailscale에서 **OAuth client**(scope `auth_keys`, `tag:lab-ec2` 발급 권한) 생성 → 토큰 확보.
+       (tagOwners 에 `"tag:lab-ec2": ["<oauth-client 소유자>"]` 형태로 그 client 가 태그를 찍을 수 있어야 함.)
+    2) `vault kv patch cledyu/aws/api tailscale_api_key='<OAuth client token>'`.
+    3) ESO `cledyu-api-tailscale-externalsecret.yaml` 의 `tailscale_api_key` 항목 주석 해제
+       (**반드시 (2) 이후** — Vault 에 없으면 ES 전체가 SyncError). → api 재시작.
+    4) 설정되면 정적 `tailscale_authkey` 는 폴백으로만 남고 세션은 동적 키를 쓴다. 발급 실패 시
+       fail-secure(그 세션만 터미널 비활성, 정적 키로 폴백 안 함).
+  - **잠정(정식 활성화 전, 정적 키 유지 시)**: 정적 `tailscale_authkey` 를 **짧은 만료 + ephemeral**
+    로 발급하고 **자주 rotate**, 탈취 창을 최소화(잔여 위험 명시적 수용). 절대 만료 없는 reusable 금지.
 
 > Ephemeral: 노드 종료 시 tailnet 목록에서 자동 정리.
 

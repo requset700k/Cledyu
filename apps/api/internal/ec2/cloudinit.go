@@ -19,8 +19,10 @@ import (
 //   - code-server: 브라우저 IDE. tailnet 경유로 프록시되므로 authkey 가 있을 때만, best-effort 로 설치한다.
 //   - 랩별 초기화: BootInit 의 packages(apt) 설치와 runcmd 실행(플랫폼 도구 설치 뒤에 온다).
 //
-// authkey 가 비면 tailscale·code-server 를 생략한다 — SSM 채점 전용으로 부팅한다.
-func renderCloudInit(sessionID string, cfg *config.AWSConfig, init session.BootInit) string {
+// authKey 는 세션이 tailnet 에 가입할 때 쓸 authkey 다. 프로비저너가 세션마다 발급한 one-off 키
+// (issue #307)이거나, 미발급 시 정적 폴백(cfg.TailscaleAuthKey)이다. 비면 tailscale·code-server 를
+// 생략하고 SSM 채점 전용으로 부팅한다.
+func renderCloudInit(sessionID string, cfg *config.AWSConfig, init session.BootInit, authKey string) string {
 	var b strings.Builder
 	b.WriteString("#cloud-config\n")
 
@@ -58,13 +60,13 @@ chpasswd:
 	// 베이크되지 않은 AMI 대비 snap 폴백을 둔다. 폴백에선 서비스 기동을 snap install 성공에 묶지
 	// 않는다(Canonical AMI 처럼 snap 이 이미 깔린 경우 install 이 비정상 종료해도 서비스는 켜지게).
 	b.WriteString("  - if systemctl enable --now amazon-ssm-agent 2>/dev/null; then :; else snap install amazon-ssm-agent --classic 2>/dev/null || true; systemctl enable --now snap.amazon-ssm-agent.amazon-ssm-agent.service 2>/dev/null || true; fi\n")
-	if cfg.TailscaleAuthKey != "" {
+	if authKey != "" {
 		hostname := tailnetHostname(cfg, sessionID)
 		// tailscale 설치(베이스 AMI 가 packer 로 미리 굽지 않은 경우 대비) 후 가입. 가입은 설치 뒤에 와야 한다.
 		b.WriteString("  - curl -fsSL https://tailscale.com/install.sh | sh || true\n")
 		// --ssh: 검증엔진/사용자가 tailnet 경유 SSH 로 접속(virtctl 대체). --hostname: 결정적 MagicDNS 이름.
 		fmt.Fprintf(&b, "  - tailscale up --ssh --hostname=%s --authkey=%s\n",
-			yamlScalar(hostname), yamlScalar(cfg.TailscaleAuthKey))
+			yamlScalar(hostname), yamlScalar(authKey))
 	}
 	for _, cmd := range init.Runcmd {
 		// runcmd 의 각 항목은 셸로 실행되는 단일 문자열로 둔다(content DSL 과 동일 계약).
@@ -72,7 +74,7 @@ chpasswd:
 	}
 	// 브라우저 IDE(code-server) — best-effort 라 맨 마지막에 둔다. 무거운 다운로드라 채점·터미널·
 	// 랩 초기화(init.Runcmd, 예: k3s 준비)를 막지 않도록 그 뒤에 설치한다. tailnet 경유 프록시라 authkey 필요.
-	if cfg.TailscaleAuthKey != "" {
+	if authKey != "" {
 		b.WriteString("  - curl -fsSL https://code-server.dev/install.sh | sh || true\n")
 	}
 

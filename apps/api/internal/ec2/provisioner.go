@@ -19,6 +19,7 @@ import (
 	ectypes "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 
 	"github.com/requset700k/cledyu/api/internal/config"
 	"github.com/requset700k/cledyu/api/internal/session"
@@ -47,10 +48,12 @@ type ec2API interface {
 
 // Provisioner는 EC2 세션 수명주기를 관리한다. session.Provider 를 구현한다.
 type Provisioner struct {
-	api ec2API
-	cfg *config.AWSConfig
-	met *vmmetrics.Recorder
-	rdb *redis.Client
+	api    ec2API
+	cfg    *config.AWSConfig
+	met    *vmmetrics.Recorder
+	rdb    *redis.Client
+	log    *zap.Logger
+	minter KeyMinter // nil이면 정적 cfg.TailscaleAuthKey 폴백(하위호환)
 }
 
 // Provisioner가 프로바이더 중립 계약을 구현함을 컴파일 타임에 보장한다.
@@ -59,12 +62,26 @@ var _ session.Provider = (*Provisioner)(nil)
 // NewProvisioner는 표준 AWS SDK 자격증명 체인(환경변수 AWS_ACCESS_KEY_ID/SECRET 등 —
 // Vault→ESO 주입)으로 EC2 클라이언트를 만든다. region 은 AWSConfig 값을 우선한다.
 // met는 kubevirt 매니저와 공유하는 vm_boot_total Recorder다(nil이면 기록을 건너뛴다).
-func NewProvisioner(ctx context.Context, cfg *config.AWSConfig, met *vmmetrics.Recorder, rdb *redis.Client) (*Provisioner, error) {
+func NewProvisioner(ctx context.Context, cfg *config.AWSConfig, met *vmmetrics.Recorder, rdb *redis.Client, log *zap.Logger) (*Provisioner, error) {
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.Region))
 	if err != nil {
 		return nil, fmt.Errorf("ec2 provisioner: load aws config: %w", err)
 	}
-	return &Provisioner{api: awsec2.NewFromConfig(awsCfg), cfg: cfg, met: met, rdb: rdb}, nil
+	p := &Provisioner{api: awsec2.NewFromConfig(awsCfg), cfg: cfg, met: met, rdb: rdb, log: log}
+	// Tailscale API 키가 있으면 세션별 one-off authkey 를 동적 발급한다(issue #307). 없으면 정적
+	// cfg.TailscaleAuthKey 폴백(하위호환).
+	if cfg.TailscaleAPIKey != "" {
+		ttl := time.Duration(cfg.SessionKeyTTLSeconds) * time.Second
+		if ttl <= 0 {
+			ttl = 10 * time.Minute
+		}
+		tag := cfg.SessionKeyTag
+		if tag == "" {
+			tag = "tag:lab-ec2"
+		}
+		p.minter = newTailscaleKeyMinter(cfg.TailscaleAPIKey, "-", tag, ttl)
+	}
+	return p, nil
 }
 
 // newWithAPI는 주입된 EC2 API 로 프로비저너를 만든다(테스트 전용).
@@ -72,11 +89,29 @@ func newWithAPI(api ec2API, cfg *config.AWSConfig, met *vmmetrics.Recorder, rdb 
 	return &Provisioner{api: api, cfg: cfg, met: met, rdb: rdb}
 }
 
+// resolveSessionAuthKey는 세션 cloud-init 에 넣을 tailnet authkey 를 결정한다. minter 가 있으면
+// 세션마다 one-off 키를 발급하고, 발급 실패 시 정적 reusable 키로 폴백하지 않고 빈 값을 반환한다
+// (fail-secure: 유출 위험 있는 정적 키 대신 그 세션만 터미널 비활성, SSM 채점은 유지). minter 가
+// 없으면 정적 cfg.TailscaleAuthKey(하위호환).
+func (p *Provisioner) resolveSessionAuthKey(ctx context.Context) string {
+	if p.minter == nil {
+		return p.cfg.TailscaleAuthKey
+	}
+	key, err := p.minter.Mint(ctx)
+	if err != nil {
+		if p.log != nil {
+			p.log.Warn("세션 tailnet authkey 발급 실패 — 터미널 없이 부팅(SSM 채점만 동작)", zap.Error(err))
+		}
+		return ""
+	}
+	return key
+}
+
 func (p *Provisioner) Create(ctx context.Context, sessionID, labID, userID string, init session.BootInit) (*session.Session, error) {
 	now := time.Now().UTC()
 	expires := now.Add(time.Duration(p.cfg.SessionTTLHours) * time.Hour)
 
-	userData := base64.StdEncoding.EncodeToString([]byte(renderCloudInit(sessionID, p.cfg, init)))
+	userData := base64.StdEncoding.EncodeToString([]byte(renderCloudInit(sessionID, p.cfg, init, p.resolveSessionAuthKey(ctx))))
 
 	in := &awsec2.RunInstancesInput{
 		LaunchTemplate: &ectypes.LaunchTemplateSpecification{

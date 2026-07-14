@@ -10,7 +10,7 @@ import (
 
 // SSM Agent 설치는 채점 경로의 전제라 authkey 유무와 무관하게 항상 포함돼야 한다.
 func TestRenderCloudInit_InstallsSSMAlways(t *testing.T) {
-	out := renderCloudInit("sess1", &config.AWSConfig{}, session.BootInit{})
+	out := renderCloudInit("sess1", &config.AWSConfig{}, session.BootInit{}, "")
 	if !strings.Contains(out, "amazon-ssm-agent") {
 		t.Fatalf("SSM Agent 설치가 누락됨:\n%s", out)
 	}
@@ -19,7 +19,7 @@ func TestRenderCloudInit_InstallsSSMAlways(t *testing.T) {
 // authkey 가 없으면 tailnet 가입·IDE 가 불가하므로 tailscale·code-server 는 빠지고
 // SSM 채점 전용으로만 부팅한다(현행 계약 보존).
 func TestRenderCloudInit_NoAuthKey_SSMOnly(t *testing.T) {
-	out := renderCloudInit("sess1", &config.AWSConfig{}, session.BootInit{})
+	out := renderCloudInit("sess1", &config.AWSConfig{}, session.BootInit{}, "")
 	if strings.Contains(out, "tailscale") {
 		t.Fatalf("authkey 가 없는데 tailscale 이 포함됨:\n%s", out)
 	}
@@ -31,7 +31,7 @@ func TestRenderCloudInit_NoAuthKey_SSMOnly(t *testing.T) {
 // tailscale 바이너리 설치는 반드시 `tailscale up` 보다 먼저 와야 한다(설치 후 가입).
 func TestRenderCloudInit_WithAuthKey_InstallsTailscaleBeforeUp(t *testing.T) {
 	cfg := &config.AWSConfig{TailscaleAuthKey: "tskey-test", TailnetHostnamePrefix: "lab"}
-	out := renderCloudInit("sess1", cfg, session.BootInit{})
+	out := renderCloudInit("sess1", cfg, session.BootInit{}, cfg.TailscaleAuthKey)
 
 	install := strings.Index(out, "tailscale.com/install.sh")
 	up := strings.Index(out, "tailscale up")
@@ -48,7 +48,7 @@ func TestRenderCloudInit_WithAuthKey_InstallsTailscaleBeforeUp(t *testing.T) {
 // authkey 가 있으면 브라우저 IDE(code-server)도 best-effort 로 설치한다.
 func TestRenderCloudInit_WithAuthKey_InstallsCodeServer(t *testing.T) {
 	cfg := &config.AWSConfig{TailscaleAuthKey: "tskey-test"}
-	out := renderCloudInit("sess1", cfg, session.BootInit{})
+	out := renderCloudInit("sess1", cfg, session.BootInit{}, cfg.TailscaleAuthKey)
 	if !strings.Contains(out, "code-server.dev/install.sh") {
 		t.Fatalf("code-server 설치가 누락됨:\n%s", out)
 	}
@@ -59,7 +59,7 @@ func TestRenderCloudInit_WithAuthKey_InstallsCodeServer(t *testing.T) {
 // 먼저 와야 한다.
 func TestRenderCloudInit_EnsuresCurlBeforeDependents(t *testing.T) {
 	cfg := &config.AWSConfig{TailscaleAuthKey: "tskey-test", TailnetHostnamePrefix: "lab"}
-	out := renderCloudInit("sess1", cfg, session.BootInit{Runcmd: []string{"curl -sfL https://get.k3s.io | sh"}})
+	out := renderCloudInit("sess1", cfg, session.BootInit{Runcmd: []string{"curl -sfL https://get.k3s.io | sh"}}, cfg.TailscaleAuthKey)
 
 	guard := strings.Index(out, "command -v $c")
 	tsInstall := strings.Index(out, "tailscale.com/install.sh")
@@ -77,7 +77,7 @@ func TestRenderCloudInit_EnsuresCurlBeforeDependents(t *testing.T) {
 // 랩 콘텐츠(BootInit.Runcmd)는 플랫폼 도구 설치가 끝난 뒤에 실행돼야 한다.
 func TestRenderCloudInit_LabRuncmdAfterPlatformInstalls(t *testing.T) {
 	cfg := &config.AWSConfig{TailscaleAuthKey: "tskey-test"}
-	out := renderCloudInit("sess1", cfg, session.BootInit{Runcmd: []string{"echo lab-content-marker"}})
+	out := renderCloudInit("sess1", cfg, session.BootInit{Runcmd: []string{"echo lab-content-marker"}}, cfg.TailscaleAuthKey)
 
 	ssm := strings.Index(out, "amazon-ssm-agent")
 	lab := strings.Index(out, "lab-content-marker")
@@ -90,7 +90,7 @@ func TestRenderCloudInit_LabRuncmdAfterPlatformInstalls(t *testing.T) {
 // 반드시 랩 runcmd 뒤(맨 마지막)에 와야 한다.
 func TestRenderCloudInit_CodeServerAfterLabRuncmd(t *testing.T) {
 	cfg := &config.AWSConfig{TailscaleAuthKey: "tskey-test"}
-	out := renderCloudInit("sess1", cfg, session.BootInit{Runcmd: []string{"echo lab-content-marker"}})
+	out := renderCloudInit("sess1", cfg, session.BootInit{Runcmd: []string{"echo lab-content-marker"}}, cfg.TailscaleAuthKey)
 
 	lab := strings.Index(out, "lab-content-marker")
 	ide := strings.Index(out, "code-server.dev/install.sh")

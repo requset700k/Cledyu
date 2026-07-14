@@ -115,7 +115,18 @@ type AWSConfig struct {
 	TailnetHostnamePrefix string `mapstructure:"tailnet_hostname_prefix"`
 	// TailscaleAuthKey: 세션 인스턴스 cloud-init 이 tailnet 에 가입할 때 쓰는 ephemeral authkey.
 	// Vault→ESO 로 주입. 비면 cloud-init 이 tailscale 가입을 생략(라이브 터미널/IDE 불가, SSM 채점만).
+	// TailscaleAPIKey 가 설정되면 이 정적 키 대신 세션별 동적발급 키가 쓰인다(폴백용).
 	TailscaleAuthKey string `mapstructure:"tailscale_auth_key"`
+	// TailscaleAPIKey: 세션마다 one-off authkey 를 동적 발급하기 위한 Tailscale API 액세스 토큰
+	// (auth_keys write 스코프 + tag:lab-ec2 발급 권한). 설정 시 프로비저너가 세션마다 비재사용·
+	// ephemeral·짧은만료 키를 발급해 user-data 에 넣어, 정적 reusable 키가 세션(sudo lab 계정)으로
+	// 유출되는 위험을 없앤다(issue #307). Vault→ESO 주입. 미설정 시 TailscaleAuthKey 폴백.
+	TailscaleAPIKey string `mapstructure:"tailscale_api_key"`
+	// SessionKeyTTLSeconds: 동적 발급 세션 authkey 의 만료(초). 인스턴스 부팅+가입 시간만 커버하면
+	// 되므로 짧게 둔다. 기본 600(10분).
+	SessionKeyTTLSeconds int `mapstructure:"session_key_ttl_seconds"`
+	// SessionKeyTag: 동적 발급 세션 authkey 에 붙일 태그. 기본 tag:lab-ec2.
+	SessionKeyTag string `mapstructure:"session_key_tag"`
 	// APITailscaleAuthKey: api 파드 자신이 tsnet 으로 tailnet 에 가입할 때 쓰는 authkey(tag:cledyu-api).
 	// 세션 authkey(TailscaleAuthKey)와 별개다 — api 가 EC2 세션에 라이브 터미널 SSH 를 붙이려면 자신이
 	// tailnet 노드로 붙어야 한다(클러스터 파드는 tailnet/MagicDNS 에 직접 못 닿음). 비면 tsnet 미기동.
@@ -201,6 +212,9 @@ func Load() (*Config, error) {
 	v.SetDefault("aws.instance_type", "t3.medium")
 	v.SetDefault("aws.session_ttl_hours", 3)
 	v.SetDefault("aws.provision_timeout_minutes", 10)
+	v.SetDefault("aws.session_key_ttl_seconds", 600)   // 동적 세션 authkey 만료(초)
+	v.SetDefault("aws.session_key_tag", "tag:lab-ec2") // 동적 세션 authkey 태그
+	// aws.tailscale_api_key 는 기본 빈 값 — env CLEDYU_AWS_TAILSCALE_API_KEY(Secret)로 주입. 미설정 시 정적 authkey 폴백.
 	v.SetDefault("aws.max_active_sessions", 0) // 0 = EC2 오버플로우 비활성(현행 KubeVirt 전용 동작 보존)
 	v.SetDefault("aws.tailnet_hostname_prefix", "lab")
 	v.SetDefault("aws.tailscale_auth_key", "")     // env CLEDYU_AWS_TAILSCALE_AUTH_KEY(Secret)로 주입
