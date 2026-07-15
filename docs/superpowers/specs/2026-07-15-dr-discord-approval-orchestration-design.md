@@ -73,7 +73,7 @@ EKS 기동부터 공개 DNS 전환까지 자동 완료한다. Vault 스냅샷 �
 | 컴포넌트 | 리전 | 런타임 | 역할 |
 |---|---|---|---|
 | `failover-trigger` Lambda | us-east-1 | python3.12 | EventBridge → `sfn.start_execution` |
-| `approval-request` Lambda | ap-northeast-2 | python3.12 | S3 스냅샷 목록 → Discord 승인 메시지 |
+| `approval-request` Lambda | ap-northeast-2 | python3.12 | S3 스냅샷 목록 → **Bot API** 로 Discord 승인 메시지(§3.6) |
 | `interaction` Lambda | ap-northeast-2 | **nodejs20** | Function URL, Ed25519 검증, `SendTaskSuccess` |
 | `addon-install` Lambda | ap-northeast-2 | python3.12 | coredns·ebs-csi 멱등 설치 |
 | `dns-switch` Lambda | ap-northeast-2 | python3.12 | WAF 확인 + Route53 UPSERT |
@@ -113,6 +113,35 @@ interaction** 으로 도착한다 — 버튼 클릭 payload 에 드롭다운의 
 
 item 스키마: `{approvalId(PK), taskToken, snapshot, latestSnapshot, ttl}`. `latestSnapshot` 은 [1] 이 목록을
 만들 때 함께 써 두어, 사용자가 드롭다운을 건드리지 않고 바로 승인했을 때의 폴백값으로 쓴다.
+
+> **`snapshot` 은 DynamoDB 예약어다** — 표현식에 직접 쓰면 **항상** `ValidationException`. `UpdateItem` 은
+> `ExpressionAttributeNames`(`"SET #snap = :s"` + `{"#snap": "snapshot"}`)로 우회한다. 쓰는 쪽([1])은
+> `PutItem` 의 `Item` 맵이라 표현식을 안 거쳐 무관하다 — 그래서 **읽는 쪽만** 걸린다(초안이 놓친 이유).
+
+### 3.6 승인 메시지는 웹훅이 아니라 **Bot API** 로 보낸다 (실측 2026-07-15 — 초안의 근본 오류)
+
+**초안은 기존 `dr-alert` 웹훅(#310) 재사용을 전제했으나 그것으로는 버튼·드롭다운을 보낼 수 없다.**
+Discord 공식 문서: "**Non-application-owned webhooks cannot send interactive components, and the
+`components` field will be ignored**"(`with_components` 를 붙여도 **비**대화형 컴포넌트만 허용).
+채널 설정에서 만든 일반 incoming 웹훅은 application 소유가 아니다.
+
+**증상이 조용해서 위험하다:** Discord 가 에러가 아니라 **2xx 를 주고 `components` 만 버린다** → Lambda 는
+성공(로그 깨끗), DynamoDB 저장까지 정상, SFN 은 토큰 대기 → **"성공했는데 메시지에 버튼만 없음"**.
+정적검증·코드리뷰로는 원리적으로 잡을 수 없고 실제 POST 를 쏴야만 드러난다(3라운드 적대적 리뷰 + 최종
+리뷰 opus 전부 통과시킴 — 아무도 "웹훅으로 버튼을 보낼 수 있나?"를 묻지 않았다).
+
+→ **승인 메시지만 봇으로 보낸다:**
+
+| | 주체 | 이유 |
+|---|---|---|
+| `dr-alert` 평문 알림(#310) | **웹훅 유지** | 컴포넌트가 없어 웹훅으로 충분. 변경하지 않는다 |
+| 승인 요청(버튼+드롭다운) | **Bot API** | `POST /channels/{id}/messages` + `Authorization: Bot <token>` |
+
+- 신규 시크릿 `${var.name_prefix}-dr-discord-bot-token`(**ap-northeast-2** — Lambda 와 같은 리전이라
+  §3.3 의 ARN 리전 파싱이 불요하다. us-east-1 에 있는 웹훅 시크릿과 다른 점)
+- 신규 변수 `dr_discord_channel_id`(공개 식별자 → `variables.tf` default 로 커밋, `dr_approver_ids` 와 동일 근거)
+- **봇은 해당 채널에 `Send Messages` 권한이 필요하다** — 없으면 `403 Missing Access`
+- 선행 작업(§9)에 Bot 생성·토큰·서버 초대가 추가된다
 
 ---
 
@@ -396,6 +425,32 @@ DNS 는 아직 온프렘을 가리키므로 상태도 안전하다.
 공개 엔드포인트가 강제된다 → **Ed25519 서명 검증이 유일한 관문**이다. 더불어 **reserved concurrency 를 소수
 (예: 5)로 제한**한다 — 공개 URL 이라 누구나 두들길 수 있고, 무제한이면 계정 Lambda 동시성을 소진해
 같은 리전의 다른 Lambda(알림 포함)까지 굶길 수 있다. 승인은 초당 몇 건이면 충분하다.
+
+#### AuthType=NONE 만으로는 부족하다 — InvokeFunction 도 열어야 한다 (실측 2026-07-15)
+
+AWS 는 **2025-10 부터 Function URL 호출에 `lambda:InvokeFunctionUrl` 과 `lambda:InvokeFunction` 을 둘 다**
+요구한다(공식 문서). 그런데 provider(aws v5.100.0)의 `aws_lambda_function_url` 은 구 동작대로
+`InvokeFunctionUrl` statement **하나만** 자동 생성한다 → **403 Forbidden**(AccessDeniedException) + 로그
+스트림 0건. 우리 코드의 401 조차 도달하지 못해 "서명 검증이 동작하는지"를 확인할 수 없다.
+
+> **최종 리뷰(opus)가 이 가설을 세웠다가 "provider 가 둘 다 자동 추가(공식 문서 명시)"로 반증 처리했으나
+> 그것이 틀렸다.** 리뷰어가 본 문서 예시는 2025-10 이후 갱신본(두 statement)이고 provider 는 그 전 동작에
+> 머물러 있다 — 문서와 구현의 시차를 정적 검토로는 알 수 없었다.
+
+**조건을 걸 수 없다 — 셋 다 막혀 있다(전부 실측):**
+
+| 시도한 조건 | 결과 |
+|---|---|
+| `lambda:FunctionUrlAuthType` | AWS AddPermission **400 거부** — "only supported for `lambda:InvokeFunctionUrl` action" |
+| `lambda:InvokedViaFunctionUrl`(AWS 권장) | **provider 미지원** — 오픈 이슈 hashicorp/terraform-provider-aws#44829. `aws_lambda_permission` 스키마에 인자 자체가 없다(스키마 덤프로 확인) |
+| `principal_org_id` | 이 계정은 Organization **미소속** |
+
+→ **조건 없이 `principal = "*"` 로 연다(감수):** 아무 AWS 계정이나 이 함수를 직접 Invoke 할 수 있고,
+이 레포가 PUBLIC 이라 ARN(계정ID·함수명)이 사실상 공개다. 그럼에도 감수하는 근거:
+1. **로직은 안전** — 서명 검증이 코드 안에 있어 헤더 없는 호출은 401 로 떨어진다
+2. **실피해는 동시성(5) 소진 → 승인 버튼 429** 뿐이고, 그때도 **CLI 우회**(`aws stepfunctions send-task-success`)로
+   DR 자체는 진행된다 → **이 우회를 런북에 반드시 명시한다. 그게 이 결정의 안전망이다**
+3. provider 가 #44829 를 구현하면 `invoked_via_function_url = true` 를 얹어 이 노출을 제거한다
 
 방어는 3겹이다:
 
@@ -681,7 +736,12 @@ DR 이 1시간 만에 죽는 것이 아니다. 문제는 **조용히** 망가진
 1. **Discord Application 등록** — Developer Portal → Public Key 확보 → Interactions Endpoint URL 설정.
    현재의 outbound 웹훅으로는 버튼 클릭을 수신할 수 없다. Public Key 는 Secrets Manager 에 저장한다.
    (URL 저장 시 Discord 가 PING 을 보내므로 interaction Lambda 배포가 선행되어야 한다 — §7.2(b).)
-2. **승인자 Discord user ID 수집** → `dr_approver_ids` 기본값(§5.4). 계정 2FA 필수(§5.4 잔여 리스크).
+2. **Bot 생성 + 서버 초대** (§3.6 — 승인 메시지는 웹훅으로 못 보낸다):
+   - 같은 Application → **Bot** 탭 → **Reset Token** 으로 토큰 발급(생성 시 1회만 보이므로 Reset 이 정상 절차)
+   - **OAuth2 → URL Generator** → scope `bot` + permission **Send Messages** → 생성된 URL 로 서버에 초대
+   - 토큰은 `${var.name_prefix}-dr-discord-bot-token` 시크릿에 주입(TF 밖에서 `file://` 로 — shell history·`ps` 노출 회피)
+   - 승인 채널 ID → `dr_discord_channel_id`
+3. **승인자 Discord user ID 수집** → `dr_approver_ids` 기본값(§5.4). 계정 2FA 필수(§5.4 잔여 리스크).
 
 > 3번(“DR 검증 전용 Keycloak 계정”)은 **삭제됨** — [12] 를 무인증 검증으로 재설계해 불필요해졌다(§5.1.4, H1).
 
@@ -794,3 +854,18 @@ Discord PING/PONG 등록 흐름·`custom_id` 100자·select 25개 재확인, int
 
 **수확 체감으로 3회차에서 종료한다:** 1회차 6건(치명 3) → 2회차 4건(치명 1) → 3회차 5건(치명 1, 나머지 경미).
 남은 위험은 정적 검토로 더 줄지 않고 §7.2·§7.3 의 실측에서 드러나는 종류다.
+
+### 11.4 실측 라운드 (2026-07-15) — **정적 검토가 원리적으로 못 잡는 결함 4건**
+
+Plan 1 구현·배포·실호출에서 나왔다. **넷 다 apply 하거나 실제로 요청을 쏴야만 드러난다** — 3라운드 적대적
+리뷰 + 최종 리뷰(opus)를 전부 통과한 것들이다.
+
+| # | 결함 | 왜 정적으로 못 잡나 | 반영 |
+|---|---|---|---|
+| **P4** | **웹훅은 버튼·드롭다운을 못 보낸다.** Discord 가 에러가 아니라 **2xx + `components` 무음 폐기** → Lambda 성공·DDB 저장 정상인데 버튼만 없음 | Discord 플랫폼 제약. 아무도 "웹훅으로 버튼을 보낼 수 있나?"를 묻지 않았다 | **§3.6 신설**(Bot API 전환), §3.3·§9 |
+| **P3** | **Function URL 403.** AWS 가 2025-10 부터 `InvokeFunction` 도 요구하는데 provider 는 `InvokeFunctionUrl` 만 자동 생성 → Lambda 호출조차 안 됨 | 문서(갱신됨)와 provider 구현의 **시차**. 최종 리뷰가 이 가설을 세웠다가 문서를 근거로 **반증 처리했고 그게 틀렸다** | §5.4 |
+| **P1** | **`-target` 이 IAM 정책을 안 끌고 온다.** 의존성(dependency)만 따라가고 의존하는 것(dependent)은 안 따라감 → 롤만 생기고 정책 누락 → 권한 없는 롤로 SFN 생성 → AccessDenied 재시도 2분+ hang | `terraform validate` 는 디스크 전체를 보지 `-target` 범위를 모른다 | §7.1·계획 `-target` 목록 |
+| **P2** | **tfvars 게이트 누락.** `enable_eks_dr` 가 tfvars 에 없어 기본값 false → `-target` 없이 apply 하면 **warm DR 129개 리소스 전멸**. pilot-light 를 `-var` 로 apply 해서 tfvars 에 안 남음 | state 와 tfvars 의 불일치는 plan 을 돌려야 보인다 | §7.1 경고. **미해결 — tfvars 보강 필요** |
+
+**교훈:** 이 설계의 남은 위험은 "더 생각해서" 줄지 않는다. **P4 는 3라운드 리뷰가 전부 통과시킨 뒤 첫 실호출에서
+1분 만에 드러났다.** §7.2 의 과금 ~0 승인 경로 검증이 이걸 잡은 장치다 — 그게 없었으면 실재해에서 처음 알았을 것이다.
