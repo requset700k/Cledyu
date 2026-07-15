@@ -1817,12 +1817,28 @@ git commit -m "feat(dr): 애드온 멱등 설치·DNS 전환·완료/실패 알�
 **Files:**
 - Modify: `infra/terraform/aws/dr-orchestration.tf`
 - Modify: `infra/terraform/aws/README.md`
+- Modify: `infra/terraform/aws/dr-failover-buildspec.yml` (아래 잔여 #2)
+- Modify: `infra/terraform/aws/scripts/bastion/12-verify-serving.sh` (아래 잔여 #3)
+- Modify: `infra/terraform/aws/dr-orchestration-lambda/notify/index.py` (아래 잔여 #4)
+- Modify: `infra/terraform/aws/scripts/bastion/04-wait-nodes-ready.sh` (아래 잔여 #5·#6)
 
 **Interfaces:**
 - Consumes: `aws_lambda_function.dr_approval_request`(Plan 1) · `aws_codebuild_project.dr_failover_tf`(T1) ·
   `aws_sfn_state_machine.dr_run_on_bastion`(T2) · bastion 스크립트(T3) · Lambda 2개(T4)
 - Produces: `aws_sfn_state_machine.dr_failover` — EventBridge 타겟·`failover-trigger` env 가 이걸 가리키게 교체
 - **[1] 의 승인 output `{snapshot, approvedBy, approvedAt}` → [7] 의 `SNAPSHOT_KEY` 로 흐른다**
+
+> **🆕 T5 에서 함께 처리할 잔여 6건 (2026-07-16 브랜치 감사 — 스펙 §11.16 (g)).**
+> 전부 "T5 가 없으면 손대봐야 소용없거나, T5 를 만들면서 자연히 닿는 자리"라 여기로 모았다.
+>
+> | # | 내용 | 안 하면 |
+> |---|---|---|
+> | **1** | **`STATE_MACHINE_ARN` 이 하네스를 가리킨다** — `dr_approval_test`(State 가 `RequestApproval` 하나, `End=true`) | **T5 의 본체.** 지금 `dr_orchestration_armed=true` 면 실재해에 승인 버튼이 뜨고, 눌러도 **아무 일도 안 일어나며 실패 알림도 없다**(성공으로 끝나므로). 운영자는 "페일오버가 돌고 있다"고 믿는다 → **T5 전까지 무장 금지** |
+> | **2** | buildspec 에 `-lock-timeout` 없음 | `cledyu-tf-lock`(DynamoDB) 이 잡혀 있으면 `[2]` 가 **즉시** 실패 → 재해 중 수동 `force-unlock`. `-lock-timeout=5m` 이면 대부분 흡수된다 |
+> | **3** | `12` 의 `curl https://auth.cledyu.com` 에 재시도 없음 | alias TTL 60s. `[11]` 의 rollout 이 우연히 시간을 벌어줄 뿐이다(§11.14 의 "여유 0초 — 우연히 살았다"와 같은 형태). **`[12]` 는 마지막 게이트라 여기서 죽으면 완벽히 복구된 DR 이 ❌ 실패 알림**을 보낸다 |
+> | **4** | `notify` 에 재시도 없음 | Discord 429/장애면 **성공·실패 알림 둘 다 유실**. `[13]` 이 죽으면 Catch → NotifyFailed 도 같은 이유로 죽는다 → **무음** |
+> | **5** | `04` 의 `grep -cw Ready` 가 `Ready,SchedulingDisabled` 를 Ready 로 셈(실측) | cordon 된 노드를 통과시킨다. 현 흐름에 cordon 주체가 없어 저위험이나, `[3]` P1e 가 §11.15 상태를 만나면 운영자가 수동 cordon 할 수 있다 |
+> | **6** | `04` 의 `WANT=3` 하드코딩 vs terraform nodegroup desired | 한쪽만 바뀌면 **조용히** 어긋난다. `[4]` 가 올린 desired 를 읽거나 최소한 양쪽에 교차 주석 |
 
 > **🔴 착수 전 결정 2건 (T1 실측에서 도출 — 스펙 §11.9):**
 >
@@ -2509,14 +2525,30 @@ git commit -m "docs(dr): Plan 2 전체 드릴 RTO 실측 반영"
 - [ ] **자식 SM 이 `env` 를 스크립트에 주입한다** (T2 Step 5 env-test — `got=vault/test.snap`)
 - [ ] **명령 로그 전문이 CloudWatch 에 실제로 쌓인다** (T2 Step 5 — 스트림 개수 ≥1.
       `SUCCEEDED` 만으로는 부족하다 — 3종 다 통과하는데 유실됐던 이력, 스펙 §11.11)
-- [ ] **미확정 5건 확정** — `03-` 의 webhook 이름 · KafkaTopic 의 Ready 조건 유무 ·
-      **`delete cluster` 가 PVC 를 지우나**(H5) · **`psql -d cledyu` 인증 통과**(H3) (T3 Step 10) ·
-      **`ClearAlbParam` 의 에러명** (T5 Step 4)
+- [x] ~~**미확정 5건 확정**~~ → **3건 해소, 2건 남음** (2026-07-16 감사 — 스펙 §11.16):
+  - [x] `03-` 의 webhook 이름 — 2026-07-15 warm 클러스터 직접 조회로 확정(03 주석)
+  - [x] KafkaTopic 의 Ready 조건 유무 — **있다.** Strimzi 0.45.2 CRD 가 printer column
+        `Ready ← .status.conditions[?(@.type=="Ready")].status` 선언(§11.16 (e)) → `09` 유지
+  - [x] **`delete cluster` 가 PVC 를 지우나**(H5) — **지운다.** CNPG 0.26.1 이 PVC 에
+        `ownerReferences: Cluster/<name>` 를 붙여 GC 가 연쇄 삭제(kind 실측 ~15초, §11.16 (e))
+        → **`08` 에 PVC 삭제 추가 불필요**
+  - [ ] **`psql -d cledyu` 인증 통과**(H3) — 여전히 미확정 (T3 Step 10 이 실측 없이 지나갔다) → **T7**
+  - [ ] **`ClearAlbParam` 의 에러명** — 여전히 미확정 (T5 Step 4)
 - [ ] **`06-` 이 재실행에서도 `SUCCEEDED`** (T3 Step 10 — 두 번 돌린다. H2)
 - [ ] **`08-` 재생성 후 PVC 가 stale 재사용이 아니다** — [12] 의 `count(*)` 가 **복원 시점 값과 일치**
       (H5 — Ready 통과·count>0 통과인데 데이터가 옛것일 수 있는 유일한 무음 경로)
+      ⚠️ **위 H5 해소에도 이 항목은 남긴다.** kind 실측은 "지금 이 버전이 이렇게 동작한다"이고,
+      CNPG 가 동작을 바꾸거나 retention 정책이 붙으면 조용히 되살아난다 — **실측이 실환경 백스톱을
+      대체하지 않는다**(§11.16 (e)). T7 표식(`dr_drill_marker`)이 그 회귀를 잡는다.
+- [ ] **`03-` 이 Vault raft PVC 를 실제로 비운다** (🆕 2026-07-16, §11.16 (c)) — `[7]` 직전
+      `vault status` 의 `initialized == false`. 이게 아니면 `[7]` 이 already-initialized 로 죽고
+      **재실행 경로가 없다**(07 이 init 산물을 안 남기므로)
+- [ ] **`07` 이 감사 로그에 시크릿을 안 남긴다** (🆕 2026-07-16, §11.16 (a)) — 드릴 후
+      `/aws/eks/cledyu-dr/cluster` 에서 `VAULT_TOKEN` · `generate-root -nonce` 가 **0건**.
+      (07-13~14 드릴분은 24 / 12건이었다. 코드는 정상 동작하므로 **이 확인 없이는 회귀를 못 잡는다**)
 - [ ] **bastion 이 `put-parameter` 에 성공한다** (T3 Step 10 의 `09-` — F3. 이게 없으면 40분 뒤 죽는다)
-- [ ] bastion 스크립트 **7개**가 각각 `SUCCEEDED` (T3 Step 10)
+- [ ] bastion 스크립트 **8개**가 각각 `SUCCEEDED` (T3 Step 10 — T4 가 `04-wait-nodes-ready` 를
+      더해 7→8, §11.14 (e))
 - [ ] `addon-install` 이 멱등하다 — `action=start` 를 두 번 돌려도 성공 (T4)
 - [ ] `dns-switch` 가 SSM 파라미터 없으면 **실패**한다 (fail-closed)
 - [ ] 메인 SM 이 [1]→[13] 을 완주한다 (T5 Step 4)
@@ -2530,6 +2562,18 @@ git commit -m "docs(dr): Plan 2 전체 드릴 RTO 실측 반영"
 
 ## 알려진 한계 (이 계획 범위 밖)
 
+- 🆕 **07-13~14 드릴분 Vault 시크릿이 감사 로그에 남아 있다**(스펙 §11.16 (a) — 2026-07-16).
+  원인은 제거됐고(87d74ce: exec 인자 → stdin) 새로 새지 않는다. 그러나 **이미 쌓인
+  `/aws/eks/cledyu-dr/cluster` 의 24 / 12 / 4건은 그대로**다(보존 90일 → 2026-10-11 자연 만료).
+  그중 12건은 `cledyu/vault/bootstrap` 의 **온프렘 운영 Vault recovery 키 전량**(threshold 3)이다.
+  **잔여 조치(사용자):** `kube-apiserver-audit-*` 스트림 삭제. 복제 경로는 없음을 확인했다
+  (구독 필터·메트릭 필터·S3 export 전부 0건) → 지우면 실제로 사라지고 **로테이션 불요**.
+  악용엔 "AWS 로그 읽기 + 온프렘 망 접근"이 둘 다 필요해 즉시 위험은 아니나, **망 격리 하나로만
+  버티는 상태**다. 지우지 않고 두면 드릴마다 3건씩 쌓인다.
+- 🆕 **07 단독 재실행은 불가**(스펙 §11.16 (c)) — 실패 시 `[3]` 부터 파이프라인을 다시 태워야 한다.
+  init~restore 의 되돌릴 수 없는 구간을 "3-peer 대기 + restore 한 줄"까지 줄여 그 창에 걸릴 확률은
+  낮췄으나 없앤 건 아니다. 없애려면 init 산물을 어딘가 남겨야 하는데 그게 (a) 의 유출 경로였다 —
+  **재실행성과 유출 방어가 맞바꿈 관계**이고, `[3]` 의 PVC 정리로 전자를 우회한 것이다.
 - **Vault k8s auth 가 ~1시간 후 만료된다**(스펙 §8.2) — 런북이 "드릴엔 무해"로 쓴 가정을 DR 1~2일 전제가
   상속. ESO 가 조용히 refresh 불능이 된다. 후속 이슈(비만료 reviewer 토큰)
 - **failback 은 수동**(스펙 §8) — 구현·런북은 있으나 실 DR 검증 이력 없음. Plan 2 드릴 직후 이어서 하면

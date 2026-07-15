@@ -1403,3 +1403,150 @@ replica 2 중 1 Running(마지막 노드) + 1 Pending(갈 노드 없음) = 가�
 `terraform -var eks_dr_node_desired=0`(모듈이 무시). 셋 다 **이름은 동작을 약속하는데 실제로는 no-op** 이고,
 셋 다 **성공을 보고**한다. §11.11 의 교훈("`SUCCEEDED` 는 로그가 남았다가 아니다")이 계속 다른 옷을 입고
 돌아온다 — **약속하는 이름을 믿지 말고 그 명령이 바꾼 상태를 직접 봐야 한다.**
+
+---
+
+### 11.16 브랜치 전수 감사 (2026-07-16) — **정적 감사 + 실측**
+
+**T1~T4 완료 시점의 브랜치(4,714줄) 전체를 대상으로, 확신 없는 항목은 kind·AWS 로 실측했다.**
+발견 5건 중 **3건은 코드가 정상 동작하므로 어떤 테스트로도 안 잡히는 것**들이다.
+
+#### (a) 🔴 **Vault 루트 토큰·복구 키가 EKS 감사 로그에 평문으로 쌓이고 있었다** (수정됨)
+
+`07-restore-vault.sh` 헤더는 `set -x` 를 피해 **stdout 을 막았다.** 그런데 그 스크립트는 전부
+`kubectl exec vault-0 -- sh -c "... VAULT_TOKEN=$X ..."` 형태이고, **exec 의 명령 인자는
+requestURI 쿼리스트링에 실려 API 서버 감사 로그로 나간다.** eks-dr.tf:71 이
+`cluster_enabled_log_types = ["audit", ...]` 라 그게 CloudWatch 로 간다. **방어가 한 층만 있었다.**
+
+실측 (`/aws/eks/cledyu-dr/cluster`, 보존 90일, 07-13~14 드릴 4회분):
+
+| 패턴 | 건수 | 새던 값 |
+|---|---|---|
+| `VAULT_TOKEN=` | 24 | `$INIT_ROOT` · `$NEWROOT` |
+| `generate-root -nonce` | **12** (= 4회 × threshold 3) | **recovery 키 전량** |
+| `generate-root -decode` | 4 | `$ENC`+`$OTP` → 루트 복호 가능 |
+
+가장 나쁜 건 12건이다. 그 키는 DR 것이 아니라 `cledyu/vault/bootstrap` 의 **온프렘 운영 Vault**
+키다(07:88-90 이 그 출처를 명시) → `generate-root` → 루트. `logs:FilterLogEvents` 만 있으면 읽힌다.
+**"Vault admin 획득은 3경로로 차단" 이라는 방어선이 이 경로로 우회됐다.**
+
+**수정(87d74ce): 인자 → stdin.** `printf '%s' "$X" | kubectl exec -i ... -- sh -c "... \$(cat) ..."`.
+`\$(cat)` 은 bastion 셸이 아니라 **파드 안 sh** 가 평가하므로 명령 문자열에 시크릿이 없다.
+kind 실증 — 구 방식은 `command=...VAULT_TOKEN%3Dhvs.CAESIFAKE...`, 신 방식은
+`command=...VAULT_TOKEN%3D%24%28cat%29...`(= `$(cat)` 리터럴)이고 값은 파드에 온전히 도착한다.
+
+**범위 확정:** SSM 명령 로그(`dr_bastion_commands`)와 CloudTrail 은 깨끗하다 — 전자는 `set -x` 부재
+덕에 명령줄이 stdout 에 안 실렸고(**헤더의 방어가 거기선 실제로 작동했다**), 후자는 스크립트 파일
+내용만 싣고 런타임 값을 안 싣는다. 새던 건 감사 로그 하나뿐이다.
+
+**잔여(사용자):** 07-13~14 드릴분 감사 스트림 삭제. 그때까지 노출은 "AWS 로그 읽기 + 온프렘 망 접근"
+둘 다 필요해 즉시 위험은 아니나, **망 격리 하나로만 버티는 상태**다.
+
+**교훈 — 방어를 한 층에만 걸고 "막았다"고 적으면, 다음 사람은 그 주석을 읽고 안심한다.**
+헤더는 위협(루트 토큰 평문 노출)을 **정확히 알고 있었는데** 출구를 하나만 셌다.
+
+#### (b) 🔴 **`kubectl wait` 는 대상이 없으면 기다리지 않고 즉시 에러다** (수정됨)
+
+kubectl **v1.34.0**(bastion 실제 버전 — 감사 로그 userAgent 로 확인) 실측:
+
+| 형태 | 대상 0개일 때 |
+|---|---|
+| `wait ... pod/does-not-exist` | `Error from server (NotFound)` → **exit 1, 즉시** |
+| `wait ... pod --all` | `error: no matching resources found` → **exit 1, 즉시** |
+| `rollout status deploy/x` | 같음 |
+
+**§11.14 (f) 의 전제가 거짓이었다.** `04-wait-nodes-ready.sh:32` 는 이렇게 적고 있다:
+
+> `kubectl wait --for=condition=Ready node --all` 은 **노드가 0대면 즉시 통과한다**(공허참)
+
+**아니다 — 통과가 아니라 에러다.** 04 의 대수 검증 루프는 여전히 **필요하지만**(없으면 즉시 죽는다)
+**이유가 반대**다. 구현이 우연히 옳았다.
+
+그 거짓 전제 때문에 `09-wait-apps-ready.sh` 의 wait 4곳에 게이트가 없었다. 바로 옆
+`08-restore-data.sh:38` 은 **같은 함정을 정확히 알고** 60회 존재 루프로 막는다 — 09 만 빠졌다.
+**[9] 가 죽으면 ALB 파라미터가 안 써지고 → [10] fail-closed → DNS 미전환 = 복구 실패**(F3 와 동일 결말).
+
+**수정(0177f80): 게이트 5곳** — kafka CR · kafkatopic 대수 · VE deploy · keycloak CR ·
+**ingress/api + ALB 호스트명**. 마지막 것은 초안이 `ALB=$(kubectl get ...)` 라 **set -e 가 친절한
+메시지 전에 죽여** `[ -n "$ALB" ]` 게이트에 도달조차 못 했고, ALB 프로비저닝(2~3분)도 안 기다렸다.
+
+#### (c) 🔴 **Vault init 멱등성** (수정됨 — codex PR 리뷰 P1 이 출발점)
+
+`vault operator init` 은 이미 초기화된 Vault 에서 죽는데, 07 은 init 산물을 **일부러 안 남긴다**(위 (a))
+→ 재실행 시 root 획득 불가 → **DR 중단**. PVC 도 warm etcd 처럼 사이클 간 살아남는다(gp3).
+
+**kind 실측이 설계를 두 번 바꿨다:**
+
+| 가설(초안) | 실측 | 결론 |
+|---|---|---|
+| Pending 파드가 PVC 삭제를 막는다 → **STS 도 지워야** | **안 막는다**(pvc-protection 이 `nodeName` 없는 파드를 in-use 로 안 봄) | **STS 삭제 불필요** → ArgoCD selfHeal 과 안 싸움 |
+| `-l app.kubernetes.io/name=vault` 로 PVC 삭제 | 차트 volumeClaimTemplates 에 **라벨이 없다**(`name: data`/`audit` 뿐) | **0개 매칭 = 조용한 no-op** 이 될 뻔 → ns 통째 `--all` |
+| — | Running 파드면 PVC 가 `deletionTimestamp` 만 받고 **Bound 에 머문다** | 기본 `--wait=true` 는 timeout + **지뢰**(파드 죽는 순간 삭제) |
+
+**수정(772df47):**
+- `[3]` 에 P1e — `delete pvc --all --wait=false`(표시) → `delete pod -l ...`(손 떼게) → deletionTimestamp
+  게이트. 노드 0(정상 warm)과 노드 3(§11.15 상태) **양쪽에서 같은 코드가 수렴한다**(실측 10초).
+- `07` 의 `aws s3 cp`·`kubectl cp` 를 **init 앞으로** — 되돌릴 수 없는 구간을 "3-peer 대기 + restore
+  한 줄"로 축소.
+- `07` init 앞 initialized 게이트 — 원인을 가리키는 메시지("[3] 부터 재실행").
+
+**codex 의 처방 중 "복원 가능한 root 토큰 경로를 별도 처리" 는 의도적으로 안 했다.** init 만 된
+fresh keyring 인지 restore 된 온프렘 keyring 인지 **스크립트가 구분할 수 없고**, 둘은 root 획득 경로가
+다르다. 구분 못 하는 걸 분기하면 절반은 틀린다 → **분기 대신 상태 자체를 제거**했다(§11.5 의
+"진단은 맞았는데 처방이 절반" 패턴).
+
+**남은 트레이드오프:** 07 단독 재실행은 여전히 불가 — `[3]` 부터 재실행해야 한다.
+
+#### (d) ⚠️ **`vault status` 는 sealed 면 exit 2** — pipefail 이 판정을 덮는다 (수정됨)
+
+(c) 의 initialized 게이트를 `vault status | jq -e '.initialized == true'` 로 쓰면 **버그다.**
+3상태 실측:
+
+| 상태 | 구 코드(파이프 직결) | 신 코드(출력 먼저 캡처) |
+|---|---|---|
+| fresh (`initialized=false`, exit 2) | 통과 ✅ | 통과 ✅ |
+| **초기화됨 + sealed (exit 2)** | **통과 ❌** | 발동 ✅ |
+| 초기화됨 + unsealed (exit 0) | 발동 ✅ | 발동 ✅ |
+
+`set -o pipefail` 아래서 `vault status` 의 exit 2 가 jq 의 판정을 덮어써 **게이트가 막으려던 상태를
+그냥 통과시킨다.** → `ST=$(... || true)` 로 캡처 후 판정.
+
+#### (e) ✅ **미확정 2건 해소** (코드 변경 불필요)
+
+**H5 — `delete cluster` 가 PVC 도 지우나 → 지운다.** kind + 레포와 동일 차트(cloudnative-pg 0.26.1)
+실측: CNPG 가 PVC 에 `ownerReferences: Cluster/<name>` 를 붙여 GC 가 연쇄 삭제한다(~15초).
+테스트 Cluster 는 PVC 를 만드는 필드가 레포와 일치한다(`instances: 1` + `storage:` 만 —
+walStorage·tablespaces·pvcTemplate 없음). `bootstrap.recovery`(S3 barman)는 kind 에서 못 써서 뺐으나
+PGDATA 초기화 방식일 뿐 PVC 소유권과 무관하다.
+→ **`08` 에 PVC 삭제 추가 불필요.** 단 **T7 표식(`dr_drill_marker`)은 유지한다** — 위 실측은 "지금 이
+버전이 이렇게 동작한다"이고, CNPG 가 동작을 바꾸거나 retention 정책이 붙으면 조용히 되살아난다.
+**실측이 실환경 백스톱을 대체하지 않는다.**
+
+**KafkaTopic 에 Ready 조건이 있나 → 있다.** Strimzi 0.45.2 의 CRD 직접 확인
+(`helm template --include-crds`): kafkatopics v1beta2 가 additionalPrinterColumns 에
+`Ready ← .status.conditions[?(@.type=="Ready")].status` 를 선언하고 status.properties 에 conditions 가
+있다. → **`09` 의 `wait kafkatopic --all` 유지**(그 wait 은 `kafka/cledyu-kafka` Ready 뒤라 Topic
+Operator 가 이미 떠 있다).
+
+#### (f) 기각된 가설 3건 (세워놓고 실측으로 떨어뜨림)
+
+| 가설 | 실측 | 판정 |
+|---|---|---|
+| dns-switch 의 UPSERT 가 failover 라우팅을 깬다 | api/app/auth 는 **단순 A alias**(SetIdentifier·헬스체크 없음) | 기각 |
+| dns-switch 의 wafv2 가 리전 불일치(us-east-1) | provider alias 없음 = ap-northeast-2 = ALB 와 동일 scope | 기각 |
+| `11:55` 의 `grep && { exit 1; }` 이 set -e 로 오작동 | AND-OR 리스트 면제 — 의도대로 동작 | 기각 |
+
+#### (g) 미수정 잔여 — **T5 에서 함께 처리**
+
+| # | 내용 | 결말 |
+|---|---|---|
+| 1 | **실재해 트리거가 하네스를 부른다** — `STATE_MACHINE_ARN = dr_approval_test.arn`(State 가 `RequestApproval` 하나, `End=true`) | 승인 버튼을 눌러도 **아무 일도 안 일어나고 실패 알림도 없다**. T5 가 해소. 그전까진 `dr_orchestration_armed` 를 켜면 안 된다 |
+| 2 | buildspec 에 `-lock-timeout` 없음 | `cledyu-tf-lock`(DynamoDB) 이 잡혀 있으면 `[2]` 즉시 실패 → 재해 중 수동 `force-unlock` |
+| 3 | `12` 의 `curl https://auth.cledyu.com` 에 재시도 없음 | alias TTL 60s. `[11]` 의 rollout 이 시간을 벌어주지만 **설계가 아니라 운**(§11.14 의 "여유 0초 — 우연히 살았다"와 같은 형태) |
+| 4 | `notify` 에 재시도 없음 | Discord 429/장애면 **성공·실패 알림 둘 다 유실** |
+| 5 | `04` 의 `grep -cw Ready` 가 `Ready,SchedulingDisabled` 를 Ready 로 셈(실측) | cordon 된 노드를 통과. 현 흐름에 cordon 주체가 없어 저위험 |
+| 6 | `04` 의 `WANT=3` 하드코딩 vs terraform nodegroup desired | 한쪽만 바뀌면 조용히 어긋남 |
+
+**교훈 — "동작하는데 틀린 것"은 테스트가 못 잡는다.** (a)(d)(e) 셋 다 **스크립트가 정상 종료하고
+게이트가 통과하는데** 틀렸다. (a) 는 유출, (d) 는 게이트 무효, (e) 는 근거 없는 미확정이 관문을
+막고 있던 것이다. §11.11("`SUCCEEDED` 는 로그가 남았다가 아니다")의 또 다른 옷이다.
