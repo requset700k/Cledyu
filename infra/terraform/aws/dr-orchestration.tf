@@ -648,8 +648,27 @@ resource "aws_cloudwatch_log_group" "dr_bastion_commands" {
 # 없으면 stdout 전문이 유실되고 stdoutTail(잘림)만 남는다.
 data "aws_iam_policy_document" "eks_dr_bastion_command_logs" {
   count = local.eks_dr_enabled
+
+  # ⚠️ 에이전트는 **로그그룹이 이미 있어도** DescribeLogGroups → CreateLogGroup 을 먼저 호출한다
+  # (2026-07-15 T2 실측 — 에이전트 로그에서 확인). "그룹은 terraform 이 만드니 CreateLogStream·
+  # PutLogEvents 면 충분"이라는 추론은 틀렸다. 그리고 **DescribeLogGroups 는 리소스 한정이 안 된다** —
+  # 에이전트 요청이 `log-group::log-stream:`(그룹명 비어 있음)으로 오므로 "*" 여야 한다.
   statement {
-    actions = ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"]
+    sid       = "DiscoverLogGroups"
+    actions   = ["logs:DescribeLogGroups"]
+    resources = ["*"]
+  }
+
+  # CreateLogGroup 은 그룹이 이미 있으면 실제로는 no-op 이지만, **권한이 없으면 에이전트가 거기서
+  # 중단하고 CloudWatch 출력을 통째로 포기한다**(명령 자체는 Success 로 끝나 조용히 유실된다).
+  statement {
+    sid = "WriteCommandLogs"
+    actions = [
+      "logs:CreateLogGroup",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents",
+      "logs:DescribeLogStreams",
+    ]
     resources = [
       aws_cloudwatch_log_group.dr_bastion_commands.arn,
       "${aws_cloudwatch_log_group.dr_bastion_commands.arn}:*",
