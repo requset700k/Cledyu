@@ -1083,3 +1083,49 @@ CloudWatchOutputConfig = {
 같이 만든다"** 를 넣었다. 그런데 이번 건은 **스크립트가 아니라 SSM 에이전트가** 부르는 것이라 그 규칙의
 문면에 안 걸렸다. **"bastion 에서 AWS API 를 부르는 주체"는 스크립트만이 아니다** — 에이전트·사이드카·
 오퍼레이터 전부다. 규칙을 문면대로만 읽으면 같은 함정을 다른 이름으로 다시 밟는다.
+
+### 11.11 T2 실측 발견 (2026-07-15) — CloudWatch 출력이 조용히 유실됐다
+
+**§11.10 에서 "S3 가 3중으로 막혔으니 CloudWatch 로 간다"고 정하고 IAM 을 함께 만들었는데, 그 IAM 이
+틀려서 CloudWatch 도 막혀 있었다.** 즉 **T2 가 자기 목적을 배신할 뻔했다.**
+
+**증상 — 모든 게이트가 통과하는데 목적만 달성 안 된다:**
+
+| 신호 | 값 | 판정 |
+|---|---|---|
+| SFN 실행 | `SUCCEEDED` | ✅ |
+| `responseCode` | `0` | ✅ |
+| `stdoutTail` | `hello\nroot\n` | ✅ |
+| **CloudWatch 스트림** | **0개** | ❌ **전문 유실** |
+
+스모크 3종(성공·실패·env 주입)이 **전부 통과**했다. **스트림을 따로 확인하지 않았으면 T2 를 완료로
+넘겼을 것이다** — 정확히 T2 가 없애려던 결함(전문 유실)을 안은 채로.
+
+**원인 — 에이전트 로그가 정확히 말해줬다:**
+```
+ERROR ... not authorized to perform: logs:DescribeLogGroups on resource: ...log-group::log-stream:
+ERROR ... not authorized to perform: logs:CreateLogGroup on resource: .../aws/ssm/cledyu-lab-dr-failover:log-stream:
+ERROR ... Error Creating Log Group for CloudWatchLogs output: AccessDeniedException
+```
+1. **에이전트는 로그그룹이 이미 있어도 `DescribeLogGroups` → `CreateLogGroup` 을 먼저 부른다.**
+   "그룹은 terraform 이 만드니 `CreateLogStream`·`PutLogEvents` 면 충분하다"는 **추론이 틀렸다.**
+   그리고 거기서 막히면 **CloudWatch 출력을 통째로 포기**한다(명령 자체는 Success 로 끝난다).
+2. **`DescribeLogGroups` 는 리소스 한정이 안 된다** — 에이전트 요청이 `log-group::log-stream:`
+   (그룹명이 **비어 있음**)으로 온다. 그룹 ARN 으로 좁힌 것이 원인이었다.
+
+**정정:** `logs:DescribeLogGroups` → `resources = ["*"]` 별도 statement + `CreateLogGroup` 추가.
+**검증(실측):** 재실행 → 스트림
+`78032f12-.../i-016ee73c5891f5230/aws-runShellScript/stdout` 생성 확인, `aws logs tail` 로 마커 문자열까지
+읽힘. **스트림 이름이 `<commandId>/<instanceId>/aws-runShellScript/stdout`** 이라 자식 SM 의 출력 계약
+(`commandId`)으로 정확히 찾힌다.
+
+**교훈 1 — `SUCCEEDED` 는 "명령이 돌았다"이지 "로그가 남았다"가 아니다.** Global Constraints 의
+**"과소 게이트 — 존재만 보고 값을 안 봄"** 그 자체다. 이 계획은 G1 함정을 *스크립트의 게이트*에 대해
+경고했는데, 정작 **우리가 실측을 판정하는 기준**에 같은 함정이 있었다. **"부수효과를 목적으로 하는 변경은
+그 부수효과를 직접 확인해야 한다"** — 성공 코드가 아니라 **스트림 개수**를 봤어야 했고, 실제로 그걸 보고서야
+찾았다.
+
+**교훈 2 — F3 는 세 번째다.** §11.7 F3(스크립트→`ssm:PutParameter`) → §11.10(에이전트→S3/CloudWatch,
+규칙의 문면에 안 걸림) → §11.11(**같은 에이전트, IAM 을 만들었는데 내용이 틀림**). 매번 "이제 IAM 을
+챙긴다"고 하고 매번 다른 층에서 틀렸다. **IAM 은 추론으로 채우면 안 된다** — 호출 주체의 **실제 요청**을
+봐야 한다(에이전트 로그·CloudTrail). 이번에도 답을 준 건 문서나 추론이 아니라 **에이전트 로그 한 줄**이었다.
