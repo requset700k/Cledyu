@@ -1,83 +1,66 @@
 package handlers
 
 import (
-	"context"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
-// consoleRegistry는 세션당 활성 라이브 터미널 연결을 최대 1개로 제한한다(기존 창 우선).
+// consoleConn은 consoleRegistry가 이전 홀더에게 정상 종료를 통보하는 데 필요한 최소 동작이다.
+// *websocket.Conn이 이를 만족한다. 인터페이스로 두어 레지스트리를 실제 소켓 없이 단위 테스트한다.
+// gorilla의 WriteControl은 다른 메서드와 동시 호출이 안전하므로, 인수한 새 연결의 goroutine에서
+// 이전 홀더 소켓에 호출해도 문제없다.
+type consoleConn interface {
+	WriteControl(messageType int, data []byte, deadline time.Time) error
+}
+
+// consoleRegistry는 세션당 활성 라이브 터미널을 최근 연결 우선(last-wins)으로 1개만 유지한다.
 //
-// KubeVirt serial console(ttyS0)은 VM당 배타 접속이라, 같은 세션에 두 번째 연결이 붙으면
-// 첫 번째가 강제로 끊긴다. 같은 계정으로 두 브라우저 창을 열고 랩에 접속하면 두 콘솔이
-// 서로를 축출하고, 클라이언트는 비정상 종료를 재연결로 처리해(runtime-api-origin.mjs
-// shouldReconnect) 두 창이 무한 재연결 핑퐁에 빠진다. acquire 로 세션당 한 연결만
-// 통과시켜 이 루프를 원천 차단한다.
+// KubeVirt serial console(ttyS0)은 VM당 배타 접속이라, 같은 세션에 두 번째 연결이 붙으면 첫 번째가
+// 강제로 끊긴다. 가드가 없으면 두 브라우저 창이 서로를 축출하고, 클라이언트는 비정상 종료를 재연결로
+// 처리해(runtime-api-origin.mjs shouldReconnect) 무한 재연결 핑퐁에 빠진다.
+//
+// last-wins: 새 연결이 항상 인수하고, 이전 홀더에는 정상 종료(close 1000) 프레임을 보내 그 클라이언트가
+// 재연결을 멈추게 한다. 실제 연결 정리는 새 SerialConsole이 KubeVirt 배타락으로 이전 콘솔을 밀어내며
+// 일어나고(기존 자가복구 경로), 피어가 죽어 그 경로가 안 도는 경우엔 proxyTerminal의 keepalive teardown이
+// 회수한다. 이 덕에 네트워크 blip 후 같은 창의 재연결이나 준비 probe→터미널 handoff 모두 거절 없이
+// 자연스럽게 슬롯을 인수해 복구된다.
 type consoleRegistry struct {
 	mu     sync.Mutex
-	active map[string]struct{}
+	active map[string]consoleConn
 }
 
 func newConsoleRegistry() *consoleRegistry {
-	return &consoleRegistry{active: make(map[string]struct{})}
+	return &consoleRegistry{active: make(map[string]consoleConn)}
 }
 
-// acquire는 sessionID에 활성 콘솔이 없을 때만 슬롯을 점유하고 true를 돌려준다.
-// 이미 활성이면 false — 호출부는 새 연결을 정상 종료(close 1000)로 닫아 재연결을 막는다.
-// nil 리시버는 가드 비활성(테스트가 &Handler{} 리터럴로 만든 경우)으로 항상 통과시킨다.
-func (r *consoleRegistry) acquire(sessionID string) bool {
+// acquire는 ws를 세션의 활성 콘솔로 등록한다(last-wins). 이전 홀더가 있으면 정상 종료(1000) 프레임을
+// 보내 그 클라이언트가 재연결을 멈추게 한다. 돌려준 release는 compare-and-delete라, 이미 더 새로운
+// 연결이 인수한 뒤 옛 홀더가 호출해도 새 등록을 지우지 않는다. nil 리시버는 가드 비활성(테스트가
+// &Handler{} 리터럴로 만든 경우)으로 no-op release만 돌려준다.
+func (r *consoleRegistry) acquire(sessionID string, ws consoleConn) (release func()) {
 	if r == nil {
-		return true
+		return func() {}
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, ok := r.active[sessionID]; ok {
-		return false
+	if prev, ok := r.active[sessionID]; ok && prev != ws {
+		// 이전 홀더에 정상 종료를 통보한다. 이 프레임은 새 SerialConsole이 KubeVirt 콘솔을 밀어내기
+		// 전에 전송되므로, 이전 클라이언트는 축출로 인한 비정상 종료가 아니라 1000을 받아 재연결하지 않는다.
+		_ = prev.WriteControl(
+			websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseNormalClosure, "superseded by newer console"),
+			time.Now().Add(time.Second),
+		)
 	}
-	r.active[sessionID] = struct{}{}
-	return true
-}
+	r.active[sessionID] = ws
+	r.mu.Unlock()
 
-// acquireWithin은 grace 안에서 슬롯을 얻으려 짧게 재시도한 뒤 결과를 돌려준다.
-//
-// 부팅 중 준비 probe(TerminalReadinessProbe)와 실제 화면 터미널은 같은 세션 WS 엔드포인트를
-// 순차로 쓴다. probe 가 준비를 감지하면 close(1000) 하고, 곧바로 실제 터미널이 새 연결을 연다.
-// probe 의 서버측 release 가 새 연결의 acquire 보다 늦게 처리되는 경합이 생기면, 즉시 거절 시
-// 화면 터미널이 close 1000 을 받아 재연결하지 않고 영구히 닫힌다. grace 재시도로 떠나는
-// 보유자가 빠질 시간을 줘 이 handoff 를 살린다. 진짜 두 번째 창(기존 창이 계속 점유)은 grace
-// 를 넘겨도 슬롯이 안 비므로 false 를 받아 기존 창 우선 정책이 그대로 유지된다.
-// ctx 취소(대기 중 클라이언트 연결 종료)나 nil 리시버(가드 비활성)도 안전하게 처리한다.
-func (r *consoleRegistry) acquireWithin(ctx context.Context, sessionID string, grace time.Duration) bool {
-	if r == nil {
-		return true
-	}
-	if r.acquire(sessionID) {
-		return true
-	}
-	ticker := time.NewTicker(25 * time.Millisecond)
-	defer ticker.Stop()
-	timeout := time.NewTimer(grace)
-	defer timeout.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return false
-		case <-timeout.C:
-			return false
-		case <-ticker.C:
-			if r.acquire(sessionID) {
-				return true
-			}
+	return func() {
+		r.mu.Lock()
+		if cur, ok := r.active[sessionID]; ok && cur == ws {
+			delete(r.active, sessionID)
 		}
+		r.mu.Unlock()
 	}
-}
-
-// release는 연결 종료 시 슬롯을 반납해 다음 창이 이어받을 수 있게 한다. nil 리시버는 no-op.
-func (r *consoleRegistry) release(sessionID string) {
-	if r == nil {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.active, sessionID)
 }

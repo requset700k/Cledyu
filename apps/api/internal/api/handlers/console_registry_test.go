@@ -1,134 +1,130 @@
 package handlers
 
 import (
-	"context"
 	"sync"
 	"testing"
 	"time"
 )
 
-// consoleRegistry는 세션당 활성 라이브 터미널 연결을 1개로 제한한다(기존 창 우선).
-// 두 번째 acquire 는 첫 연결이 release 하기 전까지 false 여야, 호출부가 그 WS 를 정상 종료로 닫는다.
-func TestConsoleRegistry_SingleActivePerSession(t *testing.T) {
+// fakeConsoleConn은 consoleRegistry가 이전 홀더에 보낸 정상 종료(supersede) 통보를 센다.
+type fakeConsoleConn struct {
+	mu        sync.Mutex
+	supersede int
+}
+
+func (f *fakeConsoleConn) WriteControl(int, []byte, time.Time) error {
+	f.mu.Lock()
+	f.supersede++
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *fakeConsoleConn) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.supersede
+}
+
+// last-wins: 두 번째 연결이 붙으면 첫 번째 홀더가 supersede(정상 종료) 통보를 받아야 한다.
+func TestConsoleRegistry_LastWinsSupersedesPrevious(t *testing.T) {
 	r := newConsoleRegistry()
+	a, b := &fakeConsoleConn{}, &fakeConsoleConn{}
 
-	if !r.acquire("s1") {
-		t.Fatal("첫 acquire 는 true 여야 한다")
-	}
-	if r.acquire("s1") {
-		t.Fatal("이미 활성인 세션의 두 번째 acquire 는 false 여야 한다(기존 창 우선)")
-	}
-
-	// 다른 세션은 서로 간섭하지 않는다.
-	if !r.acquire("s2") {
-		t.Fatal("다른 세션의 acquire 는 독립적으로 true 여야 한다")
+	relA := r.acquire("s1", a)
+	if a.count() != 0 {
+		t.Fatal("첫 연결은 supersede 통보를 받지 않아야 한다")
 	}
 
-	// release 후에는 다시 획득 가능해야 한다(창을 닫으면 다음 창이 이어받을 수 있음).
-	r.release("s1")
-	if !r.acquire("s1") {
-		t.Fatal("release 후 acquire 는 다시 true 여야 한다")
+	relB := r.acquire("s1", b)
+	if a.count() != 1 {
+		t.Fatal("두 번째 연결이 붙으면 첫 홀더는 supersede 통보를 받아야 한다(last-wins)")
+	}
+	if b.count() != 0 {
+		t.Fatal("새 홀더는 자기 자신을 supersede 하지 않는다")
+	}
+
+	_ = relA
+	_ = relB
+}
+
+// compare-and-delete: 인수당한 옛 홀더의 release는 새 홀더의 등록을 지우면 안 된다.
+// 지워버리면 다음 연결이 활성 홀더를 인식 못 해 supersede 통보가 누락된다.
+func TestConsoleRegistry_StaleReleaseDoesNotEvictNewHolder(t *testing.T) {
+	r := newConsoleRegistry()
+	a, b, c := &fakeConsoleConn{}, &fakeConsoleConn{}, &fakeConsoleConn{}
+
+	relA := r.acquire("s1", a) // active=a
+	_ = r.acquire("s1", b)     // active=b, a superseded
+
+	relA() // 옛 홀더 a의 release — active(b)를 지우면 안 된다
+
+	// c가 붙으면 여전히 활성인 b가 supersede 통보를 받아야 한다.
+	r.acquire("s1", c)
+	if b.count() != 1 {
+		t.Fatal("옛 홀더 release 후에도 활성 홀더(b)가 유지되어 supersede 통보를 받아야 한다")
 	}
 }
 
-// 미초기화(테스트가 &Handler{} 리터럴로 만든 경우) nil 레지스트리는 가드를 비활성화해
-// panic 없이 통과시켜야 한다 — h.met 등 다른 nil 허용 의존성과 동일한 관용.
+// 정상 release 후에는 슬롯이 비어, 다음 acquire가 아무도 supersede 하지 않아야 한다.
+func TestConsoleRegistry_ReleaseFreesSlot(t *testing.T) {
+	r := newConsoleRegistry()
+	a, b := &fakeConsoleConn{}, &fakeConsoleConn{}
+
+	relA := r.acquire("s1", a)
+	relA() // active=a 를 정상 반납
+
+	r.acquire("s1", b)
+	if b.count() != 0 || a.count() != 0 {
+		t.Fatalf("빈 슬롯 acquire 는 supersede 가 없어야 한다, a=%d b=%d", a.count(), b.count())
+	}
+}
+
+// 다른 세션은 서로 간섭하지 않는다.
+func TestConsoleRegistry_SessionsIndependent(t *testing.T) {
+	r := newConsoleRegistry()
+	a, b := &fakeConsoleConn{}, &fakeConsoleConn{}
+	r.acquire("s1", a)
+	r.acquire("s2", b)
+	if a.count() != 0 || b.count() != 0 {
+		t.Fatal("서로 다른 세션의 acquire 는 supersede 를 유발하지 않아야 한다")
+	}
+}
+
+// nil 리시버(테스트가 &Handler{} 리터럴로 만든 경우)는 가드 비활성으로 no-op release 를 돌려준다.
 func TestConsoleRegistry_NilReceiverIsSafe(t *testing.T) {
 	var r *consoleRegistry
-	if !r.acquire("s1") {
-		t.Fatal("nil 레지스트리 acquire 는 가드 비활성으로 true 여야 한다")
-	}
-	r.release("s1") // panic 하면 실패
+	release := r.acquire("s1", &fakeConsoleConn{})
+	release() // panic 하면 실패
 }
 
-// 동시 acquire 는 정확히 하나만 성공해야 한다(더블클릭/두 창 동시 접속의 경합).
-func TestConsoleRegistry_ConcurrentAcquireOnlyOneWins(t *testing.T) {
+// 동시 acquire: 마지막 하나만 활성으로 남고 나머지는 각각 한 번씩 supersede 통보를 받아야 한다.
+// 즉 supersede 총합은 (N-1) 이어야 한다(정확히 하나의 승자).
+func TestConsoleRegistry_ConcurrentLastWins(t *testing.T) {
 	r := newConsoleRegistry()
 	const n = 50
-	var wins int64
-	var mu sync.Mutex
+	conns := make([]*fakeConsoleConn, n)
+	for i := range conns {
+		conns[i] = &fakeConsoleConn{}
+	}
+
 	var wg sync.WaitGroup
 	start := make(chan struct{})
 	for i := 0; i < n; i++ {
 		wg.Add(1)
-		go func() {
+		go func(idx int) {
 			defer wg.Done()
 			<-start
-			if r.acquire("s1") {
-				mu.Lock()
-				wins++
-				mu.Unlock()
-			}
-		}()
+			r.acquire("s1", conns[idx])
+		}(i)
 	}
 	close(start)
 	wg.Wait()
-	if wins != 1 {
-		t.Fatalf("동시 acquire 중 정확히 1개만 성공해야 한다, got %d", wins)
-	}
-}
 
-// 슬롯이 비어 있으면 acquireWithin 은 grace 를 기다리지 않고 즉시 true 여야 한다.
-func TestConsoleRegistry_AcquireWithin_ImmediateWhenFree(t *testing.T) {
-	r := newConsoleRegistry()
-	if !r.acquireWithin(context.Background(), "s1", time.Second) {
-		t.Fatal("빈 슬롯의 acquireWithin 은 즉시 true 여야 한다")
+	total := 0
+	for _, c := range conns {
+		total += c.count()
 	}
-}
-
-// handoff: 기존 보유자(준비 probe)가 grace 안에 release 하면 새 연결(실제 터미널)은
-// 거부되지 않고 슬롯을 인수해야 한다. 이 재시도가 없으면 probe→터미널 경합에서 화면
-// 터미널이 close 1000 을 받아 영구히 닫힌다(코드리뷰 P2).
-func TestConsoleRegistry_AcquireWithin_SucceedsWhenReleasedDuringGrace(t *testing.T) {
-	r := newConsoleRegistry()
-	if !r.acquire("s1") {
-		t.Fatal("사전 점유 실패")
-	}
-	go func() {
-		time.Sleep(80 * time.Millisecond)
-		r.release("s1")
-	}()
-	start := time.Now()
-	if !r.acquireWithin(context.Background(), "s1", 2*time.Second) {
-		t.Fatal("grace 안에 release 된 슬롯은 인수되어야 한다(handoff)")
-	}
-	if elapsed := time.Since(start); elapsed < 50*time.Millisecond {
-		t.Fatalf("release 전에 성급히 획득함, elapsed=%v", elapsed)
-	}
-}
-
-// 기존 보유자가 grace 를 넘겨 계속 점유하면(진짜 두 번째 창) acquireWithin 은 false —
-// 호출부가 close 1000 으로 거절해 기존 창 우선을 유지한다.
-func TestConsoleRegistry_AcquireWithin_FailsWhenHeldBeyondGrace(t *testing.T) {
-	r := newConsoleRegistry()
-	if !r.acquire("s1") {
-		t.Fatal("사전 점유 실패")
-	}
-	if r.acquireWithin(context.Background(), "s1", 150*time.Millisecond) {
-		t.Fatal("grace 를 넘겨 점유 중이면 acquireWithin 은 false 여야 한다")
-	}
-}
-
-// 클라이언트가 대기 중 연결을 끊으면(ctx 취소) grace 만료 전에 즉시 포기해야 한다.
-func TestConsoleRegistry_AcquireWithin_CtxCancel(t *testing.T) {
-	r := newConsoleRegistry()
-	if !r.acquire("s1") {
-		t.Fatal("사전 점유 실패")
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	go func() {
-		time.Sleep(50 * time.Millisecond)
-		cancel()
-	}()
-	if r.acquireWithin(ctx, "s1", 10*time.Second) {
-		t.Fatal("ctx 취소 시 acquireWithin 은 false 여야 한다")
-	}
-}
-
-// nil 리시버는 가드 비활성으로 즉시 통과.
-func TestConsoleRegistry_AcquireWithin_NilReceiver(t *testing.T) {
-	var r *consoleRegistry
-	if !r.acquireWithin(context.Background(), "s1", time.Second) {
-		t.Fatal("nil 레지스트리 acquireWithin 은 true 여야 한다")
+	if total != n-1 {
+		t.Fatalf("동시 last-wins supersede 총합은 %d 여야 한다, got %d", n-1, total)
 	}
 }
