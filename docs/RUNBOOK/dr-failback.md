@@ -152,6 +152,27 @@ kubectl --context onprem -n api logs deploy/api | grep -E "db 연결|in-memory" 
 ```
 
 ### 8. EKS 축소
+
+> **🔴 이 apply 는 노드를 축소하지 않는다 — 미수정 결함이다**(2026-07-15 실측, 설계 스펙
+> `2026-07-15-dr-discord-approval-orchestration-design.md` §11.15).
+> `-var eks_dr_node_desired=0` 은 **모듈이 무시한다**(`.terraform/modules/eks_dr/modules/
+> eks-managed-node-group/main.tf:476-481` → `ignore_changes = [scaling_config[0].desired_size]`).
+> `eks_dr_active=false` 는 NAT·엔드포인트·bastion 만 게이트하고(eks-dr.tf:4) **노드그룹은 warm 소속이라
+> 그대로 남는다.** → terraform 은 "변경 없음"으로 **성공 보고**하는데 **m6i.xlarge 3대가 계속 돈다
+> (≈ $517/월).** 페일오버 `[4]` 가 CLI 로 스케일업하는 바로 그 이유(ignore_changes)가 여기엔 반영되지
+> 않았다 — **대칭이 깨져 있다.**
+>
+> **`dr-eks-bootstrap.md` §destroy 는 맞게 돼 있다**(`# 3) [P1] 노드 N→0 (CLI)` → CLI 2줄 후 terraform).
+> 정정하려면 그 2줄을 아래 apply **앞에** 이식한다:
+> ```bash
+> NG=$(aws eks list-nodegroups --cluster-name cledyu-dr --region ap-northeast-2 --query 'nodegroups[0]' --output text)
+> aws eks update-nodegroup-config --cluster-name cledyu-dr --region ap-northeast-2 \
+>   --nodegroup-name "$NG" --scaling-config minSize=0,maxSize=6,desiredSize=0
+> ```
+> ⚠️ 이식해도 **마지막 노드 1대는 ~16분 걸린다** — coredns·ebs-csi PDB 가 `ALLOWED DISRUPTIONS: 0` 이라
+> 드레인을 막고 `Terminate-LC-Hook`(1800s, CONTINUE) 만료로 풀린다(§11.15 (b), 실측). 애드온을 남길지
+> 지울지는 미결이며 **재-failover 멱등 전제와 얽혀 있다.**
+
 ```bash
 cd infra/terraform/aws && terraform apply \
   -var enable_eks_dr=true -var eks_dr_active=false -var eks_dr_node_desired=0 \
