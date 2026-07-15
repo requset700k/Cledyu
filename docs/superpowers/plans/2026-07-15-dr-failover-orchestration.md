@@ -133,12 +133,12 @@ version: 0.2
 
 # DR 페일오버 hot 리소스 기동 — Step Functions [2] 가 codebuild:startBuild.sync 로 호출한다.
 #
-# ⚠️ -target 목록은 docs/RUNBOOK/dr-eks-bootstrap.md §Phase 1(213-272)의 검증된 **17개** + T3 Step 8 이
-#    추가하는 aws_iam_role_policy.eks_dr_bastion_ssm_param **1개** = **18개**다.
+# ⚠️ -target 목록은 docs/RUNBOOK/dr-eks-bootstrap.md §Phase 1(213-272)의 검증된 **17개**를 그대로 쓴다.
 #    재발명 금지 — 7/14 드릴로 검증된 목록이고, 2026-07-15 에 목록을 임의로 줄였다가
-#    IAM 정책이 빠져 2분+ hang 을 겪었다. 런북의 17개엔 bastion IAM 3종(role_policy 2 + attachment 1)이 있다.
-#    (런북 개수 검증: sed -n '213,272p' 런북 | grep -oE '\-target=[a-z_.0-9]+' | sort -u | wc -l → 17)
-#    ⚠️ 18번째(ssm_param)는 런북에 없다 — T3 Step 8 이 신설하는 것이라 런북에도 Task 6 에서 반영한다.
+#    IAM 정책이 빠져 2분+ hang 을 겪었다. 이 17개엔 bastion IAM 3종(role_policy 2 + attachment 1)이 있다.
+#    (개수 검증: sed -n '213,272p' 런북 | grep -oE '\-target=[a-z_.0-9]+' | sort -u | wc -l → 17)
+#    ⚠️ **T3 Step 8 이 18번째(aws_iam_role_policy.eks_dr_bastion_ssm_param)를 추가한다** — 그 리소스는
+#    T3 이 신설하므로 T1 시점엔 존재하지 않는다. 여기서 미리 넣지 말 것(T1 Step 4 실측이 깨진다).
 # ⚠️ -var 3개 필수 — tfvars 에 enable_eks_dr 가 없어 기본값 false 다. 안 넘기면
 #    apply 가 생성이 아니라 **destroy** 가 된다(warm DR 129개).
 phases:
@@ -163,14 +163,17 @@ phases:
           -target=aws_iam_policy.eks_dr_cnpg_restore -target=module.eks_dr_cnpg_restore_irsa \
           -target=aws_iam_role.eks_dr_bastion -target=aws_iam_role_policy_attachment.eks_dr_bastion_ssm \
           -target=aws_iam_role_policy.eks_dr_bastion_describe -target=aws_iam_role_policy.eks_dr_bastion_vault_restore \
-          -target=aws_iam_role_policy.eks_dr_bastion_ssm_param \
           -target=aws_iam_instance_profile.eks_dr_bastion -target=aws_instance.eks_dr_bastion
 ```
 
-> **⚠️ T1 단독으로는 `eks_dr_bastion_ssm_param` 이 아직 없다** — T3 Step 8 이 만든다. T1 Step 4 실측
-> 시점엔 이 `-target` 줄을 빼고 돌리고, **T3 Step 8 에서 다시 넣는다**(그 Step 이 buildspec 을 Modify
-> 대상으로 잡고 있는 이유다). 없는 리소스를 `-target` 하면 terraform 이 경고만 내고 넘어가지만,
-> **경고를 믿지 말고 T3 Step 9 의 `terraform validate` 로 확인한다.**
+> **전사 검증(T1 구현 시 실행함 — 4회차 교훈 "라벨은 검증이 아니다").** 계획서의 목록을 믿지 말고
+> 런북과 **집합으로** 대조한다(개수만 세면 오탈자를 놓친다):
+> ```bash
+> sed -n '213,272p' docs/RUNBOOK/dr-eks-bootstrap.md | grep -oE '\-target=[a-zA-Z_.0-9]+' | sort -u > /tmp/rb.txt
+> grep -oE '\-target=[a-zA-Z_.0-9]+' infra/terraform/aws/dr-failover-buildspec.yml | sort -u > /tmp/bs.txt
+> diff /tmp/rb.txt /tmp/bs.txt   # 비어야 정상
+> ```
+> **2026-07-15 T1 구현 시 실행 → 17개 집합 일치·`-var` 3개 일치 확인됨 ✅**
 
 - [ ] **Step 2: terraform — CodeBuild 프로젝트 + IAM**
 
@@ -275,15 +278,40 @@ python3 -c "import yaml,sys; yaml.safe_load(open('dr-failover-buildspec.yml')); 
 ```
 Expected: fmt 통과, `Success! The configuration is valid.`, `buildspec YAML OK`
 
-- [ ] **Step 4: 운영자 실측 — CodeBuild 가 실제로 hot 리소스를 올리나** ⚡ 과금 시작
+- [ ] **Step 4: Commit + push** (사용자가 실행) — **⚠️ 실측보다 먼저다**
+
+> **⚠️ 이 Task 만 커밋·푸시가 실측 앞에 온다(T1 구현 시 발견).** 다른 Task 의 실측은 로컬
+> `terraform apply` 로 끝나지만, **[2] 는 CodeBuild 가 GitHub 에서 클론해서 돈다.** 커밋 안 한 파일도,
+> **푸시 안 한 브랜치도** CodeBuild 는 못 본다(`git ls-remote --heads origin <브랜치>` → 없음이면 실패).
+> 계획 초안은 "실측(Step 4) → 커밋(Step 5)" 순이었는데 **T1 에선 성립하지 않는다.**
+
+```bash
+cd /home/user/Cledyu
+git add infra/terraform/aws/dr-failover-buildspec.yml infra/terraform/aws/dr-orchestration.tf \
+        infra/terraform/aws/README.md docs/superpowers/plans/2026-07-15-dr-failover-orchestration.md
+git commit -m "feat(dr): CodeBuild terraform apply 실행기 (페일오버 hot 리소스 기동)"
+git push -u origin feat/dr-failover-orchestration   # ← CodeBuild 가 GitHub 에서 클론하므로 필수
+```
+
+- [ ] **Step 5: 운영자 실측 — CodeBuild 가 실제로 hot 리소스를 올리나** ⚡ 과금 시작
 
 > **여기서 hot 리소스가 올라가고 T7 까지 유지된다.** NAT·엔드포인트·bastion·(이후 노드 3).
+
+> **⚠️ `--source-version` 필수 — 머지 전엔 이게 없으면 반드시 실패한다(T1 구현 시 발견).**
+> 프로젝트의 `source_version = "main"` 인데 **buildspec 은 이 브랜치에만 있다**(`git cat-file -e
+> origin/main:infra/terraform/aws/dr-failover-buildspec.yml` → 없음). CodeBuild 가 main 을 체크아웃해
+> buildspec 을 못 찾고 죽는다. **프로젝트를 고치지 말고 호출 시 오버라이드**한다 — 실재해는 검증된
+> main 을 돌려야 하므로 기본값은 `main` 이 맞다.
 
 ```bash
 cd /home/user/Cledyu/infra/terraform/aws
 terraform apply -target=aws_codebuild_project.dr_failover_tf
-aws codebuild start-build --region ap-northeast-2 --project-name cledyu-lab-dr-failover-tf \
-  --query 'build.id' --output text
+
+# ⚠️ 머지 전이므로 --source-version 으로 이 브랜치를 지정한다(머지 후엔 생략 = main).
+BRANCH=$(git -C /home/user/Cledyu branch --show-current)
+BUILD=$(aws codebuild start-build --region ap-northeast-2 --project-name cledyu-lab-dr-failover-tf \
+  --source-version "$BRANCH" --query 'build.id' --output text) && echo "$BUILD"
+
 # 로그 따라가기 (5~10분)
 aws logs tail /aws/codebuild/cledyu-lab-dr-failover-tf --region ap-northeast-2 --follow
 ```
@@ -293,16 +321,14 @@ aws ec2 describe-instances --region ap-northeast-2 \
   --filters Name=tag:Name,Values=cledyu-dr-bastion Name=instance-state-name,Values=running \
   --query 'Reservations[].Instances[].InstanceId' --output text
 ```
-**실패 시 흔한 원인:** GitHub source 연결 미인증(CodeBuild 콘솔에서 GitHub 연결 필요) ·
-`-var` 누락으로 destroy plan · IAM 전파 지연.
-
-- [ ] **Step 5: Commit** (사용자가 실행)
-
-```bash
-cd /home/user/Cledyu
-git add infra/terraform/aws/dr-failover-buildspec.yml infra/terraform/aws/dr-orchestration.tf infra/terraform/aws/README.md
-git commit -m "feat(dr): CodeBuild terraform apply 실행기 (페일오버 hot 리소스 기동)"
-```
+**실패 시 흔한 원인(위에서부터 확률순):**
+- **buildspec not found** — `--source-version` 누락(위 경고). main 에 아직 파일이 없다
+- **GitHub source 연결 미인증** — 이 레포 **첫 CodeBuild** 라 선례가 없다. PUBLIC 레포는 토큰 없이
+  clone 된다고 알려져 있으나 **미검증**이다. 막히면 `aws_codebuild_source_credential` 또는 콘솔에서 연결
+- **`python: 3.12` 런타임 부재** — AL2 standard 5.0 이 3.12 를 주는지 **미검증**(계획서 가정).
+  install 페이즈에서 죽으면 `python: 3.11` 로 내리거나 runtime-versions 를 이미지 기본값에 맞춘다.
+  (terraform 자체는 python 을 안 쓴다 — AL2 standard 5.0 이 **섹션 자체를 요구**해서 넣은 것뿐이다)
+- `-var` 누락으로 destroy plan · IAM 전파 지연
 
 ---
 
