@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +51,11 @@ func TestTailscaleKeyMinter_Mint(t *testing.T) {
 	}
 	if gotBody.ExpirySeconds != 600 {
 		t.Errorf("expirySeconds = %d, want 600", gotBody.ExpirySeconds)
+	}
+	// description 은 Tailscale 허용 문자(영숫자·공백·하이픈·밑줄)만 — 괄호 등은 실 API 가 400
+	// "invalid characters" 로 거부해 발급이 통째로 실패한다(라이브 실측). 회귀 가드.
+	if !regexp.MustCompile(`^[A-Za-z0-9 _-]*$`).MatchString(gotBody.Description) {
+		t.Errorf("description 에 Tailscale 비허용 문자 포함: %q", gotBody.Description)
 	}
 	if gotAuth != "Bearer tskey-api-xyz" {
 		t.Errorf("Authorization = %q, want Bearer tskey-api-xyz", gotAuth)

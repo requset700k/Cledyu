@@ -101,7 +101,9 @@ func (m *tailscaleKeyMinter) Mint(ctx context.Context) (string, error) {
 	body.Capabilities.Devices.Create.Preauthorized = true
 	body.Capabilities.Devices.Create.Tags = []string{m.tag}
 	body.ExpirySeconds = int64(m.ttl.Seconds())
-	body.Description = "cledyu ec2 session (one-off)"
+	// 설명은 Tailscale 키 description 허용 문자만 쓴다 — 괄호 등은 400 "invalid characters" 로
+	// 거부돼 발급 자체가 실패한다(라이브 API 실측). 영숫자·공백·하이픈으로 제한.
+	body.Description = "cledyu ec2 session one-off"
 
 	buf, err := json.Marshal(body)
 	if err != nil {
