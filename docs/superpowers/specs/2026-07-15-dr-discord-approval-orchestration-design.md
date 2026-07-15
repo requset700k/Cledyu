@@ -1528,13 +1528,34 @@ PGDATA 초기화 방식일 뿐 PVC 소유권과 무관하다.
 있다. → **`09` 의 `wait kafkatopic --all` 유지**(그 wait 은 `kafka/cledyu-kafka` Ready 뒤라 Topic
 Operator 가 이미 떠 있다).
 
-#### (f) 기각된 가설 3건 (세워놓고 실측으로 떨어뜨림)
+#### (f) 기각된 가설 4건 (세워놓고 실측으로 떨어뜨림)
 
-| 가설 | 실측 | 판정 |
-|---|---|---|
-| dns-switch 의 UPSERT 가 failover 라우팅을 깬다 | api/app/auth 는 **단순 A alias**(SetIdentifier·헬스체크 없음) | 기각 |
-| dns-switch 의 wafv2 가 리전 불일치(us-east-1) | provider alias 없음 = ap-northeast-2 = ALB 와 동일 scope | 기각 |
-| `11:55` 의 `grep && { exit 1; }` 이 set -e 로 오작동 | AND-OR 리스트 면제 — 의도대로 동작 | 기각 |
+| 출처 | 가설 | 실측 | 판정 |
+|---|---|---|---|
+| 자체 | dns-switch 의 UPSERT 가 failover 라우팅을 깬다 | api/app/auth 는 **단순 A alias**(SetIdentifier·헬스체크 없음) | 기각 |
+| 자체 | dns-switch 의 wafv2 가 리전 불일치(us-east-1) | provider alias 없음 = ap-northeast-2 = ALB 와 동일 scope | 기각 |
+| 자체 | `11:55` 의 `grep && { exit 1; }` 이 set -e 로 오작동 | AND-OR 리스트 면제 — 의도대로 동작 | 기각 |
+| **codex P1** | **buildspec 의 `python: 3.12` 가 AL2 standard:5.0 에서 런타임 선택 오류 → `[2]` 가 시작도 못 한다** | **이미 5회 SUCCEEDED**(INSTALL 2초 통과, `terraform version` 실행됨). 빌드가 쓴 buildspec·이미지·커밋 전부 확인 | **기각** |
+
+**codex 건이 중요한 이유 — 정적 리뷰는 없는 결함도 만든다.**
+codex 는 AWS `available-runtimes` 표를 읽고 "표에 python 3.12 가 AL2023 계열로만 열거되므로 AL2
+standard:5.0 에선 실패할 것"이라고 **문서에서 동작을 추론**했다. 그 표는 **이미지에 사전 설치된 런타임
+목록**이지 미열거 버전 지정 시 하드 실패한다는 규정이 아니다.
+
+반증 근거 (2026-07-16 조회, 프로젝트 `cledyu-lab-dr-failover-tf`):
+
+| 항목 | 값 |
+|---|---|
+| buildspec | `infra/terraform/aws/dr-failover-buildspec.yml` (**이 파일**) |
+| image | `aws/codebuild/amazonlinux2-x86_64-standard:5.0` (**지목된 그 이미지**) |
+| sourceVersion / resolved | `feat/dr-failover-orchestration` / `907cab3` — 그 시점 buildspec 의 `runtime-versions` 는 현재와 **동일**(`git log -S` 로 최초 커밋 4518824 이후 무변경 확인) |
+| INSTALL | **SUCCEEDED (2초)** ← "시작도 못 한다"던 단계 |
+| 전체 | 6회 중 **5회 SUCCEEDED** |
+
+**§11.4 의 대칭형이다.** 거기선 "정적 검토가 원리적으로 못 잡는 결함 4건"이 실측으로 나왔고, 여기선
+**정적 검토가 실재하지 않는 결함을 만들어냈다.** 방향이 반대일 뿐 결론은 같다 — **실행이 문서를
+이긴다.** 그래서 buildspec 주석에 이 실측 근거를 박아 같은 리뷰가 반복되지 않게 했다
+(근거를 "AWS 문서"로만 대면 문서를 다시 읽는 사람이 계속 같은 시비를 건다).
 
 #### (g) 미수정 잔여 — **T5 에서 함께 처리**
 

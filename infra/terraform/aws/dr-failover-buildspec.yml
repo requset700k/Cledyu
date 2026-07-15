@@ -31,6 +31,17 @@ phases:
   install:
     # AL2 standard 5.0 은 buildspec 에 runtime-versions 섹션을 요구한다(AWS 문서).
     # terraform 자체는 python 을 안 쓰지만 섹션이 필수라 명시한다.
+    #
+    # ⚠️ **이 조합(AL2 standard:5.0 + python 3.12)은 실측으로 동작이 확인됐다 — 바꾸지 말 것.**
+    # codex 리뷰가 "available-runtimes 표에 python 3.12 는 AL2023 계열로만 열거되므로 install 단계에서
+    # 런타임 선택 오류로 시작도 못 할 것"이라며 P1 을 걸었으나(2026-07-16), **반증됐다:**
+    #   프로젝트 cledyu-lab-dr-failover-tf / image aws/codebuild/amazonlinux2-x86_64-standard:5.0
+    #   / sourceVersion feat/dr-failover-orchestration / resolved 907cab3(이 시점 buildspec 의
+    #   runtime-versions 는 현재와 동일) → **총 6회 중 5회 SUCCEEDED, INSTALL 단계 SUCCEEDED(2초)**,
+    #   install 의 `terraform version` 까지 실행됨.
+    # available-runtimes 표는 **이미지에 사전 설치된 런타임 목록**이지, 미열거 버전을 지정했을 때
+    # 하드 실패한다는 규정이 아니다. **문서에서 동작을 추론한 것이고 실행이 그 추론을 반증한다.**
+    # (§11.4 의 대칭형 — 거기선 정적 리뷰가 결함을 못 잡았고, 여기선 없는 결함을 만들어냈다.)
     runtime-versions:
       python: 3.12
     commands:
