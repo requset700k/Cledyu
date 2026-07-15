@@ -1129,3 +1129,100 @@ ERROR ... Error Creating Log Group for CloudWatchLogs output: AccessDeniedExcept
 규칙의 문면에 안 걸림) → §11.11(**같은 에이전트, IAM 을 만들었는데 내용이 틀림**). 매번 "이제 IAM 을
 챙긴다"고 하고 매번 다른 층에서 틀렸다. **IAM 은 추론으로 채우면 안 된다** — 호출 주체의 **실제 요청**을
 봐야 한다(에이전트 로그·CloudTrail). 이번에도 답을 준 건 문서나 추론이 아니라 **에이전트 로그 한 줄**이었다.
+
+### 11.12 T3 실측 발견 (2026-07-15) — SSM 은 `HOME` 을 주지 않는다
+
+**런북의 명령은 맞았는데 실행 환경이 달랐다.** SSM RunCommand 는 root 로 돌지만 `HOME` 을 설정하지
+않는다(실측: `HOME=[]`, `PWD=/usr/bin`).
+
+**증상이 원인을 안 가리킨다:**
+
+| 단계 | 실제 동작 |
+|---|---|
+| `aws eks update-kubeconfig` | `/root/.kube/config` 에 **정상적으로 쓴다** ✅ |
+| `kubectl ...` | `$HOME/.kube/config` 를 찾다 **못 찾음** → 기본값 `localhost:8080` 폴백 |
+| 사람이 보는 것 | **`connection refused`** ← "설정 없음"이 아니라 "연결 거부"로 보인다 |
+
+**런북이 이걸 못 잡은 이유:** 런북은 **사람용**이고 `aws ssm start-session` 은 로그인 셸이라 `HOME=/root`
+다. **명령은 맞는데 실행 환경이 다르다** — SSM 변환 규칙 1(`exec -it` 제거: TTY 없음)과 **같은 뿌리**
+(대화형 셸이 아니다)인데 초안은 증상 하나만 잡았다.
+
+**정정:** 7개 스크립트 전부 상단에 `export HOME=/root`. `KUBECONFIG` 명시보다 `HOME` 이 낫다 —
+`helm`(06)·`aws` 도 `$HOME` 을 쓴다.
+
+**회귀 체크(T3 Step 9):** `[ "$(grep -l 'export HOME=/root' $B/*.sh | wc -l)" -eq 7 ]` — 하나라도 빠지면
+그 스크립트만 `localhost:8080` 으로 죽는다.
+
+**교훈 — "이식"은 명령을 옮기는 것이지 환경을 옮기는 것이 아니다.** 런북 이식 4종은 명령 문자열이
+검증됐다는 뜻이지 **실행 컨텍스트가 같다는 뜻이 아니다.** 사람용 절차를 자동화로 옮길 때는
+"누가·어떤 셸에서 도는가"를 매번 다시 물어야 한다.
+
+---
+
+### 11.13 T4 실측 발견 (2026-07-15) — notify 통과 + 실패 진단 경로 확정(B안)
+
+**(a) `_ts` 이중 형식 파싱 — C2 회귀 방어 실측 통과.**
+
+`detectedAt="2026-07-15T05:00:00.328+0000"`(CloudWatch, **Z 아님**) · `approvedAt="...371Z"`(toISOString)
+를 넣고 실행 → Discord 에 **`감지→승인: 10분`** 렌더. `?` 가 아니므로 `fromisoformat` 이 offset·Z 를 둘 다
+파싱함이 **실측 확인**됐다. `strptime("%...%fZ")` 였다면 13단계를 다 성공하고도 "❌ 실패" 알림이 갔다(C2).
+
+> `승인→서빙: 621분` 은 버그가 아니다 — 테스트 payload 의 `approvedAt` 이 손으로 박은 과거 시각이고
+> `now` 는 실시간이라 그 간격이다. 오히려 `now` 가 살아있고 뺄셈이 도는 증거다.
+
+**(b) 🔴 `set -x` 트레이스와 명령 에러는 stdout 이 아니라 **stderr** 로 간다(로컬 실측).**
+
+```
+$ bash t.sh 2>/dev/null          # stdout 만
+이건 echo — 스크립트가 일부러 낸 메시지          ← echo 만 남는다
+$ bash t.sh 2>&1 >/dev/null      # stderr 만
++ ls /nonexistent-path-xyz                       ← set -x 트레이스
+ls: cannot access '...': No such file or directory  ← **진짜 원인**
+```
+
+자식 SM 의 `stdoutTail` 은 `$.result.StandardOutputContent` = **stdout 전용**이다. 즉 **"왜 죽었는가"는
+지금 어느 경로로도 SFN 상태에 들어오지 않는다.** `StandardErrorContent` 는 어디서도 캡처하지 않는다.
+
+**(c) 자식 SM 의 성공/실패 비대칭:**
+
+| 경로 | stdout 전달 |
+|---|---|
+| `Succeeded`(Pass) | `StandardOutputContent` 를 실어 나른다 ✅ |
+| `Failed`(Fail) | **정적 `Cause` 문자열뿐** — `Fail` 타입은 Error/Cause 문자열만 실을 수 있다 ❌ |
+
+정작 출력이 필요한 건 실패할 때인데 실패 경로가 버린다.
+
+**(d) 결정 — B안(현재 설계 유지): 실패 진단은 CloudWatch 경유, 알림엔 포인터만.**
+
+A안(알림에 로그를 욱여넣기)의 길이 산식 — Discord 2000자 기준:
+
+| 항목 | 길이 |
+|---|---|
+| 고정 오버헤드(제목·안내문·코드블록 마크업) | 129자 |
+| `executionArn` 전체 ARN | 112자 |
+| `failedState` | 19자 |
+| **로그에 쓸 수 있는 최대** | **~1,740자**(ARN 유지) / ~1,816자(실행이름만) = `set -x` 약 35줄 |
+
+현재 코드는 `[-1200:]` 이라 460자를 안 쓰고 있으나, **늘려도 stdout 은 엉뚱한 스트림**이라(위 (b))
+A안은 `StandardErrorContent` 캡처 + `Fail` 상태의 데이터 운반(위 (c)) 재설계가 선행돼야 한다.
+
+**B안을 택한 이유:** stderr 를 알림 경로에 올리면 `set -x` 트레이스가 **인자까지** 흐른다 — C6 가
+`07-restore-vault.sh` 에서 막은 바로 그 표면을 나머지 6개로 넓히는 셈이다. B안은 **알림 경로에 시크릿이
+흐를 가능성이 원천적으로 0**이다.
+
+**B안의 비용(수용함):** Discord 알림 → SFN 콘솔 → 자식 SM 실행 → `GetResult` 의 `commandId` → CloudWatch
+`aws logs tail <그룹> --log-stream-name-prefix <commandId>` = **3~4홉.** `Cause` 가 정적이라 `commandId` 가
+알림에 안 실린다.
+
+**(e) T5 주의 — `failedState` 는 상태 이름이 아니다.** `"failedState.$" = "$.error.Error"` 이므로 bastion
+7단계(`[3][6][7][8][9][11][12]`)가 **전부 같은 값**으로 온다(자식 SM 의 `Error = "BastionScriptFailed"` 하나).
+`.sync` 통합이 이를 `States.TaskFailed` 로 감쌀 가능성이 있으므로 **실제 문자열은 §5.1 [2.4] 주석대로
+실측 확정 대상이다 — 지어내지 말 것.**
+
+**(f) 교훈 — 계획서가 예측한 함정에 그대로 빠졌다.** T3 Step 9 의 C6 회귀 체크엔 이렇게 적혀 있다:
+"⚠️ `grep -q '^set -x'` 는 안 된다 — 07 은 시크릿을 다 쓴 뒤(`unset NEWROOT`) **의도적으로 켠다.**
+'있나 없나'가 아니라 **'어디 있나'** 를 봐야 한다." T4 검토 중 `grep -q '^set -x'` 로 7개를 훑어
+**"07 에 set -x 가 켜져 있다 = 루트 토큰 유출"이라는 오탐 경보**를 냈다. 계획서의 awk 체크
+(`unset NEWROOT` 줄번호와 비교)를 돌리니 `✅ line 152 > unset 146` 으로 즉시 클린이었다.
+**§11.11 의 "과소 게이트" 와 짝을 이루는 반대편 함정 — 과대 게이트(존재만 보고 위치를 안 봄)다.**
+그리고 그 방어는 이미 계획서에 **글로 적혀 있었다** — 안 읽고 grep 부터 쳤다.
