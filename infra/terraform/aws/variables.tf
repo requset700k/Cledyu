@@ -252,3 +252,36 @@ variable "eks_dr_active" {
     error_message = "eks_dr_active=true 는 warm 스택(enable_eks_dr=true)을 전제한다 — hot 리소스가 warm 리소스의 [0] 인덱스를 참조하기 때문. 두 변수는 함께 true 로만 apply 한다."
   }
 }
+
+variable "dr_orchestration_armed" {
+  description = <<-EOT
+    DR 자동 페일오버 오케스트레이션(EventBridge → Step Functions) 무장 여부.
+    false(기본): EventBridge 규칙이 생성되지 않아 복합알람이 ALARM 이 돼도 승인 요청이 발생하지 않는다.
+    ⚠️ dr_detection_armed 와 "같은 패턴"이 아니다 — dr_detection_armed 는 actions_enabled 라 SNS 발행만
+    억제하고, CloudWatch 는 알람 상태변화 이벤트를 EventBridge 기본 버스로 계속 쏜다. 그래서 EventBridge
+    규칙은 local.pub && dr_detection_armed && dr_orchestration_armed 의 AND 로 게이트한다(설계 §7.4).
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "dr_approver_ids" {
+  description = <<-EOT
+    DR 페일오버를 승인할 수 있는 Discord 사용자 ID 목록(snowflake 문자열).
+    tfvars 가 아니라 여기 default 로 커밋한다 — .gitignore 가 *.tfvars 를 제외하므로 tfvars 에 두면
+    승인자 변경이 코드 리뷰를 거치지 않는다(설계 §5.4). Discord user ID 는 서버 멤버에게 이미 보이는
+    공개 식별자라 PUBLIC 레포 커밋을 감수한다 — 실질 방어선은 목록의 비밀성이 아니라 승인자 계정 2FA 다.
+  EOT
+  type        = list(string)
+  default     = ["509288535225008138"]
+}
+
+variable "dr_discord_channel_id" {
+  description = <<-EOT
+    DR 승인 요청 메시지를 게시할 Discord 채널 ID(snowflake). 봇이 이 채널에 Send Messages 권한을
+    가져야 한다(없으면 403 Missing Permissions). 채널 ID 는 서버 멤버에게 이미 보이는 공개 식별자라
+    dr_approver_ids 와 같은 이유로 여기 default 로 커밋한다(tfvars 는 .gitignore 라 코드 리뷰를 못 거침).
+  EOT
+  type        = string
+  default     = "1526596209781899405"
+}
