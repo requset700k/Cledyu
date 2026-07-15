@@ -19,21 +19,69 @@ set -x
 export HOME=/root
 aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2
 
+# ── 존재 게이트 (2026-07-16 실측 — 초안에 없던 함정) ─────────────────────────
+# ⚠️ **`kubectl wait` 는 대상이 없으면 기다리지 않고 즉시 에러다.** 아래 `--timeout=900s` 등은
+# "CR 이 **이미** 있을 때"만 의미가 있다. kubectl v1.34.0(bastion 실제 버전) 실측:
+#   · 이름 지정    : `Error from server (NotFound): pods "x" not found` → exit 1, 즉시
+#   · --all 로 0개 : `error: no matching resources found`               → exit 1, 즉시
+# `rollout status` 도 같다. 즉 ArgoCD sync 가 조금만 늦으면 **건강한 DR 이 오탐 실패**한다.
+#
+# 그리고 [9] 의 실패는 뒤가 없다: ALB 파라미터가 안 써지고 → [10] 이 설계대로 fail-closed →
+# **DNS 미전환 = 전부 복구됐는데 서비스가 안 돌아온다**(아래 put-parameter 주석의 F3 와 같은 결말).
+#
+# 08-restore-data.sh:38-53 이 **같은 함정을 같은 방식으로** 막는다("방금 지운 CR 을 바로 기다리면
+# 안 된다 — 객체가 없어 wait 가 즉시 에러난다"). 그 선례를 따른다. 09 만 빠져 있었다.
+#
+# ⚠️ CRD 자체가 아직 없는 경우(오퍼레이터 sync 가 늦음)도 이 루프가 함께 흡수한다 —
+#    `get` 이 "server doesn't have a resource type" 으로 실패하는 것도 재시도 대상이다.
+wait_exists() { # $1=설명, $2.. = kubectl 인자
+  local desc=$1
+  shift
+  local i
+  # 10분 — 08 의 ArgoCD 재생성 대기와 동일. (주석을 for 줄 안에 두면 shfmt 가 줄을 쪼갠다)
+  for i in $(seq 1 60); do
+    kubectl "$@" > /dev/null 2>&1 && return 0
+    echo "ArgoCD sync 대기: $desc ($i/60)"
+    sleep 10
+  done
+  echo "❌ $desc 가 10분 안에 안 나타남 — ArgoCD sync 상태 확인"
+  return 1 # set -e 가 여기서 스크립트를 끝낸다
+}
+
 # Kafka — 의존: cert-manager CA + trust-manager Bundle + gp3(런북 :359). **Vault 와 무관**이라
 # [7] 뒤에 와도 안전하다(드릴이 검증한 건 "의존 순서"이지 "줄 순서"가 아니다).
+wait_exists "kafka/cledyu-kafka" -n kafka get kafka cledyu-kafka
 kubectl -n kafka wait --for=condition=Ready kafka/cledyu-kafka --timeout=900s
 
 # 토픽도 CR 이고 오퍼레이터가 Ready 를 관리한다 → 이름 하드코딩 없이 전부 대기.
 # 이름을 박지 않는 이유: 랩이 늘면 토픽이 느는데 스크립트를 안 고치면 **새 토픽을 안 기다리고 통과**한다.
+#
+# ⚠️ **`--all` 은 0개일 때 공허참으로 통과하는 게 아니라 에러난다**(위 실측). 이름을 안 박는 대신
+# **대수 검증**을 먼저 한다 — 04-wait-nodes-ready.sh:36-47 과 같은 형태다(거기선 노드 3대,
+# 여기선 "1개 이상"). 개수를 박으면 랩이 늘 때 위 주석의 문제가 그대로 돌아오므로 `>0` 만 본다.
+for i in $(seq 1 60); do
+  NT=$(kubectl -n kafka get kafkatopic --no-headers 2> /dev/null | wc -l)
+  [ "${NT:-0}" -gt 0 ] && break
+  echo "ArgoCD sync 대기: kafkatopic ($i/60)"
+  sleep 10
+done
+[ "${NT:-0}" -gt 0 ] || {
+  echo "❌ KafkaTopic 이 하나도 없다 — ArgoCD sync 상태 확인"
+  exit 1
+}
 # 🔴 **미확정 — KafkaTopic 에 Ready 조건이 있는지 Step 10 에서 확인한다**(Kafka CR 은 Strimzi 문서로
 # 확인했으나 KafkaTopic 은 미확인). 없으면 이 줄을 **삭제**하고 Kafka CR Ready 만 게이트한다.
+# (위 대수 검증은 그 경우에도 남긴다 — 토픽이 실제로 sync 됐다는 것 자체는 여전히 봐야 한다.)
 kubectl -n kafka wait --for=condition=Ready kafkatopic --all --timeout=300s
 
 # VE 선행: Kafka(KafkaUser·client cert) + **Vault 복원→ESO 로 cledyu-validation-engine-aws Secret**
 # (AWS 키 non-optional) — [7]·[8] 이 끝난 뒤라 충족돼 있다(:365).
+# `rollout status` 도 대상이 없으면 즉시 에러다 → 존재부터 확인한다.
+wait_exists "deploy/validation-engine" -n validation-engine get deploy validation-engine
 kubectl -n validation-engine rollout status deploy/validation-engine --timeout=600s
 
 # auth 는 Keycloak Ready 이후에만 넘긴다 — 조기 전환 시 ALB keycloak 타겟 unhealthy → 404/503(:406).
+wait_exists "keycloak/cledyu-keycloak" -n keycloak get keycloak cledyu-keycloak
 kubectl -n keycloak wait --for=condition=Ready keycloak/cledyu-keycloak --timeout=600s
 
 # ⚠️ bootstrap svc 응답 확인(:359 의 `cledyu-kafka-kafka-bootstrap.kafka.svc:9093`)은 **제외한다.**
@@ -43,9 +91,24 @@ kubectl -n keycloak wait --for=condition=Ready keycloak/cledyu-keycloak --timeou
 # ── [10] SwitchDNS 가 읽을 ALB 호스트명 기록 ────────────────────────────────
 # non-VPC Lambda 는 private EKS 에 못 닿고 자식 SM 은 stdout 을 CloudWatch 로 보낼 뿐이라
 # SSM 파라미터가 유일한 전달 경로다(설계 §5.1.2).
-ALB=$(kubectl -n api get ingress api -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-[ -n "$ALB" ] || {
-  echo "❌ ALB 호스트명 비어있음 — Ingress 미프로비저닝"
+# ⚠️ 실패 원인이 **두 가지**고 둘 다 대기가 필요한데 초안은 둘 다 안 기다렸다:
+#   (a) Ingress 객체 자체가 없다       → ArgoCD sync 대기(위 존재 게이트와 같은 클래스).
+#       초안은 `ALB=$(kubectl get ...)` 라 **set -e 가 여기서 죽여** 아래 친절한 메시지에 도달조차
+#       못 했다 — 운영자는 원인 대신 raw kubectl 에러를 본다.
+#   (b) 객체는 있는데 hostname 이 빈다 → alb-controller 가 프로비저닝 중(통상 2~3분).
+#       초안의 `[ -n "$ALB" ]` 는 이 경우를 **재시도 없이 즉시 실패**로 처리했다.
+# [9] 는 마지막 줄이 put-parameter 다 → 여기서 죽으면 복구를 다 해놓고 DNS 만 안 넘어간다.
+wait_exists "ingress/api" -n api get ingress api
+# 5분 — ALB 프로비저닝(통상 2~3분)
+for i in $(seq 1 30); do
+  ALB=$(kubectl -n api get ingress api \
+    -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2> /dev/null || echo "")
+  [ -n "$ALB" ] && break
+  echo "ALB 프로비저닝 대기 ($i/30)"
+  sleep 10
+done
+[ -n "${ALB:-}" ] || {
+  echo "❌ ALB 호스트명이 5분 안에 안 나옴 — alb-controller 로그 확인"
   exit 1
 }
 
