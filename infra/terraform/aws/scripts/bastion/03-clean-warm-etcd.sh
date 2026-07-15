@@ -60,4 +60,53 @@ else
   echo "P1d: api Deployment 없음 — no-op(첫 failover 정상)"
 fi
 
+# ── [P1e] Vault raft PVC 정리 (2026-07-16 신규) ─────────────────────────────
+# **왜 여기인가:** [7] 의 `vault operator init` 은 **이미 초기화된 Vault 에서 에러로 죽는다**
+# (`Vault is already initialized`). 그런데 [7] 은 init 산물(root/recovery)을 **일부러 안 남긴다**
+# (감사 로그·stdout 유출 방어) → 재실행 시 토큰을 얻을 길이 없어 **DR 이 그 자리에서 멈춘다.**
+# warm etcd 처럼 **PVC 도 failover 사이클 간 살아남으므로**(gp3, values-eks.yaml:12) 이건
+# "이전 사이클 잔존물"이고 [3] 의 소관이다 — P1c·P1d 와 같은 성격이다.
+# DR EKS 의 raft 에 보존할 상태는 없다. 매번 온프렘 스냅샷으로 덮어쓰므로 **비우는 게 정답**이다.
+#
+# **순서가 핵심이다(2026-07-16 kind 실측).** `delete pvc` 를 먼저, `delete pod` 를 나중에 한다:
+#   · 파드가 **Running** 이면(= failback 이 노드를 안 내린 상태, 스펙 §11.15) PVC 는 pvc-protection
+#     파이널라이저에 걸려 **deletionTimestamp 만 받고 Bound 에 머문다**. 기본 `--wait=true` 는
+#     여기서 timeout 에러 → set -e 로 [3] 이 죽고, PVC 엔 "파드가 죽는 순간 지워지는" 지뢰가 남는다.
+#     → `--wait=false` 로 **표시만** 하고, 파드를 지워 붙들던 손을 떼게 한다.
+#   · 파드가 **Pending** 이면(= 정상 warm, 노드 0) 애초에 안 붙든다(미스케줄 파드는 in-use 가 아니다)
+#     → PVC 가 즉시 지워진다. 같은 코드가 두 상태 모두에서 동작한다.
+#   · **STS 는 건드리지 않는다** — 그래야 ArgoCD selfHeal(platform-vault.yaml:37)과 싸우지 않는다.
+#     STS 컨트롤러가 알아서 새 PVC(다른 uid)를 만들고 파드를 붙인다(실측: 10초 내 수렴).
+#
+# ⚠️ 라벨 셀렉터로 **PVC 를 지우면 안 된다** — 차트의 volumeClaimTemplates 엔 라벨이 없다
+#    (helm template 확인: metadata 가 name: data / name: audit 뿐). -l 을 쓰면 0개 매칭으로
+#    **조용히 통과**한다. ns 통째 --all 이 유일하게 셀렉터 오타가 불가능한 형태다.
+#    vault ns 엔 이 차트 말고 PVC 를 만드는 것이 없다(앱의 directory include 는 ns·SA·cert 뿐).
+# ⚠️ 파드는 반대로 **라벨로** 지운다(이름 vault-0..2 를 박으면 replicas 변경 시 조용히 샌다).
+#    셀렉터는 helm template 로 확인한 실제 값이다. vault-agent-injector 는 name 이 달라 안 걸린다.
+# ⚠️ ns 가 없어도(첫 failover) delete 는 exit 0 + "No resources found" 다(실측) → 존재 게이트 불요.
+kubectl -n vault delete pvc --all --wait=false
+kubectl -n vault delete pod -l app.kubernetes.io/name=vault,component=server --ignore-not-found
+
+# 게이트: **실제로 사라졌나.** Terminating 에 걸린 채 넘어가면 [6] 이 그 PVC 를 재사용하고
+# [7] 이 already-initialized 로 죽는다 — 이 블록이 막으려던 바로 그 실패다.
+# 새로 만들어진 PVC 는 deletionTimestamp 가 없으므로 "하나라도 있으면 아직 안 끝난 것"으로 판정한다.
+# ⚠️ 개수로는 못 본다 — STS 컨트롤러가 즉시 새 PVC 를 만들어 count 가 0 이 되는 순간이 없다(실측).
+# 2분 (주석을 for 줄 안에 두면 shfmt 가 줄을 쪼갠다)
+for i in $(seq 1 24); do
+  STUCK=$(kubectl -n vault get pvc \
+    -o jsonpath='{range .items[*]}{.metadata.deletionTimestamp}{"\n"}{end}' 2> /dev/null |
+    grep -c . || true)
+  [ "${STUCK:-0}" -eq 0 ] && break
+  echo "Vault PVC Terminating 대기 ${STUCK}개 ($i/24)"
+  sleep 5
+done
+[ "${STUCK:-0}" -eq 0 ] || {
+  echo "❌ Vault PVC 가 2분째 Terminating — 파드가 아직 붙들고 있다."
+  echo "   노드가 살아있는 채로 [3] 이 돌았을 가능성(스펙 §11.15: failback 이 노드를 안 내림)."
+  echo "   kubectl -n vault get pod -o wide 로 확인 후 노드를 0 으로 내리고 재실행하라."
+  exit 1
+}
+echo "P1e: Vault raft PVC 정리 완료 — [7] 의 init 이 fresh Vault 를 만난다"
+
 echo "✅ warm etcd 정리 완료"

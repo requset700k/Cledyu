@@ -47,10 +47,46 @@ aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2
 
 VC="VAULT_CACERT=/vault/tls/ca.crt" # 모든 vault 명령에 필수 — TLS 자체서명(cledyu-ca)
 
-# ── 1) init (런북 :86-88) ────────────────────────────────────────────────────
+kubectl -n vault wait --for=condition=Ready pod/vault-0 --timeout=300s
+
+# ── 1) 스냅샷을 **init 보다 먼저** 파드 안까지 넣어둔다 (런북 :97-98 을 앞으로 재배치) ──────
+# 🔀 **런북과 순서가 다르다 — 의도된 재배치다(2026-07-16).**
+# init 과 restore 사이의 모든 줄은 **되돌릴 수 없는 구간**이다: init 은 성공했는데 뒤가 실패하면
+# Vault 는 "초기화됨 + fresh keyring" 인데 그 keyring 의 recovery 키를 이 스크립트가 **안 남기므로**
+# (감사 로그·stdout 유출 방어) 아무도 root 를 못 얻는다 → **복구 불능**. [3] 의 PVC 정리로 재실행은
+# 가능해졌지만, 그건 **파이프라인을 [3] 부터 다시 태우는 것**이라 재해 중 20~30분이 날아간다.
+# → init 에 의존하지 않는 것(S3 다운로드·파드로 복사)을 **전부 앞으로 빼서** 그 구간을 최소화한다.
+#   남는 구간은 "3-peer 대기 + restore 한 줄"뿐이다(peer 대기는 토큰이 필요해 뒤로 못 뺀다).
+# ⚠️ 런북은 `s3 ls | tail -1`(최신 고정)이지만 우리는 **승인 시 고른 값**을 쓴다 — 드롭다운의 존재 이유다.
+aws s3 cp "s3://cledyu-lab-dr-backups/${SNAPSHOT_KEY}" "$WORK/vault-raft.snap"
+[ -s "$WORK/vault-raft.snap" ] || {
+  echo "❌ 스냅샷이 비었거나 없음: $SNAPSHOT_KEY"
+  exit 1
+}
+kubectl -n vault cp "$WORK/vault-raft.snap" vault-0:/tmp/vault-raft.snap
+
+# ── 2) init (런북 :86-88) ────────────────────────────────────────────────────
 # KMS auto-unseal 이라 unseal 키 입력 불요 — init 만 하면 자동 unseal 된다.
 # 런북의 <INIT_ROOT> 플레이스홀더(사람이 눈으로 보고 넣는 값)를 변수 캡처로 대체(변환 규칙 3).
-kubectl -n vault wait --for=condition=Ready pod/vault-0 --timeout=300s
+#
+# ⚠️ **이미 초기화돼 있으면 여기서 죽는다** — 그리고 그 에러(`Vault is already initialized`)는
+# 원인을 안 가리킨다. 운영자는 재해 중에 "왜 Vault 가 이미 초기화돼 있지?"부터 조사하게 된다.
+# 진짜 원인은 [3] 의 P1e(raft PVC 정리)가 안 돌았다는 것이다 — [3] 을 건너뛰고 [7] 만 재실행했거나,
+# [3] 의 PVC 정리가 실패했는데 넘어갔거나. **먼저 판정해서 원인을 말해준다.**
+# (여기서 복구를 시도하지 않는 이유: 이미 초기화된 Vault 의 keyring 이 fresh 인지 복원본인지
+#  스크립트가 알 방법이 없고, 그 둘은 root 획득 경로가 서로 다르다. 추측 대신 [3] 부터 재실행이 정답.)
+# ⚠️ 출력을 **먼저 캡처**한다 — `vault status | jq` 로 직결하면 안 된다(2026-07-16 실측).
+#    `vault status` 는 **sealed 면 exit 2** 다. `set -o pipefail` 아래서 그 2 가 jq 의 판정을 덮어써
+#    파이프라인이 non-zero → if 가 false → **"초기화됨 + sealed" 를 그냥 통과시킨다**(= 게이트가
+#    막으려던 바로 그 상태). 3상태(fresh / 초기화+sealed / 초기화+unsealed) 실측으로 확인했다.
+ST=$(kubectl -n vault exec vault-0 -- sh -c "$VC vault status -format=json" 2> /dev/null || true)
+if echo "$ST" | jq -e '.initialized == true' > /dev/null 2>&1; then
+  echo "❌ Vault 가 이미 초기화돼 있다 — [7] 은 fresh Vault 를 전제한다."
+  echo "   원인: [3] CleanWarmEtcd 의 P1e(Vault raft PVC 정리)가 안 돌았다."
+  echo "   → [7] 만 재실행하지 말고 **[3] 부터** 파이프라인을 다시 태울 것."
+  exit 1
+fi
+
 INIT=$(kubectl -n vault exec vault-0 -- sh -c "$VC vault operator init -format=json")
 INIT_ROOT=$(echo "$INIT" | jq -r .root_token)
 if [ -z "$INIT_ROOT" ] || [ "$INIT_ROOT" = "null" ]; then
@@ -73,18 +109,10 @@ done
   exit 1
 }
 
-# ── 2) 스냅샷 취득 (런북 :97-98) ─────────────────────────────────────────────
-# ⚠️ 런북은 `s3 ls | tail -1`(최신 고정)이지만 우리는 **승인 시 고른 값**을 쓴다 — 드롭다운의 존재 이유다.
-aws s3 cp "s3://cledyu-lab-dr-backups/${SNAPSHOT_KEY}" "$WORK/vault-raft.snap"
-[ -s "$WORK/vault-raft.snap" ] || {
-  echo "❌ 스냅샷이 비었거나 없음: $SNAPSHOT_KEY"
-  exit 1
-}
-
 # ── 3) force restore (런북 :107-109) ─────────────────────────────────────────
 # 스냅샷은 다른 클러스터(온프렘)에서 왔고 방금 init 한 EKS Vault 는 recovery/shamir 키가 달라
 # 일반 restore 는 seal 일관성 검사에서 거부된다 → **-force 필수**.
-kubectl -n vault cp "$WORK/vault-raft.snap" vault-0:/tmp/vault-raft.snap
+# (스냅샷은 §1 에서 이미 파드 안 /tmp 에 들어와 있다 — init 앞으로 뺐다.)
 printf '%s' "$INIT_ROOT" | kubectl -n vault exec -i vault-0 -- sh -c \
   "$VC VAULT_TOKEN=\$(cat) vault operator raft snapshot restore -force /tmp/vault-raft.snap"
 unset INIT_ROOT # force restore 후 무효화된다(런북 :111) — 더 들고 있지 않는다
