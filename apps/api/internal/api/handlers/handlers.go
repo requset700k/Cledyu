@@ -50,6 +50,7 @@ type Handler struct {
 	vmFiles   vmFileService                 // 세션 VM 파일 목록·미리보기 서비스. 미설정이면 endpoint만 503.
 	bq        bqAnalytics                   // D3 강사 분석 BigQuery 조회. nil 허용 — 미설정 시 503.
 	met       *handlerMetrics               // Prometheus 도메인 메트릭 수집기. nil 허용 — 로컬/CI 폴백.
+	consoles  *consoleRegistry              // 세션당 활성 라이브 터미널 1개 제한(기존 창 우선). nil 허용 — 미설정 시 가드 비활성(테스트).
 }
 
 // SetEC2Dial는 EC2 세션(tailnet MagicDNS)에 닿는 다이얼러를 주입한다. main이 tsnet 노드를
@@ -130,6 +131,7 @@ func New(cfg *config.Config, log *zap.Logger, sessions session.Provider, validat
 		kcAdmin:   kc,
 		locks:     locks,
 		redis:     redisClient,
+		consoles:  newConsoleRegistry(),
 		met: func() *handlerMetrics {
 			defaultHandlerMetricsOnce.Do(func() {
 				defaultHandlerMetrics = newHandlerMetrics(prometheus.DefaultRegisterer)
