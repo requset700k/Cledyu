@@ -21,14 +21,20 @@ aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2
 kubectl -n postgres delete cluster cledyu-pg --ignore-not-found
 kubectl -n keycloak delete cluster keycloak-pg --ignore-not-found
 
-# 🔴 **미확정 — delete 가 PVC 도 지우나. 판정처는 T7 Step 4 의 표식(dr_drill_marker)이다.**
-# ⚠️ 원래 "T3 Step 10 에서 확인한다"였는데 **그 Step 이 실측 없이 지나갔다**(2026-07-15). 주석이 이미
-#    지나간 관문을 가리키는 바람에 이 건이 미아가 됐다 → **살아있는 관문(T7)으로 다시 건다.**
-# 남아서 재생성된 Cluster 가 그걸 재사용하면 **S3 복원이 아니라 stale 데이터로 뜬다**
-# (PGDATA 가 이미 있으면 bootstrap.recovery 가 아예 안 돈다).
-# 그리고 `wait --for=condition=Ready` 는 **통과하고**, [12] 의 count(*) > 0 도 **통과한다**(행은 있으니까)
-# → 이 계획에서 가장 조용한 실패 경로다. **아래 get pvc 는 눈으로 보는 것일 뿐 게이트가 아니다.**
-# T7 표식이 0/ERROR 로 나오면 여기에 PVC 삭제를 명시 추가하고 이 주석을 실측 결과로 대체한다.
+# ✅ **미확정 해소(2026-07-16) — delete 가 PVC 도 지운다. 여기에 PVC 삭제를 추가할 필요 없다.**
+# H5 는 "PVC 가 남아 재생성된 Cluster 가 재사용 → S3 복원이 아니라 stale 데이터로 뜨는데
+# `wait Ready` 도 [12] 의 count(*)>0 도 **통과**하는, 이 계획에서 가장 조용한 실패 경로"였다.
+#
+# **실측(kind + 레포와 동일한 CNPG 차트 0.26.1):** CNPG 가 PVC 에 `ownerReferences: Cluster/<name>`
+# 를 붙이므로 Cluster 삭제 → 가비지 컬렉션이 PVC 를 연쇄 삭제한다(Terminating 거쳐 ~15초 내 소멸).
+# 테스트 Cluster 는 레포와 **구조가 일치**한다(instances: 1 + storage: 만 — walStorage·tablespaces·
+# pvcTemplate 없음, cluster.yaml:16-24 확인). storageClass 만 다른데(gp3 vs kind 기본) PVC 삭제는
+# ownerRef GC 라 storageClass 와 무관하다.
+#
+# ⚠️ **그래도 T7 Step 4 의 표식(dr_drill_marker)은 유지한다.** 위 실측은 "지금 이 버전이 이렇게
+#    동작한다"는 것이고, CNPG 가 동작을 바꾸거나 누가 retention 정책을 붙이면 조용히 되살아난다.
+#    표식이 그 회귀를 잡는 **실환경 백스톱**이다 — 실측이 표식을 대체하지 않는다.
+# 아래 get pvc 는 드릴 로그에 남기는 관찰일 뿐 게이트가 아니다.
 kubectl -n postgres get pvc -l cnpg.io/cluster=cledyu-pg 2>&1 | head -3 || true
 kubectl -n keycloak get pvc -l cnpg.io/cluster=keycloak-pg 2>&1 | head -3 || true
 

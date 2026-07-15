@@ -69,9 +69,13 @@ done
   echo "❌ KafkaTopic 이 하나도 없다 — ArgoCD sync 상태 확인"
   exit 1
 }
-# 🔴 **미확정 — KafkaTopic 에 Ready 조건이 있는지 Step 10 에서 확인한다**(Kafka CR 은 Strimzi 문서로
-# 확인했으나 KafkaTopic 은 미확인). 없으면 이 줄을 **삭제**하고 Kafka CR Ready 만 게이트한다.
-# (위 대수 검증은 그 경우에도 남긴다 — 토픽이 실제로 sync 됐다는 것 자체는 여전히 봐야 한다.)
+# ✅ **미확정 해소(2026-07-16)** — KafkaTopic 에 Ready 조건이 **있다.** 쓰는 버전(Strimzi 0.45.2)의
+# CRD 를 직접 확인했다(`helm template --include-crds`): kafkatopics.kafka.strimzi.io v1beta2 가
+# additionalPrinterColumns 에 `Ready ← .status.conditions[?(@.type=="Ready")].status` 를 선언하고
+# status.properties 에 conditions 가 있다. 오퍼레이터가 안 세팅하는 조건에 printer column 을 달지
+# 않으므로 이 줄은 유효하다 — **삭제하지 않는다.**
+# 그리고 이 wait 은 위의 `kafka/cledyu-kafka` Ready **뒤**라 Topic Operator(Entity Operator 의 일부)가
+# 이미 떠 있다 → 조건이 채워질 주체가 존재한다.
 kubectl -n kafka wait --for=condition=Ready kafkatopic --all --timeout=300s
 
 # VE 선행: Kafka(KafkaUser·client cert) + **Vault 복원→ESO 로 cledyu-validation-engine-aws Secret**
