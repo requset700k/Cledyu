@@ -1,7 +1,8 @@
 'use client';
 
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Suspense, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { api } from '@/lib/api';
 import type { BillingPlan, Subscription } from '@/lib/types';
 
@@ -222,11 +223,14 @@ export default function BillingPage() {
 }
 
 function BillingPageContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const paymentSimulationEnabled = process.env.NODE_ENV !== 'production';
   const [activationMessage, setActivationMessage] = useState<string | null>(null);
   const [activationError, setActivationError] = useState<string | null>(null);
   const [selectedPlanID, setSelectedPlanID] = useState<string | null>(null);
   const [paymentPlanID, setPaymentPlanID] = useState<string | null>(null);
+  const consumedCheckoutID = useRef<string | null>(null);
   const plans = useQuery({
     queryKey: ['billing-plans'],
     queryFn: () => api.billing.plans(),
@@ -234,6 +238,23 @@ function BillingPageContent() {
   const subscription = useQuery({
     queryKey: ['my-subscription'],
     queryFn: () => api.billing.subscription(),
+  });
+  const completeReturnedCheckout = useMutation({
+    mutationFn: (checkoutID: string) => api.billing.completeCheckout(checkoutID),
+    onMutate: () => {
+      setActivationMessage(null);
+      setActivationError(null);
+    },
+    onSuccess: async () => {
+      await subscription.refetch();
+      setPaymentPlanID(null);
+      setActivationMessage('결제가 완료되었습니다. 선택한 요금제 권한이 활성화되었습니다.');
+      router.replace('/billing', { scroll: false });
+    },
+    onError: () => {
+      setActivationError('결제 처리에 실패했습니다. 잠시 후 다시 시도하세요.');
+      router.replace('/billing', { scroll: false });
+    },
   });
   const activatePlan = useMutation({
     mutationFn: async (planID: string) => {
@@ -256,6 +277,17 @@ function BillingPageContent() {
       setActivationError('결제 처리에 실패했습니다. 잠시 후 다시 시도하세요.');
     },
   });
+  const returnedCheckoutID = searchParams.get('checkout_session_id');
+  const returnedProvider = searchParams.get('provider');
+
+  useEffect(() => {
+    if (!paymentSimulationEnabled || !returnedCheckoutID) return;
+    if (returnedProvider && returnedProvider !== 'mock') return;
+    if (consumedCheckoutID.current === returnedCheckoutID) return;
+
+    consumedCheckoutID.current = returnedCheckoutID;
+    completeReturnedCheckout.mutate(returnedCheckoutID);
+  }, [completeReturnedCheckout, paymentSimulationEnabled, returnedCheckoutID, returnedProvider]);
 
   if (plans.isLoading || subscription.isLoading) {
     return <p className="text-slate-400">불러오는 중...</p>;
@@ -332,6 +364,9 @@ function BillingPageContent() {
 
         {activationMessage && <p className="mt-3 text-emerald-300 text-sm">{activationMessage}</p>}
         {activationError && <p className="mt-3 text-red-300 text-sm">{activationError}</p>}
+        {completeReturnedCheckout.isPending && (
+          <p className="mt-3 text-brand-300 text-sm">결제 결과를 반영하는 중입니다...</p>
+        )}
       </section>
 
       <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
