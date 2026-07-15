@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"context"
 	"sync"
 	"testing"
+	"time"
 )
 
 // consoleRegistry는 세션당 활성 라이브 터미널 연결을 1개로 제한한다(기존 창 우선).
@@ -63,5 +65,70 @@ func TestConsoleRegistry_ConcurrentAcquireOnlyOneWins(t *testing.T) {
 	wg.Wait()
 	if wins != 1 {
 		t.Fatalf("동시 acquire 중 정확히 1개만 성공해야 한다, got %d", wins)
+	}
+}
+
+// 슬롯이 비어 있으면 acquireWithin 은 grace 를 기다리지 않고 즉시 true 여야 한다.
+func TestConsoleRegistry_AcquireWithin_ImmediateWhenFree(t *testing.T) {
+	r := newConsoleRegistry()
+	if !r.acquireWithin(context.Background(), "s1", time.Second) {
+		t.Fatal("빈 슬롯의 acquireWithin 은 즉시 true 여야 한다")
+	}
+}
+
+// handoff: 기존 보유자(준비 probe)가 grace 안에 release 하면 새 연결(실제 터미널)은
+// 거부되지 않고 슬롯을 인수해야 한다. 이 재시도가 없으면 probe→터미널 경합에서 화면
+// 터미널이 close 1000 을 받아 영구히 닫힌다(코드리뷰 P2).
+func TestConsoleRegistry_AcquireWithin_SucceedsWhenReleasedDuringGrace(t *testing.T) {
+	r := newConsoleRegistry()
+	if !r.acquire("s1") {
+		t.Fatal("사전 점유 실패")
+	}
+	go func() {
+		time.Sleep(80 * time.Millisecond)
+		r.release("s1")
+	}()
+	start := time.Now()
+	if !r.acquireWithin(context.Background(), "s1", 2*time.Second) {
+		t.Fatal("grace 안에 release 된 슬롯은 인수되어야 한다(handoff)")
+	}
+	if elapsed := time.Since(start); elapsed < 50*time.Millisecond {
+		t.Fatalf("release 전에 성급히 획득함, elapsed=%v", elapsed)
+	}
+}
+
+// 기존 보유자가 grace 를 넘겨 계속 점유하면(진짜 두 번째 창) acquireWithin 은 false —
+// 호출부가 close 1000 으로 거절해 기존 창 우선을 유지한다.
+func TestConsoleRegistry_AcquireWithin_FailsWhenHeldBeyondGrace(t *testing.T) {
+	r := newConsoleRegistry()
+	if !r.acquire("s1") {
+		t.Fatal("사전 점유 실패")
+	}
+	if r.acquireWithin(context.Background(), "s1", 150*time.Millisecond) {
+		t.Fatal("grace 를 넘겨 점유 중이면 acquireWithin 은 false 여야 한다")
+	}
+}
+
+// 클라이언트가 대기 중 연결을 끊으면(ctx 취소) grace 만료 전에 즉시 포기해야 한다.
+func TestConsoleRegistry_AcquireWithin_CtxCancel(t *testing.T) {
+	r := newConsoleRegistry()
+	if !r.acquire("s1") {
+		t.Fatal("사전 점유 실패")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	if r.acquireWithin(ctx, "s1", 10*time.Second) {
+		t.Fatal("ctx 취소 시 acquireWithin 은 false 여야 한다")
+	}
+}
+
+// nil 리시버는 가드 비활성으로 즉시 통과.
+func TestConsoleRegistry_AcquireWithin_NilReceiver(t *testing.T) {
+	var r *consoleRegistry
+	if !r.acquireWithin(context.Background(), "s1", time.Second) {
+		t.Fatal("nil 레지스트리 acquireWithin 은 true 여야 한다")
 	}
 }

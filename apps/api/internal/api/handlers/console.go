@@ -29,6 +29,11 @@ const (
 	maxTerminalDim = 1000
 )
 
+// consoleHandoffGrace는 세션 콘솔 슬롯이 곧 비워질 때(준비 probe→실제 터미널 handoff) 새 연결이
+// 순간 경합으로 거절되지 않도록 acquire 가 재시도하는 최대 대기다. 떠나는 보유자의 서버측 release
+// 지연(공개 ingress RTT 포함)을 넉넉히 덮되, 진짜 두 번째 창은 이 시간만 지나면 거절된다.
+const consoleHandoffGrace = 2 * time.Second
+
 // terminalResizer는 PTY 윈도우 크기 변경을 지원하는 연결이다(EC2 SSH PTY 가 구현, serial 은 미구현).
 type terminalResizer interface {
 	Resize(cols, rows int) error
@@ -144,7 +149,12 @@ func (h *Handler) kubevirtConsole(c *gin.Context, sessionID string) {
 	// 정상 종료(close 1000)로 닫는다. 클라이언트는 1000 을 의도된 종료로 보고 재연결하지
 	// 않아(runtime-api-origin.mjs shouldReconnect) 루프가 끊긴다. 거절은 SerialConsole 을
 	// 열기 전에 하므로 KubeVirt 배타락 축출 자체가 발생하지 않는다.
-	if !h.consoles.acquire(sessionID) {
+	//
+	// acquireWithin 의 grace 는 부팅 handoff 를 살린다: 준비 probe(TerminalReadinessProbe)가
+	// 같은 세션 WS 를 먼저 쓰다 close(1000) 하고 곧바로 실제 터미널이 연결될 때, probe 의 서버측
+	// release 가 이 acquire 보다 늦게 처리되는 경합에서 즉시 거절하면 화면 터미널이 영구히 닫힌다.
+	// 떠나는 보유자가 빠질 시간을 줘 handoff 를 살리되, 진짜 두 번째 창(계속 점유)은 grace 후 거절된다.
+	if !h.consoles.acquireWithin(c.Request.Context(), sessionID, consoleHandoffGrace) {
 		_ = ws.WriteMessage(websocket.TextMessage, []byte("\r\n[이미 다른 창에서 터미널이 열려 있습니다. 이 창을 닫고 기존 창을 사용하세요.]\r\n"))
 		_ = ws.WriteControl(
 			websocket.CloseMessage,
