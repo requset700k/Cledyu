@@ -4,6 +4,22 @@ locals {
   eks_dr_active  = var.eks_dr_active ? 1 : 0 # pilot-light hot(NAT·엔드포인트·bastion 인스턴스)
   eks_dr_name    = "cledyu-dr"
   eks_dr_tags    = { Project = "cledyu", Purpose = "dr", ManagedBy = "terraform" }
+
+  # ⚠️ 클러스터 admin·KMS 키 관리자를 **명시**한다 — caller identity 를 쓰면 안 된다.
+  #
+  # eks 모듈은 둘 다 "지금 terraform 을 치는 principal"로 기본 대체한다:
+  #   · enable_cluster_creator_admin_permissions=true → access entry 를 caller 로 생성
+  #   · kms_key_administrators=[]                     → coalescelist(..., [session_context.issuer_arn])
+  # 지금까지는 런북대로 **사람이** apply 해서 user/kcy 였는데, DR 페일오버 [2] 가 **CodeBuild** 로
+  # apply 하게 되면서 2026-07-15 T1 실측에서 둘 다 CodeBuild 롤로 넘어갔다(access entry 2 destroyed +
+  # KMS 키 정책 1 changed). 사람이 apply 하면 다시 뒤집혀 **terraform 이 영원히 수렴하지 않는다.**
+  #
+  # 페일오버 자체는 안 깨진다(bastion entry 는 아래 access_entries 로 명시, KMS 는 root 문이 있어
+  # 계정 락아웃 없음). 진짜 문제는 **페일오버 경로에 destroy 가 상시로 뜨는 것**이다 — 운영자가
+  # destroy 줄을 안 읽게 되고, 그건 `-var` 누락으로 warm DR 129개가 날아가는 사고를 놓치는 훈련이 된다.
+  #
+  # account_id 는 누가 apply 하든 같으므로(같은 계정) 이 값은 결정적이다.
+  eks_dr_admin_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/kcy"
 }
 
 module "eks_dr_vpc" {
@@ -59,6 +75,9 @@ module "eks_dr" {
   cluster_encryption_config = {
     resources = ["secrets"]
   }
+  # ⚠️ 비우면 모듈이 caller identity 로 대체한다(main.tf:316 coalescelist) → apply 주체마다 키 정책이
+  # 뒤집힌다. 명시 필수(§locals.eks_dr_admin_arn).
+  kms_key_administrators = [local.eks_dr_admin_arn]
 
   enable_irsa = true
 
@@ -75,8 +94,10 @@ module "eks_dr" {
     }
   }
 
-  # 부트스트랩 운영자(terraform apply principal)가 관리자로 접근.
-  enable_cluster_creator_admin_permissions = true
+  # ⚠️ false 필수 — true 면 모듈이 "terraform apply principal"을 admin 으로 넣는다(main.tf:243).
+  # DR 페일오버 [2] 는 CodeBuild 가 apply 하므로 사람↔CodeBuild 롤로 매 apply 마다 뒤집힌다.
+  # 운영자는 아래 access_entries.operator 로 **명시**한다(§locals.eks_dr_admin_arn).
+  enable_cluster_creator_admin_permissions = false
 
   # private-only 엔드포인트라 kubectl 은 bastion(eks-dr-bastion.tf)에서만 가능하고,
   # 그 kubectl 은 bastion instance profile 롤로 인증된다 → 이 롤을 cluster admin 에 매핑.
@@ -90,7 +111,23 @@ module "eks_dr" {
         }
       }
     }
+    # 운영자(사람). private 엔드포인트라 노트북 kubectl 은 어차피 불가하지만, EKS 콘솔 가시성과
+    # bastion 경유 디버깅의 근거가 된다. 예전엔 enable_cluster_creator_admin_permissions 가
+    # 암묵적으로 만들어주던 것을 명시로 바꾼 것이다(2026-07-15 T1 실측).
+    operator = {
+      principal_arn = local.eks_dr_admin_arn
+      policy_associations = {
+        admin = {
+          policy_arn   = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+          access_scope = { type = "cluster" }
+        }
+      }
+    }
   }
+
+  # ⚠️ CodeBuild 롤(cledyu-lab-dr-failover-tf)은 **일부러 넣지 않는다.** versions.tf 에 kubernetes
+  # provider 가 없어 terraform 이 k8s API 를 호출하지 않는다 → 클러스터 접근이 필요 없다.
+  # T1 실측에서 받아간 admin 은 애초에 불필요한 권한이었다.
   tags = local.eks_dr_tags
 
   # pilot-light warm(node0): coredns·aws-ebs-csi-driver 는 Deployment 라 스케줄할 노드가 없으면
