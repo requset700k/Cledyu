@@ -10,7 +10,7 @@
 crash.log
 crash.*.log
 # Lambda 빌드 산출물(archive_file 이 apply 시 생성 — 커밋 금지)
-infra/terraform/aws/dr-alert-lambda/dr-alert.zip
+infra/terraform/aws/**/*.zip
 
 # Ansible
 .ansible/
