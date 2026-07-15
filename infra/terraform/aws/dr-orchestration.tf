@@ -303,6 +303,70 @@ data "aws_iam_policy_document" "dr_sfn" {
     actions   = ["events:PutTargets", "events:PutRule", "events:DescribeRule"]
     resources = ["arn:aws:events:${var.region}:${data.aws_caller_identity.current.account_id}:rule/StepFunctionsGetEventForCodeBuildStartBuildRule"]
   }
+
+  # ── 자식 SM 이 bastion 에 명령을 보내기 위한 권한 ──
+  statement {
+    sid = "RunOnBastion"
+    actions = [
+      "ssm:SendCommand",
+      "ssm:GetCommandInvocation",
+      "ssm:DescribeInstanceInformation",
+    ]
+    # SendCommand 는 문서·인스턴스 양쪽에 권한이 필요하고, GetCommandInvocation 은 command ARN 을
+    # 런타임에야 알 수 있다. DescribeInstanceInformation 은 리소스 한정을 지원하지 않는다(AWS 문서).
+    resources = ["*"]
+  }
+
+  # ── [2.4]·[2.5]·[4] — 메인 SM(T5)이 쓸 SDK 상태들. 여기서 미리 넣어둔다 ──
+  statement {
+    sid       = "ResolveBastion"
+    actions   = ["ec2:DescribeInstances"]
+    resources = ["*"] # DescribeInstances 는 리소스 한정을 지원하지 않는다(AWS 문서)
+  }
+
+  statement {
+    # [2.4] ClearAlbParam — stale ALB 파라미터 방어(설계 §5.1.2). [9] 가 쓰기 전에 항상 비운다.
+    sid       = "ClearAlbParam"
+    actions   = ["ssm:DeleteParameter"]
+    resources = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/cledyu-dr/failover/*"]
+  }
+
+  statement {
+    # [4] ScaleNodes — warm(desired 0) → hot(desired 3).
+    sid       = "ScaleNodes"
+    actions   = ["eks:UpdateNodegroupConfig", "eks:DescribeNodegroup", "eks:ListNodegroups"]
+    resources = ["*"] # 노드그룹 이름을 런타임에 조회하므로 사전 특정 불가
+  }
+}
+
+# ⚠️ 자식 SM 을 참조하는 statement 는 **별도 정책**이어야 한다 — dr_sfn 에 두면 terraform 사이클이다:
+#   dr_run_on_bastion --depends_on--> aws_iam_role_policy.dr_sfn --policy--> data.dr_sfn
+#     --resources--> dr_run_on_bastion.arn   ← 순환 (terraform validate 가 "Error: Cycle" 로 거부)
+# 자식 SM 은 dr_sfn 만 depends_on 하고 이 정책은 depends_on 하지 않으므로 여기선 안전하다.
+data "aws_iam_policy_document" "dr_sfn_child" {
+  statement {
+    sid       = "StartChildSm"
+    actions   = ["states:StartExecution"]
+    resources = [aws_sfn_state_machine.dr_run_on_bastion.arn]
+  }
+  statement {
+    sid = "ChildSmSync"
+    # states:startExecution.sync 는 자식 실행을 폴링·중단하기 위해 아래가 필요하다(AWS 문서).
+    actions   = ["states:DescribeExecution", "states:StopExecution"]
+    resources = ["*"]
+  }
+  statement {
+    sid = "ChildSmSyncEvents"
+    # .sync 통합은 EventBridge 관리형 규칙으로 완료를 감지한다(AWS 문서) — CodeBuild .sync 와 동일 요구.
+    actions   = ["events:PutTargets", "events:PutRule", "events:DescribeRule"]
+    resources = ["arn:aws:events:${var.region}:${data.aws_caller_identity.current.account_id}:rule/StepFunctionsGetEventsForStepFunctionsExecutionRule"]
+  }
+}
+
+resource "aws_iam_role_policy" "dr_sfn_child" {
+  name   = "${var.name_prefix}-dr-sfn-child"
+  role   = aws_iam_role.dr_sfn.id
+  policy = data.aws_iam_policy_document.dr_sfn_child.json
 }
 
 resource "aws_iam_role_policy" "dr_sfn" {
@@ -555,4 +619,231 @@ resource "aws_codebuild_project" "dr_failover_tf" {
   concurrent_build_limit = 1
 
   tags = local.eks_dr_tags
+}
+
+# ── 자식 SM: bastion 에서 스크립트 실행 (SSM 폴링) ────────────────────────────
+# SFN 에 SSM `.sync` 통합이 **없다**(AWS optimized integrations 표에 SSM 이 없고, AWS SDK 통합엔
+# .sync 가 Not supported). ssm:SendCommand 는 CommandId 만 즉시 반환하므로 폴링을 직접 만든다.
+# SSM 단계가 6개([3][6][7][8][9][11][12])라 인라인하면 상태가 폭증하고, 통짜 스크립트로 합치면
+# 실패 지점을 잃는다 → 폴링 로직을 여기 한 군데만 두고 메인 SM 이 states:startExecution.sync 로 호출한다.
+
+# bastion 명령 출력(stdout/stderr)을 받는다.
+#
+# ⚠️ **S3(dr_backups)로 보내지 않는다** — 계획 초안은 OutputS3BucketName=dr_backups 였으나 3중으로 막혔다
+# (2026-07-15 T2 착수 전 발견):
+#   (1) bastion 롤에 s3:PutObject 가 없다(GetObject on vault/* 만) — SSM 은 **인스턴스 자격증명**으로 올린다
+#   (2) 버킷이 SSE-KMS 인데 bastion 엔 kms:Decrypt 만 있고 쓰기용 GenerateDataKey 가 없다
+#   (3) 버킷이 **Object Lock GOVERNANCE 30일** — 드릴 로그가 30일간 삭제 불가로 쌓인다.
+#       dr_backups 는 "삭제·변조 불가로 굳혀 랜섬웨어·실수 삭제로부터 보호"하는 WORM 금고다(backup.tf:11).
+#       **백업 금고와 운영 로그는 성격이 정반대다** — (1)(2)는 IAM 으로 고쳐지지만 (3)은 설계 문제다.
+# → CloudWatch Logs 로 보낸다. 이 설계의 다른 로그(SFN·Lambda·CodeBuild)와 같은 곳이고, retention 으로
+#   자동 정리되며 `aws logs tail` 로 바로 읽는다.
+resource "aws_cloudwatch_log_group" "dr_bastion_commands" {
+  name              = "/aws/ssm/${var.name_prefix}-dr-failover"
+  retention_in_days = 30
+}
+
+# ⚠️ SSM 의 CloudWatch 출력은 **인스턴스(bastion)의 자격증명**으로 쓴다 — SFN 롤이 아니다.
+# 붙어 있는 AmazonSSMManagedInstanceCore 는 logs 권한을 **하나도 주지 않는다**(실측 확인) →
+# 없으면 stdout 전문이 유실되고 stdoutTail(잘림)만 남는다.
+data "aws_iam_policy_document" "eks_dr_bastion_command_logs" {
+  count = local.eks_dr_enabled
+  statement {
+    actions = ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"]
+    resources = [
+      aws_cloudwatch_log_group.dr_bastion_commands.arn,
+      "${aws_cloudwatch_log_group.dr_bastion_commands.arn}:*",
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "eks_dr_bastion_command_logs" {
+  count  = local.eks_dr_enabled
+  name   = "ssm-command-logs"
+  role   = aws_iam_role.eks_dr_bastion[0].id
+  policy = data.aws_iam_policy_document.eks_dr_bastion_command_logs[0].json
+}
+
+resource "aws_sfn_state_machine" "dr_run_on_bastion" {
+  name       = "${var.name_prefix}-dr-run-on-bastion"
+  role_arn   = aws_iam_role.dr_sfn.arn
+  depends_on = [aws_iam_role_policy.dr_sfn]
+
+  logging_configuration {
+    log_destination = "${aws_cloudwatch_log_group.dr_sfn.arn}:*"
+    # 부모와 동일 — 실행 데이터에 taskToken 이 실릴 수 있다(설계 §5.4).
+    include_execution_data = false
+    level                  = "ALL"
+  }
+
+  definition = jsonencode({
+    Comment = "bastion 에서 스크립트 실행 — SSM 폴링(SFN 에 SSM .sync 통합 없음)"
+    # ⚠️ 실행 전체 상한. WaitCmd→GetResult→Done?→WaitCmd 는 무한 루프이고 Done? 의 Default 가 Failed 지만
+    # Status 가 InProgress 로 계속 오면 영원히 돈다. SSM 의 executionTimeout 이 먼저 걸려 TimedOut 을 주는
+    # 게 정상 경로이나, 그마저 안 오는 경우(에이전트 죽음 등)의 backstop 이다.
+    # 가장 긴 스크립트(08=3600) + 폴링 여유. 초과 시 States.Timeout → 부모의 Catch 가 잡는다.
+    TimeoutSeconds = 4200
+    StartAt        = "WaitForSsmAgent"
+    States = {
+      # ⚠️ module.eks_dr_endpoints 는 s3/kms/sts 만 만든다 — ssm/ssmmessages/ec2messages 인터페이스
+      # 엔드포인트가 없어 bastion 의 SSM 에이전트는 **NAT 로 나가서 등록**해야 한다. 그 NAT 는 [2] 의
+      # 같은 apply 에서 방금 생겼다. 등록 전 SendCommand 는 동기 예외를 던져 Choice·Wait 를 타지
+      # 못하므로 등록을 먼저 기다린다(런북 :280 이 같은 창을 기록).
+      WaitForSsmAgent = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::aws-sdk:ssm:describeInstanceInformation"
+        Parameters = {
+          Filters = [{ Key = "InstanceIds", "Values.$" = "States.Array($.instanceId)" }]
+        }
+        ResultPath = "$.agent"
+        Retry = [{
+          # ⚠️ 이 Retry 는 API 에러용이고 **미등록 인스턴스에는 안 걸린다** —
+          # describeInstanceInformation 은 미등록 대상에 에러가 아니라 **빈 목록**을 준다.
+          # 등록 대기는 아래 AgentReady?→WaitAgent 루프가 한다.
+          ErrorEquals     = ["States.ALL"]
+          IntervalSeconds = 20
+          MaxAttempts     = 15
+          BackoffRate     = 1.0
+        }]
+        Next = "AgentReady?"
+      }
+
+      # ⚠️ IsPresent 가드 필수. 에이전트 미등록이면 InstanceInformationList 가 **빈 배열**이라
+      # $.agent.InstanceInformationList[0].PingStatus 경로 자체가 없다. 경로 없는 Variable 을 Choice 가
+      # 어떻게 다루는지(States.Runtime vs Default 낙하)는 미확정이나, States.Runtime 이면 **어떤 Catch 로도
+      # 못 잡는다** → IsPresent 를 먼저 두면 어느 쪽이든 안전하다.
+      # ⚠️ 스모크 테스트는 이 분기를 **원리적으로 못 밟는다**(bastion 이 뜬 지 오래라 이미 Online).
+      # 즉 드릴은 통과하고 **실재해(방금 만든 bastion)에서만** 터지는 자리라 코드로 막는다.
+      "AgentReady?" = {
+        Type = "Choice"
+        Choices = [{
+          And = [
+            { Variable = "$.agent.InstanceInformationList[0].PingStatus", IsPresent = true },
+            { Variable = "$.agent.InstanceInformationList[0].PingStatus", StringEquals = "Online" },
+          ]
+          Next = "BuildCommands"
+        }]
+        Default = "WaitAgent"
+      }
+
+      WaitAgent = {
+        Type    = "Wait"
+        Seconds = 20
+        Next    = "WaitForSsmAgent"
+      }
+
+      # env 와 script 를 배열 2원소로 만든다 — **문자열 조립을 하지 않는다.**
+      # States.Format 에 스크립트 전문을 넣으면 작은따옴표('sh -c ...')가 intrinsic 리터럴을 끊고,
+      # 중괄호({ echo; exit 1; })가 플레이스홀더로 읽히며, 개행이 인자에 못 들어가 **정의가 거부된다.**
+      # 배열 원소는 각각 온전한 JSON 문자열이라 전부 안전하다.
+      # AWS-RunShellScript 는 commands 를 순서대로 **같은 셸**에서 실행하므로 env 의 export 가 script 에 걸린다.
+      BuildCommands = {
+        Type = "Pass"
+        Parameters = {
+          "instanceId.$"     = "$.instanceId"
+          "timeoutSeconds.$" = "$.timeoutSeconds"
+          "label.$"          = "$.label"
+          "commands.$"       = "States.Array($.env, $.script)"
+        }
+        Next = "SendCommand"
+      }
+
+      SendCommand = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::aws-sdk:ssm:sendCommand"
+        Parameters = {
+          "InstanceIds.$" = "States.Array($.instanceId)"
+          DocumentName    = "AWS-RunShellScript"
+          "Comment.$"     = "$.label"
+          # ⚠️ SendCommand 의 TimeoutSeconds 는 **배달 타임아웃**이다 — AWS 문서: "If this time is reached
+          # and the command hasn't already started running, it won't run." 실행 시간을 제한하지 **않는다.**
+          # 에이전트가 Online 인 것을 WaitForSsmAgent 가 확인했으므로 60s 면 충분하고,
+          # 실행 제한은 아래 executionTimeout 이 한다.
+          TimeoutSeconds = 60
+          CloudWatchOutputConfig = {
+            CloudWatchLogGroupName  = aws_cloudwatch_log_group.dr_bastion_commands.name
+            CloudWatchOutputEnabled = true
+          }
+          Parameters = {
+            "commands.$" = "$.commands"
+            # AWS-RunShellScript 의 executionTimeout 은 **문자열 배열**이다(SSM 문서 파라미터 규격).
+            "executionTimeout.$" = "States.Array(States.Format('{}', $.timeoutSeconds))"
+          }
+        }
+        ResultPath = "$.cmd"
+        Retry = [{
+          # 에이전트 등록 직후에도 잠깐 전파 지연으로 실패할 수 있다.
+          # ⚠️ States.ALL 은 **단독**이어야 하고 마지막 retrier 여야 한다(AWS 문서) — 다른 에러명과
+          # 같이 쓰면 CreateStateMachine 이 정의를 거부해 terraform apply 가 실패한다.
+          ErrorEquals     = ["States.ALL"]
+          IntervalSeconds = 20
+          MaxAttempts     = 10
+          BackoffRate     = 1.5
+        }]
+        Next = "WaitCmd"
+      }
+
+      WaitCmd = {
+        Type    = "Wait"
+        Seconds = 30
+        Next    = "GetResult"
+      }
+
+      GetResult = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::aws-sdk:ssm:getCommandInvocation"
+        Parameters = {
+          "CommandId.$"  = "$.cmd.Command.CommandId"
+          "InstanceId.$" = "$.instanceId"
+        }
+        ResultPath = "$.result"
+        Retry = [{
+          # 명령 직후엔 InvocationDoesNotExist 가 날 수 있다(전파).
+          ErrorEquals     = ["States.ALL"]
+          IntervalSeconds = 10
+          MaxAttempts     = 5
+          BackoffRate     = 1.5
+        }]
+        Next = "Done?"
+      }
+
+      "Done?" = {
+        Type = "Choice"
+        Choices = [
+          {
+            Or = [
+              { Variable = "$.result.Status", StringEquals = "Pending" },
+              { Variable = "$.result.Status", StringEquals = "InProgress" },
+              { Variable = "$.result.Status", StringEquals = "Delayed" },
+            ]
+            Next = "WaitCmd"
+          },
+          { Variable = "$.result.Status", StringEquals = "Success", Next = "Succeeded" },
+        ]
+        # Failed·TimedOut·Cancelled·Cancelling 등 나머지는 전부 실패로 본다(명시 성공만 통과).
+        Default = "Failed"
+      }
+
+      Succeeded = {
+        Type = "Pass"
+        # ⚠️ stdout **전문을 반환하지 않는다** — GetCommandInvocation 의 StandardOutputContent 는
+        # 잘린 값이고(24,000자), 그걸 7단계 누적하면 SFN 페이로드 상한(256KB)에 근접한다.
+        # 전문은 CloudWatch 로그그룹에 있고 commandId 로 찾는다(스트림: <commandId>/<instanceId>/...).
+        Parameters = {
+          "status.$"       = "$.result.Status"
+          "responseCode.$" = "$.result.ResponseCode"
+          "stdoutTail.$"   = "$.result.StandardOutputContent"
+          "commandId.$"    = "$.cmd.Command.CommandId"
+          logGroup         = aws_cloudwatch_log_group.dr_bastion_commands.name
+        }
+        End = true
+      }
+
+      Failed = {
+        Type  = "Fail"
+        Error = "BastionScriptFailed"
+        Cause = "SSM 명령 실패 — 자식 SM 실행 이력의 GetResult 결과에서 commandId 를 찾아 CloudWatch 로그그룹 ${aws_cloudwatch_log_group.dr_bastion_commands.name} 에서 전문 확인: aws logs tail <그룹> --log-stream-name-prefix <commandId>"
+      }
+    }
+  })
 }
