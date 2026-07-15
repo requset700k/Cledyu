@@ -36,6 +36,10 @@ type Session struct {
 	// InstanceID/Region은 EC2 세션에서만 채워진다(검증 요청 라우팅·관측성용).
 	InstanceID string `json:"instance_id,omitempty"`
 	Region     string `json:"region,omitempty"`
+	// TailnetEnabled는 이 세션이 실제로 tailnet 에 가입했는지(라이브 터미널/IDE 도달 가능)다.
+	// EC2 세션에서만 의미 있으며 인스턴스 태그(cledyu.io/tailnet)에서 채운다. 응답 게이트가
+	// 정적 authkey 유무가 아니라 이 값으로 터미널 URL 광고를 판단한다. 직렬화 제외(내부용).
+	TailnetEnabled bool `json:"-"`
 }
 
 // BootInit은 랩별 cloud-init 추가 작업이다(content.InitSpec 에서 변환).

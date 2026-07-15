@@ -82,5 +82,12 @@ func (h *Handler) IDE(c *gin.Context) {
 			_, _ = w.Write([]byte(`{"error":"ide not ready"}`))
 		},
 	}
+	// EC2 세션의 code-server 는 tailnet MagicDNS 로만 닿으므로 tsnet 다이얼러(ec2Dial)로 접속한다.
+	// (KubeVirt 세션의 ip 는 클러스터 pod IP 라 기본 Transport 로 닿고, tsnet 다이얼러로는 못 닿는다.)
+	// 없으면 EC2 IDE 프록시가 기본 net.Dialer 로 MagicDNS 에 붙으려다 항상 503 이 된다 — /ws 터미널은
+	// ec2Dial 을 쓰는데 IDE 만 빠져 있어, sessionResponse 가 ide_url 을 광고해도 프록시가 깨졌다(Codex).
+	if sess.Provider == session.ProviderEC2 && h.ec2Dial != nil {
+		proxy.Transport = &http.Transport{DialContext: h.ec2Dial}
+	}
 	proxy.ServeHTTP(c.Writer, c.Request)
 }

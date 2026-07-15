@@ -19,6 +19,7 @@ import (
 	ectypes "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 
 	"github.com/redis/go-redis/v9"
+	"go.uber.org/zap"
 
 	"github.com/requset700k/cledyu/api/internal/config"
 	"github.com/requset700k/cledyu/api/internal/session"
@@ -35,6 +36,7 @@ const (
 	tagStartedAt          = "cledyu.io/started-at"
 	tagExpiresAt          = "cledyu.io/expires-at"
 	tagBootResultRecorded = "cledyu.io/boot-result-recorded"
+	tagTailnet            = "cledyu.io/tailnet" // "1"이면 이 세션이 tailnet 에 가입(라이브 터미널 가능)
 )
 
 // ec2API는 프로비저너가 쓰는 EC2 호출 표면이다. 단위 테스트에서 가짜 구현으로 대체한다.
@@ -47,10 +49,12 @@ type ec2API interface {
 
 // Provisioner는 EC2 세션 수명주기를 관리한다. session.Provider 를 구현한다.
 type Provisioner struct {
-	api ec2API
-	cfg *config.AWSConfig
-	met *vmmetrics.Recorder
-	rdb *redis.Client
+	api    ec2API
+	cfg    *config.AWSConfig
+	met    *vmmetrics.Recorder
+	rdb    *redis.Client
+	log    *zap.Logger
+	minter KeyMinter // nil이면 정적 cfg.TailscaleAuthKey 폴백(하위호환)
 }
 
 // Provisioner가 프로바이더 중립 계약을 구현함을 컴파일 타임에 보장한다.
@@ -59,12 +63,26 @@ var _ session.Provider = (*Provisioner)(nil)
 // NewProvisioner는 표준 AWS SDK 자격증명 체인(환경변수 AWS_ACCESS_KEY_ID/SECRET 등 —
 // Vault→ESO 주입)으로 EC2 클라이언트를 만든다. region 은 AWSConfig 값을 우선한다.
 // met는 kubevirt 매니저와 공유하는 vm_boot_total Recorder다(nil이면 기록을 건너뛴다).
-func NewProvisioner(ctx context.Context, cfg *config.AWSConfig, met *vmmetrics.Recorder, rdb *redis.Client) (*Provisioner, error) {
+func NewProvisioner(ctx context.Context, cfg *config.AWSConfig, met *vmmetrics.Recorder, rdb *redis.Client, log *zap.Logger) (*Provisioner, error) {
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.Region))
 	if err != nil {
 		return nil, fmt.Errorf("ec2 provisioner: load aws config: %w", err)
 	}
-	return &Provisioner{api: awsec2.NewFromConfig(awsCfg), cfg: cfg, met: met, rdb: rdb}, nil
+	p := &Provisioner{api: awsec2.NewFromConfig(awsCfg), cfg: cfg, met: met, rdb: rdb, log: log}
+	// Tailscale API 키가 있으면 세션별 one-off authkey 를 동적 발급한다(issue #307). 없으면 정적
+	// cfg.TailscaleAuthKey 폴백(하위호환).
+	if cfg.TailscaleAPIKey != "" {
+		ttl := time.Duration(cfg.SessionKeyTTLSeconds) * time.Second
+		if ttl <= 0 {
+			ttl = 10 * time.Minute
+		}
+		tag := cfg.SessionKeyTag
+		if tag == "" {
+			tag = "tag:lab-ec2"
+		}
+		p.minter = newTailscaleKeyMinter(cfg.TailscaleOAuthClientID, cfg.TailscaleAPIKey, "-", tag, ttl)
+	}
+	return p, nil
 }
 
 // newWithAPI는 주입된 EC2 API 로 프로비저너를 만든다(테스트 전용).
@@ -72,11 +90,38 @@ func newWithAPI(api ec2API, cfg *config.AWSConfig, met *vmmetrics.Recorder, rdb 
 	return &Provisioner{api: api, cfg: cfg, met: met, rdb: rdb}
 }
 
+// resolveSessionAuthKey는 세션 cloud-init 에 넣을 tailnet authkey 를 결정한다. minter 가 있으면
+// 세션마다 one-off 키를 발급하고, 발급 실패 시 정적 reusable 키로 폴백하지 않고 빈 값을 반환한다
+// (fail-secure: 유출 위험 있는 정적 키 대신 그 세션만 터미널 비활성, SSM 채점은 유지). minter 가
+// 없으면 정적 cfg.TailscaleAuthKey(하위호환).
+func (p *Provisioner) resolveSessionAuthKey(ctx context.Context) string {
+	if p.minter == nil {
+		return p.cfg.TailscaleAuthKey
+	}
+	key, err := p.minter.Mint(ctx)
+	if err != nil {
+		if p.log != nil {
+			p.log.Warn("세션 tailnet authkey 발급 실패 — 터미널 없이 부팅(SSM 채점만 동작)", zap.Error(err))
+		}
+		return ""
+	}
+	return key
+}
+
 func (p *Provisioner) Create(ctx context.Context, sessionID, labID, userID string, init session.BootInit) (*session.Session, error) {
 	now := time.Now().UTC()
 	expires := now.Add(time.Duration(p.cfg.SessionTTLHours) * time.Hour)
 
-	userData := base64.StdEncoding.EncodeToString([]byte(renderCloudInit(sessionID, p.cfg, init)))
+	authKey := p.resolveSessionAuthKey(ctx)
+	userData := base64.StdEncoding.EncodeToString([]byte(renderCloudInit(sessionID, p.cfg, init, authKey)))
+	// 이 세션이 실제로 tailnet 에 가입하는지(=authKey 가 있는지)를 태그로 남긴다. 라이브 터미널
+	// 광고·도달 판단(VMIAddress/sessionResponse)이 정적 cfg 키가 아니라 이 세션의 실제 가입 여부로
+	// 이뤄지게 한다 — 동적 키만 설정(정적 제거)이거나 세션별 발급 실패(fail-secure)인 경우까지 정확히
+	// 반영한다(Codex P1).
+	tailnetTagVal := "0"
+	if authKey != "" {
+		tailnetTagVal = "1"
+	}
 
 	in := &awsec2.RunInstancesInput{
 		LaunchTemplate: &ectypes.LaunchTemplateSpecification{
@@ -97,6 +142,7 @@ func (p *Provisioner) Create(ctx context.Context, sessionID, labID, userID strin
 				{Key: aws.String(tagLabID), Value: aws.String(labID)},
 				{Key: aws.String(tagStartedAt), Value: aws.String(now.Format(time.RFC3339))},
 				{Key: aws.String(tagExpiresAt), Value: aws.String(expires.Format(time.RFC3339))},
+				{Key: aws.String(tagTailnet), Value: aws.String(tailnetTagVal)},
 				{Key: aws.String("Name"), Value: aws.String(tailnetHostname(p.cfg, sessionID))},
 			},
 		}},
@@ -135,7 +181,7 @@ func (p *Provisioner) Get(ctx context.Context, sessionID string) (*session.Sessi
 	if inst == nil {
 		return nil, session.ErrNotFound
 	}
-	sess := instanceToSession(inst, p.cfg.Region)
+	sess := p.instanceToSession(inst)
 	// KubeVirt Get()의 ready-at 최초 관측 시점 기록과 대응
 	// running 전이를 처음 본 폴링에서 vm_boot_total{result=success,env=ec2}를 1회 기록
 	if sess.Status == "ready" {
@@ -244,9 +290,6 @@ func (p *Provisioner) ReapExpiredSessions(ctx context.Context) ([]string, error)
 // VMIAddress는 세션 인스턴스의 tailnet MagicDNS 호스트네임을 반환한다(라이브 터미널/IDE 프록시용).
 // 인스턴스가 아직 running 이 아니거나 tailnet 미가입(authkey 미설정)이면 ErrNotFound.
 func (p *Provisioner) VMIAddress(ctx context.Context, sessionID string) (string, error) {
-	if p.cfg.TailscaleAuthKey == "" {
-		return "", session.ErrNotFound // tailnet 미사용 — 도달 주소 없음
-	}
 	inst, err := p.findActiveInstance(ctx, tagFilter(tagSessionID, sessionID))
 	if err != nil {
 		return "", err
@@ -254,7 +297,26 @@ func (p *Provisioner) VMIAddress(ctx context.Context, sessionID string) (string,
 	if inst == nil || inst.State == nil || inst.State.Name != ectypes.InstanceStateNameRunning {
 		return "", session.ErrNotFound
 	}
+	// 도달성은 현재 config(정적/동적 키 설정 여부)가 아니라 이 세션이 실제로 tailnet 에 가입했는지로
+	// 판단한다 — sessionResponse/instanceToSession 과 동일 기준(sessionTailnetEnabled). config 로 먼저
+	// 게이트하면, Secret 이 일시적으로 빠진 채 api 가 재시작될 때 이미 tag=1 로 부팅돼 tailnet 에 붙어
+	// 있는 세션이 광고(sessionResponse)는 되는데 여기서만 ErrNotFound(→503)가 나는 불일치가 생긴다(Codex).
+	if !p.sessionTailnetEnabled(inst) {
+		return "", session.ErrNotFound
+	}
 	return tailnetHostname(p.cfg, sessionID), nil
+}
+
+// sessionTailnetEnabled는 세션 EC2 가 tailnet 에 가입돼 라이브 터미널로 도달 가능한지 판단한다.
+//   - cledyu.io/tailnet 태그가 있으면 그 값("1")을 신뢰한다(신버전 인스턴스: 동적/정적 가입 실측).
+//   - 태그가 없으면(구버전 코드가 만든 레거시 인스턴스) 정적 authkey 설정 여부로 폴백한다. 레거시
+//     세션은 정적 키로 이미 가입해 있을 수 있으므로, 이 PR 롤아웃 중 활성 세션의 터미널이 끊기지
+//     않게 태그 부재를 곧바로 미가입으로 단정하지 않는다.
+func (p *Provisioner) sessionTailnetEnabled(inst *ectypes.Instance) bool {
+	if v, ok := tagLookup(inst, tagTailnet); ok {
+		return v == "1"
+	}
+	return p.cfg.TailscaleAuthKey != ""
 }
 
 // --- 내부 헬퍼 ---
@@ -371,19 +433,20 @@ func (p *Provisioner) terminate(ctx context.Context, instanceID string) error {
 }
 
 // instanceToSession은 EC2 인스턴스(태그·상태)를 프로바이더 중립 Session 으로 변환한다.
-func instanceToSession(inst *ectypes.Instance, region string) *session.Session {
+func (p *Provisioner) instanceToSession(inst *ectypes.Instance) *session.Session {
 	startedAt, _ := time.Parse(time.RFC3339, tagValue(inst, tagStartedAt))
 	expiresAt, _ := time.Parse(time.RFC3339, tagValue(inst, tagExpiresAt))
 	return &session.Session{
-		ID:         tagValue(inst, tagSessionID),
-		LabID:      tagValue(inst, tagLabID),
-		UserID:     tagValue(inst, tagUserID),
-		Status:     instanceStatus(inst),
-		StartedAt:  startedAt,
-		ExpiresAt:  expiresAt,
-		Provider:   session.ProviderEC2,
-		InstanceID: aws.ToString(inst.InstanceId),
-		Region:     region,
+		ID:             tagValue(inst, tagSessionID),
+		LabID:          tagValue(inst, tagLabID),
+		UserID:         tagValue(inst, tagUserID),
+		Status:         instanceStatus(inst),
+		StartedAt:      startedAt,
+		ExpiresAt:      expiresAt,
+		Provider:       session.ProviderEC2,
+		InstanceID:     aws.ToString(inst.InstanceId),
+		Region:         p.cfg.Region,
+		TailnetEnabled: p.sessionTailnetEnabled(inst),
 	}
 }
 
@@ -403,10 +466,16 @@ func instanceStatus(inst *ectypes.Instance) string {
 }
 
 func tagValue(inst *ectypes.Instance, key string) string {
+	v, _ := tagLookup(inst, key)
+	return v
+}
+
+// tagLookup은 tagValue 와 달리 태그 부재("0"과 구분)를 ok=false 로 알려준다.
+func tagLookup(inst *ectypes.Instance, key string) (string, bool) {
 	for _, t := range inst.Tags {
 		if aws.ToString(t.Key) == key {
-			return aws.ToString(t.Value)
+			return aws.ToString(t.Value), true
 		}
 	}
-	return ""
+	return "", false
 }

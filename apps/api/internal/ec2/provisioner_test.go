@@ -289,6 +289,27 @@ func TestVMIAddress(t *testing.T) {
 	}
 }
 
+// Codex: Secret 이 일시적으로 빠진 채 api 가 재시작돼 config 의 정적/동적 키가 모두 비어도, 이미
+// cledyu.io/tailnet=1 로 부팅돼 tailnet 에 붙어 있는 세션은 VMIAddress 가 도달 주소를 줘야
+// sessionResponse 광고(같은 태그 기준)와 일치한다 — config 로 먼저 게이트하면 광고는 되는데 503.
+func TestVMIAddress_JoinedSessionReachableWhenConfigKeysCleared(t *testing.T) {
+	f := &fakeEC2{}
+	p := newWithAPI(f, testCfg(), nil, nil) // 정적 키 설정 → 세션이 tag=1 로 생성
+	ctx := context.Background()
+	_, _ = p.Create(ctx, "s1", "lab-a", "u1", session.BootInit{})
+	f.instances[0].State = &ectypes.InstanceState{Name: ectypes.InstanceStateNameRunning}
+
+	// api 재시작으로 Secret 이 빠진 상황 재현: config 의 정적·동적 키가 모두 비었다.
+	p.cfg.TailscaleAuthKey = ""
+	p.cfg.TailscaleAPIKey = ""
+
+	// 인스턴스 태그가 tailnet=1 이므로 도달 주소를 반환해야 한다.
+	addr, err := p.VMIAddress(ctx, "s1")
+	if err != nil || addr != "lab-s1" {
+		t.Errorf("VMIAddress(joined, config cleared) = %q, %v; want lab-s1", addr, err)
+	}
+}
+
 // TestVMBootSuccessRecordedOnce_EC2는 리뷰 코멘트가 지적한 EC2 부팅 성공 미계측을 검증
 // running 전이를 처음 관측한 Get() 호출에서 vm_boot_total{result=success,env=ec2}가 1회 기록,
 // 이후 반복 폴링에서는 dedup 태그(tagBootResultRecorded)로 중복 집계되지 않아야 함

@@ -139,7 +139,7 @@ func main() {
 
 	var overflow session.Provider
 	if cfg.AWS.LaunchTemplateID != "" && cfg.AWS.MaxActiveSessions > 0 {
-		if prov, err := ec2.NewProvisioner(ctx, &cfg.AWS, vmBootMetrics, redisClient); err != nil {
+		if prov, err := ec2.NewProvisioner(ctx, &cfg.AWS, vmBootMetrics, redisClient, logger); err != nil {
 			logger.Warn("ec2 provisioner init failed, overflow disabled", zap.Error(err))
 		} else {
 			overflow = prov

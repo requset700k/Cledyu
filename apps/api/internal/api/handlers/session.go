@@ -158,7 +158,7 @@ func (h *Handler) sessionResponse(s *session.Session) gin.H {
 	// — 프론트는 placeholder 를 유지한다.
 	if lc, ok := h.labs[s.LabID]; ok && lc.HasLiveTerminal() && s.Status == "ready" {
 		reachable := s.Provider != session.ProviderEC2 ||
-			(h.cfg.AWS.TailscaleAuthKey != "" && h.ec2Dial != nil)
+			(s.TailnetEnabled && h.ec2Dial != nil)
 		if reachable {
 			out["terminal_url"] = "/api/v1/sessions/" + s.ID + "/ws"
 			// IDE 랩(code-server)은 브라우저 VS Code 프록시 경로도 함께 제공.

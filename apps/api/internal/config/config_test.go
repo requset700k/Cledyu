@@ -32,6 +32,25 @@ func TestLoadReadsKeycloakClientSecretEnv(t *testing.T) {
 	}
 }
 
+// Viper 회귀 가드: SetDefault 로 등록된 키만 AutomaticEnv+Unmarshal 이 struct 로 바인딩한다.
+// tailscale_api_key/oauth_client_id 의 SetDefault 가 빠지면 env 를 넣어도 빈 값이 되어 minter 가
+// 안 만들어지고 동적 세션 authkey(issue #307) 가 통째로 죽는다 — 이를 막는다.
+func TestLoadReadsTailscaleDynamicKeyEnv(t *testing.T) {
+	t.Setenv("CLEDYU_AWS_TAILSCALE_API_KEY", "tskey-client-abc")
+	t.Setenv("CLEDYU_AWS_TAILSCALE_OAUTH_CLIENT_ID", "cid-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got, want := cfg.AWS.TailscaleAPIKey, "tskey-client-abc"; got != want {
+		t.Fatalf("AWS.TailscaleAPIKey = %q, want %q (SetDefault 등록 누락 시 env 바인딩 안 됨)", got, want)
+	}
+	if got, want := cfg.AWS.TailscaleOAuthClientID, "cid-123"; got != want {
+		t.Fatalf("AWS.TailscaleOAuthClientID = %q, want %q", got, want)
+	}
+}
+
 func TestLoadDefaultsProvisionTimeoutToTenMinutes(t *testing.T) {
 	cfg, err := Load()
 	if err != nil {

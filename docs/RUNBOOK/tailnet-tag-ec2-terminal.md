@@ -77,7 +77,7 @@ error: ... Tailscale SSH requires an additional check   (또는 초기엔 no suc
 - 2026-07-14 임시로 넣은 `{users:["lab"], autogroup:self}` accept 규칙이 있으면 **삭제**(위 태그 규칙이 대체).
 - API 로 할 경우: `GET /api/v2/tailnet/-/acl` → 수정 → `POST .../acl/validate` → `POST .../acl`(If-Match).
 
-### 5.2 tagged authkey 발급 — **키 A 만 정적 배선, 키 B(세션)는 #307 선행 필수**
+### 5.2 tagged authkey 발급 — **키 A 만 정적 배선, 키 B(세션)는 동적 발급(#307, PR #309 구현)**
 
 `login.tailscale.com/admin/settings/keys` → Generate auth key:
 
@@ -95,11 +95,39 @@ error: ... Tailscale SSH requires an additional check   (또는 초기엔 no suc
     하므로, Vault 에 넣은 정적 one-off 키는 **첫 세션만 성공**하고 이후 세션은 tailnet 가입이
     깨져 **라이브 터미널/IDE 가 다시 미기동**한다. → 운영 불가.
 
-  즉 세션 키 B 는 **운용 가능한 정적 fallback 이 없다.** EC2 라이브 터미널을 신뢰 가능하게 켜려면
-  api 가 세션 프로비저닝마다 Tailscale API(`POST /api/v2/tailnet/-/keys`)로 **세션별 one-off
-  (비재사용)+ephemeral+짧은 만료** authkey 를 **동적 발급**하도록 하는 코드 변경(**이슈 #307**)이
-  **선행 필수**다. #307 전에는 §5.3~5.4 로 키 B 를 정적 배선하지 말 것 —
-  EC2 라이브 터미널을 데모/운영 경로로 두지 않는다(데모 필요 여부는 §9 참조).
+  즉 세션 키 B 는 **운용 가능한 정적 fallback 이 없다.** 그래서 api 가 세션 프로비저닝마다 Tailscale
+  API(`POST /api/v2/tailnet/-/keys`)로 **세션별 one-off(비재사용)+ephemeral+짧은 만료** authkey 를
+  **동적 발급**하는 코드 변경(**이슈 #307**)이 필요했고, 이는 **PR #309 로 구현 완료**됐다(코드:
+  `apps/api/internal/ec2/authkey.go`, provisioner 배선, deployment env `CLEDYU_AWS_TAILSCALE_API_KEY`
+  +`CLEDYU_AWS_TAILSCALE_OAUTH_CLIENT_ID`). **활성화 절차**:
+
+    1) Tailscale에서 **OAuth client**(scope `auth_keys`, `tag:lab-ec2` 발급 권한) 생성 → **client id** 와
+       **client secret**(`tskey-client-...`) 확보.
+       (tagOwners 에 `"tag:lab-ec2": ["<oauth-client 소유자>"]` 형태로 그 client 가 태그를 찍을 수 있어야 함.)
+    2) `vault kv patch cledyu/aws/api tailscale_api_key='<client secret>' tailscale_oauth_client_id='<client id>'`.
+       - 코드는 client secret 을 `/api/v2/oauth/token` 에서 **client_credentials 로 교환**해 짧은수명(1h)
+         액세스 토큰을 얻고 만료 시 **자동 갱신**한다. OAuth 액세스 토큰을 직접 넣으면 안 된다 —
+         1시간 뒤 발급이 끊긴다(이 교환 배선이 그 문제를 없앤 이유다).
+       - 대안(비권장): tag 스코프가 아닌 **API 액세스 토큰**을 쓸 거면 `tailscale_api_key` 에 그 토큰만
+         넣고 `tailscale_oauth_client_id` 는 비운다(코드가 직접 Bearer). 단 API 토큰은 사용자 소유·90일
+         만료라 담당자 이탈·회전 부담이 있어 OAuth client 를 권장.
+    3) ESO `cledyu-api-tailscale-externalsecret.yaml` 의 `tailscale_api_key`(및 OAuth 방식이면
+       `tailscale_oauth_client_id`) 항목 주석 해제(**반드시 (2) 이후** — Vault 에 없으면 ES 전체가
+       SyncError). → api 재시작.
+    4) 설정되면 세션은 동적 키를 쓴다(발급 실패 시 fail-secure — 그 세션만 터미널 비활성, 정적 키로
+       폴백 안 함). 정적 `tailscale_authkey` 는 **동적 모드에서 세션에 쓰이지 않는다**(dead). §5.3 대로
+       기존 정적 세션 키 B 는 Vault 에서 비우고(동적 전용) ES 의 `tailscale_authkey` data 항목도 함께
+       주석 처리한다 — 규칙: ES data 항목 존재 ⟺ Vault property 시드됨.
+       - **레거시 세션 배수(Codex)**: 정적 키를 비우기 **전에** pre-#309(태그 `cledyu.io/tailnet`
+         부재) EC2 세션이 실행 중이 아닌지 확인한다. 태그 없는 레거시 세션은 도달성 판단이 정적 키
+         유무로 폴백하는데, 정적 키를 비우면 만료(≤세션 TTL)까지 터미널을 잃는다. 활성 EC2 에
+         `cledyu.io/tailnet=1` 을 backfill 하거나, 그 세션들이 만료되도록 두고 전환한다.
+       - **TTL 확인(Codex)**: `session_key_ttl_seconds`(기본 1800) 가 EC2 부팅+cloud-init(apt)+SSM
+         지연보다 짧으면 키가 `tailscale up` 전에 만료돼 가입이 실패한다(인스턴스는 tag=1 이라 터미널이
+         광고돼도 dial 실패). 첫 세션에서 실제 접속까지 반드시 실검증하고, 부팅이 느리면 TTL 을 올린다.
+
+  활성화(위 절차) 전까지는 §5.3 대로 정적 세션 키 B 를 비워 두고 EC2 라이브 터미널을 데모/운영
+  경로로 두지 않는다(데모 필요 여부는 §9 참조).
 
 > Ephemeral: 노드 종료 시 tailnet 목록에서 자동 정리.
 
@@ -107,9 +135,10 @@ error: ... Tailscale SSH requires an additional check   (또는 초기엔 no suc
 
 api authkey(A)=`api_tailscale_authkey` 를 주입하되, **세션 키 B(`tailscale_authkey`)는 보존하지
 말고 반드시 비운다.** 현재 Vault 엔 2026-07-14 드릴 배선으로 세션 키가 이미 들어 있는데, 이걸
-그대로 두면 Secret→env(`CLEDYU_AWS_TAILSCALE_AUTH_KEY`, `deployment.yaml:120`)로 계속 주입되어
-api 가 **세션 cloud-init 에 그 키를 다시 bake**(`cloudinit.go:61`, 값이 비어있지 않으면 bake)하고
-**EC2 `terminal_url` 도 계속 광고**(`session.go:159`, `TailscaleAuthKey != ""` 조건)한다. 즉
+그대로 두면 Secret→env(`CLEDYU_AWS_TAILSCALE_AUTH_KEY`)로 계속 주입되어 api 가 **세션 cloud-init 에
+그 키를 다시 bake**(`cloudinit.go`, authKey 가 비어있지 않으면 bake)하고, 그 세션은 tailnet 에 가입해
+인스턴스 태그 `cledyu.io/tailnet=1` 이 붙어 **EC2 `terminal_url` 도 계속 광고**된다(PR #309 이후 광고
+게이트는 정적 키 유무가 아니라 세션별 `TailnetEnabled` — 즉 정적 키로라도 가입하면 광고). 즉
 "키 B 를 정적 배선하지 않는다"는 §5.2 목표는 **키를 안 넣는 것만으로는 달성되지 않고, 이미 있는
 값을 비워야** 성립한다. (Codex PR #308 P1.)
 
@@ -132,13 +161,14 @@ curl -sS -X DELETE -H "Authorization: Bearer $TS_APIKEY" \
   https://api.tailscale.com/api/v2/device/<deviceID>
 ```
 
-> `tailscale_authkey=''`(빈 값)이면 ESO 가 Secret 값을 빈 값으로 덮고, `cloudinit.go:61` /
-> `session.go:159` 의 `!= ""` 조건이 거짓이 되어 bake·터미널 광고가 멈춘다. **단 authkey revoke 만으로는
+> `tailscale_authkey=''`(빈 값)이면 ESO 가 Secret 값을 빈 값으로 덮고, api 가 세션 cloud-init 에
+> authkey 를 bake 하지 않는다 → 세션이 tailnet 에 안 붙어 인스턴스 태그 `cledyu.io/tailnet=0` 이
+> 되고 `session.TailnetEnabled=false` 라 터미널 광고도 멈춘다. **단 authkey revoke 만으로는
 > 부족** — Tailscale authkey 는 장치 등록용이라, 그 키로 이미 승인된 장치는 키 폐기 후에도 node key 만료
 > 또는 device 삭제 전까지 tailnet 접근을 유지한다([공식 문서](https://tailscale.com/kb/1085/auth-keys)).
-> 그래서 위 3) 에서 기등록 device 를 명시적으로 삭제한다. #307(동적 발급) 구현 후 api 가 세션별로
-> 발급하며(정적 property 미사용), 그때 api 에 Tailscale API 키(`auth_keys` write)를 Vault→ESO 로
-> 별도 주입한다(#307 범위).
+> 그래서 위 3) 에서 기등록 device 를 명시적으로 삭제한다. #307(동적 발급)은 PR #309 로 구현됐다 — §5.2
+> 활성화 절차대로 api 에 Tailscale API 키(`auth_keys` write)를 Vault→ESO 로 주입하면 api 가 세션별로
+> 발급한다(정적 property 미사용).
 
 ### 5.4 동기화 + api 재시작
 
@@ -157,8 +187,8 @@ kubectl -n api rollout status deployment/api
 
 이 단계로 **api 파드(키 A)** 만 tagged 노드가 되고, **세션 키 B 는 비워져** api 가 더 이상 세션
 cloud-init 에 bake 하지 않으며 EC2 `terminal_url` 도 광고하지 않는다(프론트는 placeholder 유지).
-**세션 EC2(키 B) 태깅·라이브 터미널은 #307 구현 후** 동적 발급된 tagged authkey 로 가입한다.
-#307 전에는 §6 검증의 터미널 실검증도 성립하지 않는다(정적 키로는 첫 세션만 뜨거나 아예 미기동).
+**세션 EC2(키 B) 태깅·라이브 터미널은 §5.2 활성화(동적 발급, PR #309 구현) 후** 동적 발급된 tagged
+authkey 로 가입한다. 활성화 전에는 §6 검증의 터미널 실검증도 성립하지 않는다(정적 키 B 를 비워 뒀으므로).
 
 ## 6. 검증
 
@@ -196,9 +226,9 @@ kubectl -n api set env deployment/api CLEDYU_KUBEVIRT_MAX_ACTIVE_SESSIONS-   # �
 
 ## 9. 데모 판단 (2026-07-22 시연)
 
-EC2 오버플로우 **라이브 터미널**은 세션 키 B 동적 발급(#307)이 선행돼야 안전·정상 동작하므로,
-#307 미완 상태에서는 **데모 경로에서 EC2 라이브 터미널을 제외**하는 것을 기본으로 한다.
+EC2 오버플로우 **라이브 터미널**은 세션 키 B 동적 발급(#307, PR #309 로 구현)이 **활성화**돼야
+안전·정상 동작한다. §5.2 활성화 전에는 **데모 경로에서 EC2 라이브 터미널을 제외**하는 것을 기본으로 한다.
 
 - 온프렘 KubeVirt 세션 터미널(virtctl 경로)은 이 이슈·키 B 와 **무관하게 정상** — 데모는 이쪽으로.
 - EC2 오버플로우 자체(용량 초과 시 AWS 로 스핀업)는 터미널과 별개로 실증 가능(세션 기동까지).
-- #307 완료 시 §5.2 의 동적 발급으로 EC2 라이브 터미널까지 데모 경로 편입 가능.
+- §5.2 활성화(동적 발급) 후 EC2 라이브 터미널까지 데모 경로 편입 가능.
