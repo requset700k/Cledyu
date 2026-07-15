@@ -824,6 +824,15 @@ git commit -m "feat(dr): bastion 스크립트 실행 자식 상태 머신(SSM �
 
 1. **`kubectl exec -it` → `-it` 제거.** SSM RunCommand 엔 TTY 가 없다
 2. 상단에 `#!/bin/bash` + `set -euo pipefail`
+2.5. **⚠️ `export HOME=/root` 를 반드시 넣는다(T3 실측 발견, 스펙 §11.12).**
+   SSM RunCommand 는 root 로 돌지만 **`HOME` 을 설정하지 않는다**(실측: `HOME=[]`, `PWD=/usr/bin`).
+   `aws eks update-kubeconfig` 는 `/root/.kube/config` 에 **정상적으로 쓰는데**, kubectl 은 `$HOME/.kube/config`
+   를 찾다가 못 찾고 **기본값 `localhost:8080` 으로 폴백**해 `connection refused` 로 죽는다.
+   **에러가 원인을 안 가리킨다** — "설정 없음"이 아니라 "연결 거부"로 보인다.
+   - 런북이 이걸 못 잡은 이유: 런북은 **사람용**이고 `aws ssm start-session` 은 로그인 셸이라 `HOME=/root` 다.
+     **명령은 맞는데 실행 환경이 다르다** — 규칙 1(TTY 없음)과 **같은 뿌리**(대화형 셸이 아니다)인데
+     초안은 증상 하나만 잡았다.
+   - `KUBECONFIG` 명시보다 `HOME` 이 낫다 — `helm`(06)·`aws` 도 `$HOME` 을 쓴다.
 3. **수동 플레이스홀더를 변수 캡처로** — 런북의 `<INIT_ROOT>`·`<TS>` 등은 사람이 눈으로 보고 넣는 값이다
 4. **확인 스텝을 게이트로 — 단 "그 시점에 이미 참인 것"만.** 런북이 "확인한다"라고만 한 곳을
    `|| exit 1` 로 강제하되, **아직 참이 아닌 게 정상인 것을 게이트하면 건강한 DR 에서 오탐한다.**
@@ -1221,29 +1230,51 @@ Run:
 ```bash
 cd /home/user/Cledyu
 for f in infra/terraform/aws/scripts/bastion/*.sh; do bash -n "$f" && echo "구문 OK: $f"; done
-shellcheck infra/terraform/aws/scripts/bastion/*.sh || echo "⚠️ shellcheck 경고 확인"
+
+# ⚠️ **`shellcheck` 를 로컬 설치 여부로 건너뛰지 말 것 — pre-commit 훅으로 돌린다.**
+# 이 레포의 훅은 자기 shellcheck·shfmt 를 쓰므로 로컬에 없어도 **커밋 때 반드시 걸린다.**
+# T3 구현에서 "shellcheck 미설치 — 건너뜀"으로 넘겼다가 **커밋이 SC2015 로 거부**됐다(2026-07-15).
+# shfmt 는 파일을 **수정**하므로(훅이 "files were modified" 로 실패) 먼저 돌려서 포맷을 확정한 뒤 add 한다.
+pre-commit run shellcheck --files infra/terraform/aws/scripts/bastion/*.sh
+pre-commit run shfmt      --files infra/terraform/aws/scripts/bastion/*.sh   # 파일을 고친다 → 통과할 때까지
+
+# ⚠️ shfmt 는 줄번호를 밀므로 **재포맷 후 아래 회귀 체크를 다시 돌린다**(C6 체크가 줄번호 기반).
 grep -rn 'exec -it' infra/terraform/aws/scripts/bastion/ && echo "❌ -it 잔존(SSM 엔 TTY 없음)" || echo "✅ -it 없음"
 
-# C6 회귀 — 07 은 시크릿을 만지므로 상단 `set -x` 가 있으면 안 된다(Vault 루트 토큰이 S3·Discord 로 샌다)
-grep -q '^set -x' infra/terraform/aws/scripts/bastion/07-restore-vault.sh \
-  && echo "❌ 07 에 set -x — 루트 토큰 유출 경로(C6)" || echo "✅ 07 set -x 없음"
+# ⚠️ **회귀 체크는 주석을 걷어내고 한다.** 스크립트 주석엔 "이렇게 쓰면 안 된다"는 **나쁜 예가 그대로
+# 적혀 있어서**, 순진한 grep 은 전부 오탐한다(T3 구현 중 실측 — 3건이 오탐이었다).
+code() { sed -e 's/[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$1"; }
+B=infra/terraform/aws/scripts/bastion
+
+# C6 회귀 — 07 의 **시크릿 구간**에 set -x 가 있으면 안 된다(루트 토큰이 CloudWatch·Discord 로 샌다).
+# ⚠️ `grep -q '^set -x'` 는 안 된다 — 07 은 시크릿을 다 쓴 뒤(`unset NEWROOT`) **의도적으로 켠다.**
+#    "있나 없나"가 아니라 **"어디 있나"** 를 봐야 한다(과소 게이트 회피).
+awk '/^unset NEWROOT/{e=NR} /^set -x/{x=NR} END{
+  if (x && (!e || x < e)) { print "❌ 07 의 시크릿 구간에 set -x (line "x") — 루트 토큰 유출(C6)"; exit 1 }
+  else print "✅ 07 set -x 는 시크릿 구간 밖(line "x" > unset "e")" }' $B/07-restore-vault.sh
 
 # F3 회귀 — 09 가 put-parameter 를 하면 그 IAM 이 반드시 있어야 한다
-grep -q 'put-parameter' infra/terraform/aws/scripts/bastion/09-wait-apps-ready.sh \
+code $B/09-wait-apps-ready.sh | grep -q 'put-parameter' \
   && { grep -q 'ssm:PutParameter' infra/terraform/aws/eks-dr-bastion.tf \
-       && echo "✅ put-parameter IAM 있음" || echo "❌ 09 가 put-parameter 하는데 bastion 롤에 권한 없음(F3)"; }
+    && echo "✅ put-parameter IAM 있음" || echo "❌ 09 가 put-parameter 하는데 bastion 롤에 권한 없음(F3)"; }
+
+# §11.11 회귀 — CloudWatch 쓰기 IAM(없으면 명령은 Success 인데 로그 전문이 조용히 유실)
+grep -q 'logs:CreateLogGroup' infra/terraform/aws/dr-orchestration.tf \
+  && echo "✅ CloudWatch IAM 있음" || echo "❌ CreateLogGroup 없음 — 에이전트가 출력을 포기한다(§11.11)"
 
 # H2 회귀 — `git clone ... &&` 는 set -e 가 실패를 안 잡는다(멱등도 아니다)
-grep -n 'git clone.*&&' infra/terraform/aws/scripts/bastion/*.sh \
-  && echo "❌ clone 을 && 로 이었다 — 실패가 묻히고 재실행 불가(H2)" || echo "✅ clone && 없음"
+for f in $B/*.sh; do code "$f" | grep -q 'git clone.*&&' && echo "❌ $f: clone 을 && 로 이었다(H2)"; done; echo "✅ clone && 없음"
 
 # H3 회귀 — psql 은 레포 선례대로 -U 없이(선례 5건: dr-failback.md·dr-failback-isolated-drill.md)
-grep -n 'psql -U' infra/terraform/aws/scripts/bastion/*.sh \
-  && echo "❌ psql -U — 레포 선례 5건과 어긋난다(H3)" || echo "✅ psql -U 없음"
+for f in $B/*.sh; do code "$f" | grep -q 'psql -U' && echo "❌ $f: psql -U — 선례 5건과 어긋난다(H3)"; done; echo "✅ psql -U 없음"
 
 # H1 회귀 — 06 이 wave 2 리소스(api ns)를 게이트하면 건강한 DR 에서 오탐한다
-grep -n 'get configmap cledyu-root-ca-bundle\|get clusterissuer' infra/terraform/aws/scripts/bastion/06-bootstrap-apps.sh \
+code $B/06-bootstrap-apps.sh | grep -q 'get configmap cledyu-root-ca-bundle\|get clusterissuer' \
   && echo "❌ 06 이 아직 없는 게 정상인 것을 게이트한다(H1)" || echo "✅ 06 과대 게이트 없음"
+
+# §11.12 회귀 — SSM 은 HOME 을 안 준다. 7개 전부 있어야 한다(하나라도 빠지면 kubectl 이 localhost:8080)
+[ "$(grep -l 'export HOME=/root' $B/*.sh | wc -l)" -eq 7 ] \
+  && echo "✅ HOME 7/7" || echo "❌ export HOME=/root 누락 — kubectl 이 localhost:8080 으로 폴백한다"
 
 cd infra/terraform/aws && terraform fmt -check eks-dr-bastion.tf && terraform validate
 ```
