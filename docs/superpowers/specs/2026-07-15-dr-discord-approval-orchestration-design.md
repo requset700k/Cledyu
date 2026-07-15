@@ -864,8 +864,19 @@ Plan 1 구현·배포·실호출에서 나왔다. **넷 다 apply 하거나 실�
 |---|---|---|---|
 | **P4** | **웹훅은 버튼·드롭다운을 못 보낸다.** Discord 가 에러가 아니라 **2xx + `components` 무음 폐기** → Lambda 성공·DDB 저장 정상인데 버튼만 없음 | Discord 플랫폼 제약. 아무도 "웹훅으로 버튼을 보낼 수 있나?"를 묻지 않았다 | **§3.6 신설**(Bot API 전환), §3.3·§9 |
 | **P3** | **Function URL 403.** AWS 가 2025-10 부터 `InvokeFunction` 도 요구하는데 provider 는 `InvokeFunctionUrl` 만 자동 생성 → Lambda 호출조차 안 됨 | 문서(갱신됨)와 provider 구현의 **시차**. 최종 리뷰가 이 가설을 세웠다가 문서를 근거로 **반증 처리했고 그게 틀렸다** | §5.4 |
-| **P1** | **`-target` 이 IAM 정책을 안 끌고 온다.** 의존성(dependency)만 따라가고 의존하는 것(dependent)은 안 따라감 → 롤만 생기고 정책 누락 → 권한 없는 롤로 SFN 생성 → AccessDenied 재시도 2분+ hang | `terraform validate` 는 디스크 전체를 보지 `-target` 범위를 모른다 | §7.1·계획 `-target` 목록 |
+| **P1** | **IAM 정책이 숨은 의존이다.** Lambda/SM 은 `aws_iam_role` 만 참조하고 `aws_iam_role_policy` 는 참조하지 않는다 → (a) `-target` 이 정책을 안 끌고 오고 (b) 전체 apply 에선 형제라 **병렬 생성 레이스**. 둘 다 권한 없는 롤로 SFN 생성 → AccessDenied 2분+ hang | `terraform validate` 는 의존 그래프의 이 구멍을 검사하지 않는다 | **`depends_on`** (SFN·Lambda 3개). 초안의 "`-target` 에 정책 나열" 처방은 (a)만 막아 절반이었다 — codex 리뷰가 정정 |
 | **P2** | **tfvars 게이트 누락.** `enable_eks_dr` 가 tfvars 에 없어 기본값 false → `-target` 없이 apply 하면 **warm DR 129개 리소스 전멸**. pilot-light 를 `-var` 로 apply 해서 tfvars 에 안 남음 | state 와 tfvars 의 불일치는 plan 을 돌려야 보인다 | §7.1 경고. **미해결 — tfvars 보강 필요** |
 
 **교훈:** 이 설계의 남은 위험은 "더 생각해서" 줄지 않는다. **P4 는 3라운드 리뷰가 전부 통과시킨 뒤 첫 실호출에서
 1분 만에 드러났다.** §7.2 의 과금 ~0 승인 경로 검증이 이걸 잡은 장치다 — 그게 없었으면 실재해에서 처음 알았을 것이다.
+
+### 11.5 PR 리뷰 (codex) — 2건
+
+| # | 지적 | 판정 |
+|---|---|---|
+| **P5** | **failover-trigger 의 `StartExecution` 이 멱등하지 않다.** EventBridge→Lambda 는 비동기(at-least-once)라 같은 알람 이벤트가 중복 전달될 수 있고 Lambda 자체도 재시도한다. `name` 을 안 주면 중복마다 **새 실행 + 새 승인 토큰** → Discord 에 승인 버튼이 여러 개. **Plan 2 연결 후엔 한 재해가 여러 페일오버로 이어진다** | **타당 — 수정.** `name = event["id"]`(이벤트마다 유일한 UUID)로 고정, `ExecutionAlreadyExists` 를 성공 처리해 재시도를 끊는다. 알람이 OK→ALARM 을 두 번 오가는 **정당한 두 전이는 id 가 달라 각각 실행**된다(원하는 동작) |
+| **P1 처방 정정** | SM 이 `aws_iam_role_policy.dr_sfn` 에 의존하지 않아 생성 순서가 안 고정된다 | **타당 — 내 처방이 절반이었다**(위 P1 행 참조). `depends_on` 으로 교체 |
+
+> **P1 이 두 번 정정된 것이 이 프로젝트의 축소판이다.** 진단(숨은 의존)은 맞았으나 처방(`-target` 나열)이
+> `-target` 경로만 막았고, **레포에 이미 정답(`depends_on`)이 있었는데**(`public-ingress.tf:214-218` 이
+> 같은 상황을 주석으로 설명 중) 그걸 안 보고 새로 발명했다. 기존 패턴을 먼저 찾을 것.

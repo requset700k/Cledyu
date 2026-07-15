@@ -30,11 +30,24 @@ Function URL → interaction Lambda(Ed25519 검증 → 허용목록 → DynamoDB
   tfvars 에 안 남은 탓이다. `terraform.tfvars.example` 에도 DR 게이트가 하나도 없다.
   → **근본 해결은 tfvars 에 게이트 명시**(`enable_eks_dr=true` / `eks_dr_active=false` /
   `dr_orchestration_armed=false`) 후 `-target` 없이 plan 해서 `destroy 0` 확인. **미해결 — 후속 과제.**
-- **⚠️ `-target` 에 `aws_iam_role_policy.*` 를 반드시 명시 (2026-07-15 실측)** — `-target` 은 **의존성만**
-  따라가고 **의존하는 것(dependent)은 안 따라간다.** Lambda/SM 은 `aws_iam_role` 을 참조하지만
-  `aws_iam_role_policy` 는 참조하지 않으므로(정책이 롤에 의존할 뿐), 롤만 생기고 **정책이 누락**된다 →
-  권한 없는 롤로 SFN 생성 시도 → AccessDenied 재시도 루프(2분+ hang 후 실패). 4개 롤 전부
-  `PolicyNames: []` 였다. `terraform validate` 는 디스크 전체를 보므로 이걸 못 잡는다.
+- **⚠️ IAM 정책은 `depends_on` 으로 묶는다 — `-target` 에 나열하지 않는다 (codex 리뷰로 처방 정정)**
+
+  `-target` 은 **의존성(dependency)만** 따라가고 **의존하는 것(dependent)은 안 따라간다.** Lambda/SM 은
+  `aws_iam_role` 을 참조하지만 `aws_iam_role_policy` 는 참조하지 않으므로(정책이 롤에 의존할 뿐),
+  롤만 생기고 **정책이 누락**된다 → 권한 없는 롤로 SFN 생성 → AccessDenied 재시도 2분+ hang 후 실패
+  (실측 2026-07-15: 4개 롤 전부 `PolicyNames: []`). `terraform validate` 는 디스크 전체를 보므로 못 잡는다.
+
+  **초안은 처방을 "`-target` 목록에 정책 4개 추가"로 냈으나 그것으로는 절반만 막는다** — 전체 apply 에서
+  정책과 SM 은 형제라 terraform 이 **병렬 생성**하고, 정책보다 SM 이 먼저 나가면 같은 AccessDenied 가 난다.
+
+  → **정석은 `depends_on` 이고, 이 레포는 이미 그 패턴을 쓰고 있었다**(`eks-dr-bastion.tf:127`,
+  `public-ingress.tf:218`). `public-ingress.tf:214-217` 주석이 이 상황을 그대로 적어둔다:
+  > "instance profile 만 참조하면 role 에 붙는 attachment 는 **숨은 의존**이라, 운영자가 `-target` 으로
+  > 재생성할 때 attachment 가 빠져 SSM 접속이 안 될 수 있다. **`depends_on` 으로 `-target` 이
+  > attachment 까지 함께 끌어오게 한다.**"
+
+  `depends_on` 하나가 **레이스와 `-target` 누락을 동시에** 해소한다. `dr-orchestration.tf` 의 SFN·Lambda 3개에
+  적용 완료.
 - **⚠️ terraform docs** — `infra/terraform/aws` 의 리소스/변수/출력을 바꾼 커밋엔 재생성된 `README.md` 를 반드시 함께 `git add`(안 하면 pre-commit `terraform_docs` 훅이 커밋 중단)
 - **pre-commit 훅:** `terraform_fmt`·`terraform_validate`·`terraform_tflint`·`terraform_docs`·`ruff`(--fix)·`ruff-format`
 - **Lambda 패키징:** 기존 `dr-alert` 패턴 — `data.archive_file` + `source_file`, 외부 의존성 없음. 빌드 산출물 `.zip` 은 `.gitignore` 에 추가
@@ -1193,25 +1206,25 @@ git commit -m "feat(dr): EventBridge 규칙(3중 AND 게이트) + 크로스리�
 
 ## 운영자 apply — 검증된 `-target` 목록 (2026-07-15 실측)
 
-각 Task 의 `-target` 은 IAM 정책이 빠져 있다(Global Constraints 참조). **아래가 실제로 통과한 전체 목록**이다:
+**IAM 정책은 나열하지 않는다** — `depends_on` 이 끌고 온다(Global Constraints 참조).
 
 ```bash
 cd ~/Cledyu/infra/terraform/aws
 terraform apply \
   -target=aws_dynamodb_table.dr_approvals \
-  -target=aws_iam_role_policy.dr_approval_request \
   -target=aws_lambda_function.dr_approval_request \
   -target=aws_secretsmanager_secret.discord_pubkey \
   -target=aws_secretsmanager_secret.discord_bot_token \
-  -target=aws_iam_role_policy.dr_interaction \
   -target=aws_lambda_function.dr_interaction \
   -target=aws_lambda_function_url.dr_interaction \
   -target=aws_lambda_permission.dr_interaction_url_invoke \
-  -target=aws_iam_role_policy.dr_sfn \
   -target=aws_sfn_state_machine.dr_approval_test \
-  -target=aws_iam_role_policy.dr_failover_trigger \
   -target=aws_lambda_function.dr_failover_trigger
 ```
+
+> **`depends_on` 도입 전에는** 여기에 `aws_iam_role_policy.{dr_approval_request,dr_interaction,dr_sfn,dr_failover_trigger}`
+> 4개를 **직접 나열해야** 했다. 이제 필요 없다 — 나열해도 무해하나 의존 관계가 코드에 있으므로 중복이다.
+> **적용 확인:** apply 후 `aws iam list-role-policies --role-name cledyu-lab-dr-sfn` 이 비어 있지 않아야 한다.
 
 EventBridge 규칙(무장)은 별도 — 드릴 때만:
 ```bash
