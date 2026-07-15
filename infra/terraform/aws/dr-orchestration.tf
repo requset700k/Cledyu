@@ -94,8 +94,11 @@ resource "aws_cloudwatch_log_group" "dr_approval_request" {
 }
 
 resource "aws_lambda_function" "dr_approval_request" {
-  function_name    = "${var.name_prefix}-dr-approval-request"
-  depends_on       = [aws_cloudwatch_log_group.dr_approval_request]
+  function_name = "${var.name_prefix}-dr-approval-request"
+  # 역할 정책도 명시적 의존으로 묶는다 — role 만 참조하면 정책이 숨은 의존이라
+  # -target=aws_lambda_function.dr_approval_request 로 배포할 때 정책이 안 끌려와
+  # 권한 없는 Lambda 가 배포된다(실측 2026-07-15). bastion·proxy 와 동일 패턴.
+  depends_on       = [aws_cloudwatch_log_group.dr_approval_request, aws_iam_role_policy.dr_approval_request]
   filename         = data.archive_file.dr_approval_request.output_path
   source_code_hash = data.archive_file.dr_approval_request.output_base64sha256
   handler          = "index.handler"
@@ -184,8 +187,9 @@ resource "aws_cloudwatch_log_group" "dr_interaction" {
 }
 
 resource "aws_lambda_function" "dr_interaction" {
-  function_name    = "${var.name_prefix}-dr-interaction"
-  depends_on       = [aws_cloudwatch_log_group.dr_interaction]
+  function_name = "${var.name_prefix}-dr-interaction"
+  # 역할 정책을 명시적 의존으로(위 dr_approval_request 와 동일 사유).
+  depends_on       = [aws_cloudwatch_log_group.dr_interaction, aws_iam_role_policy.dr_interaction]
   filename         = data.archive_file.dr_interaction.output_path
   source_code_hash = data.archive_file.dr_interaction.output_base64sha256
   handler          = "index.handler"
@@ -304,6 +308,16 @@ resource "aws_sfn_state_machine" "dr_approval_test" {
   name     = "${var.name_prefix}-dr-approval-test"
   role_arn = aws_iam_role.dr_sfn.arn
 
+  # 역할 정책을 명시적 의존으로 묶는다. role 만 참조하면 정책은 **숨은 의존**이라 두 가지가 깨진다
+  # (bastion·proxy 인스턴스와 동일 패턴 — eks-dr-bastion.tf:127, public-ingress.tf:218):
+  #   (1) 전체 apply 에서 정책과 SM 이 형제라 terraform 이 병렬 생성 → 정책보다 먼저 CreateStateMachine
+  #       이 나가면 logging_configuration 에 필요한 CloudWatch Logs 권한이 없어 AccessDenied.
+  #   (2) -target=aws_sfn_state_machine.dr_approval_test 로 재생성할 때 정책이 안 끌려온다
+  #       (-target 은 의존성만 따라가고 의존하는 것은 안 따라감) → 권한 없는 롤로 생성 시도 →
+  #       AccessDenied 재시도 루프로 2분+ hang 후 실패(실측 2026-07-15).
+  # depends_on 이 둘 다 해소한다.
+  depends_on = [aws_iam_role_policy.dr_sfn]
+
   logging_configuration {
     log_destination = "${aws_cloudwatch_log_group.dr_sfn.arn}:*"
     # ⚠️ false 로 고정 — true 면 LambdaFunctionScheduled 이벤트의 input 에 해석된 실제 taskToken 이
@@ -384,10 +398,11 @@ resource "aws_cloudwatch_log_group" "dr_failover_trigger" {
 }
 
 resource "aws_lambda_function" "dr_failover_trigger" {
-  count            = local.pub
-  provider         = aws.use1
-  function_name    = "${var.name_prefix}-dr-failover-trigger"
-  depends_on       = [aws_cloudwatch_log_group.dr_failover_trigger]
+  count         = local.pub
+  provider      = aws.use1
+  function_name = "${var.name_prefix}-dr-failover-trigger"
+  # 역할 정책을 명시적 의존으로(위 dr_approval_request 와 동일 사유).
+  depends_on       = [aws_cloudwatch_log_group.dr_failover_trigger, aws_iam_role_policy.dr_failover_trigger]
   filename         = data.archive_file.dr_failover_trigger.output_path
   source_code_hash = data.archive_file.dr_failover_trigger.output_base64sha256
   handler          = "index.handler"
