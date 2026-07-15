@@ -4,6 +4,8 @@ warm(node0) 에선 이 둘이 Deployment 라 DEGRADED 로 terraform apply 를 �
 빼두고(eks-dr.tf) 노드가 뜬 뒤 CLI 로 설치한다(런북 Phase 1 (3)).
 """
 
+import contextlib
+
 import boto3
 
 _eks = boto3.client("eks")
@@ -23,7 +25,14 @@ def _start(name, **kw):
         verb = _eks.update_addon
     except _eks.exceptions.ResourceNotFoundException:
         verb = _eks.create_addon
-    verb(clusterName=CLUSTER, addonName=name, resolveConflicts="OVERWRITE", **kw)
+    # ⚠️ ResourceInUseException 은 두 가지 뜻이다(T4 실측 — 초안은 앞의 하나만 알았다):
+    #   (a) create 인데 이미 존재함     → 위 describe 분기가 막는다
+    #   (b) **update 인데 이미 변경 중** → 여기서 막는다(3회차 start 가 실제로 이걸로 죽었다)
+    # (b) 는 [5] 가 재시도되거나 운영자가 실패한 페일오버를 UPDATING 창(~1-3분) 안에 다시 실행하면
+    # 난다 — 재해 중 충분히 있을 법한 행동이다. 어느 쪽이든 **설치는 이미 진행 중**이니 성공으로
+    # 흘려보낸다. 완료 판정은 check(=SFN 폴링)의 몫이지 여기가 아니다.
+    with contextlib.suppress(_eks.exceptions.ResourceInUseException):
+        verb(clusterName=CLUSTER, addonName=name, resolveConflicts="OVERWRITE", **kw)
 
 
 def handler(event, context):
