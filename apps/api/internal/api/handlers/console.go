@@ -29,6 +29,15 @@ const (
 	maxTerminalDim = 1000
 )
 
+const (
+	// terminalPingPeriod는 유휴 WS 연결이 중간 프록시에 끊기지 않게 보내는 keepalive ping 주기다.
+	terminalPingPeriod = 20 * time.Second
+	// terminalPongWait는 이 시간 동안 pong(또는 다른 프레임)이 없으면 피어가 죽은 것으로 보고 읽기를
+	// 깨우는 read deadline이다. 죽은 연결이 콘솔 슬롯을 무한히 점유하는 것을 막는다. ping 주기의
+	// 배수라 일시적 지연에는 관대하되(idle 터미널 유지), 실제 절단은 이 안에 회수된다.
+	terminalPongWait = 60 * time.Second
+)
+
 // terminalResizer는 PTY 윈도우 크기 변경을 지원하는 연결이다(EC2 SSH PTY 가 구현, serial 은 미구현).
 type terminalResizer interface {
 	Resize(cols, rows int) error
@@ -138,6 +147,15 @@ func (h *Handler) kubevirtConsole(c *gin.Context, sessionID string) {
 	}
 	defer ws.Close() //nolint:errcheck
 
+	// 세션당 활성 콘솔을 최근 연결 우선(last-wins)으로 1개만 유지한다. KubeVirt serial
+	// console(ttyS0)은 VM당 배타 접속이라 두 번째 연결이 붙으면 첫 번째가 끊기고, 두 창이 서로를
+	// 축출하며 무한 재연결한다. acquire는 새 연결을 활성으로 등록하고 이전 홀더에 정상 종료(1000)를
+	// 통보해 그 클라이언트가 재연결을 멈추게 한다(runtime-api-origin.mjs shouldReconnect). 이전 연결의
+	// 실제 정리는 아래 새 SerialConsole이 배타락으로 이전 콘솔을 밀어내며 일어난다. 거절이 아니라
+	// 인수라, 네트워크 blip 후 같은 창의 재연결과 준비 probe→터미널 handoff 모두 자연스럽게 복구된다.
+	release := h.consoles.acquire(sessionID, ws)
+	defer release()
+
 	// 연결 수립 기록
 	if h.met != nil {
 		h.met.wsConnectionsEstablished.WithLabelValues("kubevirt").Inc()
@@ -221,9 +239,16 @@ func (h *Handler) ec2Console(c *gin.Context, sessionID string) {
 func proxyTerminal(ws *websocket.Conn, conn io.ReadWriteCloser, pinnedCols, pinnedRows int) (closeReason string) {
 	defer conn.Close() //nolint:errcheck
 
-	// http.Server의 ReadTimeout/WriteTimeout(15s)이 장수명 WS를 끊지 않도록 deadline 해제.
-	_ = ws.SetReadDeadline(time.Time{})
+	// WriteDeadline은 해제(http.Server의 ReadTimeout/WriteTimeout이 장수명 WS를 끊지 않도록).
+	// ReadDeadline은 pong 기반으로 둔다: pong(또는 어떤 프레임)이 오면 갱신하고, terminalPongWait
+	// 동안 무응답이면 ReadMessage를 깨워 죽은 연결을 회수한다. 이게 없으면 절단된 피어의 핸들러가
+	// conn.Read에서 영원히 블록돼 콘솔 슬롯(consoleRegistry)을 무한 점유하고, 같은 사용자의 재연결이
+	// 새 활성 홀더로 인수되지 못한다. keepalive ping(아래)이 pong을 유도해 정상 연결은 계속 갱신된다.
 	_ = ws.SetWriteDeadline(time.Time{})
+	_ = ws.SetReadDeadline(time.Now().Add(terminalPongWait))
+	ws.SetPongHandler(func(string) error {
+		return ws.SetReadDeadline(time.Now().Add(terminalPongWait))
+	})
 
 	// v2 subprotocol 을 협상했을 때만 제어 프레임을 주고받는다(송신 pin·수신 resize 양방향 대칭).
 	// 협상 안 된 연결(구 웹↔새 API 스큐)은 모든 TextMessage 를 raw 입력으로 전달해 입력 계약을 지킨다.
@@ -237,18 +262,24 @@ func proxyTerminal(ws *websocket.Conn, conn io.ReadWriteCloser, pinnedCols, pinn
 		_ = ws.WriteMessage(websocket.TextMessage, []byte(frame))
 	}
 
-	// keepalive ping — 유휴 연결이 중간 프록시에 의해 끊기는 것을 방지.
+	// keepalive ping — 유휴 연결이 중간 프록시에 의해 끊기는 것을 방지하고, 응답(pong)으로 피어
+	// 생존을 확인한다. ping write가 실패하면 피어가 사라진 것이므로 ws·conn을 닫아 양쪽 루프를 깨우고
+	// 핸들러가 반환·슬롯을 반납하게 한다(죽은 홀더가 콘솔 슬롯을 점유한 채 남지 않도록).
 	stopPing := make(chan struct{})
 	defer close(stopPing)
 	go func() {
-		t := time.NewTicker(20 * time.Second)
+		t := time.NewTicker(terminalPingPeriod)
 		defer t.Stop()
 		for {
 			select {
 			case <-stopPing:
 				return
 			case <-t.C:
-				_ = ws.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second))
+				if err := ws.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+					_ = ws.Close()
+					_ = conn.Close()
+					return
+				}
 			}
 		}
 	}()
