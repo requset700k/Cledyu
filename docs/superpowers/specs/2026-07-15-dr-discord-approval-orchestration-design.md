@@ -880,3 +880,70 @@ Plan 1 구현·배포·실호출에서 나왔다. **넷 다 apply 하거나 실�
 > **P1 이 두 번 정정된 것이 이 프로젝트의 축소판이다.** 진단(숨은 의존)은 맞았으나 처방(`-target` 나열)이
 > `-target` 경로만 막았고, **레포에 이미 정답(`depends_on`)이 있었는데**(`public-ingress.tf:214-218` 이
 > 같은 상황을 주석으로 설명 중) 그걸 안 보고 새로 발명했다. 기존 패턴을 먼저 찾을 것.
+
+### 11.6 Plan 2 계획서 적대적 검증 (2026-07-15) — 구현 전
+
+Plan 2 계획서(`2026-07-15-dr-failover-orchestration.md`)를 구현 착수 전에 공격해 **4건**을 잡았다.
+
+| # | 결함 | 정정 |
+|---|---|---|
+| **A1** | **"bastion 스크립트 7개 전부 런북 이식"이 거짓.** 3개(`03`·`09`·`12`)는 런북에 원본이 없다. 특히 `09` 가 가리킨 `:357-370` 은 **사람용 체크리스트**(`- [ ]` + 백틱 조각)이고 [6][7][8][10][11][12] 까지 다루는 마스터 표라 [9] 의 원본이 아니다 | 대응표를 **이식 4 / 신규 3** 으로 재작성. "이식"의 정의를 Global Constraints 에 못박음 |
+| A2 | 런북 줄번호 3건 오류 — `06` 이 CNPG 가드를, `08` 이 **real-DR `backupEnabled` flip 을 먹고 있었다**(§8.1 이 "수동 PR"로 결정한 것 → 자동화 유입 위험) | 실제 `### ` 경계로 정정(272-331 / 75-160+161-194 / **332-343**) |
+| A3 | `03` 의 정리 대상 webhook 이름이 **계획 작성자의 창작** — 틀리면 `--ignore-not-found` 로 조용히 통과해 P1c 가 안 고쳐진다 | **미확정으로 명시** + T3 Step 9 에서 실측 확정 |
+| A4 | `09` 가 **G1 함정 자리** — 사람용 확인을 기계 게이트로 옮김. 런북이 "미배포는 정상"이라 적은 것(ServiceMonitor·CiliumNetworkPolicy·lab-ssh-key)을 게이트하면 **건강한 DR 에서 오탐** | 오퍼레이터 `condition=Ready` 에만 의존. 토픽은 이름 하드코딩 대신 `--all`(랩 추가 시 자동 확장). bootstrap svc 검사 제외(TLS 9093 — 어설픈 검사가 G1 을 부른다) |
+
+**교훈:** 계획서도 코드처럼 틀린다. **"이식"이라는 단어가 검증을 건너뛰게 만들었다** — 이식이면 런북이
+보증하니까 안 봐도 된다고 믿은 것이다. 실제로는 3개가 창작이었고, 그중 `03` 은 **조용히 실패하는** 종류다.
+
+### 11.7 Plan 2 계획서 적대적 검증 3회차 (2026-07-15) — 구현 전
+
+A1~A4·C1~C6 를 반영한 계획서를 레포와 대조해 다시 공격, **9건**을 잡았다. **1·2·3 은 P0** 다.
+
+| # | 결함 | 정정 |
+|---|---|---|
+| **F1** | **Task 2 가 terraform 순환을 만든다 — `validate` 부터 실패.** 자식 SM 이 `aws_iam_role_policy.dr_sfn` 을 `depends_on` 하는데 `data.aws_iam_policy_document.dr_sfn` 이 그 SM 의 `.arn` 을 참조 → `SM→policy→data→SM`. **스크래치패드에 같은 모양으로 재현해 `Error: Cycle` 확인** | 자식 SM 참조 statement 를 **별도 정책 `dr_sfn_child`** 로 분리. Global Constraints 에 "`depends_on` 거는 리소스를 그 정책이 참조하면 순환" 명시 |
+| **F2** | **SFN 롤에 CodeBuild·Lambda·EKS 권한이 전무.** Plan 1 의 `InvokeApprovalRequest`(approval-request 1개)+`Logs` 가 전부라 [2]·[4]·[5]·[10]·[13] **과 NotifyFailed 까지** AccessDenied. **NotifyFailed 가 죽으면 모든 Catch 가 무음** → "실패해도 사람이 이어받는다"는 마지막 방어선 소멸. 자식 SM `.sync` 의 EventBridge 요구는 정확히 짚어놓고 **CodeBuild `.sync` 의 같은 요구는 놓쳤다** | **§SFN 롤 IAM 배선표** 신설(상태×API×정책×Task). statement 를 T1/T2/T4 에 분배 |
+| **F3** | **bastion 롤에 `ssm:PutParameter` 가 없다**(`eks-dr-bastion.tf` 에 `ssm:` 액션 0건, `AmazonSSMManagedInstanceCore` 는 `GetParameter` 만 준다). `09-` 의 **마지막 줄**이 put-parameter라 **~40분 복구를 다 끝내고** 죽고, [10] 은 **설계대로** fail-closed → **전부 복구됐는데 서비스가 안 돌아온다.** §5.1.2 가 명시했는데 초안은 dns-switch 쪽만 반영 | T3 에 **Step 8 신설**(정책+`depends_on`+`-target` 18번째). T3 Files 에 `.tf` 추가 |
+| F4 | **`ClearAlbParam` 상태가 없다.** §5.1.2 의 stale 2중 방어 ①이 증발. 그런데 `03-` 주석은 *"[2.5] ResolveBastion 이 한다"* 며 **존재하지 않는 구현을 가리켜** 리뷰어를 통과시킨다 | [2.4] `ClearAlbParam` 신설(SFN Task=API 1개라 ResolveBastion 과 못 합침). 에러명은 **미확정 표시** |
+| F5 | **notify 의 입력을 채우는 곳이 없다.** `Payload` 매핑 부재로 **헤드라인 산출물인 RTO 2단이 `?`** 로 나온다 — C2 에서 고친 `_ts()` 가 값을 못 받는다 | NotifyComplete/NotifyFailed 정의 추가. `detectedAt` 은 `$.detail.state.timestamp`(테스트 실행에 없음→States.Runtime) 대신 **`$$.Execution.StartTime`**. NotifyFailed 는 `$.approval` 미참조([1] 실패 시 없음) |
+| F6 | **계획이 자기 계약을 자기 테스트로 위반.** 계약은 "`env` 항상"인데 T2 Step 5 두 커맨드 + T3 Step 9 `run()` 이 전부 `env` 누락 → **첫 실측이 States.Runtime 으로 죽고 운영자가 멀쩡한 ASL 을 뜯는다** | 세 곳 다 `env` 추가. `run()` 에 3번째 인자. env 주입 스모크 신설 |
+| F7 | `AgentReady?` 가 **자기가 막으려던 상황에서 깨질 수 있다** — 미등록 시 빈 목록이라 `[0].PingStatus` 경로 부재. **Step 5 스모크는 에이전트가 이미 Online 이라 이 분기를 원리적으로 못 밟는다**(C2 와 같은 패턴) | `IsPresent` 가드 선행. Choice 의 미존재 경로 거동은 미확정으로 남기되 **어느 쪽이든 안전하게** |
+| F8 | [4] `ScaleNodes` 가 **표에만 있고** HCL·IAM 부재 | `ScaleNodes`→`UpdateNodegroup`→`WaitNodes`→`CheckNodes`→`NodesActive?` 정의. `DEGRADED`·`CREATE_FAILED` 명시 거부 |
+| F9 | `addon-install` 계약이 **세 군데서 다르다** — Interfaces `{coredns, ebsCsi}` vs 코드 `{started}`/`{status,done}` vs Step 5 Expected. Step 5 의 invoke 는 payload 가 없어 **check 경로로 빠져 `ResourceNotFoundException`** | Interfaces 를 코드에 맞춤. invoke 에 `action` 추가 |
+
+**교훈: 잡힌 것과 못 잡은 것의 성격이 갈렸다.** A1~A4·C1~C6 은 전부 **한 파일·한 상태 안에서 완결되는**
+결함(창작한 이름·`States.Format` 파손·타임스탬프 파싱·`set -x` 유출)이었다. 반면 3회차 9건 중 5건(F1~F5)은
+**"A 가 만들고 B 가 쓰는 것"의 배선**이고, 하필 그게 **`Interfaces` 가 선언만 하고 어느 Task 도 구현을
+책임지지 않는 자리**다. **T3 가 `.sh` 만 만들고 `.tf` 를 안 건드린 것이 F3 의 직접 원인**이다.
+
+> **계획서를 Task 단위로 자기완결적으로 쓰면 Task 경계를 넘는 것이 통째로 사라진다.** 랩 검증의
+> 폭포수 dead-end 와 같은 구조다 — 각 스텝은 멀쩡한데 스텝 **사이**가 비어 있다. 다음 계획부터는
+> **"각 상태가 호출하는 API × 실제 롤 권한" 표를 착수 전에 그린다**(이번엔 §SFN 롤 IAM 배선표로 신설).
+
+### 11.8 Plan 2 계획서 적대적 검증 4회차 (2026-07-15) — 구현 전
+
+3회차 반영본을 다시 공격, **6건**. 각도를 바꿨다 — **"이식"이라 라벨된 4개의 *내용*을 원본과 한 줄씩 대조**했다.
+**A1(2회차)이 개수(7→4)만 고치고 내용은 아무도 안 봤다는 것**을 노렸고, 그 4개 안에 P1 이 2건 있었다.
+
+| # | 결함 | 정정 |
+|---|---|---|
+| **H1** | **`06` 을 런북대로 옮기면 건강한 DR 에서 실패한다.** 런북 272-331 끝의 `kubectl get clusterissuer` · `kubectl -n api get configmap cledyu-root-ca-bundle` 은 사람이 **폴링**하는 확인인데, 변환 규칙 2(`set -euo pipefail`)를 먹으면 하드 게이트가 된다. **`service-api.yaml:12` 가 `sync-wave: "2"`** 라 그 시점엔 **api ns 자체가 없다** → `NotFound` → `exit 1`. **Global Constraints 가 "과대 게이트 → 건강한 DR 오탐"이라 경고한 G1 함정 그 자체인데, 그 경고를 `09` 에만 적용하고 `06` 은 "이식/낮음"으로 평가** | 두 줄 **제거**([9] 가 자연히 게이트한다 — Kafka 의존이 곧 cert-manager CA + Bundle). 변환 규칙 4 를 "**그 시점에 이미 참인 것만** 게이트"로 재작성 |
+| **H2** | **`git clone` 은 멱등이 아니고 `set -e` 가 그 실패를 안 잡는다**(실측: `fatal: already exists` 뒤에도 스크립트 계속). `A && B` 는 AND-OR 리스트라 **A 의 실패가 set -e 면제**. → cd 가 안 된 채 진행하다 **뒤의 `git rev-parse` 에서 엉뚱한 에러로 죽는다.** T3 Step 10 이 "실패→고침→재실행"이라 **증분 드릴에서 반드시 밟는다.** 초안의 "`helm upgrade --install` 은 멱등이라 재실행 안전"이 **멱등한 건 helm 인데 clone 까지 안심시켰다** | `[ -d ~/Cledyu/.git ] && fetch+reset --hard \|\| clone` 로 멱등화. `cd` 를 `&&` 로 잇지 않는다. 변환 규칙 5(`A && B` 는 게이트가 아니다)·6(멱등) 신설 |
+| **H3** | **`12` 의 `psql -U cledyu` 가 레포 선례 5건과 어긋난다** — `dr-failback.md:85`·`dr-failback-isolated-drill.md:85·87·90·91·97 **전부 `psql -d <db> -tAc`, `-U` 없음**. CNPG 파드 OS 유저는 postgres 라 local peer 인증에서 `-U cledyu` 는 OS유저≠롤. **[12] 는 페일오버의 마지막 게이트**라 **완벽히 복구된 DR 이 ❌ 실패 알림**을 보낸다(F5 와 같은 결과) | `-U` 제거, 선례 준수. peer 거동은 단정하지 않고 **Step 10 실측으로 확정** |
+| H4 | **"런북 순서 유지"가 사실이 아니다.** 런북 체크리스트는 **Kafka → Vault → CNPG** 인데 우리는 **Vault → CNPG → Kafka** — **이미 바꿔놓고** "런북 순서를 지키니 안전하다"로 자기 변경을 정당화했다 | 근거 교체: Kafka 의존은 `cert-manager CA + trust-manager Bundle + gp3` 로 **Vault 무관**(체크리스트 `:359`). **드릴이 검증한 건 "의존 순서"이지 "줄 순서"가 아니다** |
+| H5 | **`08` 은 이식이 아니라 재배치.** 런북은 "**root-app 직후, 차트가 CR 을 만들기 전에**" 지우라는데 우리는 [7](~30분) 뒤 = **ArgoCD 가 만든 CR 을 지우고 재생성을 기다리는 다른 동작**. 명령 2줄만 같다. **재배치 자체는 옳다**([7] 전엔 ESO 가 `postgres-credentials-cnpg` 를 못 만들어 CR 이 못 뜬다) | 라벨 🔀 재배치/중간. **새 의존(selfHeal) 확인함 — `data-postgres-cnpg-dr.yaml:31`·`data-keycloak-pg-dr.yaml:32` 둘 다 `true` ✅**. **🔴 PVC 재사용 미검증**(Step 10) |
+| H6 | 런북 `:296` 주석이 "api/web **0**" 이라 적었으나 실제 `service-api.yaml:12` 는 **wave 2** | Task 6 에 정정 추가. **이 오해가 H1 을 키웠다** — wave 0 이면 "곧 뜬다"로 보인다 |
+
+**교훈 1 — 라벨은 검증이 아니다.** 2회차(A1)는 *"'이식'이라는 단어가 검증을 건너뛰게 만들었다"* 고
+**정확히 진단해놓고 개수만 고쳤다.** 남은 4개는 여전히 "이식"이라 적힌 채였고 아무도 원본을 안 열었다.
+**진단이 맞아도 처방이 절반이면 같은 자리에서 또 터진다** — §11.5 가 "P1 이 두 번 정정된 것이 이
+프로젝트의 축소판"이라 쓴 그 패턴이 **세 번째**로 반복됐다.
+
+**교훈 2 — "사람용 → 기계" 변환은 규칙이 서로를 배신한다.** 변환 규칙 2(`set -e`)와 4(확인→게이트)를
+곱하면 **런북이 "폴링해서 보라"고 쓴 것이 "없으면 실패"가 된다**(H1). 같은 `A && B` 구문이 `11` 에선
+안전장치이고 `06` 에선 함정이다(H2). **규칙을 스크립트마다 기계적으로 적용하지 말고, 그 줄이 원래
+사람에게 무엇을 시키던 것인지**(확인? 폴링? 게이트?)**를 먼저 판정한다.**
+
+**교훈 3 — 3·4회차가 각각 9건·6건을 냈다.** "이제 됐다"가 세 번 틀렸다. 정적 리뷰의 수확은 아직
+체감하지 않았으나, **남은 결함은 대부분 실행해야 보이는 종류**(PVC 재사용·peer 인증·에러명)로 수렴 중이다
+— 다음은 T1 실측이다.
