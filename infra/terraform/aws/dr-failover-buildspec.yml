@@ -5,13 +5,21 @@ version: 0.2
 # 왜 CodeBuild 인가: Lambda 는 15분 제한이 있고(NAT 생성만 몇 분) terraform 바이너리가 필요하다.
 # AWS SDK 로 직접 생성하면 state 밖 고아가 생겨 failback 의 `terraform apply` 전제를 깬다.
 #
-# ⚠️ -target 목록은 docs/RUNBOOK/dr-eks-bootstrap.md §Phase 1(213-272)의 검증된 **17개**를 그대로 쓴다.
+# ⚠️ -target 목록은 docs/RUNBOOK/dr-eks-bootstrap.md §Phase 1(213-272)의 검증된 **17개**
+#    + T3 이 신설한 bastion 정책 **2개** = **19개**다.
 #    재발명 금지 — 7/14 풀 E2E 드릴로 검증된 목록이고, 2026-07-15 에 목록을 임의로 줄였다가
-#    IAM 정책이 빠져 2분+ hang 을 겪었다. 이 17개엔 bastion IAM 3종이 포함돼 있다
+#    IAM 정책이 빠져 2분+ hang 을 겪었다. 런북의 17개엔 bastion IAM 3종이 포함돼 있다
 #    (role_policy: describe·vault_restore / attachment: ssm).
 #    개수 검증:
 #      sed -n '213,272p' docs/RUNBOOK/dr-eks-bootstrap.md \
 #        | grep -oE '\-target=[a-zA-Z_.0-9]+' | sort -u | wc -l   # → 17
+#
+#    ⚠️ 신설 2개는 **런북에 없다** — Task 6 이 런북에도 반영한다:
+#      · eks_dr_bastion_ssm_param    : `09-` 의 put-parameter. 없으면 **~40분 복구 후 마지막 줄**에서
+#                                      AccessDenied 로 죽고 [10] 이 fail-closed → 서비스 미복구(F3)
+#      · eks_dr_bastion_command_logs : SSM 명령 로그의 CloudWatch 쓰기. 없으면 **전문이 조용히 유실**
+#                                      (명령 자체는 Success 로 끝난다 — 스펙 §11.11)
+#    aws_instance.eks_dr_bastion 의 depends_on 에도 둘 다 있지만, 이 레포는 **둘 다 하는 것이 컨벤션**이다.
 #
 # ⚠️ -var 3개 필수 — terraform.tfvars 는 .gitignore 라 CodeBuild 체크아웃에 없고, 있더라도
 #    enable_eks_dr 가 들어 있지 않아 기본값 false 다. 안 넘기면 apply 가 생성이 아니라
@@ -51,5 +59,7 @@ phases:
           -target=aws_iam_role_policy_attachment.eks_dr_bastion_ssm \
           -target=aws_iam_role_policy.eks_dr_bastion_describe \
           -target=aws_iam_role_policy.eks_dr_bastion_vault_restore \
+          -target=aws_iam_role_policy.eks_dr_bastion_ssm_param \
+          -target=aws_iam_role_policy.eks_dr_bastion_command_logs \
           -target=aws_iam_instance_profile.eks_dr_bastion \
           -target=aws_instance.eks_dr_bastion
