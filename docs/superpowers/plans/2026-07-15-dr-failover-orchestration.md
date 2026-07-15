@@ -342,14 +342,28 @@ aws ec2 describe-instances --region ap-northeast-2 \
 - Modify: `infra/terraform/aws/dr-orchestration.tf`
 - Modify: `infra/terraform/aws/README.md`
 
+> **🆕 CloudWatch 출력을 택하면서 리소스 2개가 늘었다**(T2 구현, 스펙 §11.10):
+> `aws_cloudwatch_log_group.dr_bastion_commands` + `aws_iam_role_policy.eks_dr_bastion_command_logs`.
+> **후자를 빠뜨리면 stdout 전문이 조용히 유실된다** — SSM 의 CloudWatch 출력은 **bastion 자격증명**으로
+> 쓰는데, 붙어 있는 `AmazonSSMManagedInstanceCore` 는 **logs 권한을 하나도 주지 않는다**(실측 확인).
+> F3(bastion 의 `ssm:PutParameter` 누락)와 **같은 클래스**다: 설계가 bastion 에서 AWS API 를 부르는데
+> 그 IAM 을 아무도 안 만든다.
+
 **Interfaces:**
-- Consumes: `aws_iam_role.dr_sfn`(Plan 1) — 정책에 SSM·S3 액션 추가 필요
+- Consumes: `aws_iam_role.dr_sfn`(Plan 1) — 정책에 SSM 액션 추가 필요
 - Produces: `aws_sfn_state_machine.dr_run_on_bastion` — Task 5 가 `states:startExecution.sync` 로 호출
 - **입력 계약:** `{instanceId, script, env, timeoutSeconds, label}` — **`env` 는 항상 채운다**(기본 `":"` = 셸 no-op).
   스크립트 앞에 실릴 셸 한 줄이며 [7] 의 스냅샷 주입에만 실값을 쓴다. **문자열 조립을 하지 않는 이유는 §Task 5 [7]**
   (스크립트 전문을 `States.Format` 리터럴에 넣으면 따옴표·중괄호·개행이 intrinsic 을 깨 정의가 거부됨)
-- **출력 계약:** `{status, responseCode, stdoutTail, stdoutUrl, stderrUrl}` — **stdout 전문을 반환하지 않는다**
+- **출력 계약:** `{status, responseCode, stdoutTail, commandId, logGroup}` — **stdout 전문을 반환하지 않는다.**
+  전문은 **CloudWatch 로그그룹**(`/aws/ssm/cledyu-lab-dr-failover`)에 있고 `commandId` 로 찾는다:
+  `aws logs tail <logGroup> --log-stream-name-prefix <commandId>`
+  > **⚠️ 초안은 `stdoutUrl`·`stderrUrl`(S3) 이었으나 S3 경로가 3중으로 막혀 있었다**(T2 착수 전 발견, 스펙 §11.10):
+  > (1) bastion 롤에 `s3:PutObject` 없음 — SSM 은 **인스턴스 자격증명**으로 올린다 (2) 버킷이 SSE-KMS 인데
+  > bastion 엔 `kms:Decrypt` 만 (3) 버킷이 **Object Lock GOVERNANCE 30일** — 드릴 로그가 30일간 삭제 불가.
+  > (1)(2)는 IAM 으로 고쳐지나 **(3)은 설계 문제**다: `dr_backups` 는 WORM 금고이고 운영 로그와 성격이 정반대다.
 - **상태 흐름:** `WaitForSsmAgent → AgentReady? → BuildCommands(Pass) → SendCommand → WaitCmd → GetResult → Done?`
+  (+ `WaitAgent` 루프, 종료: `Succeeded`(End) / `Failed`(Fail))
 
 - [ ] **Step 1: SFN 롤 정책 확장 — 정책이 2개로 갈린다(사이클 회피)**
 
@@ -551,9 +565,14 @@ resource "aws_sfn_state_machine" "dr_run_on_bastion" {
           # 스크립트가 1시간까지 매달릴 수 있었다(적대적 검증 2026-07-15).
           # → 배달은 짧게 고정(에이전트가 이미 Online 인 것을 WaitForSsmAgent 가 확인했으므로 60s 면 충분),
           #    실행 제한은 executionTimeout 에 $.timeoutSeconds 를 넣는다.
-          TimeoutSeconds     = 60
-          OutputS3BucketName = aws_s3_bucket.dr_backups.id
-          OutputS3KeyPrefix  = "dr-failover-logs"
+          TimeoutSeconds = 60
+          # ⚠️ S3(dr_backups) 로 보내지 않는다 — 3중으로 막혀 있다(스펙 §11.10):
+          # bastion 에 s3:PutObject 없음 · SSE-KMS 쓰기용 GenerateDataKey 없음 ·
+          # **Object Lock GOVERNANCE 30일**(WORM 금고에 드릴 로그가 30일씩 잠긴다).
+          CloudWatchOutputConfig = {
+            CloudWatchLogGroupName  = aws_cloudwatch_log_group.dr_bastion_commands.name
+            CloudWatchOutputEnabled = true
+          }
           Parameters = {
             # BuildCommands(Pass)가 만든 [env, script] 2원소 배열. AWS-RunShellScript 는 commands 를
             # 순서대로 **같은 셸**에서 실행하므로 앞 원소의 export 가 뒤 스크립트에 적용된다.
@@ -623,15 +642,15 @@ resource "aws_sfn_state_machine" "dr_run_on_bastion" {
           "status.$"       = "$.result.Status"
           "responseCode.$" = "$.result.ResponseCode"
           "stdoutTail.$"   = "$.result.StandardOutputContent"
-          "stdoutUrl.$"    = "$.result.StandardOutputUrl"
-          "stderrUrl.$"    = "$.result.StandardErrorUrl"
+          "commandId.$"    = "$.cmd.Command.CommandId"
+          logGroup         = aws_cloudwatch_log_group.dr_bastion_commands.name
         }
         End = true
       }
       Failed = {
         Type  = "Fail"
         Error = "BastionScriptFailed"
-        Cause = "SSM 명령 실패 — 자식 SM 실행의 GetResult 상태에서 stdoutUrl/stderrUrl 확인"
+        Cause = "SSM 명령 실패 — 자식 SM 실행 이력의 GetResult 결과에서 commandId 를 찾아 CloudWatch 로그그룹 ${...dr_bastion_commands.name} 에서 전문 확인: aws logs tail <그룹> --log-stream-name-prefix <commandId>"
       }
     }
   })
@@ -777,7 +796,7 @@ git commit -m "feat(dr): bastion 스크립트 실행 자식 상태 머신(SSM �
 
 > **⚠️ 7번(`set -x`)은 `07-restore-vault.sh` 에 그대로 적용하면 안 된다(리뷰 지적 C6).** `set -x` 는 실행되는
 > 명령을 **인자까지** 추적하므로 Vault init 출력·`$INIT_ROOT`·`$NEWROOT`·recovery 키가 stdout/stderr 에
-> 찍힌다. 그 출력은 자식 SM 이 **S3 백업 버킷**(`OutputS3BucketName`)으로 보내고 `stdoutTail` 로
+> 찍힌다. 그 출력은 자식 SM 이 **CloudWatch 로그그룹**(`CloudWatchOutputConfig`)으로 보내고 `stdoutTail` 로
 > **Discord 실패 알림**에도 실린다 → **Vault 루트 토큰 평문 노출.**
 > → `07-` 은 **시크릿 구간에서 `set +x`** 로 끄고 그 밖에서만 켠다(아래 Step 3).
 
@@ -1248,7 +1267,11 @@ run() {  # run <스크립트> [타임아웃] [env]
 run infra/terraform/aws/scripts/bastion/03-clean-warm-etcd.sh 600
 # → SUCCEEDED 확인 후 다음. 순서대로: 03 → (노드 스케일·애드온은 Task 4 후) → 06 → 07 → 08 → 09 → 11 → 12
 ```
-Expected: 각각 `SUCCEEDED`. 실패 시 `stdoutUrl`(S3)로 전문 확인.
+Expected: 각각 `SUCCEEDED`. **실패 시 전문은 CloudWatch 에서 본다**(출력이 S3 → CloudWatch 로 바뀌었다,
+스펙 §11.10). 자식 SM 출력의 `commandId` 로:
+```bash
+aws logs tail /aws/ssm/cledyu-lab-dr-failover --region ap-northeast-2 --log-stream-name-prefix <commandId>
+```
 
 > **07 은 `SNAPSHOT_KEY` 가 필요하다** — `run` 의 3번째 인자(`env`)로 넘긴다. **이렇게 하면 T5 의 [7] 이
 > 쓰는 것과 정확히 같은 경로를 실측하게 된다**(초안은 `<(printf ...; cat ...)` 로 스크립트에 직접
