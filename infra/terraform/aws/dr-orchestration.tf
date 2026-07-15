@@ -288,6 +288,21 @@ data "aws_iam_policy_document" "dr_sfn" {
     ]
     resources = ["*"]
   }
+
+  # ── [2] TerraformApply — 없으면 AccessDenied 로 페일오버가 승인 직후 멈춘다 ──
+  statement {
+    sid       = "StartCodeBuild"
+    actions   = ["codebuild:StartBuild", "codebuild:StopBuild", "codebuild:BatchGetBuilds"]
+    resources = [aws_codebuild_project.dr_failover_tf.arn]
+  }
+
+  statement {
+    sid = "CodeBuildSyncEvents"
+    # ⚠️ codebuild:startBuild.sync 는 EventBridge 관리형 규칙으로 완료를 감지한다(AWS 문서) —
+    # .sync 통합의 숨은 IAM 요구다. 액션이 아니라 **규칙 생성 권한**이라 놓치기 쉽다.
+    actions   = ["events:PutTargets", "events:PutRule", "events:DescribeRule"]
+    resources = ["arn:aws:events:${var.region}:${data.aws_caller_identity.current.account_id}:rule/StepFunctionsGetEventForCodeBuildStartBuildRule"]
+  }
 }
 
 resource "aws_iam_role_policy" "dr_sfn" {
@@ -456,4 +471,79 @@ resource "aws_lambda_permission" "dr_disaster" {
   function_name = aws_lambda_function.dr_failover_trigger[0].function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.dr_disaster[0].arn
+}
+
+# ── [2] TerraformApply 실행기 (CodeBuild) ─────────────────────────────────────
+# Lambda 15분 제한(NAT 생성만 몇 분) + terraform 바이너리 필요 → CodeBuild 가 유일한 선택.
+# AWS SDK 직접 생성은 state 밖 고아를 만들어 failback 의 `terraform apply` 전제를 깬다.
+# VPC 연결 불요 — terraform 은 AWS API 만 호출한다(EKS 엔드포인트를 안 건드림).
+# 과금: 빌드 중에만 발생한다(idle $0) → 승인 게이트 리소스처럼 count 게이트 없이 상시 둔다.
+
+data "aws_iam_policy_document" "dr_codebuild_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+    principals {
+      type        = "Service"
+      identifiers = ["codebuild.amazonaws.com"]
+    }
+  }
+}
+
+resource "aws_iam_role" "dr_failover_tf" {
+  name               = "${var.name_prefix}-dr-failover-tf"
+  assume_role_policy = data.aws_iam_policy_document.dr_codebuild_assume.json
+}
+
+# ⚠️ 이 롤은 사실상 DR 범위 admin 이다(설계 §5.4 가 명시한 표면). terraform apply 가 무엇을 만들지는
+# -target 인자가 정하지만 **-target 은 terraform 인자일 뿐 IAM 경계가 아니므로** 롤을 좁힐 수 없다.
+# 방어선은 승인 게이트 3겹(Ed25519 서명·허용목록·armed)이고, 이 롤을 쓸 수 있는 것은 SFN 뿐이다.
+resource "aws_iam_role_policy_attachment" "dr_failover_tf_admin" {
+  role       = aws_iam_role.dr_failover_tf.name
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
+}
+
+resource "aws_cloudwatch_log_group" "dr_failover_tf" {
+  name              = "/aws/codebuild/${var.name_prefix}-dr-failover-tf"
+  retention_in_days = 30
+}
+
+resource "aws_codebuild_project" "dr_failover_tf" {
+  name         = "${var.name_prefix}-dr-failover-tf"
+  service_role = aws_iam_role.dr_failover_tf.arn
+  # -target 은 의존성만 따라가고 의존하는 것은 안 따라간다 → 정책을 명시 의존으로 묶는다
+  # (eks-dr-bastion.tf:127 · public-ingress.tf:218 기존 패턴).
+  depends_on = [aws_iam_role_policy_attachment.dr_failover_tf_admin]
+
+  artifacts { type = "NO_ARTIFACTS" }
+
+  environment {
+    compute_type = "BUILD_GENERAL1_SMALL"
+    image        = "aws/codebuild/amazonlinux2-x86_64-standard:5.0"
+    type         = "LINUX_CONTAINER"
+
+    environment_variable {
+      name  = "TF_VERSION"
+      value = "1.9.8" # versions.tf 의 required_version >= 1.9.0 을 만족하는 고정 버전
+    }
+  }
+
+  source {
+    type      = "GITHUB"
+    location  = "https://github.com/requset700k/Cledyu.git"
+    buildspec = "infra/terraform/aws/dr-failover-buildspec.yml"
+  }
+
+  # 실재해는 **검증된 main** 을 돌린다 — 재해 중에 브랜치를 굴리지 않는다.
+  # ⚠️ 드릴은 buildspec 이 아직 main 에 없을 수 있다(머지 전) → 프로젝트를 고치지 말고
+  #    `aws codebuild start-build --source-version <브랜치>` 로 **호출 시 오버라이드**한다.
+  source_version = "main"
+
+  logs_config {
+    cloudwatch_logs {
+      group_name = aws_cloudwatch_log_group.dr_failover_tf.name
+    }
+  }
+
+  build_timeout = 30 # 분. NAT·엔드포인트·bastion 생성 ~3분 + 여유
+  tags          = local.eks_dr_tags
 }
