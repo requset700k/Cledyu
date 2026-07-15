@@ -1651,6 +1651,28 @@ git commit -m "feat(dr): 애드온 멱등 설치·DNS 전환·완료/실패 알�
 - Produces: `aws_sfn_state_machine.dr_failover` — EventBridge 타겟·`failover-trigger` env 가 이걸 가리키게 교체
 - **[1] 의 승인 output `{snapshot, approvedBy, approvedAt}` → [7] 의 `SNAPSHOT_KEY` 로 흐른다**
 
+> **🔴 착수 전 결정 2건 (T1 실측에서 도출 — 스펙 §11.9):**
+>
+> **(1) 드릴을 main 에 대고 할 것인가.** [2] 는 `SourceVersion` 을 안 넘겨 **프로젝트 기본값 main** 을
+> 쓴다. **머지 전이면 main 에 buildspec 이 없어 T5 드릴이 "buildspec not found" 로 죽는다**(T1 에서
+> 실제로 겪은 실패). 권장은 **T5 전에 main 머지** — 실재해가 돌리는 게 정확히 main 이라, 브랜치를
+> 드릴하면 **정작 실제로 도는 코드를 한 번도 안 테스트**하는 셈이다.
+>
+> **(2) [2] 에 `Retry` 를 붙일 것인가.** terraform state 락은 하나다. **재해 중엔 운영자가 terraform 을
+> 만지고 있을 확률이 오히려 높고**(장애 확인하려고 `plan` 을 친다), 그 순간 승인을 누르면 [2] 가
+> `Error acquiring the state lock` 으로 죽는다(T1 에서 빌드 2개가 4초 차로 부딪혀 재현됨).
+> 빌드↔빌드는 `concurrent_build_limit = 1` 로 막았으나 **사람↔빌드는 안 막힌다.**
+> - 락은 초~분 단위로 풀리니 Retry(예: 60s × 5)로 삼킬 수 있다
+> - 그러나 **"모든 실패를 재시도"하면 `-var` 누락 같은 진짜 실패도 30분 늘어진다**
+> - → **락 에러만 골라낼 수 있는지 Step 4 에서 실측한다.** CodeBuild 실패가 SFN 에 어떤 에러명으로
+>   오는지(terraform 내부 에러까지 구분되는지) 확인 후 결정:
+>   ```bash
+>   aws stepfunctions get-execution-history --region ap-northeast-2 --execution-arn <ARN> \
+>     --query 'events[?type==`TaskFailed`].taskFailedEventDetails' --output json
+>   ```
+>   구분이 안 되면 **Retry 를 붙이지 않는다** — 재해 중 30분 지연이 락 충돌보다 나쁘다. 대신 런북에
+>   "승인 전 `terraform` 을 만지지 말 것"을 명시(Task 6).
+
 - [ ] **Step 1: 메인 SM 정의**
 
 **상태 이름·주체·다음 상태를 그대로 쓴다**(스펙 §5 표). 이름을 지어내지 말 것 — 런북·스펙·원장이
@@ -1720,7 +1742,9 @@ ALB keycloak 타겟 unhealthy 로 404/503. `09` 가 Keycloak Ready 를 기다리
         Next           = "TerraformApply"
       }
 
-      # [2] CodeBuild .sync — 최적화 통합이라 완료까지 대기한다
+      # [2] CodeBuild .sync — 최적화 통합이라 완료까지 대기한다.
+      # ⚠️ SourceVersion 을 넘기지 않는다 → 프로젝트 기본값 main 을 쓴다. 실재해는 **검증된 main** 을
+      # 돌려야 한다(재해 중에 브랜치를 굴리지 않는다). 드릴만 start-build --source-version 으로 오버라이드.
       TerraformApply = {
         Type       = "Task"
         Resource   = "arn:aws:states:::codebuild:startBuild.sync"
@@ -2123,6 +2147,13 @@ git commit -m "feat(dr): 페일오버 메인 상태 머신 13단계 + 트리거 
 - [ ] **Step 2: `dr-detection.md`**
   - 상단 경고를 **"무장 가능"** 으로 갱신(Plan 2 완료 = 하류가 붙음)
   - 승인 갈래 다이어그램에 [2]~[13] 반영
+  - **🆕 "승인 전 `terraform` 을 만지지 말 것"(T1-2, 스펙 §11.9)** — state 락은 하나라서 운영자의
+    `terraform plan/apply` 가 [2] 를 죽인다. **재해 중엔 상태를 확인하려고 terraform 을 칠 확률이
+    오히려 높다.** 확인이 필요하면 `terraform` 대신 `aws` CLI 읽기 명령을 쓴다
+  - **🆕 "미커밋 로컬 수정은 재해 중 무시된다"(T1-3, 스펙 §11.9)** — [2] 는 **GitHub main** 을 clone 한다.
+    운영자 디스크의 미커밋 수정은 **조용히 롤백된다.** DR 직전에 급히 고쳤다면 **반드시 커밋·푸시·머지**해야
+    [2] 가 그걸 본다. (T1 실측 중 실제로 이 사고가 났다 — 로컬 수정을 apply 해놓고 빌드를 돌려 옛 코드가
+    되돌렸다)
 
 - [ ] **Step 3: `dr-failback.md`**
   - **step 0 게이트 신설** — `backupEnabled=true` 확인. false 면 여기서 flip·커밋·sync 후 진행.

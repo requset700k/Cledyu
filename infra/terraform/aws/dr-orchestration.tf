@@ -545,5 +545,14 @@ resource "aws_codebuild_project" "dr_failover_tf" {
   }
 
   build_timeout = 30 # 분. NAT·엔드포인트·bastion 생성 ~3분 + 여유
-  tags          = local.eks_dr_tags
+
+  # ⚠️ 동시 빌드 금지 — terraform state 락은 **하나**다(S3 backend + DynamoDB cledyu-tf-lock).
+  # 2026-07-15 T1 실측: 4초 간격으로 빌드 2개가 시작돼 뒤엣것이 `Error acquiring the state lock`
+  # (ConditionalCheckFailedException)으로 죽었다. 락 에러는 20초 뒤에야 나고 메시지가 원인을 안 가리켜
+  # 진단이 오래 걸린다 → 아예 **시작 자체를 막아** 빠르고 명확하게 실패시킨다.
+  # 이건 빌드↔빌드 충돌만 막는다. **사람↔빌드 충돌**(운영자가 재해 중 terraform 을 만지는 경우)은
+  # 여전히 가능하고, 그건 [2] 의 Retry 로 다뤄야 한다(T5 에서 판단).
+  concurrent_build_limit = 1
+
+  tags = local.eks_dr_tags
 }

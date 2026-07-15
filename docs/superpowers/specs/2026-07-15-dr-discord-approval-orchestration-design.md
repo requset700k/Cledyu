@@ -947,3 +947,96 @@ A1~A4·C1~C6 를 반영한 계획서를 레포와 대조해 다시 공격, **9�
 **교훈 3 — 3·4회차가 각각 9건·6건을 냈다.** "이제 됐다"가 세 번 틀렸다. 정적 리뷰의 수확은 아직
 체감하지 않았으나, **남은 결함은 대부분 실행해야 보이는 종류**(PVC 재사용·peer 인증·에러명)로 수렴 중이다
 — 다음은 T1 실측이다.
+
+### 11.9 T1 실측 발견 (2026-07-15) — CodeBuild 첫 실행
+
+**4라운드 정적 리뷰(15건)를 통과한 계획이 첫 실측 5분 만에 P1 을 냈다.** 계획서의 점진적 드릴 전략이
+정확히 의도대로 작동한 것이다. 셋 다 **`.tf` 파일만 봐서는 원리적으로 안 보이는** 종류다.
+
+#### T1-1 (P1) — apply 주체가 바뀌자 EKS access entry·KMS 키 정책이 넘어갔다
+
+첫 CodeBuild 실행이 `Apply complete! Resources: 9 added, 1 changed, 2 destroyed` 를 냈다.
+**그 `2 destroyed` 와 `1 changed` 가 무해하지 않았다:**
+
+| | 이전(사람이 apply) | 이후(CodeBuild 가 apply) |
+|---|---|---|
+| EKS access entry `cluster_creator` | `user/kcy` | `role/cledyu-lab-dr-failover-tf` |
+| KMS 키 `KeyAdministration` | `user/kcy` | `role/cledyu-lab-dr-failover-tf` |
+
+**원인 — eks 모듈이 caller identity 를 기본값으로 쓰는 곳이 두 군데다:**
+```hcl
+# eks-dr.tf:79 (당시)
+enable_cluster_creator_admin_permissions = true   # → main.tf:243 이 caller 를 merge
+# kms_key_administrators 미지정
+# → main.tf:316  coalescelist(var.kms_key_administrators, [session_context.issuer_arn])
+```
+지금까지는 **런북대로 사람이 apply** 해서 늘 `user/kcy` 였다. [2] TerraformApply 가 **CodeBuild** 로
+apply 하게 되면서 주체가 바뀌었다.
+
+**페일오버 자체는 안 깨진다** — bastion entry 는 `access_entries` 로 명시돼 있고(살아남음), 클러스터는
+private-only 라 `user/kcy` 의 노트북 kubectl 은 애초에 불가했으며, KMS 는 root 문이 있어 계정 락아웃이 없다.
+**진짜 문제는 플립플롭이다:** 사람이 apply → kcy, CodeBuild 가 apply → 롤, **terraform 이 영원히
+수렴하지 않는다.** 그리고 **페일오버 경로에 destroy 가 상시로 뜨면 운영자가 destroy 줄을 안 읽게 된다** —
+그건 `-var` 누락으로 warm DR 129개가 날아가는 사고를 놓치는 훈련이다.
+
+**정정:** caller identity 의존을 양쪽 다 제거하고 **명시**로 바꿨다.
+```hcl
+locals { eks_dr_admin_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/kcy" }
+enable_cluster_creator_admin_permissions = false
+kms_key_administrators                   = [local.eks_dr_admin_arn]
+access_entries = { bastion = {...}, operator = { principal_arn = local.eks_dr_admin_arn, ... } }
+```
+`account_id` 는 어느 주체든 같은 계정이라 결정적이다. **CodeBuild 롤은 일부러 안 넣었다** —
+`versions.tf` 에 kubernetes provider 가 없어 terraform 이 k8s API 를 호출하지 않는다. 받아간 admin 은
+**애초에 불필요한 권한**이었다.
+
+**검증(실측):** CodeBuild 2회 연속 → 1회차 `2 added, 1 changed, 2 destroyed`(kcy 복구) → 2회차
+**`0 added, 0 changed, 0 destroyed`**. 사람 plan 도 `No changes`. **양쪽 주체 수렴 확인.**
+덤으로 **[2] 가 멱등**임이 증명됐다(계획서가 "hot 이 이미 떠 있으면 [2] 는 no-op" 이라 쓴 전제).
+
+#### T1-2 — terraform state 락은 하나다
+
+빌드 2개가 **4초 간격**으로 시작돼 뒤엣것이 `Error acquiring the state lock`
+(DynamoDB `ConditionalCheckFailedException`)으로 죽었다.
+
+- **막은 것:** `concurrent_build_limit = 1` — 빌드↔빌드 충돌은 **시작 자체를 막아** 즉시·명확히 실패시킨다
+  (락 에러는 20초 뒤에 나고 메시지가 원인을 안 가리켜 진단이 오래 걸린다)
+- **🔴 안 막힌 것 — [2] 의 Retry (T5 에서 판단):** **사람↔빌드** 충돌은 여전하다. 그리고 **재해 중엔
+  운영자가 terraform 을 만지고 있을 확률이 오히려 높다**(장애 확인하려고 `plan` 을 친다). 그 순간 승인을
+  누르면 **[2] 가 락 충돌로 죽는다.** 락은 초~분 단위로 풀리니 Retry 로 삼킬 수 있으나, "모든 실패를
+  재시도"하면 `-var` 누락 같은 진짜 실패도 30분 늘어진다 → **락 에러만 골라낼 수 있는지 T5 에서 실측.**
+
+#### T1-3 — 코드 출처가 둘로 갈렸다 (설계의 본질, 제거 불가)
+
+| 주체 | 코드 출처 | git 인식 |
+|---|---|---|
+| 로컬 `terraform apply` | **운영자 디스크** | ❌ 미커밋도 그대로 씀 |
+| CodeBuild [2] | **GitHub clone** | ✅ **푸시된 것만** |
+
+**둘 다 같은 S3 state 에 쓴다.** T1 실측 중 실제로 사고가 났다 — 로컬에서 T1-1 을 고쳐 apply(→kcy 복구)
+했는데, **커밋·푸시 전에** 빌드를 돌려 **옛 코드가 되돌렸다**(`158ec196`). 제거할 수 없는 성질이다 —
+CodeBuild 는 git 에서 읽어야 재해 때 **검증된 코드**가 돌기 때문이다.
+
+**T1 전에는 없던 위험이다.** 사람만 terraform 을 돌렸고 **디스크 = 진실**이었다. 이제는:
+> **재해가 나서 [2] 가 돌면, 운영자 디스크의 미커밋 수정은 무시되고 main 코드가 apply 된다.**
+> 즉 **로컬에서 급히 고쳐놓은 것이 재해 중에 조용히 롤백된다.**
+
+→ Task 6 에서 **런북에 명시**한다(기술적 방어 수단이 없다 — 문서화가 유일한 완화).
+
+#### T1-4 — T5 드릴은 main 을 봐야 한다 (미결정, T5 에서)
+
+프로젝트 기본값이 `source_version = "main"` 이고 **실재해는 이게 맞다**(재해 중에 브랜치를 굴리지 않는다).
+드릴은 `start-build --source-version <브랜치>` 로 **호출 시 오버라이드**한다 — 프로젝트는 안 건드린다.
+
+**그런데 T5 는 SFN 을 통해 도는데 [2] 는 `SourceVersion` 을 안 넘긴다** → 프로젝트 기본값(main)을 쓴다
+→ **머지 전이면 main 에 buildspec 이 없어 T5 드릴이 죽는다.** 선택지:
+1. **T5 전에 main 으로 머지**(권장) — **fidelity 가 더 높다.** 실재해가 돌리는 게 정확히 main 이라,
+   브랜치를 드릴하면 **정작 실제로 도는 코드를 한 번도 안 테스트**하는 셈이다
+2. `source_version` 을 변수로 빼서 드릴 때 브랜치로 apply → 되돌리기. **되돌리기를 잊으면 실재해가
+   브랜치를 돌린다**
+
+**교훈 — 규칙을 적는 것과 지키는 것은 별개다.** T1 구현 중 "커밋·푸시가 실측보다 먼저"를 발견해
+**계획서 T1 의 스텝 순서를 뒤집어 놓고**(Step 4 Commit+push → Step 5 실측), **그 직후 eks-dr.tf 수정에서
+똑같은 실수를 했다** — 커밋 안 한 채 "빌드 돌려서 검증하자"고 한 것이다. 그 검증은 **원리적으로 성립할 수
+없었다.** §11.7 의 F 계열(배선 누락)·§11.8 의 H 계열(라벨 맹신)과 같은 뿌리다: **아는 것이 지키는 것을
+보장하지 않는다.**
