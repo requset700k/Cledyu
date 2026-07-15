@@ -1040,3 +1040,46 @@ CodeBuild 는 git 에서 읽어야 재해 때 **검증된 코드**가 돌기 때
 똑같은 실수를 했다** — 커밋 안 한 채 "빌드 돌려서 검증하자"고 한 것이다. 그 검증은 **원리적으로 성립할 수
 없었다.** §11.7 의 F 계열(배선 누락)·§11.8 의 H 계열(라벨 맹신)과 같은 뿌리다: **아는 것이 지키는 것을
 보장하지 않는다.**
+
+### 11.10 T2 착수 전 발견 (2026-07-15) — SSM 출력 경로
+
+계획서의 자식 SM 은 SSM 명령 출력을 **S3(`dr_backups`)로** 보내게 설계돼 있었다
+(`OutputS3BucketName = aws_s3_bucket.dr_backups.id`). **3중으로 막혀 있었다:**
+
+| # | 사실 | 결과 |
+|---|---|---|
+| 1 | bastion 롤에 **`s3:PutObject` 없음** (`GetObject on vault/*` 만) | 업로드 실패 — SSM 은 **인스턴스 자격증명**으로 올린다 |
+| 2 | 버킷이 **SSE-KMS** 인데 bastion 엔 `kms:Decrypt`·`DescribeKey` 만 | 쓰기용 `kms:GenerateDataKey` 없음 |
+| 3 | 버킷이 **Object Lock GOVERNANCE 30일**(실측 확인) | 드릴 로그가 **30일간 삭제 불가**로 누적 |
+
+**1·2 는 IAM 으로 고쳐지지만 3 은 설계 문제다.** `dr_backups` 는 *"삭제·변조 불가로 굳혀 writer 키 유출·
+랜섬웨어·실수 삭제로부터 보호"*하는 **WORM 금고**다(`backup.tf:11`). **백업 금고와 운영 디버그 로그는
+성격이 정반대다** — 라이프사이클(`expiration 35일`)도 Lock 때문에 제 역할을 못 한다.
+
+**정정 — CloudWatch Logs 로 보낸다.** 이 설계의 다른 로그(SFN·Lambda·CodeBuild)와 같은 곳이고,
+retention(30일)으로 자동 정리되며 `aws logs tail` 로 바로 읽는다(T1 에서 CodeBuild 디버깅하던 그 방식).
+
+```hcl
+CloudWatchOutputConfig = {
+  CloudWatchLogGroupName  = aws_cloudwatch_log_group.dr_bastion_commands.name  # /aws/ssm/cledyu-lab-dr-failover
+  CloudWatchOutputEnabled = true
+}
+```
+**출력 계약이 바뀐다:** `{..., stdoutUrl, stderrUrl}` → `{..., commandId, logGroup}`.
+
+**IAM 도 같이 만들었다 — F3 와 같은 클래스다.** SSM 의 CloudWatch 출력도 **bastion 자격증명**으로 쓰는데,
+붙어 있는 `AmazonSSMManagedInstanceCore` 는 **logs 권한을 하나도 주지 않는다**(실측: 정책에 `logs:*` 0건,
+`s3:*` 0건). 빠뜨렸으면 **stdout 전문이 조용히 유실**되고 잘린 `stdoutTail` 만 남았을 것이다.
+→ `aws_iam_role_policy.eks_dr_bastion_command_logs`(`CreateLogStream`·`PutLogEvents`·`DescribeLogStreams`).
+
+> **왜 전문이 필요한가 — `stdoutTail` 로는 부족할 수 있다.** `GetCommandInvocation` 의
+> `StandardOutputContent` 는 문서상 **"the first 24,000 characters"** 다. **뒤가 아니라 앞**이라면,
+> `set -x` 로 길게 뱉는 `06-bootstrap-apps.sh` 가 **끝에서 실패했을 때 정작 그 에러가 안 담긴다**
+> (notify 가 Discord 에 싣는 `stdoutTail[-1200:]` 도 "앞 24k 의 끝"일 뿐이다).
+> **🔴 "first" 인지는 미실측** — T2 Step 5 스모크에서 긴 출력으로 확인한다.
+
+**교훈 — F3 는 한 번으로 안 끝났다.** §11.7 F3 는 "`09-` 가 `ssm:PutParameter` 를 부르는데 IAM 이 없다"
+였고, 정정으로 **Global Constraints 에 "스크립트를 만드는 Task 는 그 스크립트가 호출하는 AWS API 의 IAM 도
+같이 만든다"** 를 넣었다. 그런데 이번 건은 **스크립트가 아니라 SSM 에이전트가** 부르는 것이라 그 규칙의
+문면에 안 걸렸다. **"bastion 에서 AWS API 를 부르는 주체"는 스크립트만이 아니다** — 에이전트·사이드카·
+오퍼레이터 전부다. 규칙을 문면대로만 읽으면 같은 함정을 다른 이름으로 다시 밟는다.
