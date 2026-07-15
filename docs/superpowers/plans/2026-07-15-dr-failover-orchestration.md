@@ -1404,7 +1404,9 @@ git commit -m "feat(dr): bastion 페일오버 스크립트 7종 + ALB 전달용 
 warm(node0) 에선 이 둘이 Deployment 라 DEGRADED 로 terraform apply 를 블록한다 → cluster_addons 에서
 빼두고(eks-dr.tf) 노드가 뜬 뒤 CLI 로 설치한다(런북 Phase 1 (3)).
 """
-import os
+
+# ⚠️ `import os` 를 넣지 않는다 — 이 파일은 os 를 안 쓴다. 레포 ruff 는 `F` 를 select 하므로
+#    F401(unused import) 로 **Step 5 정적 검증이 즉시 깨진다**(T4 구현 중 실측).
 import boto3
 
 _eks = boto3.client("eks")
@@ -1414,7 +1416,8 @@ CLUSTER = "cledyu-dr"
 def _start(name, **kw):
     """설치를 **시작만** 한다 — 기다리지 않는다.
 
-    ⚠️ Lambda 하드 상한은 900s 다. 초안은 애드온 2개를 각각 최대 600s(15s×40) **순차 대기**해서
+    ⚠️ Lambda 하드 상한은 900s 다. 초안은 애드온 2개를 각각 최대 600s(15s x 40) **순차 대기**해서
+    (※ `×`(U+00D7)를 쓰면 ruff RUF002 로 정적 검증이 깨진다 — 독스트링엔 ASCII `x`)
     최대 1200s → **타임아웃**이었다([2] 를 CodeBuild 로 만든 바로 그 이유에 다시 걸린 것 — 리뷰 지적 C4).
     → 시작만 하고 ACTIVE 대기는 SFN 의 Wait+Choice 폴링에 맡긴다(자식 SM 과 같은 패턴).
     """
@@ -1491,8 +1494,8 @@ ALB 호스트명은 [9] 가 SSM 파라미터에 써둔 값을 읽는다 — non-
 파라미터가 없으면 **즉시 실패**한다 — 폴백·추측 금지. "[9] 가 안 썼다 = ALB 를 못 얻었다"이므로
 DNS 를 건드리지 않고 멈추는 것이 옳다(DNS 는 온프렘을 가리킨 채 남아 상태가 안전).
 """
-import os
-import boto3
+
+import boto3  # `import os` 금지 — 미사용이라 ruff F401 (위 addon-install 과 동일)
 
 _ssm = boto3.client("ssm")
 _elb = boto3.client("elbv2")
@@ -1501,26 +1504,51 @@ _r53 = boto3.client("route53")
 
 HOSTS = ["api", "app", "auth"]
 PARAM = "/cledyu-dr/failover/alb-hostname"
+DOMAIN = "cledyu.com"
+WAF_ACL = "cledyu-lab-public"  # = var.name_prefix("cledyu-lab") + "-public" (waf.tf:10)
+
+
+def _find_zone():
+    """공개 hosted zone 을 이름으로 찾는다 — **일치를 확인하고** 쓴다.
+
+    ⚠️ 초안은 `list_hosted_zones_by_name(...)["HostedZones"][0]` 였다. 이 API 의 DNSName 은 필터가
+    아니라 **정렬 시작점**이다 — cledyu.com 존이 없으면 알파벳순 다음 존이 [0] 으로 돌아오고
+    **남의 존에 api·app·auth 를 UPSERT** 한다. 이 모듈 자신의 fail-closed 원칙(파라미터 없으면 즉시
+    실패)과 어긋나는 fail-open 이었다(T4 구현 중 발견).
+    private 존도 거른다 — 같은 이름의 split-horizon 존이 있으면 공개 전환이 조용히 내부에만 먹는다.
+
+    ⚠️ terraform 의 data.aws_route53_zone.public 을 참조하지 않는 이유: 그건 count =
+    local.pub(enable_public_ingress, 기본 false) 게이트라 이 게이트 없는 Lambda 가 env 로 받으면
+    평시 apply 가 index out of range 로 깨진다. → 런타임 조회 + 이름 게이트.
+    """
+    for z in _r53.list_hosted_zones_by_name(DNSName=DOMAIN)["HostedZones"]:
+        if z["Name"].rstrip(".") == DOMAIN and not z["Config"].get("PrivateZone"):
+            return z["Id"]
+    raise RuntimeError(f"공개 hosted zone 없음: {DOMAIN} — DNS 를 건드리지 않고 멈춘다")
 
 
 def handler(event, context):
     alb = _ssm.get_parameter(Name=PARAM)["Parameter"]["Value"]  # 없으면 ParameterNotFound → 실패
 
     lbs = _elb.describe_load_balancers()["LoadBalancers"]
-    lb = next(x for x in lbs if x["DNSName"] == alb)
+    # ⚠️ 초안의 `next(x for x in lbs if ...)` 는 못 찾으면 StopIteration 이 그대로 올라가
+    # CloudWatch 에 **원인 없는 에러**만 남긴다 → 기본값 None + 명시 판정.
+    lb = next((x for x in lbs if x["DNSName"] == alb), None)
+    if lb is None:
+        raise RuntimeError(f"ALB 를 못 찾음: {alb} — [9] 가 쓴 파라미터가 stale 인지 확인")
 
     # WAF(/metrics 차단)는 api·web values-eks 의 wafv2-acl-arn annotation 으로 ALB 생성과 동시에
     # 자동 연결된다 → 여기선 **붙었는지 확인만**. 안 붙었으면 /metrics 가 조용히 열린다(설계 §6.3).
     acl = _waf.get_web_acl_for_resource(ResourceArn=lb["LoadBalancerArn"]).get("WebACL")
-    if not acl or acl["Name"] != "cledyu-lab-public":
+    if not acl or acl["Name"] != WAF_ACL:
         raise RuntimeError(f"WAF 미연결 — values-eks 의 wafv2-acl-arn 이 stale: {acl}")
 
-    zone = _r53.list_hosted_zones_by_name(DNSName="cledyu.com")["HostedZones"][0]["Id"]
+    zone = _find_zone()
     changes = [
         {
             "Action": "UPSERT",
             "ResourceRecordSet": {
-                "Name": f"{h}.cledyu.com",
+                "Name": f"{h}.{DOMAIN}",
                 "Type": "A",
                 "AliasTarget": {
                     "HostedZoneId": lb["CanonicalHostedZoneId"],
@@ -1547,9 +1575,12 @@ dr-alert(#310)와 같은 us-east-1 웹훅 시크릿을 읽으므로 **ARN 에서
 Secrets Manager 는 리전 서비스라 ap-northeast-2 클라이언트가 us-east-1 시크릿을 못 찾는다(스펙 §3.3).
 """
 import json
-import os
+import os  # notify 는 os.environ 을 실제로 쓴다(위 둘과 달리 필요)
 import urllib.request
-from datetime import datetime, timezone
+
+# ⚠️ `from datetime import datetime, timezone` + `timezone.utc` 는 ruff UP017 로 깨진다
+#    (pyproject target-version = py311, 런타임 python3.12) → UTC 별칭을 쓴다.
+from datetime import UTC, datetime
 
 import boto3
 
@@ -1592,7 +1623,7 @@ def _mins(a, b):
 
 
 def handler(event, context):
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     if event.get("outcome") == "success":
         text = (
             "✅ **DR 페일오버 완료**\n"
@@ -1636,6 +1667,16 @@ def handler(event, context):
 
 **(a) 각 Lambda 의 실행 롤:**
 - `addon-install`: `eks:DescribeAddon`·`CreateAddon`·`UpdateAddon`(cledyu-dr 한정), `iam:PassRole`(ebs-csi 롤), `sts:GetCallerIdentity`
+  > **🔴 `module.eks_dr_ebs_csi_irsa[0].iam_role_arn` 을 쓰지 말 것(T4 구현 중 실측 — `terraform validate`
+  > 가 실제로 거부했다).** 그 모듈은 `count = local.eks_dr_enabled`(**기본 false** — tfvars 에 `enable_eks_dr`
+  > 가 없다)라 **list of object** 다. 이 Lambda 들엔 게이트가 없으므로 참조하면 평시 apply 가
+  > index out of range 로 깨진다. **eks-dr.tf:139 가 "롤명 `cledyu-dr-ebs-csi` 결정적"이라 명시한 게
+  > 정확히 이 용도** → ARN 을 문자열로 조립한다:
+  > `"arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.eks_dr_name}-ebs-csi"`
+  > (dns-switch 가 Route53 존을 런타임 조회하는 것도 **같은 구조** — `data.aws_route53_zone.public` 이
+  > `enable_public_ingress` 게이트라 참조 불가. **게이트된 것을 게이트 없는 것이 참조하면 안 된다**가 규칙이다.)
+  > **`iam:PassedToService = eks.amazonaws.com` 조건을 함께 건다**(초안 누락) — 없으면 이 롤로 ebs-csi 롤을
+  > EKS 아닌 서비스에도 넘길 수 있다.
 - `dns-switch`: `ssm:GetParameter`(`/cledyu-dr/failover/*`), `elasticloadbalancing:DescribeLoadBalancers`,
   `wafv2:GetWebACLForResource`, `route53:ChangeResourceRecordSets`·`ListHostedZonesByName`(해당 존)
 - `notify`: `secretsmanager:GetSecretValue`(**us-east-1 의 `discord_webhook` ARN** — dr-alert 와 공용)
@@ -1722,6 +1763,22 @@ Expected: Discord 에 `✅ DR 페일오버 완료`(**RTO 2단이 `?` 가 아니�
 
 > **실제 형식은 드릴에서 재확인한다.** 위 `+0000` 은 AWS 문서 기준이고, 진짜 값은 T7 드릴 때
 > `aws stepfunctions describe-execution --query input` 으로 확인해 이 payload 를 갱신한다.
+
+**✅ 실측 완료 (2026-07-15) — notify 양쪽 경로 통과. 상세는 스펙 §11.13:**
+- `감지→승인: 10분` 렌더 = `+0000`·`Z` **양쪽 형식 파싱 확인**(C2 회귀 방어가 실제로 동작).
+  `승인→서빙: 621분` 은 버그가 아니라 테스트 payload 의 과거 `approvedAt` 과 실시간 `now` 의 간격이다.
+- 실패 경로도 렌더 확인(`실행: ?` 는 테스트 payload 에 `executionArn` 이 없어서 — 실제론 SFN 이 채운다).
+- `terraform plan -target=aws_lambda_function.dr_notify` → **`4 to add, 0 to change, 0 to destroy`**.
+  `-target` 이 게이트 리소스를 안 건드림을 확인(tfvars 에 `enable_eks_dr` 가 없어 전체 apply 였다면
+  warm DR 129개 destroy 였다).
+
+**🔴 실패 알림의 코드블록엔 스크립트 출력이 안 온다 — 정적 안내문이 온다(§11.13 (b)(c)(d)).**
+`set -x` 트레이스와 명령 에러는 **stderr** 인데 `stdoutTail` 은 `StandardOutputContent`(stdout 전용)이고,
+게다가 자식 SM 의 `Failed` 는 `Fail` 타입이라 **정적 `Cause` 문자열만** 실을 수 있다.
+**결정: B안(현재 설계 유지)** — 실패 진단은 CloudWatch 경유, 알림엔 포인터만. 시크릿 유출 표면 0 을
+얻는 대가로 "알림 → SFN 콘솔 → 자식 실행 → commandId → CloudWatch" **3~4홉**을 수용한다.
+위 테스트 payload 의 `stdoutTail: "테스트 실패 메시지"` 는 **실제보다 예쁘다** — 진짜 경로에선 그 자리에
+"SSM 명령 실패 — ... CloudWatch 로그그룹 ... 에서 전문 확인" 안내문이 찍힌다.
 
 - [ ] **Step 6: Commit** (사용자가 실행)
 
@@ -2121,6 +2178,11 @@ ALB keycloak 타겟 unhealthy 로 404/503. `09` 가 Keycloak Ready 를 기다리
             outcome = "failed"
             # SFN 은 "어느 상태가 실패했나"를 catcher 에 안 준다 → 에러명으로 대신한다.
             # 자식 SM 실패는 BastionScriptFailed 로 오고, 어느 스크립트인지는 Cause 로 판별한다.
+            # ⚠️ **스펙 §11.13 (e) 필독** — bastion 7단계가 전부 같은 값으로 온다(자식 SM 의 Fail 은
+            #    Error 하나뿐). `.sync` 가 이를 States.TaskFailed 로 감쌀 가능성이 있으므로 **실제
+            #    문자열은 [2.4] 와 같은 방법으로 실측 확정한다 — 지어내지 말 것.**
+            # ⚠️ stdoutTail 은 **스크립트 출력이 아니다**(§11.13 (b)(c)) — stderr 는 캡처되지 않고
+            #    Fail 타입은 정적 Cause 만 싣는다. B안(§11.13 (d)) 대로 CloudWatch 포인터가 실린다.
             "failedState.$"  = "$.error.Error"
             "stdoutTail.$"   = "$.error.Cause"
             "executionArn.$" = "$$.Execution.Id"
