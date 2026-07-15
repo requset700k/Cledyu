@@ -108,6 +108,29 @@ resource "aws_iam_role_policy" "eks_dr_bastion_vault_restore" {
   policy = data.aws_iam_policy_document.eks_dr_bastion_vault_restore[0].json
 }
 
+# [9] 09-wait-apps-ready.sh 가 ALB 호스트명을 여기 써서 [10] SwitchDNS(non-VPC Lambda)에 넘긴다.
+# non-VPC Lambda 는 private EKS 에 못 닿고 자식 SM 은 stdout 을 CloudWatch 로 보낼 뿐이라 이 파라미터가
+# 유일한 전달 경로다(설계 §5.1.2). 경로를 /cledyu-dr/failover/* 로 한정해 다른 파라미터는 못 건드리게 한다.
+#
+# ⚠️ 붙어 있는 AmazonSSMManagedInstanceCore 는 GetParameter 는 주지만 **PutParameter 는 안 준다.**
+# 없으면 `09-` 의 **마지막 줄**이 AccessDenied 로 죽는데, 그 시점은 Kafka·VE·Keycloak 이 다 뜨고
+# Vault·CNPG 복원까지 끝난 **~40분 뒤**다. 그리고 [10] 은 설계대로 fail-closed 라 DNS 를 안 넘긴다
+# → **모든 게 정상 복구됐는데 서비스는 안 돌아온다**(적대적 검증 3회차 F3).
+data "aws_iam_policy_document" "eks_dr_bastion_ssm_param" {
+  count = local.eks_dr_enabled
+  statement {
+    actions   = ["ssm:PutParameter"]
+    resources = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/cledyu-dr/failover/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "eks_dr_bastion_ssm_param" {
+  count  = local.eks_dr_enabled
+  name   = "ssm-put-failover-param"
+  role   = aws_iam_role.eks_dr_bastion[0].id
+  policy = data.aws_iam_policy_document.eks_dr_bastion_ssm_param[0].json
+}
+
 resource "aws_iam_instance_profile" "eks_dr_bastion" {
   count = local.eks_dr_enabled
   name  = "${local.eks_dr_name}-bastion"
@@ -124,7 +147,14 @@ resource "aws_instance" "eks_dr_bastion" {
 
   # SSM 정책 attachment 를 명시적 의존으로 묶어 -target 재생성 시 SSM 접속이 끊기지 않게 한다
   # (proxy 인스턴스와 동일 패턴).
-  depends_on = [aws_iam_role_policy_attachment.eks_dr_bastion_ssm]
+  # -target 은 의존성만 따라가고 의존하는 것은 안 따라간다 → 정책들을 명시 의존으로 묶는다.
+  # ⚠️ ssm_param 이 빠지면 `09-` 가 ~40분 뒤 마지막 줄에서 죽고, ssm_command_logs 가 빠지면
+  # 명령 로그 전문이 조용히 유실된다(스펙 §11.10·§11.11).
+  depends_on = [
+    aws_iam_role_policy_attachment.eks_dr_bastion_ssm,
+    aws_iam_role_policy.eks_dr_bastion_ssm_param,
+    aws_iam_role_policy.eks_dr_bastion_command_logs,
+  ]
 
   metadata_options {
     http_tokens   = "required"
