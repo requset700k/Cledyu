@@ -337,6 +337,23 @@ data "aws_iam_policy_document" "dr_sfn" {
     actions   = ["eks:UpdateNodegroupConfig", "eks:DescribeNodegroup", "eks:ListNodegroups"]
     resources = ["*"] # 노드그룹 이름을 런타임에 조회하므로 사전 특정 불가
   }
+
+  # ── [5]·[10]·[13] Lambda 호출 — 없으면 이 셋과 NotifyFailed 가 전부 AccessDenied ──
+  # ⚠️ notify 를 빠뜨리면 **실패가 무음이 된다**: 모든 Catch 가 NotifyFailed 로 가는데 그게
+  # AccessDenied 면 SFN 은 FAILED 로 끝나고 Discord 엔 아무것도 안 온다 → 재해 중 "승인 눌렀는데
+  # 소식이 없다". 이 설계의 마지막 방어선이라 T4 Step 5 에서 가장 먼저 확인한다.
+  #
+  # 사이클 없음 — Lambda 3개는 자기 실행 롤만 보고 aws_iam_role_policy.dr_sfn 을 depends_on 하지
+  # 않는다. 사이클이 나는 건 자식 SM 뿐이고 그건 dr_sfn_child 로 분리했다(위 주석).
+  statement {
+    sid     = "InvokeFailoverLambdas"
+    actions = ["lambda:InvokeFunction"]
+    resources = [
+      aws_lambda_function.dr_addon_install.arn,
+      aws_lambda_function.dr_dns_switch.arn,
+      aws_lambda_function.dr_notify.arn,
+    ]
+  }
 }
 
 # ⚠️ 자식 SM 을 참조하는 statement 는 **별도 정책**이어야 한다 — dr_sfn 에 두면 terraform 사이클이다:
@@ -865,4 +882,215 @@ resource "aws_sfn_state_machine" "dr_run_on_bastion" {
       }
     }
   })
+}
+
+# ══ [5] InstallAddons — coredns·ebs-csi 멱등 설치 (Lambda) ═════════════════════
+# warm(node0) 에선 이 둘이 Deployment 라 DEGRADED 로 apply 를 블록한다 → cluster_addons 에서 빼두고
+# (eks-dr.tf:133-139) [4] ScaleNodes 직후 여기서 설치한다. Lambda 는 **시작만** 하고 ACTIVE 대기는
+# SFN 의 WaitAddons→CheckAddons 폴링이 한다(900s 상한 회피 — [2] 를 CodeBuild 로 뺀 것과 같은 이유).
+data "archive_file" "dr_addon_install" {
+  type        = "zip"
+  source_file = "${path.module}/dr-orchestration-lambda/addon-install/index.py"
+  output_path = "${path.module}/dr-orchestration-lambda/addon-install/addon-install.zip"
+}
+
+resource "aws_iam_role" "dr_addon_install" {
+  name               = "${var.name_prefix}-dr-addon-install"
+  assume_role_policy = data.aws_iam_policy_document.dr_lambda_assume.json
+}
+
+data "aws_iam_policy_document" "dr_addon_install" {
+  statement {
+    sid     = "ManageAddons"
+    actions = ["eks:DescribeAddon", "eks:CreateAddon", "eks:UpdateAddon"]
+    resources = [
+      "arn:aws:eks:${var.region}:${data.aws_caller_identity.current.account_id}:cluster/${local.eks_dr_name}",
+      "arn:aws:eks:${var.region}:${data.aws_caller_identity.current.account_id}:addon/${local.eks_dr_name}/*/*",
+    ]
+  }
+  statement {
+    sid     = "PassEbsCsiRole"
+    actions = ["iam:PassRole"]
+    # create/update_addon 의 serviceAccountRoleArn 은 PassRole 을 요구한다 — 없으면 ebs-csi 만
+    # AccessDenied 로 죽고 coredns 는 성공해 **절반만 설치된 상태**가 된다.
+    #
+    # ⚠️ module.eks_dr_ebs_csi_irsa[0].iam_role_arn 을 쓰지 않는다 — 그 모듈은 count =
+    # local.eks_dr_enabled(기본 false) 라 이 게이트 없는 Lambda 가 참조하면 평시 apply 가
+    # index out of range 로 깨진다. eks-dr.tf:139 가 "롤명 결정적"이라 명시한 게 이 용도다.
+    resources = ["arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.eks_dr_name}-ebs-csi"]
+    condition {
+      test     = "StringEquals"
+      variable = "iam:PassedToService"
+      values   = ["eks.amazonaws.com"]
+    }
+  }
+  statement {
+    sid       = "WhoAmI"
+    actions   = ["sts:GetCallerIdentity"]
+    resources = ["*"] # GetCallerIdentity 는 리소스 한정을 지원하지 않는다(AWS 문서)
+  }
+  statement {
+    sid     = "Logs"
+    actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = [
+      "arn:aws:logs:${var.region}:*:log-group:/aws/lambda/${var.name_prefix}-dr-addon-install",
+      "arn:aws:logs:${var.region}:*:log-group:/aws/lambda/${var.name_prefix}-dr-addon-install:*",
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "dr_addon_install" {
+  name   = "${var.name_prefix}-dr-addon-install"
+  role   = aws_iam_role.dr_addon_install.id
+  policy = data.aws_iam_policy_document.dr_addon_install.json
+}
+
+resource "aws_cloudwatch_log_group" "dr_addon_install" {
+  name              = "/aws/lambda/${var.name_prefix}-dr-addon-install"
+  retention_in_days = 30
+}
+
+resource "aws_lambda_function" "dr_addon_install" {
+  function_name    = "${var.name_prefix}-dr-addon-install"
+  depends_on       = [aws_cloudwatch_log_group.dr_addon_install, aws_iam_role_policy.dr_addon_install]
+  filename         = data.archive_file.dr_addon_install.output_path
+  source_code_hash = data.archive_file.dr_addon_install.output_base64sha256
+  handler          = "index.handler"
+  runtime          = "python3.12"
+  role             = aws_iam_role.dr_addon_install.arn
+  timeout          = 60 # 시작만 한다 — 대기는 SFN 폴링
+}
+
+# ══ [10] SwitchDNS — api·app·auth 를 EKS ALB 로 (Lambda) ═══════════════════════
+# bastion 롤엔 route53/wafv2/elbv2 권한이 없다(런북 명시: AccessDenied) → Lambda 가 자기 롤로 한다.
+# Route53 은 공개 API 라 VPC 연결 불요. ALB 신원은 [9] 가 쓴 SSM 파라미터가 유일한 경로(설계 §5.1.2).
+data "archive_file" "dr_dns_switch" {
+  type        = "zip"
+  source_file = "${path.module}/dr-orchestration-lambda/dns-switch/index.py"
+  output_path = "${path.module}/dr-orchestration-lambda/dns-switch/dns-switch.zip"
+}
+
+resource "aws_iam_role" "dr_dns_switch" {
+  name               = "${var.name_prefix}-dr-dns-switch"
+  assume_role_policy = data.aws_iam_policy_document.dr_lambda_assume.json
+}
+
+data "aws_iam_policy_document" "dr_dns_switch" {
+  statement {
+    sid       = "ReadAlbParam"
+    actions   = ["ssm:GetParameter"]
+    resources = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/cledyu-dr/failover/*"]
+  }
+  statement {
+    sid     = "FindAlb"
+    actions = ["elasticloadbalancing:DescribeLoadBalancers"]
+    # Describe* 는 리소스 한정을 지원하지 않는다(AWS 문서) — ALB 목록에서 DNSName 으로 찾아야 한다.
+    resources = ["*"]
+  }
+  statement {
+    sid     = "CheckWaf"
+    actions = ["wafv2:GetWebACLForResource"]
+    # ⚠️ ALB(조회 대상)와 WebACL(반환값) **양쪽**에 권한이 필요하다 — ALB ARN 은 런타임에 알고,
+    # ACL 은 lab public 스택 소유라 여기서 특정하면 그 스택 게이트에 묶인다.
+    resources = ["*"]
+  }
+  statement {
+    sid     = "SwitchRecords"
+    actions = ["route53:ChangeResourceRecordSets"]
+    # 존 ID 는 런타임 조회다 — public-ingress 의 data.aws_route53_zone 은 enable_public_ingress
+    # 게이트(기본 false)라 여기서 참조하면 DR apply 에서 index out of range 로 깨진다.
+    resources = ["arn:aws:route53:::hostedzone/*"]
+  }
+  statement {
+    sid       = "FindZone"
+    actions   = ["route53:ListHostedZonesByName"]
+    resources = ["*"] # List* 는 리소스 한정을 지원하지 않는다(AWS 문서)
+  }
+  statement {
+    sid     = "Logs"
+    actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = [
+      "arn:aws:logs:${var.region}:*:log-group:/aws/lambda/${var.name_prefix}-dr-dns-switch",
+      "arn:aws:logs:${var.region}:*:log-group:/aws/lambda/${var.name_prefix}-dr-dns-switch:*",
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "dr_dns_switch" {
+  name   = "${var.name_prefix}-dr-dns-switch"
+  role   = aws_iam_role.dr_dns_switch.id
+  policy = data.aws_iam_policy_document.dr_dns_switch.json
+}
+
+resource "aws_cloudwatch_log_group" "dr_dns_switch" {
+  name              = "/aws/lambda/${var.name_prefix}-dr-dns-switch"
+  retention_in_days = 30
+}
+
+resource "aws_lambda_function" "dr_dns_switch" {
+  function_name    = "${var.name_prefix}-dr-dns-switch"
+  depends_on       = [aws_cloudwatch_log_group.dr_dns_switch, aws_iam_role_policy.dr_dns_switch]
+  filename         = data.archive_file.dr_dns_switch.output_path
+  source_code_hash = data.archive_file.dr_dns_switch.output_base64sha256
+  handler          = "index.handler"
+  runtime          = "python3.12"
+  role             = aws_iam_role.dr_dns_switch.arn
+  timeout          = 30
+}
+
+# ══ [13] NotifyComplete + 모든 Catch 의 NotifyFailed (Lambda) ══════════════════
+# 평문이라 components 가 없다 → dr-alert(#310)와 **같은 us-east-1 웹훅**을 공용한다.
+# ⚠️ 시크릿은 us-east-1, 이 Lambda 는 ap-northeast-2 → 코드가 ARN 에서 리전을 파싱한다(스펙 §3.3).
+data "archive_file" "dr_notify" {
+  type        = "zip"
+  source_file = "${path.module}/dr-orchestration-lambda/notify/index.py"
+  output_path = "${path.module}/dr-orchestration-lambda/notify/notify.zip"
+}
+
+resource "aws_iam_role" "dr_notify" {
+  name               = "${var.name_prefix}-dr-notify"
+  assume_role_policy = data.aws_iam_policy_document.dr_lambda_assume.json
+}
+
+data "aws_iam_policy_document" "dr_notify" {
+  statement {
+    sid       = "ReadWebhook"
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [aws_secretsmanager_secret.discord_webhook.arn] # us-east-1 (provider aws.use1)
+  }
+  statement {
+    sid     = "Logs"
+    actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = [
+      "arn:aws:logs:${var.region}:*:log-group:/aws/lambda/${var.name_prefix}-dr-notify",
+      "arn:aws:logs:${var.region}:*:log-group:/aws/lambda/${var.name_prefix}-dr-notify:*",
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "dr_notify" {
+  name   = "${var.name_prefix}-dr-notify"
+  role   = aws_iam_role.dr_notify.id
+  policy = data.aws_iam_policy_document.dr_notify.json
+}
+
+resource "aws_cloudwatch_log_group" "dr_notify" {
+  name              = "/aws/lambda/${var.name_prefix}-dr-notify"
+  retention_in_days = 30
+}
+
+resource "aws_lambda_function" "dr_notify" {
+  function_name    = "${var.name_prefix}-dr-notify"
+  depends_on       = [aws_cloudwatch_log_group.dr_notify, aws_iam_role_policy.dr_notify]
+  filename         = data.archive_file.dr_notify.output_path
+  source_code_hash = data.archive_file.dr_notify.output_base64sha256
+  handler          = "index.handler"
+  runtime          = "python3.12"
+  role             = aws_iam_role.dr_notify.arn
+  timeout          = 30
+  environment {
+    variables = {
+      WEBHOOK_SECRET_ARN = aws_secretsmanager_secret.discord_webhook.arn
+    }
+  }
 }
