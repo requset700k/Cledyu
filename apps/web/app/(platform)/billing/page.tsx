@@ -30,6 +30,7 @@ function PlanCard({
   currentPlanID,
   currentSubscriptionStatus,
   selected,
+  paymentEnabled,
   onSelect,
   onPay,
 }: {
@@ -37,11 +38,13 @@ function PlanCard({
   currentPlanID: string;
   currentSubscriptionStatus: Subscription['status'];
   selected: boolean;
+  paymentEnabled: boolean;
   onSelect: (planID: string) => void;
   onPay: (planID: string) => void;
 }) {
   const isCurrent = plan.id === currentPlanID && currentSubscriptionStatus === 'active';
   const isPaid = plan.price_krw > 0;
+  const canPay = paymentEnabled && isPaid && !isCurrent;
   const buttonLabel = isCurrent ? '현재 이용 중' : isPaid ? '결제하기' : '기능 보기';
 
   return (
@@ -77,11 +80,11 @@ function PlanCard({
         type="button"
         onClick={() => {
           onSelect(plan.id);
-          if (isPaid && !isCurrent) {
+          if (canPay) {
             onPay(plan.id);
           }
         }}
-        disabled={isCurrent}
+        disabled={isCurrent || (isPaid && !paymentEnabled)}
         className="mt-6 w-full rounded-md bg-brand-500 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-400 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
       >
         {selected && !isPaid ? '선택됨' : buttonLabel}
@@ -339,6 +342,7 @@ function BillingPageContent() {
             currentPlanID={subscription.data.plan_id}
             currentSubscriptionStatus={subscription.data.status}
             selected={plan.id === selectedPlan.id}
+            paymentEnabled={paymentSimulationEnabled}
             onSelect={setSelectedPlanID}
             onPay={setPaymentPlanID}
           />
