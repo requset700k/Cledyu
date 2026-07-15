@@ -23,7 +23,18 @@ Function URL → interaction Lambda(Ed25519 검증 → 허용목록 → DynamoDB
 - **리전:** 감지·알림·EventBridge·failover-trigger = **us-east-1**(`provider aws.use1`). 나머지 전부 **ap-northeast-2**(기본 provider). 근거 §3.2
 - **작업 브랜치:** `docs/dr-discord-approval-orchestration` (스펙 `02c14bd` 이 이미 올라가 있음)
 - **terraform 컨벤션:** `var.name_prefix` 접두, 정책은 `data.aws_iam_policy_document`, 시크릿 output 금지
-- **⚠️ `-target` 없는 plan/apply 금지** — `infra/terraform/aws` 는 tfvars 가 없어 전체 plan 시 게이트 리소스를 오-destroy 한다. 항상 `-target` 부분 plan
+- **⚠️ `-target` 없는 plan/apply 금지 (2026-07-15 실측 갱신)** — `terraform.tfvars` 는 존재하나
+  `enable_public_ingress`·`dr_detection_armed`·`alert_email` **3개만** 설정한다. **`enable_eks_dr` 가 없어
+  기본값 `false`** → `-target` 없이 apply 하면 state 의 **`eks_dr` 리소스 129개(warm pilot-light 스택,
+  `module.eks_dr[0]`)가 전부 destroy** 된다. pilot-light 를 `-var enable_eks_dr=true` 로 apply 해서
+  tfvars 에 안 남은 탓이다. `terraform.tfvars.example` 에도 DR 게이트가 하나도 없다.
+  → **근본 해결은 tfvars 에 게이트 명시**(`enable_eks_dr=true` / `eks_dr_active=false` /
+  `dr_orchestration_armed=false`) 후 `-target` 없이 plan 해서 `destroy 0` 확인. **미해결 — 후속 과제.**
+- **⚠️ `-target` 에 `aws_iam_role_policy.*` 를 반드시 명시 (2026-07-15 실측)** — `-target` 은 **의존성만**
+  따라가고 **의존하는 것(dependent)은 안 따라간다.** Lambda/SM 은 `aws_iam_role` 을 참조하지만
+  `aws_iam_role_policy` 는 참조하지 않으므로(정책이 롤에 의존할 뿐), 롤만 생기고 **정책이 누락**된다 →
+  권한 없는 롤로 SFN 생성 시도 → AccessDenied 재시도 루프(2분+ hang 후 실패). 4개 롤 전부
+  `PolicyNames: []` 였다. `terraform validate` 는 디스크 전체를 보므로 이걸 못 잡는다.
 - **⚠️ terraform docs** — `infra/terraform/aws` 의 리소스/변수/출력을 바꾼 커밋엔 재생성된 `README.md` 를 반드시 함께 `git add`(안 하면 pre-commit `terraform_docs` 훅이 커밋 중단)
 - **pre-commit 훅:** `terraform_fmt`·`terraform_validate`·`terraform_tflint`·`terraform_docs`·`ruff`(--fix)·`ruff-format`
 - **Lambda 패키징:** 기존 `dr-alert` 패턴 — `data.archive_file` + `source_file`, 외부 의존성 없음. 빌드 산출물 `.zip` 은 `.gitignore` 에 추가
@@ -414,18 +425,30 @@ resource "aws_lambda_function" "dr_approval_request" {
 }
 ```
 
-> **⚠️ 크로스리전 시크릿 (2026-07-15 리뷰에서 초안의 오류 정정):** `aws_secretsmanager_secret.discord_webhook`
-> 은 `dr-alert-lambda.tf` 에서 `provider = aws.use1` 로 **us-east-1 에 생성**된다. 이 Lambda 는
-> ap-northeast-2 라 크로스리전 조회가 된다.
+> **🚨 이 Step 의 웹훅 코드는 폐기되었다 (실측 2026-07-15, 스펙 §3.6).**
 >
-> **초안은 "ARN 에 리전이 박혀 있어 boto3 가 자동으로 us-east-1 로 붙는다"고 썼는데 틀렸다.**
-> Secrets Manager 는 리전 서비스라 클라이언트가 자기 리전 엔드포인트(`secretsmanager.ap-northeast-2.amazonaws.com`)
-> 로만 요청하고, ARN 의 리전으로 라우팅해주지 않는다 — AWS 문서가 "ARN 을 쓰라"고 안내하는 건
-> **크로스계정**이지 크로스리전이 아니다. 기본 클라이언트로 두면 런타임에 `ResourceNotFoundException` 이
-> 나고, **정적검증으로는 안 잡히고 운영자 실측에서야 드러난다.**
+> **일반 incoming 웹훅(dr-alert #310)으로는 버튼·드롭다운을 보낼 수 없다.** Discord 공식 문서:
+> "Non-application-owned webhooks cannot send interactive components, and the `components` field will be
+> **ignored**". 게다가 **에러가 아니라 2xx 를 주고 조용히 버린다** → Lambda 성공·DDB 저장 정상인데
+> 메시지에 버튼만 없다(실측). 정적검증·리뷰로는 원리적으로 못 잡는다.
 >
-> → 위 `_webhook_url()` 처럼 **ARN 에서 리전을 파싱해 클라이언트를 만든다.** 이 방식은 가정이 맞든
-> 틀리든 양쪽 다 동작하므로 무조건 안전하다.
+> → **승인 메시지는 Bot API 로 보낸다:**
+> - `POST https://discord.com/api/v10/channels/{DISCORD_CHANNEL_ID}/messages`
+> - 헤더 `Authorization: Bot <token>` (`"Bot "` 접두 필수 — 빠지면 401)
+> - 시크릿 `aws_secretsmanager_secret.discord_bot_token` (**ap-northeast-2** — Lambda 와 같은 리전이라
+>   아래 크로스리전 파싱이 **불요**하다)
+> - env: `WEBHOOK_SECRET_ARN` → `BOT_TOKEN_SECRET_ARN` + `DISCORD_CHANNEL_ID`
+> - IAM: `ReadWebhook` → `ReadBotToken`
+> - 봇은 해당 채널에 **Send Messages** 권한 필요(없으면 `403 Missing Access`)
+>
+> **`dr-alert` 웹훅은 그대로 둔다** — 평문 알림은 컴포넌트가 없어 웹훅으로 충분(#310 무변경).
+> 최종 코드는 `infra/terraform/aws/dr-orchestration-lambda/approval-request/index.py` 참조.
+>
+> **크로스리전 교훈은 여전히 유효하다(다른 시크릿에 적용):** 초안은 "ARN 에 리전이 박혀 있어 boto3 가
+> 자동으로 붙는다"고 썼는데 **틀렸다.** Secrets Manager 는 리전 서비스라 클라이언트가 자기 리전
+> 엔드포인트로만 요청하고 ARN 의 리전으로 라우팅하지 않는다(AWS 문서의 "ARN 을 쓰라"는 **크로스계정**
+> 안내지 크로스리전이 아니다). us-east-1 시크릿을 ap-northeast-2 Lambda 에서 읽어야 할 때는
+> **ARN 에서 리전을 파싱해 클라이언트를 만든다** — 이 방식은 양쪽 다 동작해 무조건 안전하다.
 
 - [ ] **Step 4: 검증 — 린트/fmt/validate/부분 plan**
 
@@ -1167,6 +1190,59 @@ git commit -m "feat(dr): EventBridge 규칙(3중 AND 게이트) + 크로스리�
 ```
 
 ---
+
+## 운영자 apply — 검증된 `-target` 목록 (2026-07-15 실측)
+
+각 Task 의 `-target` 은 IAM 정책이 빠져 있다(Global Constraints 참조). **아래가 실제로 통과한 전체 목록**이다:
+
+```bash
+cd ~/Cledyu/infra/terraform/aws
+terraform apply \
+  -target=aws_dynamodb_table.dr_approvals \
+  -target=aws_iam_role_policy.dr_approval_request \
+  -target=aws_lambda_function.dr_approval_request \
+  -target=aws_secretsmanager_secret.discord_pubkey \
+  -target=aws_secretsmanager_secret.discord_bot_token \
+  -target=aws_iam_role_policy.dr_interaction \
+  -target=aws_lambda_function.dr_interaction \
+  -target=aws_lambda_function_url.dr_interaction \
+  -target=aws_lambda_permission.dr_interaction_url_invoke \
+  -target=aws_iam_role_policy.dr_sfn \
+  -target=aws_sfn_state_machine.dr_approval_test \
+  -target=aws_iam_role_policy.dr_failover_trigger \
+  -target=aws_lambda_function.dr_failover_trigger
+```
+
+EventBridge 규칙(무장)은 별도 — 드릴 때만:
+```bash
+terraform apply -var dr_orchestration_armed=true \
+  -target=aws_cloudwatch_event_rule.dr_disaster \
+  -target=aws_cloudwatch_event_target.dr_disaster \
+  -target=aws_lambda_permission.dr_disaster
+# 드릴 후 -var 없이 재실행하면 count=0 으로 삭제된다(무장 해제)
+```
+
+### 합성 EventBridge 이벤트는 불가 — `set-alarm-state` 를 쓴다 (실측 정정)
+
+초안의 `aws events put-events --entries '[{"Source":"aws.cloudwatch",...}]'` 는
+**`NotAuthorizedForSourceException`** 으로 실패한다 — **`aws.` 접두는 AWS 예약 네임스페이스**다.
+
+→ 복합알람을 직접 발동시킨다(오히려 실제 경로를 그대로 타는 더 나은 테스트):
+```bash
+aws cloudwatch set-alarm-state --region us-east-1 --alarm-name cledyu-lab-dr-disaster \
+  --state-value ALARM --state-reason "배선 검증 드릴 — 실제 재해 아님"
+```
+
+> **⚠️ 복원이 필수다.** AWS 문서: "If you use SetAlarmState on a composite alarm, the composite alarm is
+> **not guaranteed to return to its actual state**. It returns to its actual state only once any of its
+> children alarms change state." 자식(pull·push)이 안정적이면 **ALARM 에 눌러앉고, 그 상태는 진짜 재해를
+> 가린다**(EventBridge 는 상태 *변화*에만 반응 → 이미 ALARM 이면 진짜 재해에 안 쏨).
+> ```bash
+> aws cloudwatch set-alarm-state --region us-east-1 --alarm-name cledyu-lab-dr-disaster \
+>   --state-value OK --state-reason "드릴 종료 — 상태 복원"
+> aws cloudwatch describe-alarms --region us-east-1 --alarm-names cledyu-lab-dr-disaster \
+>   --alarm-types CompositeAlarm --query 'CompositeAlarms[].StateValue' --output text   # → OK 확인
+> ```
 
 ## 완료 기준
 
