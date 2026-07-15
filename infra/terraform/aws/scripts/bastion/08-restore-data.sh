@@ -21,10 +21,14 @@ aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2
 kubectl -n postgres delete cluster cledyu-pg --ignore-not-found
 kubectl -n keycloak delete cluster keycloak-pg --ignore-not-found
 
-# 🔴 **미확정 — Step 10 에서 확인한다: delete 가 PVC 도 지우나.**
-# 남아서 재생성된 Cluster 가 그걸 재사용하면 **S3 복원이 아니라 stale 데이터로 뜬다.**
+# 🔴 **미확정 — delete 가 PVC 도 지우나. 판정처는 T7 Step 4 의 표식(dr_drill_marker)이다.**
+# ⚠️ 원래 "T3 Step 10 에서 확인한다"였는데 **그 Step 이 실측 없이 지나갔다**(2026-07-15). 주석이 이미
+#    지나간 관문을 가리키는 바람에 이 건이 미아가 됐다 → **살아있는 관문(T7)으로 다시 건다.**
+# 남아서 재생성된 Cluster 가 그걸 재사용하면 **S3 복원이 아니라 stale 데이터로 뜬다**
+# (PGDATA 가 이미 있으면 bootstrap.recovery 가 아예 안 돈다).
 # 그리고 `wait --for=condition=Ready` 는 **통과하고**, [12] 의 count(*) > 0 도 **통과한다**(행은 있으니까)
-# → 이 계획에서 가장 조용한 실패 경로다. 지워지지 않으면 여기에 PVC 삭제를 명시 추가한다.
+# → 이 계획에서 가장 조용한 실패 경로다. **아래 get pvc 는 눈으로 보는 것일 뿐 게이트가 아니다.**
+# T7 표식이 0/ERROR 로 나오면 여기에 PVC 삭제를 명시 추가하고 이 주석을 실측 결과로 대체한다.
 kubectl -n postgres get pvc -l cnpg.io/cluster=cledyu-pg 2>&1 | head -3 || true
 kubectl -n keycloak get pvc -l cnpg.io/cluster=keycloak-pg 2>&1 | head -3 || true
 

@@ -2381,6 +2381,37 @@ git commit -m "docs(dr): 런북에 CleanWarmEtcd(P1c)·P1d·WAF 게이트·failb
 # → 런북 :498-573 참조. 노드만 0 으로 내리는 게 아니라 hot 리소스를 전부 내린다.
 ```
 
+- [ ] **Step 1.5: 표식 주입 — 🔴 이 드릴에서 유일하게 stale 복원을 잡을 수 있는 장치**
+
+> **왜 필요한가:** `08-restore-data.sh:24` 의 미확정(**`kubectl delete cluster` 가 PVC 도 지우나**)이
+> T3 Step 10 을 그냥 지나갔다. 안 지워지면 **CNPG 가 옛 PVC 의 PGDATA 를 재사용해 뜨고
+> `bootstrap.recovery` 가 아예 안 돈다** — S3 복원본이 아니라 **지난 드릴 데이터로 서비스가 올라간다.**
+>
+> **그리고 이 드릴은 그걸 절대 못 잡는다.** `09` 는 "파드 Ready?", `12` 는 "`users` 에 row 가 있나?" 만
+> 본다 — **옛날 데이터에도 row 는 있다.** 온프렘과 DR 데이터가 어차피 같으니 stale/fresh 를 구분할
+> 방법이 **원리적으로 없다.** → **드릴이 초록불로 끝나도 "복구됐다"가 아니라 "뭔가 떴다"일 뿐이다.**
+> 표식은 그 구분을 만드는 유일한 수단이다: **스냅샷 이후에 넣은 값이 복원본에 보이면 fresh, 없으면 stale.**
+
+```bash
+# ⚠️ 알람 발동(Step 2) **전에** 넣는다 — 재해가 시작되면 온프렘 쓰기가 멈춘다.
+# ⚠️ 레포 선례대로 -U 없이(H3). 온프렘 컨텍스트 고정 — DR 에 넣으면 시험 자체가 무의미하다.
+MARK="drill-$(date -u +%Y%m%dT%H%M%SZ)"; echo "표식: $MARK"
+
+# 전용 테이블 — users 등 실제 스키마를 안 건드린다(드릴이 프로덕션 데이터를 오염시키면 안 된다).
+kubectl --context onprem -n postgres exec cledyu-pg-1 -- psql -d cledyu -c \
+  "CREATE TABLE IF NOT EXISTS dr_drill_marker (id text primary key, at timestamptz default now())"
+kubectl --context onprem -n postgres exec cledyu-pg-1 -- psql -d cledyu -c \
+  "INSERT INTO dr_drill_marker (id) VALUES ('$MARK')"
+
+# ⚠️ WAL 이 S3 에 닿아야 복원본에 들어온다 — 강제 스위치로 현재 세그먼트를 아카이브시킨다.
+kubectl --context onprem -n postgres exec cledyu-pg-1 -- psql -d cledyu -tAc "SELECT pg_switch_wal()"
+
+# 아카이브 확인 — 여기서 실패하면 표식이 S3 에 없으니 Step 4 판정이 **거짓 음성**이 된다.
+kubectl --context onprem -n postgres exec cledyu-pg-1 -- psql -d cledyu -tAc \
+  "SELECT last_archived_wal, last_failed_wal FROM pg_stat_archiver"
+```
+`last_failed_wal` 이 비어 있고 `last_archived_wal` 이 방금 값이어야 한다.
+
 - [ ] **Step 2: 무장 + 알람 발동**
 
 ```bash
@@ -2410,6 +2441,33 @@ Discord 승인 버튼 클릭(**드롭다운에서 최신이 아닌 스냅샷을 
 ```bash
 curl -sf https://auth.cledyu.com/realms/cledyu-learn | grep -q cledyu-learn && echo "✅ realm"
 curl -s -o /dev/null -w "%{http_code}\n" https://api.cledyu.com/metrics   # → 403 (WAF)
+```
+
+**🔴 표식 판정 — 이 드릴의 진짜 합격선이다(Step 1.5 참조).**
+
+```bash
+# bastion 에서(DR 은 private). 표식이 없으면 복원이 아니라 stale PVC 재사용이다.
+NG_MARK=$(kubectl -n postgres exec cledyu-pg-1 -- psql -d cledyu -tAc \
+  "SELECT count(*) FROM dr_drill_marker WHERE id = '$MARK'" 2>&1 | tr -d '[:space:]')
+```
+| 결과 | 뜻 |
+|---|---|
+| `1` | ✅ **fresh** — S3 복원본이 서빙된다. `08` 의 delete 가 PVC 까지 지웠다(미확정 해소) |
+| `0` | ❌ **stale** — PVC 가 재사용됐다. `bootstrap.recovery` 가 안 돌았다 |
+| `ERROR: relation ... does not exist` | ❌ **stale** — 표식 테이블 생성 이전 시점의 디스크다 |
+
+> **⚠️ `0`·`ERROR` 면 다른 게이트가 전부 통과했어도 드릴은 실패다.** `12-verify-serving.sh` 의
+> `SELECT count(*) FROM users` 는 이 경우에도 통과한다 — 옛 데이터에도 users 는 있다. **"뭔가 떴다"와
+> "복구됐다"를 가르는 건 이 한 줄뿐이다.**
+> → 실패 시 `08-restore-data.sh` 에 PVC 삭제를 추가하고(런북 §destroy step 3 의 PVC 정리 참조)
+> **그 미확정 주석(`08:24`)을 실측 결과로 대체한다.**
+
+- [ ] **Step 4.5: 표식 정리**
+
+```bash
+# 온프렘 복귀(failback) 후. 드릴 흔적을 프로덕션 DB 에 남기지 않는다.
+kubectl --context onprem -n postgres exec cledyu-pg-1 -- psql -d cledyu -c \
+  "DROP TABLE IF EXISTS dr_drill_marker"
 ```
 
 - [ ] **Step 5: 알람 복원 + 무장 해제 + 파괴**
