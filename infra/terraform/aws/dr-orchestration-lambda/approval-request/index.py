@@ -3,6 +3,13 @@
 S3 의 Vault raft 스냅샷을 최신순 25개(Discord String Select 상한) 뽑아 드롭다운으로 만들고,
 승인 버튼과 함께 Discord 채널에 게시한 뒤 taskToken 을 DynamoDB 에 저장하고 반환 없이 끝난다
 (SFN 은 interaction Lambda 의 SendTaskSuccess 를 받을 때까지 대기).
+
+⚠️ **웹훅이 아니라 Bot API 로 보낸다.** dr-alert(#310)처럼 채널 설정에서 만든 일반 incoming
+웹훅은 **버튼·드롭다운을 못 보낸다** — Discord 공식 문서: "Non-application-owned webhooks cannot
+send interactive components, and the components field will be ignored". 더 나쁜 건 **에러가 아니라
+2xx 를 주고 components 만 조용히 버린다**는 점이다(실측 2026-07-15: Lambda 성공·DDB 저장까지 됐는데
+메시지에 버튼만 없음). 그래서 승인 메시지는 application 소유 주체(=봇)로 보내야 한다.
+평문 알림(dr-alert)은 컴포넌트가 없어 웹훅 그대로 둔다.
 """
 
 import json
@@ -15,32 +22,22 @@ import boto3
 
 _s3 = boto3.client("s3")
 _ddb = boto3.client("dynamodb")
+# 봇 토큰 시크릿은 이 Lambda 와 같은 리전(ap-northeast-2, 기본 provider)에 만든다 →
+# 크로스리전 파싱 불요(us-east-1 에 있는 dr-alert 웹훅 시크릿과 다른 점).
+_sm = boto3.client("secretsmanager")
 
 # Discord String Select 옵션 상한(공식 문서). 6h 주기 스냅샷 기준 약 6일치.
 MAX_OPTIONS = 25
 # 승인 대기 24h = SFN .waitForTaskToken 타임아웃과 일치시킨다.
 TTL_SECONDS = 24 * 60 * 60
+DISCORD_API = "https://discord.com/api/v10"
 
 
-def _webhook_url():
-    # dr-alert 와 동일 — 캐싱하지 않아 웹훅 로테이션이 즉시 반영된다.
-    #
-    # 이 Lambda 는 ap-northeast-2 에서 도는데 시크릿은 dr-alert-lambda.tf 가
-    # provider = aws.use1 로 만든 us-east-1 리소스다. Secrets Manager 는 리전
-    # 서비스라 클라이언트는 자기 리전 엔드포인트로만 요청하고, ARN 에 리전이
-    # 박혀 있어도 자동으로 그 리전으로 라우팅해주지 않는다(크로스리전 ARN 지원
-    # 없음 — AWS 문서의 "ARN 사용" 안내는 크로스계정 얘기지 크로스리전이 아니다).
-    # 그래서 시크릿 ARN 에서 리전을 파싱해 그 리전으로 클라이언트를 만든다.
-    # 하드코딩("us-east-1")하지 않는 이유: ARN 이 진실의 원천이라 시크릿이
-    # 나중에 다른 리전으로 옮겨져도 코드 변경 없이 따라간다.
-    arn = os.environ["WEBHOOK_SECRET_ARN"]
-    region = arn.split(":")[3]
-    sm = boto3.client("secretsmanager", region_name=region)
-    resp = sm.get_secret_value(SecretId=arn)
-    url = json.loads(resp["SecretString"])["url"]
-    if not url.startswith("https://"):
-        raise ValueError("webhook URL must be https")
-    return url
+def _bot_token():
+    # 캐싱하지 않는다 — 승인 요청은 재해·드릴 때만 발생하므로 호출당 1회 조회 비용이 무시할 수준이고,
+    # 토큰 로테이션(Developer Portal 의 Reset Token)이 warm Lambda 에도 즉시 반영된다(dr-alert 와 동일 원칙).
+    resp = _sm.get_secret_value(SecretId=os.environ["BOT_TOKEN_SECRET_ARN"])
+    return json.loads(resp["SecretString"])["token"]
 
 
 def _list_snapshots():
@@ -131,16 +128,22 @@ def handler(event, context):
         ],
     }
 
+    # Bot API 로 게시 — 웹훅은 components 를 조용히 버린다(모듈 docstring 참조).
+    # 봇은 이 채널에 Send Messages 권한이 있어야 한다(없으면 403 Missing Permissions).
     req = urllib.request.Request(  # noqa: S310
-        _webhook_url(),
+        f"{DISCORD_API}/channels/{os.environ['DISCORD_CHANNEL_ID']}/messages",
         data=json.dumps(message).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
+            # 봇 인증. "Bot " 접두는 Discord 규격이며 빠지면 401 이다.
+            "Authorization": f"Bot {_bot_token()}",
             # Discord 는 Cloudflare 뒤라 기본 UA(Python-urllib/*)를 403 으로 막는다(#311).
             "User-Agent": "Cledyu-DR-Approval/1.0 (+https://cledyu.com)",
         },
         method="POST",
     )
+    # 실패 시 예외를 그대로 올려 SFN Task 를 실패시킨다 — 승인 메시지가 안 갔는데 토큰만 24h 대기하는
+    # 상태(사람이 영영 못 누름)를 만들지 않는다.
     with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
         resp.read()
 

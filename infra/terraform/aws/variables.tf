@@ -273,5 +273,15 @@ variable "dr_approver_ids" {
     공개 식별자라 PUBLIC 레포 커밋을 감수한다 — 실질 방어선은 목록의 비밀성이 아니라 승인자 계정 2FA 다.
   EOT
   type        = list(string)
-  default     = []
+  default     = ["509288535225008138"]
+}
+
+variable "dr_discord_channel_id" {
+  description = <<-EOT
+    DR 승인 요청 메시지를 게시할 Discord 채널 ID(snowflake). 봇이 이 채널에 Send Messages 권한을
+    가져야 한다(없으면 403 Missing Permissions). 채널 ID 는 서버 멤버에게 이미 보이는 공개 식별자라
+    dr_approver_ids 와 같은 이유로 여기 default 로 커밋한다(tfvars 는 .gitignore 라 코드 리뷰를 못 거침).
+  EOT
+  type        = string
+  default     = "1526596209781899405"
 }

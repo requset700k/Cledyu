@@ -68,9 +68,9 @@ data "aws_iam_policy_document" "dr_approval_request" {
     resources = [aws_dynamodb_table.dr_approvals.arn]
   }
   statement {
-    sid       = "ReadWebhook"
+    sid       = "ReadBotToken"
     actions   = ["secretsmanager:GetSecretValue"]
-    resources = [aws_secretsmanager_secret.discord_webhook.arn]
+    resources = [aws_secretsmanager_secret.discord_bot_token.arn]
   }
   statement {
     sid     = "Logs"
@@ -104,17 +104,26 @@ resource "aws_lambda_function" "dr_approval_request" {
   timeout          = 30
   environment {
     variables = {
-      APPROVALS_TABLE    = aws_dynamodb_table.dr_approvals.name
-      BACKUP_BUCKET      = aws_s3_bucket.dr_backups.id
-      WEBHOOK_SECRET_ARN = aws_secretsmanager_secret.discord_webhook.arn
+      APPROVALS_TABLE      = aws_dynamodb_table.dr_approvals.name
+      BACKUP_BUCKET        = aws_s3_bucket.dr_backups.id
+      BOT_TOKEN_SECRET_ARN = aws_secretsmanager_secret.discord_bot_token.arn
+      DISCORD_CHANNEL_ID   = var.dr_discord_channel_id
     }
   }
 }
 
-# 주의: aws_secretsmanager_secret.discord_webhook 은 dr-alert-lambda.tf 에서 provider = aws.use1
-# 로 us-east-1 에 생성된다. 이 Lambda 는 ap-northeast-2 라 크로스리전 GetSecretValue 가 된다 —
-# ARN 에 리전이 박혀 있어 boto3 가 자동으로 us-east-1 로 붙으므로 동작하지만, 실제 apply 후
-# 스냅샷 목록·웹훅 크로스리전 조회가 되는지는 운영자가 실측으로 확인한다.
+# Discord 봇 토큰. 값은 TF 밖에서 넣는다(평문 state 회피 — 웹훅과 동일 패턴).
+#
+# ⚠️ 왜 웹훅이 아니라 봇인가: 채널 설정에서 만든 일반 incoming 웹훅(dr-alert, #310)은 버튼·드롭다운을
+# 보낼 수 없다 — Discord 공식 문서 "Non-application-owned webhooks cannot send interactive components,
+# and the components field will be ignored". 게다가 **에러가 아니라 2xx 를 주고 components 만 조용히
+# 버린다**(실측 2026-07-15: Lambda 성공·DDB 저장까지 정상인데 메시지에 버튼만 없음 → 정적검증·리뷰로는
+# 잡을 수 없고 실제 POST 를 쏴야 드러남). 승인 메시지는 application 소유 주체(=봇)로만 보낼 수 있다.
+# 평문 알림(dr-alert)은 컴포넌트가 없어 웹훅 그대로 둔다.
+resource "aws_secretsmanager_secret" "discord_bot_token" {
+  name = "${var.name_prefix}-dr-discord-bot-token"
+}
+
 
 # Discord Application Public Key(hex). 값은 TF 밖에서 넣는다 — 평문 state 회피(웹훅과 동일 패턴).
 # 이 키로 X-Signature-Ed25519 를 검증한다. 시크릿은 아니지만(공개키) 로테이션 편의를 위해 SM 에 둔다.
@@ -202,6 +211,40 @@ resource "aws_lambda_function" "dr_interaction" {
 resource "aws_lambda_function_url" "dr_interaction" {
   function_name      = aws_lambda_function.dr_interaction.function_name
   authorization_type = "NONE"
+}
+
+# ⚠️ AWS 는 2025-10 부터 Function URL 호출에 lambda:InvokeFunctionUrl **과** lambda:InvokeFunction 을
+# 둘 다 요구한다(공식 문서: "Starting in October 2025, new function URLs will require both ...").
+# 그런데 provider(aws v5.100.0)의 aws_lambda_function_url 은 구 동작대로 InvokeFunctionUrl statement
+# 하나만 자동 생성한다 → InvokeFunction 이 없어 **403 Forbidden**(AccessDeniedException)이 나고
+# Lambda 가 아예 호출되지 않는다(우리 코드의 401 조차 도달 못 함 — 실측 2026-07-15).
+#
+# ⚠️ AWS 는 2025-10 부터 Function URL 호출에 lambda:InvokeFunctionUrl **과** lambda:InvokeFunction 을
+# 둘 다 요구한다(공식 문서). 그런데 provider(aws v5.100.0)의 aws_lambda_function_url 은 구 동작대로
+# InvokeFunctionUrl statement 하나만 자동 생성한다 → 이 리소스가 없으면 **403 Forbidden**
+# (AccessDeniedException)이 나고 Lambda 가 아예 호출되지 않는다. 우리 코드의 401 조차 도달 못 해서
+# "서명 검증이 동작하는지"를 확인할 수 없다(실측 2026-07-15: 403 + 로그 스트림 0건).
+#
+# **조건을 걸 수 없다 — 셋 다 막혀 있다(실측):**
+#   - lambda:FunctionUrlAuthType → AWS AddPermission 이 400 거부("only supported for
+#     lambda:InvokeFunctionUrl action").
+#   - lambda:InvokedViaFunctionUrl(AWS 권장) → provider 미지원, 오픈 이슈
+#     hashicorp/terraform-provider-aws#44829. aws_lambda_permission 스키마에 인자 자체가 없다.
+#   - principal_org_id → 이 계정은 Organization 소속이 아니다.
+#
+# **그래서 조건 없이 연다. 감수하는 노출과 그 근거:**
+#   이 statement 는 "아무 AWS 계정이나 이 함수를 직접 Invoke 할 수 있음"을 뜻하고, 이 레포가 PUBLIC 이라
+#   ARN(계정ID·함수명)이 사실상 공개다. 그러나 (1) 서명 검증이 코드 안에 있어 헤더 없는 호출은 401 로
+#   떨어지므로 **로직은 안전**하고, (2) 실피해는 reserved_concurrent_executions(5) 소진 → 재해 순간
+#   승인 버튼 429 인데, 그때도 CLI 우회(aws stepfunctions send-task-success)가 있어 DR 자체는 안 막힌다.
+#   → 이 우회는 런북에 반드시 명시할 것(이게 이 결정의 안전망이다).
+#
+# provider 가 #44829 를 구현하면 invoked_via_function_url = true 를 얹어 이 노출을 없앨 것.
+resource "aws_lambda_permission" "dr_interaction_url_invoke" {
+  statement_id  = "FunctionURLInvokeAllowPublicAccess"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.dr_interaction.function_name
+  principal     = "*"
 }
 
 output "dr_interaction_url" {
