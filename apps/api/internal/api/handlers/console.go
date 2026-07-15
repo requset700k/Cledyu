@@ -138,6 +138,26 @@ func (h *Handler) kubevirtConsole(c *gin.Context, sessionID string) {
 	}
 	defer ws.Close() //nolint:errcheck
 
+	// 세션당 활성 콘솔 1개 제한(기존 창 우선). KubeVirt serial console(ttyS0)은 VM당 배타
+	// 접속이라 두 번째 연결이 붙으면 첫 번째가 끊긴다. 같은 계정으로 두 창을 열면 두 콘솔이
+	// 서로를 축출하며 무한 재연결하므로, 이미 활성 세션이면 이 연결을 KubeVirt 에 붙기 전에
+	// 정상 종료(close 1000)로 닫는다. 클라이언트는 1000 을 의도된 종료로 보고 재연결하지
+	// 않아(runtime-api-origin.mjs shouldReconnect) 루프가 끊긴다. 거절은 SerialConsole 을
+	// 열기 전에 하므로 KubeVirt 배타락 축출 자체가 발생하지 않는다.
+	if !h.consoles.acquire(sessionID) {
+		_ = ws.WriteMessage(websocket.TextMessage, []byte("\r\n[이미 다른 창에서 터미널이 열려 있습니다. 이 창을 닫고 기존 창을 사용하세요.]\r\n"))
+		_ = ws.WriteControl(
+			websocket.CloseMessage,
+			websocket.FormatCloseMessage(websocket.CloseNormalClosure, "duplicate console"),
+			time.Now().Add(time.Second),
+		)
+		if h.met != nil {
+			h.met.wsConnectionDrops.WithLabelValues("kubevirt", "duplicate").Inc()
+		}
+		return
+	}
+	defer h.consoles.release(sessionID)
+
 	// 연결 수립 기록
 	if h.met != nil {
 		h.met.wsConnectionsEstablished.WithLabelValues("kubevirt").Inc()
