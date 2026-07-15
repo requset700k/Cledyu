@@ -1272,9 +1272,12 @@ for f in $B/*.sh; do code "$f" | grep -q 'psql -U' && echo "❌ $f: psql -U — 
 code $B/06-bootstrap-apps.sh | grep -q 'get configmap cledyu-root-ca-bundle\|get clusterissuer' \
   && echo "❌ 06 이 아직 없는 게 정상인 것을 게이트한다(H1)" || echo "✅ 06 과대 게이트 없음"
 
-# §11.12 회귀 — SSM 은 HOME 을 안 준다. 7개 전부 있어야 한다(하나라도 빠지면 kubectl 이 localhost:8080)
-[ "$(grep -l 'export HOME=/root' $B/*.sh | wc -l)" -eq 7 ] \
-  && echo "✅ HOME 7/7" || echo "❌ export HOME=/root 누락 — kubectl 이 localhost:8080 으로 폴백한다"
+# §11.12 회귀 — SSM 은 HOME 을 안 준다. **전부** 있어야 한다(하나라도 빠지면 kubectl 이 localhost:8080)
+# ⚠️ 개수를 하드코딩하지 않는다 — T4 실측이 04-wait-nodes-ready.sh 를 더해 7→8 이 됐고(§11.14 (e)),
+#    `-eq 7` 이던 초안은 그 순간 **정상인데 ❌ 를 뱉는 오탐**이 됐다. 파일 수와 비교한다.
+[ "$(grep -l 'export HOME=/root' $B/*.sh | wc -l)" -eq "$(ls $B/*.sh | wc -l)" ] \
+  && echo "✅ HOME $(ls $B/*.sh | wc -l)/$(ls $B/*.sh | wc -l)" \
+  || echo "❌ export HOME=/root 누락 — kubectl 이 localhost:8080 으로 폴백한다"
 
 cd infra/terraform/aws && terraform fmt -check eks-dr-bastion.tf && terraform validate
 ```
@@ -1742,6 +1745,20 @@ Expected: 끝에 `{"status": {"coredns": "ACTIVE", "aws-ebs-csi-driver": "ACTIVE
 **`start` 를 두 번 돌려도 성공**해야 한다(멱등 — failback 이 애드온을 warm 에 남기므로 재-failover 시
 `create` 는 409 로 죽는다. `describe` 후 `update` 로 분기하는 게 그 방어다).
 
+> **🔴 실측(2026-07-15): 두 번은 통과하고 세 번째가 죽었다 — 이 성공 기준 자체가 과소했다(스펙 §11.14 (g)).**
+> 3회차 `start` → `ResourceInUseException: cannot be updated as it is currently in UPDATING state`.
+> `ResourceInUseException` 은 **(a) create 인데 이미 존재함**(describe 분기가 막음) 뿐 아니라
+> **(b) update 인데 이미 변경 중**(안 막힘) 에도 난다. 2회차가 UPDATING 을 만들고 3회차가 부딪혔다.
+> → `_start` 를 `contextlib.suppress(ResourceInUseException)` 로 정정. **검증은 3회 연속으로 한다** —
+> 2회는 (b) 를 못 잡는다(2회차 시점엔 애드온이 ACTIVE 라 update 가 그냥 된다).
+>
+> **✅ 해소된 미확정:** `update_addon` 의 `resolveConflicts` 는 create 와 값 집합이 같다(OVERWRITE 수용).
+
+**🔴 T5 로 넘어가는 발견 — `[4]` 의 게이트가 무효다(스펙 §11.14).** 이 Step 을 수동으로 돌리다 발견했다:
+`aws eks wait nodegroup-active` 가 **부팅 8초차에 반환**했고(`Nodegroup.Status` 는 스케일 내내 ACTIVE),
+경합을 재현하니 **노드 Ready 와 InstallAddons 가 같은 초**였다(여유 0초, 노드가 35s 만에 떠준 운).
+→ 위 Task 5 의 `[4]` 를 `WaitNodesReady`(자식 SM) 로 **이미 정정해두었다.**
+
 **dns-switch 는 [9] 가 파라미터를 쓴 뒤**(Task 3 Step 10 의 `09-` 실행 후) 검증한다 — 그전엔
 `ParameterNotFound` 로 **실패하는 게 정상**이고, 그게 fail-closed 검증이기도 하다.
 
@@ -1841,7 +1858,8 @@ git commit -m "feat(dr): 애드온 멱등 설치·DNS 전환·완료/실패 알�
 | **2.4** | **`ClearAlbParam`** 🆕 | SDK `ssm:deleteParameter` | — | `ResolveBastion` |
 | 2.5 | `ResolveBastion` | SDK `ec2:describeInstances` | — | `CleanWarmEtcd` |
 | 3 | `CleanWarmEtcd` | 자식 SM | `03-clean-warm-etcd.sh` | `ScaleNodes` |
-| 4 | `ScaleNodes` | SDK + 폴링 | — | `InstallAddons` |
+| 4 | `ScaleNodes` | SDK(list+update, 폴링 없음) | — | `WaitNodesReady` |
+| **4.5** | **`WaitNodesReady`** 🆕 | 자식 SM | **`04-wait-nodes-ready.sh`** | `InstallAddons` |
 | 5 | `InstallAddons` | Lambda `addon-install`(`action=start`) | — | `WaitAddons` |
 | 5a | `WaitAddons` | Wait 20s | — | `CheckAddons` |
 | 5b | `CheckAddons` | Lambda `addon-install`(`action=check`) | — | `AddonsDone?` |
@@ -1986,31 +2004,51 @@ ALB keycloak 타겟 unhealthy 로 404/503. `09` 가 Keycloak Ready 를 기다리
           ScalingConfig = { MinSize = 0, MaxSize = 6, DesiredSize = 3 }
         }
         ResultPath = null
-        Next       = "WaitNodes"
+        # 🔴 **초안은 여기서 Next = "WaitNodes" 였다. 그 게이트는 무효다 — T4 실측으로 증명됨(스펙 §11.14).**
+        Next = "WaitNodesReady"
       }
-      # eks:wait nodegroup-active 에 해당하는 SFN 폴링. 애드온 루프와 같은 패턴.
-      WaitNodes = { Type = "Wait", Seconds = 30, Next = "CheckNodes" }
-      CheckNodes = {
+
+      # 🔴 **초안의 WaitNodes/CheckNodes/NodesActive? 3상태를 삭제하고 이걸로 대체한다.**
+      #
+      # **초안이 왜 틀렸나(실측 2회 — 스펙 §11.14):** `$.Nodegroup.Status` 는 스케일 설정 변경 중에도
+      # **`ACTIVE` 에서 벗어나지 않는다.** 스케일 전·중·후 전부 ACTIVE 다. 즉 대답이 안 바뀌므로
+      # 질문 자체가 무의미하다 → `WaitNodes`(30s) 한 번 돌고 **노드 부팅 30초차에 InstallAddons** 로 넘어간다.
+      #   · 15:56:52 update InProgress → 15:57:21 wait 반환(ACTIVE)  = 부팅 8초차에 "다 됐다"
+      #   · 16:25:30 scale → 16:26:04 status=ACTIVE → 16:26:05 InstallAddons / **노드 Ready 도 16:26:05**
+      #     = **여유 0초.** 노드가 35s 만에 떠준 덕에 우연히 살았다(EKS 노드 부팅은 통상 60~120s).
+      #
+      # **왜 kubectl 인가:** SFN 은 private EKS 에 못 닿는다(§5.1.2 와 같은 제약). "노드가 k8s 에 Ready 인가"를
+      # 아는 주체는 클러스터 안의 bastion 뿐이다. ASG 의 InService 도 **kubelet 조인이 아니라 EC2 헬스체크**라
+      # 같은 함정이다(실측: 인스턴스 running 시각 < 노드 Ready 시각).
+      #
+      # **왜 [5] 의 애드온 루프에 맡기지 않나:** 그 루프는 실제로 진짜 게이트다(실측: done=true 가 +105s =
+      # 노드 Ready +35s 보다 70s 뒤 — CREATING 을 제대로 기다렸다). 하지만 `check` 가 **DEGRADED 를 치명으로
+      # 본다.** DEGRADED 는 두 뜻이다 — (a) 노드가 아직 없어서 / (b) 진짜 고장(P1c). 지금은 구분 불가라
+      # 어느 쪽으로 짜도 반은 틀린다. **여기서 노드를 확실히 세우면 이후 DEGRADED 는 (b) 뿐**이므로
+      # `check` 의 치명 판정이 비로소 옳아진다. 대안(DEGRADED 를 참고 폴링)은 (b) 일 때 TimeoutSeconds
+      # (90000=25h)까지 매달린다 — 재해 중 25시간 매달림은 빠른 실패보다 나쁘다.
+      #
+      # 비용: 자식 SM 왕복 ~30s. RTO 40분에서 30초.
+      # ⚠️ 스크립트는 `04-wait-nodes-ready.sh` 로 신설한다(T3 의 7종 + 1). SSM 변환 규칙 전부 적용:
+      #    `export HOME=/root`(§11.12) 필수 — 없으면 kubectl 이 localhost:8080 으로 폴백한다.
+      #    내용: `kubectl wait --for=condition=Ready node --all --timeout=600s` + 대수 검증
+      #    (`[ "$(kubectl get nodes --no-headers | wc -l)" -eq 3 ]` — wait 는 **0대일 때도 즉시 통과**한다.
+      #     "모든 노드가 Ready" 는 노드가 없으면 공허참이다 — 과소 게이트 회피).
+      WaitNodesReady = {
         Type     = "Task"
-        Resource = "arn:aws:states:::aws-sdk:eks:describeNodegroup"
+        Resource = "arn:aws:states:::states:startExecution.sync:2"
         Parameters = {
-          ClusterName       = "cledyu-dr"
-          "NodegroupName.$" = "$.ng.name"
+          StateMachineArn = aws_sfn_state_machine.dr_run_on_bastion.arn
+          Input = {
+            "instanceId.$" = "$.bastion.instanceId"
+            script         = file("${path.module}/scripts/bastion/04-wait-nodes-ready.sh")
+            env            = ":"
+            timeoutSeconds = 900
+            label          = "WaitNodesReady"
+          }
         }
-        ResultSelector = { "status.$" = "$.Nodegroup.Status" }
-        ResultPath     = "$.ngStatus"
-        Next           = "NodesActive?"
-      }
-      "NodesActive?" = {
-        Type = "Choice"
-        Choices = [
-          # CREATE_FAILED·DEGRADED 를 명시 거부한다 — 안 하면 Default 로 영원히 폴링하다
-          # 메인 SM 의 TimeoutSeconds(90000)까지 매달린다.
-          { Variable = "$.ngStatus.status", StringEquals = "DEGRADED", Next = "NotifyFailed" },
-          { Variable = "$.ngStatus.status", StringEquals = "CREATE_FAILED", Next = "NotifyFailed" },
-          { Variable = "$.ngStatus.status", StringEquals = "ACTIVE", Next = "InstallAddons" },
-        ]
-        Default = "WaitNodes"
+        ResultPath = null
+        Next       = "InstallAddons"
       }
 ```
 

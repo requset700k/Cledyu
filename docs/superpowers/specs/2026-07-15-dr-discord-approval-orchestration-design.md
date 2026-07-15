@@ -1226,3 +1226,163 @@ A안은 `StandardErrorContent` 캡처 + `Fail` 상태의 데이터 운반(위 (c
 (`unset NEWROOT` 줄번호와 비교)를 돌리니 `✅ line 152 > unset 146` 으로 즉시 클린이었다.
 **§11.11 의 "과소 게이트" 와 짝을 이루는 반대편 함정 — 과대 게이트(존재만 보고 위치를 안 봄)다.**
 그리고 그 방어는 이미 계획서에 **글로 적혀 있었다** — 안 읽고 grep 부터 쳤다.
+
+---
+
+### 11.14 T4 실측 발견 2 (2026-07-15) — `[4]` 의 게이트는 아무것도 안 거른다
+
+**§11.11 의 과소 게이트가 세 번째다.** T2 는 `SUCCEEDED` 를 보고 "로그가 남았다"로 착각했고, 여기선
+`Nodegroup.Status == ACTIVE` 를 보고 **"노드가 떴다"로 착각**했다.
+
+**(a) 게이트 무효 — 2회 측정, 같은 결과:**
+
+| 시각(UTC) | 사건 |
+|---|---|
+| 15:56:52 | `update-nodegroup-config` → update `InProgress` |
+| 15:57:13~14 | EC2 인스턴스 `running`(부팅 시작) |
+| **15:57:21** | **`aws eks wait nodegroup-active` 반환** ← 부팅 8초차 |
+
+`Nodegroup.Status` 는 **스케일 전·중·후 전부 `ACTIVE`** 다 — 대답이 안 바뀌므로 질문이 무의미하다.
+계획 초안의 `CheckNodes`/`NodesActive?` 가 정확히 이 값을 본다 → `WaitNodes`(30s) 한 번 돌고
+**노드 부팅 30초차에 `InstallAddons`** 로 넘어간다.
+
+**(b) 경합 재현 — 여유가 0초였다:**
+
+```
+T0    16:25:30  scale desired 0→3
+T+34  16:26:04  CheckNodes 가 봤을 status = ACTIVE   ← 게이트 통과
+T+35  16:26:05  InstallAddons(start) 호출
+T+35  16:26:05  **노드 3대가 k8s 에 Ready**          ← 같은 초. 순전히 운이었다
+      +58 s     coredns ACTIVE / ebs-csi CREATING
+      +105s     둘 다 ACTIVE, done=true → BootstrapApps
+```
+노드가 **35초** 만에 Ready 된 덕에 살았다. EKS 노드 부팅은 통상 60~120s 라 **다음번엔 진다.**
+(지상 검증: bastion `kubectl get nodes` 의 `Ready` `lastTransitionTime` = `16:26:05Z` 3대 전부)
+
+**(c) 🟢 `[5]` 의 애드온 폴링 루프는 **진짜 게이트**다.** `done=true` 가 **+105s** — 노드 Ready(+35s)보다
+70s 뒤다. `CREATING` 동안 제대로 기다렸다. **가짜 게이트와 진짜 게이트가 둘 다 있었고 우리가 믿은 건
+가짜 쪽이었다.**
+
+**(d) ✅ 해소 — 노드 0 → 애드온 DEGRADED 는 **실재한다. 다만 2분 25초 늦게 온다.**
+
+경합 실행 자체는 `CREATING → ACTIVE` 로 갔고 DEGRADED 를 안 거쳤다(노드가 이미 Ready 였으니 당연).
+그래서 뒷정리(노드 3→0) 중에 따로 관측했다:
+
+| 시각(UTC) | 노드 | coredns | ebs-csi |
+|---|---|---|---|
+| 16:43:15 | **0** | ACTIVE | ACTIVE |
+| 16:45:40 | 0 | **DEGRADED** | **DEGRADED** |
+
+→ "warm node0 → DEGRADED(InsufficientNumberOfReplicas)" 라는 §pilot-light 의 주장은 **참**이다.
+**그리고 애드온 status 는 양방향으로 지연 지표다** — 노드가 사라진 뒤 **2분 25초** 동안 ACTIVE 라고
+계속 답했다.
+
+**이게 왜 위험한가:** `[5]` 가 부팅 중에 뜨면(= (a)(b) 의 상황) 애드온은 `CREATING` 으로 시작한다.
+노드가 **2분 반 안에** 조인하면 `CREATING → ACTIVE` 로 살고, 늦으면 `DEGRADED` 가 뜬다 →
+`check` 가 raise → **페일오버 중단.** 노드 조인은 이번엔 35s 였지만 통상 60~120s 이고 AZ·용량에 따라
+더 길 수 있다. **즉 "DEGRADED 로 죽을 위험"은 가설이 아니라 타이밍 문제일 뿐이다.**
+`check` 의 `DEGRADED → raise` 는 (a)노드 미기동 / (b)진짜 고장을 **구분하지 못한다** — 아래 (e) 가 그 답이다.
+
+**(e) 결정 — `[4]` 뒤에 `[4.5] WaitNodesReady`(자식 SM, `04-wait-nodes-ready.sh`) 신설.**
+초안의 `WaitNodes`/`CheckNodes`/`NodesActive?` 3상태는 **삭제**한다.
+**이유는 "노드를 기다리려고"가 아니라 "DEGRADED 의 뜻을 하나로 만들려고"다** — 노드를 확실히 세운 뒤면
+이후 DEGRADED 는 (b) 뿐이므로 `check` 의 치명 판정이 비로소 옳아진다.
+**(d) 의 실측이 이 결정을 사후 확증했다** — DEGRADED 는 실재하고(가설이 아니었다) 노드 조인이 2분 반을
+넘기면 뜬다. `[4.5]` 는 그 타이밍 의존을 **통째로 제거**한다: 노드가 Ready 인 뒤에만 애드온을 만드므로
+(a) 는 발생할 수 없고, DEGRADED 가 보이면 그건 무조건 (b) 다.
+- **대안 기각:** DEGRADED 를 참고 폴링 → (b) 일 때 `TimeoutSeconds`(90000=**25시간**)까지 매달린다.
+  재해 중 25시간 매달림은 **빠른 실패보다 나쁘다**(사람이 이어받을 기회를 뺏는다).
+- **ASG `InService` 기각:** EC2 헬스체크지 kubelet 조인이 아니다 — 같은 함정의 다른 층.
+  (실측: 인스턴스 `running` 시각 < 노드 `Ready` 시각)
+- 비용: 자식 SM 왕복 ~30s. RTO 40분에서 30초.
+
+**(f) ⚠️ 새 검문소를 만들면서 같은 함정을 또 밟을 뻔했다.**
+`kubectl wait --for=condition=Ready node --all` 은 **노드가 0대면 즉시 통과한다** — "모든 노드가 Ready" 가
+노드가 없으면 **공허참**이다. 스케일 직후엔 노드가 0대일 수 있으므로 이 한 줄만 쓰면
+**초안과 똑같이 아무것도 안 거르는 게이트**가 된다.
+→ `04-wait-nodes-ready.sh` 는 **대수 검증을 함께** 한다: `[ "$(kubectl get nodes --no-headers | wc -l)" -eq 3 ]`.
+
+**(g) 멱등성 방어가 절반이었다 — `ResourceInUseException` 은 두 가지 뜻이다.**
+
+3회 연속 `start` 실측:
+
+| 회차 | 결과 |
+|---|---|
+| 1 | ✅ `{"started": [...]}` |
+| 2 | ✅ 성공(애드온 ACTIVE → `update_addon`) |
+| **3** | ❌ **`ResourceInUseException: cannot be updated as it is currently in UPDATING state`** |
+
+초안은 이 예외를 **"create 인데 이미 존재함"** 으로만 이해하고 `describe → update` 로 막았다. 그런데
+**`update_addon` 도 UPDATING 중인 애드온에 같은 예외를 낸다.** 2회차가 UPDATING 을 만들고 3회차가 거기
+부딪혔다. **재-failover(애드온이 ACTIVE 로 남음)는 커버되지만, `[5]` 재시도·운영자의 재실행(UPDATING
+창 ~1-3분)은 안 커버된다** — 재해 중 "안 되네? 다시 눌러보자"는 충분히 있을 법하다.
+**정정:** `contextlib.suppress(ResourceInUseException)` — 어느 뜻이든 **설치는 이미 진행 중**이니 성공으로
+흘린다. 완료 판정은 `check`(=SFN 폴링)의 몫이지 `_start` 가 아니다.
+
+**(h) 해소된 미확정:** "`update_addon` 의 `resolveConflicts` 값 집합이 create 와 다를 수 있다"(계획서 T4
+Step 1 주석) → **다르지 않다.** 2회차 `start` 가 `update_addon(resolveConflicts="OVERWRITE")` 로 200 반환.
+
+**교훈 — "기다린다"고 적힌 코드가 기다리는지 확인해야 한다.** `wait nodegroup-active`·`CheckNodes`·
+`kubectl wait --all` 셋 다 **이름은 기다림인데 실제로는 즉시 통과**한다. §11.11 의 교훈("부수효과를
+목적으로 하는 변경은 그 부수효과를 직접 확인해야 한다")의 쌍둥이다: **대기를 목적으로 하는 게이트는
+그 대기가 실제로 일어났는지를 — 시각을 찍어서 — 확인해야 한다.** 이번에 답을 준 건 추론이 아니라
+`lastTransitionTime` 과 타임스탬프 로그였다.
+
+---
+
+### 11.15 T4 실측 파생 발견 (2026-07-15) — **failback 이 노드를 안 내린다** (범위 밖·미수정)
+
+**T4 실측의 뒷정리(노드 3→0)가 30분 걸려 원인을 파다 나왔다. failover 가 아니라 failback 의 결함이다.**
+
+**(a) `dr-failback.md` §8 "EKS 축소" 는 축소를 하지 않는다.**
+
+두 런북이 다르다:
+
+| 런북 | 노드 N→0 | 결과 |
+|---|---|---|
+| `dr-eks-bootstrap.md` §destroy | **`aws eks update-nodegroup-config ... desiredSize=0`(CLI)** → 그 다음 terraform | ✅ (주석: `# 3) [P1] 노드 N→0 (CLI)`) |
+| `dr-failback.md` §8 | **terraform 만** (`-var eks_dr_node_desired=0`) | ❌ **아무 일도 안 일어난다** |
+
+`-var eks_dr_node_desired=0` 이 안 먹는 이유 — 모듈이 그 값을 무시한다(소스 확인:
+`.terraform/modules/eks_dr/modules/eks-managed-node-group/main.tf:476-481`):
+```hcl
+lifecycle {
+  create_before_destroy = true
+  ignore_changes = [ scaling_config[0].desired_size ]
+}
+```
+`eks_dr_active=false` 는 **NAT·엔드포인트·bastion 만** 게이트한다(eks-dr.tf:4) — 노드그룹은
+`enable_eks_dr`(warm) 소속이라 그대로 남는다. **failover 의 `[4]` 가 CLI 를 쓰는 바로 그 이유
+(ignore_changes)가 failback 에는 반영되지 않았다 — 대칭이 깨졌다.**
+
+**영향:** 실제 failback 후 **m6i.xlarge 3대가 계속 돈다** = `$0.236/h × 3 × 730h ≈ **$517/월**`.
+terraform 은 "변경 없음"으로 **성공 보고**하고 런북엔 "EKS 축소"라고 적혀 있다 — 조용한 유실이다.
+**격리 드릴로는 안 잡힌다**(드릴은 복원 부품만 검증). 실제 full failback 이 아직 없어서 미발견이었다.
+
+**정정(미적용 — failback 소유자 판단 필요):** §8 에 bootstrap §destroy 의 CLI 2줄을 이식.
+
+**(b) 애드온 PDB 가 마지막 노드 드레인을 막는다 — failback 에 30분 꼬리.**
+
+```
+NAMESPACE     NAME                 MAX UNAVAILABLE   ALLOWED DISRUPTIONS
+kube-system   coredns              1                 0     ← 0
+kube-system   ebs-csi-controller   1                 0     ← 0
+```
+replica 2 중 1 Running(마지막 노드) + 1 Pending(갈 노드 없음) = 가용 1 = 최소선 → **eviction 거부.**
+`Terminate-LC-Hook`(timeout 1800s, DefaultResult=CONTINUE)이 만료돼야 강제 종료된다.
+실측: scale-0 요청 16:27:43 → 노드 0 도달 **16:43:15 (약 16분)**.
+
+**이건 `[5]` 가 애드온을 설치하기 때문에 생긴다.** 실측 전 warm 에는 coredns 애드온이 없었고
+(terraform `cluster_addons` 에서 제외 — eks-dr.tf:140-143) PDB 도 없어 스케일다운이 깨끗했다.
+계획서는 **"failback 이 애드온을 warm 에 남긴다"** 를 전제하므로(§11.14 (g) 의 멱등성이 그 전제 위에 있다)
+**첫 실제 failback 부터 이 꼬리가 붙는다.**
+
+**선택지(미결):** ① 30분 꼬리를 문서화하고 수용 ② failback 이 애드온을 delete(그러면 §11.14 (g) 의
+재-failover 멱등 전제가 사라진다 — create 경로만 남음) ③ PDB 를 무시하는 강제 드레인.
+**①②는 서로 얽혀 있다 — 애드온을 지우면 멱등성 방어의 존재 이유가 바뀐다.**
+
+**교훈 — "축소한다"고 적힌 명령이 축소를 안 한다.** 오늘 같은 부류가 **세 번** 나왔다:
+`aws eks wait nodegroup-active`(부팅 8초차 반환) · `CheckNodes`(status 가 안 바뀜) ·
+`terraform -var eks_dr_node_desired=0`(모듈이 무시). 셋 다 **이름은 동작을 약속하는데 실제로는 no-op** 이고,
+셋 다 **성공을 보고**한다. §11.11 의 교훈("`SUCCEEDED` 는 로그가 남았다가 아니다")이 계속 다른 옷을 입고
+돌아온다 — **약속하는 이름을 믿지 말고 그 명령이 바꾼 상태를 직접 봐야 한다.**
