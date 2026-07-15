@@ -1,7 +1,46 @@
 # RUNBOOK: DR 재해 감지 + 알림
 
 온프렘 데이터센터/클러스터 상실을 자동으로 감지하여 AWS-side 경로로 담당자에게 알린다.
-복구는 사람이 판단·검증 후 기존 수동 런북(`docs/RUNBOOK/dr-eks-bootstrap.md`)으로 실행한다(자동 오케스트레이션 없음).
+복구는 사람이 판단·검증 후 기존 수동 런북(`docs/RUNBOOK/dr-eks-bootstrap.md`)으로 실행한다.
+
+> ## ⚠️ 승인 게이트 상태 (2026-07-15 현재)
+>
+> Discord 승인 게이트(Plan 1)가 **구현·배포됐으나 무장 해제 상태**다(`dr_orchestration_armed=false`
+> → EventBridge 규칙 미생성). **지금 재해가 나면 승인 요청은 뜨지 않는다** — 이 런북의 수동 경로가 유일하다.
+>
+> **무장하면 안 된다(Plan 2 완료 전까지).** 승인 버튼을 누르면 Step Functions 가 **아무것도 하지 않고
+> `Succeed` 로 끝난다** — 하류([2]~[13]: EKS 기동·복원·DNS 전환)가 아직 없기 때문이다. Discord 엔
+> "✅ 승인함" 이 찍히므로 **DR 이 진행된 줄 알고 넘어가는 것이 최악**이다.
+>
+> - 설계: `docs/superpowers/specs/2026-07-15-dr-discord-approval-orchestration-design.md`
+> - Plan 1(승인 게이트, 완료): `docs/superpowers/plans/2026-07-15-dr-discord-approval-gate.md`
+> - Plan 2(오케스트레이션, 미착수): 이게 끝나야 무장 가능
+
+## 0. 승인 URL 이 429/503 이면 — CLI 우회 (무장 후 유효)
+
+승인 Function URL 은 공개 엔드포인트이고 `reserved_concurrent_executions = 5` 다. 누군가 URL 을 두들기면
+동시성이 소진돼 **재해 순간 승인 버튼이 429** 로 막힐 수 있다(설계 §5.4 — provider 제약으로 IAM 조건을
+걸 수 없어 감수한 노출. **이 우회가 그 결정의 안전망이다**).
+
+**DR 은 막히지 않는다 — 토큰을 직접 풀면 된다:**
+
+```bash
+# 1) 대기 중인 승인의 approvalId·taskToken·스냅샷 목록 확인
+aws dynamodb scan --table-name cledyu-lab-dr-approvals --region ap-northeast-2 \
+  --query 'Items[].{id:approvalId.S,latest:latestSnapshot.S,chosen:snapshot.S}' --output table
+
+# 2) taskToken 취득 (위에서 고른 approvalId 로)
+TOKEN=$(aws dynamodb get-item --table-name cledyu-lab-dr-approvals --region ap-northeast-2 \
+  --key '{"approvalId":{"S":"<approvalId>"}}' --query 'Item.taskToken.S' --output text)
+
+# 3) 승인 = 토큰 해제. snapshot 은 복원할 Vault 스냅샷 키(미지정 시 최신을 쓰려면 latestSnapshot 값).
+aws stepfunctions send-task-success --region ap-northeast-2 --task-token "$TOKEN" \
+  --task-output '{"snapshot":"vault/vault-raft-<UTC타임스탬프>.snap","approvedBy":"cli-fallback","approvedAt":"<ISO8601>"}'
+```
+
+> `--task-output` 의 `snapshot` 키는 **필수**다 — 하류(Plan 2 의 [7] RestoreVault)가 이 값으로 복원한다.
+> 스냅샷 목록은 `aws s3api list-objects-v2 --bucket cledyu-lab-dr-backups --prefix vault/
+> --query 'reverse(sort_by(Contents,&LastModified))[:5].Key' --output text` 로도 볼 수 있다.
 
 ## 1. 아키텍처 한눈에
 
@@ -27,6 +66,35 @@
                                     ▼
                               담당자 인지 → 판단 → 수동 복구
 ```
+
+### 승인 게이트 갈래 (Plan 1 — 배포됨, **무장 해제 상태**)
+
+복합알람은 두 갈래로 나간다. 위 SNS 갈래(알림)는 **무장돼 동작 중**이고, 아래 갈래는 **미무장**이다.
+
+```
+  AND 복합알람(us-east-1)
+   ├─→ SNS → dr-alert Lambda → Discord 알림        ← 무장됨(actions_enabled=true)
+   │
+   └─→ EventBridge 규칙                             ← ✋ 미생성(count=0)
+         count = local.pub && dr_detection_armed && dr_orchestration_armed
+                                          ↑ true         ↑ false ← 여기서 막힘
+         └→ failover-trigger Lambda(us-east-1)
+              └→ sfn.start_execution ── 리전 넘음 ──→ Step Functions(ap-northeast-2)
+                    └→ approval-request Lambda(.waitForTaskToken, 24h)
+                         · S3 vault/ 스냅샷 최신순 25개 → 드롭다운(기본=최신)
+                         · Bot API 로 승인 버튼 게시
+                         ⏸ 사람이 사이트·로그 확인 → 클릭
+                         └→ interaction Lambda: Ed25519 검증 → 승인자 허용목록 → 토큰 해제
+                              └→ (Plan 2 가 붙을 자리 — 지금은 그냥 Succeed)
+```
+
+**세 플래그가 AND 인 이유(설계 §7.4):**
+- `local.pub` — 복합알람이 `count = local.pub` 이라 공개 진입점을 끄면 존재하지 않는다. 이게 빠지면
+  `disaster[0]` 참조가 깨져 **terraform apply 전체가 중단**된다(`e68064b` 가 제거한 실패 모드와 동일).
+- `dr_detection_armed` — 이 플래그는 `actions_enabled` 라 **SNS 발행만** 억제하고 CloudWatch 는 알람
+  상태변화 이벤트를 EventBridge 로 **계속 쏜다**. 이게 빠지면 "감지를 껐다"고 믿는 창에서
+  **알림은 안 뜨는데 승인 버튼만 뜬다**.
+- `dr_orchestration_armed` — 오케스트레이션 전용 스위치.
 
 **us-east-1 앵커 이유:** Route53 health check의 CloudWatch 메트릭(`AWS/Route53 HealthCheckStatus`)은 **us-east-1에만 발행**된다.
 복합알람(`aws_cloudwatch_composite_alarm`)은 멤버 알람과 **동일 리전·계정**이어야 하므로, pull 알람뿐 아니라
@@ -196,6 +264,61 @@ aws cloudwatch describe-alarms --region us-east-1 \
 ```
 
 **기록:** composite OK 복귀 시각 (`T6`)
+
+### 2.5 승인 게이트 드릴 (Plan 1 — 하트비트를 건드리지 않는 배선 검증)
+
+위 §2 드릴은 **진짜 신호를 차단**해 감지를 검증한다. 승인 게이트 배선만 보려면 **알람을 직접 발동**시키면
+된다 — 온프렘·하트비트를 전혀 안 건드린다.
+
+> **⚠️ 합성 EventBridge 이벤트는 불가하다(실측 2026-07-15).**
+> `aws events put-events --entries '[{"Source":"aws.cloudwatch",...}]'` 는
+> **`NotAuthorizedForSourceException: Not authorized for the source`** 로 실패한다 —
+> **`aws.` 접두는 AWS 예약 네임스페이스**라 사용자가 그 소스로 이벤트를 못 쏜다.
+
+```bash
+# 1) 무장 (드릴 동안만)
+cd infra/terraform/aws
+terraform apply -var dr_orchestration_armed=true \
+  -target=aws_cloudwatch_event_rule.dr_disaster \
+  -target=aws_cloudwatch_event_target.dr_disaster \
+  -target=aws_lambda_permission.dr_disaster      # 3 to add
+
+# 2) 복합알람 강제 발동 — 실제 이벤트가 나가므로 진짜 경로를 그대로 탄다
+aws cloudwatch set-alarm-state --region us-east-1 --alarm-name cledyu-lab-dr-disaster \
+  --state-value ALARM --state-reason "배선 검증 드릴 — 실제 재해 아님"
+```
+
+**기대: Discord 에 메시지 2개** — `🚨 DR 재해 감지`(SNS 갈래) + `🚨 DR 페일오버 승인 요청`(EventBridge 갈래).
+승인 요청은 **`🧪 [테스트]` 표식 없이** 떠야 한다(failover-trigger 가 `mode` 를 안 넣어 실재해로 렌더 = fail-safe 동작 증거).
+**승인 버튼은 누르지 않는다.**
+
+```bash
+# 3) ⚠️ 알람 복원 — 반드시. 안 하면 진짜 재해를 가린다.
+aws cloudwatch set-alarm-state --region us-east-1 --alarm-name cledyu-lab-dr-disaster \
+  --state-value OK --state-reason "드릴 종료 — 상태 복원"
+aws cloudwatch describe-alarms --region us-east-1 --alarm-names cledyu-lab-dr-disaster \
+  --alarm-types CompositeAlarm --query 'CompositeAlarms[].StateValue' --output text   # → OK
+
+# 4) 대기 중 실행 정지
+ARN=$(aws stepfunctions list-state-machines --region ap-northeast-2 \
+  --query "stateMachines[?name=='cledyu-lab-dr-approval-test'].stateMachineArn" --output text)
+aws stepfunctions list-executions --region ap-northeast-2 --state-machine-arn "$ARN" \
+  --status-filter RUNNING --query 'executions[].executionArn' --output text \
+| tr '\t' '\n' | while read -r e; do [ -n "$e" ] && aws stepfunctions stop-execution \
+    --region ap-northeast-2 --execution-arn "$e"; done
+
+# 5) 무장 해제 — -var 없이 재실행하면 count=0 으로 삭제(3 to destroy)
+terraform apply \
+  -target=aws_cloudwatch_event_rule.dr_disaster \
+  -target=aws_cloudwatch_event_target.dr_disaster \
+  -target=aws_lambda_permission.dr_disaster
+aws events list-rules --region us-east-1 --name-prefix cledyu-lab-dr-disaster   # → Rules: []
+```
+
+> **3번(복원)이 왜 필수인가:** AWS 문서 — "If you use SetAlarmState on a composite alarm, the composite
+> alarm is **not guaranteed to return to its actual state**. It returns to its actual state only once any of
+> its **children alarms change state**." 자식(pull·push)이 안정적이면 **ALARM 에 눌러앉는다.** 그리고
+> EventBridge 는 상태 *변화*에만 반응하므로, 눌러앉은 ALARM 은 **진짜 재해가 나도 아무것도 안 쏜다.**
 
 ---
 
@@ -507,8 +630,12 @@ aws sns publish --region us-east-1 \
 
 - 감지 설계 스펙: `docs/superpowers/specs/2026-07-14-dr-detection-alerting-design.md`
 - Plan C 전체 계획: `docs/superpowers/plans/2026-07-03-dr-backup-plan-c-orchestration.md`
-- 수동 복구 런북: `docs/RUNBOOK/dr-eks-bootstrap.md` **(알림 후 사람이 실행할 것)**
+- 수동 복구 런북: `docs/RUNBOOK/dr-eks-bootstrap.md` **(알림 후 사람이 실행할 것 — 현재 유일한 복구 경로)**
 - AWS DR 설계: `docs/superpowers/specs/2026-07-01-aws-dr-backup-design.md`
+- **승인 게이트 설계**: `docs/superpowers/specs/2026-07-15-dr-discord-approval-orchestration-design.md`
+  (§3.6 Bot API 전환 · §5.4 Function URL 노출과 CLI 우회 근거 · §7.4 3중 AND 게이트 · §11.4 실측 발견 4건)
+- **Plan 1 계획(승인 게이트, 완료)**: `docs/superpowers/plans/2026-07-15-dr-discord-approval-gate.md`
+  (검증된 `-target` 목록 · `set-alarm-state` 드릴 절차)
 
 ---
 
