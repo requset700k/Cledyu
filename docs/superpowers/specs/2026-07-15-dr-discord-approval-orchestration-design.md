@@ -1283,6 +1283,23 @@ T+35  16:26:05  **노드 3대가 k8s 에 Ready**          ← 같은 초. 순전
 더 길 수 있다. **즉 "DEGRADED 로 죽을 위험"은 가설이 아니라 타이밍 문제일 뿐이다.**
 `check` 의 `DEGRADED → raise` 는 (a)노드 미기동 / (b)진짜 고장을 **구분하지 못한다** — 아래 (e) 가 그 답이다.
 
+**⚠️ `status` 와 `health` 는 별개다 — 진입 경로에 따라 다른 값이 나온다(추가 실측):**
+
+| 진입 경로 | `status` | `health.issues[0].code` |
+|---|---|---|
+| ACTIVE 애드온 + 노드 소멸 | **`DEGRADED`**(2분25초 뒤) | `InsufficientNumberOfReplicas` |
+| **`update_addon`** + 노드 0 | **`UPDATING`**(끝나지 않음) | `InsufficientNumberOfReplicas` |
+
+**같은 "노드가 없다"가 한 번은 `DEGRADED`, 한 번은 `UPDATING` 으로 온다.** `check` 는 `status` 만 보므로
+후자는 `done=false` 로 계속 폴링한다(우연히 옳은 동작). **`health` 를 안 보는 한 (a)/(b) 판별은 불가능하고,
+`health` 를 보더라도 `InsufficientNumberOfReplicas` 는 (a)(b) 양쪽에서 나온다** — 결국 `[4.5]` 로 (a) 를
+발생 자체가 불가능하게 만드는 것 외에 깨끗한 해법이 없다.
+
+> **부수 사실:** 노드 0 에서 `update_addon` 하면 **`UPDATING` 이 영영 안 끝난다**(파드가 뜰 노드가 없으니
+> 애드온이 healthy 판정을 못 받는다). 실측 정리 중 "UPDATING 이 끝나면 지우자"는 루프가 **무한 대기**에
+> 걸렸다. `delete_addon` 은 **`UPDATING` 중에도 즉시 수리된다**(→ `DELETING`) — 정리 시 상태 전이를
+> 기다릴 필요 없다.
+
 **(e) 결정 — `[4]` 뒤에 `[4.5] WaitNodesReady`(자식 SM, `04-wait-nodes-ready.sh`) 신설.**
 초안의 `WaitNodes`/`CheckNodes`/`NodesActive?` 3상태는 **삭제**한다.
 **이유는 "노드를 기다리려고"가 아니라 "DEGRADED 의 뜻을 하나로 만들려고"다** — 노드를 확실히 세운 뒤면
