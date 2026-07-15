@@ -34,8 +34,18 @@ wafv2/elbv2 — bastion 롤에 없는 권한, Route53 은 공개 API 라 VPC 불
   정책을 별도 `aws_iam_role_policy` 로 분리**한다(§SFN 롤 IAM 배선표)
 - **⚠️ IAM 은 Task 별로 채우지 말고 §SFN 롤 IAM 배선표를 보고 채운다.** 적대적 검증 3회차에서 나온
   9건 중 5건이 "A 가 만들고 B 가 쓰는 것"의 배선 누락이었다 — `Interfaces` 가 선언만 하고 어느 Task 도
-  구현을 책임지지 않는 자리다. **스크립트를 만드는 Task 는 그 스크립트가 호출하는 AWS API 의 IAM 도 같이 만든다**
+  구현을 책임지지 않는 자리다. **AWS API 를 부르는 것을 만드는 Task 는 그 IAM 도 같이 만든다**
   (T3 가 `.sh` 만 만들고 `.tf` 를 안 건드린 것이 F3 의 직접 원인)
+- **⚠️ "부르는 주체"는 스크립트만이 아니다.** F3 는 **세 번** 다른 층에서 터졌다(스펙 §11.7·§11.10·§11.11):
+  스크립트(`09-`→`ssm:PutParameter`) → **SSM 에이전트**(→CloudWatch, "스크립트"라는 문면에 안 걸림) →
+  **같은 에이전트인데 IAM 내용이 틀림**. 에이전트·오퍼레이터·오퍼레이터가 만든 파드 전부가 주체다.
+- **⚠️ IAM 을 추론으로 채우지 않는다 — 호출 주체의 실제 요청을 본다.** §11.11 에서 "로그그룹은 terraform 이
+  만드니 `CreateLogStream`·`PutLogEvents` 면 충분하다"고 추론했으나 **에이전트는 그룹이 있어도
+  `DescribeLogGroups`→`CreateLogGroup` 을 먼저 부르고, 막히면 출력을 통째로 포기**했다(명령은 Success).
+  답을 준 건 문서도 추론도 아니라 **에이전트 로그 한 줄**이었다. 막히면 CloudTrail·에이전트 로그를 볼 것.
+- **⚠️ 부수효과를 목적으로 하는 변경은 그 부수효과를 직접 확인한다.** `SUCCEEDED`·`responseCode: 0` 은
+  "명령이 돌았다"이지 **"로그가 남았다"가 아니다**(§11.11 — 스모크 3종이 전부 통과하는데 전문은 유실).
+  Global Constraints 의 "과소 게이트 — 존재만 보고 값을 안 봄"이 **실측 판정 기준 자체**에도 적용된다
 - **⚠️ SSM RunCommand 는 TTY 가 없다** — 런북의 `kubectl exec -it` 에서 **`-it` 를 반드시 제거**한다
 - **⚠️ "이식"은 명령을 그대로 옮기는 것이다 — 런북에 없는 것을 "이식"이라 적지 않는다.**
   이 계획의 초안은 bastion 스크립트 7개를 전부 "런북 이식"이라 적었으나 **3개는 런북에 없었다**(적대적
@@ -675,9 +685,25 @@ aws_iam_role_policy.dr_sfn, aws_sfn_state_machine.dr_run_on_bastion` 가 뜨면 
 > `States.Runtime` 으로 즉시 죽는다.** 초안의 이 Step 은 두 커맨드 다 `env` 를 빠뜨려서, **첫 실측이
 > 실패하고 운영자가 멀쩡한 ASL 을 뜯게** 되어 있었다. 계획이 자기 계약을 자기 테스트로 위반한 것이다.
 
+> **⚠️ `-target` 3개 필수 — SM 하나만 주면 절반만 적용된다(T2 실측 발견).** Global Constraints 의
+> *"`-target` 은 의존성만 따라가고 의존하는 것은 안 따라간다"* 가 여기 그대로 적용된다:
+> - ✅ 딸려옴: `dr_bastion_commands`(SM 이 참조) · `dr_sfn` 정책(SM 이 `depends_on`) ·
+>   **`dr_failover_tf`**(그 정책이 CodeBuild ARN 을 참조 — 의존 사슬을 타고 여기까지 간다)
+> - ❌ 안 딸려옴: **`dr_sfn_child`**(SM 을 *참조하는* 쪽 = 역방향) ·
+>   **`eks_dr_bastion_command_logs`**(bastion 롤이라 SM 의 의존 그래프 밖)
+>
+> 후자를 빠뜨리면 **스모크는 통과하는데 로그 전문이 유실된다**(§11.11).
+> ⚠️ **`-var` 3개도 필수** — bastion IAM 이 `count = local.eks_dr_enabled` 라 빠뜨리면 destroy 플랜이 된다.
+
 ```bash
 cd /home/user/Cledyu/infra/terraform/aws
-terraform apply -target=aws_sfn_state_machine.dr_run_on_bastion
+terraform apply -var enable_eks_dr=true -var eks_dr_active=true -var eks_dr_node_desired=0 \
+  -target=aws_sfn_state_machine.dr_run_on_bastion \
+  -target=aws_iam_role_policy.eks_dr_bastion_command_logs \
+  -target=aws_iam_role_policy.dr_sfn_child
+# Expected: Plan: 4 to add, 2 to change, 0 to destroy.
+#   (2 change = dr_sfn 정책 statement 추가 + dr_failover_tf 의 concurrent_build_limit)
+
 BASTION=$(aws ec2 describe-instances --region ap-northeast-2 \
   --filters Name=tag:Name,Values=cledyu-dr-bastion Name=instance-state-name,Values=running \
   --query 'Reservations[0].Instances[0].InstanceId' --output text)
@@ -697,6 +723,25 @@ aws stepfunctions start-execution --region ap-northeast-2 --state-machine-arn "$
   --input "{\"instanceId\":\"$BASTION\",\"script\":\"exit 3\",\"env\":\":\",\"timeoutSeconds\":60,\"label\":\"fail-test\"}"
 ```
 Expected: `FAILED`, error `BastionScriptFailed`. **이게 안 되면 메인 SM 이 실패를 못 잡는다.**
+
+**⚠️ `SUCCEEDED` 만 보고 넘어가면 안 된다 — CloudWatch 스트림을 직접 센다(T2 실측 발견, 스펙 §11.11).**
+초안은 성공/실패/env 3종만 확인했는데, **셋 다 통과하는데 로그 전문이 유실**되고 있었다
+(에이전트가 `DescribeLogGroups`/`CreateLogGroup` 에서 막히면 CloudWatch 출력을 포기하지만 **명령 자체는
+Success 로 끝난다**). `SUCCEEDED` 는 "명령이 돌았다"이지 "로그가 남았다"가 아니다:
+
+```bash
+# 출력의 commandId 로 스트림이 실제로 생겼는지 — **개수를 센다**
+CMD=<위 실행 output 의 commandId>
+aws logs describe-log-streams --region ap-northeast-2 --log-group-name /aws/ssm/cledyu-lab-dr-failover \
+  --log-stream-name-prefix "$CMD" --query 'logStreams[].logStreamName' --output json
+aws logs tail /aws/ssm/cledyu-lab-dr-failover --region ap-northeast-2 --since 10m --log-stream-name-prefix "$CMD"
+```
+Expected: `<commandId>/<instanceId>/aws-runShellScript/stdout` **1개 이상** + 스크립트 출력이 실제로 읽힘.
+**`[]` 면 bastion 의 logs IAM 이 틀린 것이다** — 에이전트 로그가 정답을 알려준다(추론하지 말 것):
+```bash
+aws ssm send-command --region ap-northeast-2 --instance-ids <BASTION> --document-name AWS-RunShellScript \
+  --parameters 'commands=["grep -iE \"cloudwatch|denied\" /var/log/amazon/ssm/amazon-ssm-agent.log | tail -20"]'
+```
 
 ```bash
 # env 주입 경로 — [7] 이 SNAPSHOT_KEY 를 받는 바로 그 메커니즘. 여기서 검증해두면 T5 에서 안 헤맨다.
@@ -2273,6 +2318,8 @@ git commit -m "docs(dr): Plan 2 전체 드릴 RTO 실측 반영"
 - [ ] CodeBuild 가 hot 리소스를 올린다 (T1 Step 4)
 - [ ] 자식 SM 이 성공/실패를 정확히 구분한다 (T2 Step 5 — `exit 3` → `FAILED`)
 - [ ] **자식 SM 이 `env` 를 스크립트에 주입한다** (T2 Step 5 env-test — `got=vault/test.snap`)
+- [ ] **명령 로그 전문이 CloudWatch 에 실제로 쌓인다** (T2 Step 5 — 스트림 개수 ≥1.
+      `SUCCEEDED` 만으로는 부족하다 — 3종 다 통과하는데 유실됐던 이력, 스펙 §11.11)
 - [ ] **미확정 5건 확정** — `03-` 의 webhook 이름 · KafkaTopic 의 Ready 조건 유무 ·
       **`delete cluster` 가 PVC 를 지우나**(H5) · **`psql -d cledyu` 인증 통과**(H3) (T3 Step 10) ·
       **`ClearAlbParam` 의 에러명** (T5 Step 4)
