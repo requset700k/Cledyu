@@ -1,0 +1,55 @@
+version: 0.2
+
+# DR 페일오버 hot 리소스 기동 — Step Functions [2] TerraformApply 가 codebuild:startBuild.sync 로 호출한다.
+#
+# 왜 CodeBuild 인가: Lambda 는 15분 제한이 있고(NAT 생성만 몇 분) terraform 바이너리가 필요하다.
+# AWS SDK 로 직접 생성하면 state 밖 고아가 생겨 failback 의 `terraform apply` 전제를 깬다.
+#
+# ⚠️ -target 목록은 docs/RUNBOOK/dr-eks-bootstrap.md §Phase 1(213-272)의 검증된 **17개**를 그대로 쓴다.
+#    재발명 금지 — 7/14 풀 E2E 드릴로 검증된 목록이고, 2026-07-15 에 목록을 임의로 줄였다가
+#    IAM 정책이 빠져 2분+ hang 을 겪었다. 이 17개엔 bastion IAM 3종이 포함돼 있다
+#    (role_policy: describe·vault_restore / attachment: ssm).
+#    개수 검증:
+#      sed -n '213,272p' docs/RUNBOOK/dr-eks-bootstrap.md \
+#        | grep -oE '\-target=[a-zA-Z_.0-9]+' | sort -u | wc -l   # → 17
+#
+# ⚠️ -var 3개 필수 — terraform.tfvars 는 .gitignore 라 CodeBuild 체크아웃에 없고, 있더라도
+#    enable_eks_dr 가 들어 있지 않아 기본값 false 다. 안 넘기면 apply 가 생성이 아니라
+#    **destroy** 가 된다(warm DR 129개). 런북 §Phase 1 과 동일한 3개.
+#
+# ⚠️ 노드 desired 는 모듈이 ignore_changes 하므로 여기선 0 이다 — [4] ScaleNodes 가 CLI 로 올린다.
+
+phases:
+  install:
+    # AL2 standard 5.0 은 buildspec 에 runtime-versions 섹션을 요구한다(AWS 문서).
+    # terraform 자체는 python 을 안 쓰지만 섹션이 필수라 명시한다.
+    runtime-versions:
+      python: 3.12
+    commands:
+      - curl -fsSL --retry 5 https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip -o /tmp/tf.zip
+      - unzip -q /tmp/tf.zip -d /usr/local/bin && terraform version
+  build:
+    commands:
+      - cd infra/terraform/aws
+      # backend 는 S3(cledyu-tf-state) — 온프렘이 죽어도 닿는다(versions.tf).
+      - terraform init -input=false
+      - |
+        terraform apply -input=false -auto-approve \
+          -var enable_eks_dr=true -var eks_dr_active=true -var eks_dr_node_desired=0 \
+          -target=module.eks_dr_vpc \
+          -target=module.eks_dr \
+          -target=module.eks_dr_ebs_csi_irsa \
+          -target=module.eks_dr_alb_irsa \
+          -target=aws_security_group.eks_dr_endpoints \
+          -target=aws_security_group.eks_dr_bastion \
+          -target=module.eks_dr_endpoints \
+          -target=module.eks_dr_vault_unseal_irsa \
+          -target=aws_iam_policy.eks_dr_vault_unseal \
+          -target=aws_iam_policy.eks_dr_cnpg_restore \
+          -target=module.eks_dr_cnpg_restore_irsa \
+          -target=aws_iam_role.eks_dr_bastion \
+          -target=aws_iam_role_policy_attachment.eks_dr_bastion_ssm \
+          -target=aws_iam_role_policy.eks_dr_bastion_describe \
+          -target=aws_iam_role_policy.eks_dr_bastion_vault_restore \
+          -target=aws_iam_instance_profile.eks_dr_bastion \
+          -target=aws_instance.eks_dr_bastion
