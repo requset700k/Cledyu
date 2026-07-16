@@ -1847,13 +1847,16 @@ git commit -m "feat(dr): 애드온 멱등 설치·DNS 전환·완료/실패 알�
 
 > Plan 1 의 테스트 SM(`dr_approval_test`)을 실제 페일오버 SM 으로 대체하고, EventBridge 타겟을 옮긴다.
 
+**브랜치:** `feat/dr-failover-main-sm` (**`origin/main` 에서 딴다** — T1~T4 는 PR #317 로 squash 머지됐다.
+기존 `feat/dr-failover-executors` 를 rebase 하면 이미 main 에 있는 43커밋이 재생된다)
+
 **Files:**
-- Modify: `infra/terraform/aws/dr-orchestration.tf`
-- Modify: `infra/terraform/aws/README.md`
-- Modify: `infra/terraform/aws/dr-failover-buildspec.yml` (아래 잔여 #2)
-- Modify: `infra/terraform/aws/scripts/bastion/12-verify-serving.sh` (아래 잔여 #3)
-- Modify: `infra/terraform/aws/dr-orchestration-lambda/notify/index.py` (아래 잔여 #4)
-- Modify: `infra/terraform/aws/scripts/bastion/04-wait-nodes-ready.sh` (아래 잔여 #5·#6)
+- Modify: `infra/terraform/aws/dr-orchestration.tf` (메인 SM · 실패 경로 · 자식 SM `CausePath` · 트리거 배선)
+- Modify: `infra/terraform/aws/README.md` (terraform_docs 재생성 — 안 하면 pre-commit 훅이 커밋 중단)
+- Modify: `infra/terraform/aws/dr-orchestration-lambda/notify/index.py` (잔여 #4b — allowlist 제거 · Cause 파싱)
+- Modify: `infra/terraform/aws/scripts/bastion/04-wait-nodes-ready.sh` (잔여 #5·#6)
+- ~~`dr-failover-buildspec.yml`~~ (잔여 #2 는 `73aad01` 로 해소 — 손댈 것 없음)
+- ~~`scripts/bastion/12-verify-serving.sh`~~ (잔여 #3 은 `1da0e9f` 로 해소 — 실환경 검증만 T7)
 
 **Interfaces:**
 - Consumes: `aws_lambda_function.dr_approval_request`(Plan 1) · `aws_codebuild_project.dr_failover_tf`(T1) ·
@@ -1869,32 +1872,28 @@ git commit -m "feat(dr): 애드온 멱등 설치·DNS 전환·완료/실패 알�
 > | **1** | **`STATE_MACHINE_ARN` 이 하네스를 가리킨다** — `dr_approval_test`(State 가 `RequestApproval` 하나, `End=true`) | **T5 의 본체.** 지금 `dr_orchestration_armed=true` 면 실재해에 승인 버튼이 뜨고, 눌러도 **아무 일도 안 일어나며 실패 알림도 없다**(성공으로 끝나므로). 운영자는 "페일오버가 돌고 있다"고 믿는다 → **T5 전까지 무장 금지** |
 > | **2** ✅ | ~~buildspec 에 `-lock-timeout` 없음~~ (codex P2 도 지적) | **해소** — `init`·`apply` 양쪽에 `-lock-timeout=5m`. `cledyu-tf-lock` 이 잡혀 있어도 5분 재시도로 흡수(즉시 실패 → 수동 force-unlock 회피) |
 > | **3** ✅ | ~~`12` 의 `curl https://auth.cledyu.com` 에 재시도 없음~~ (codex P2 도 지적) | **해소(로직)** — 30회×10s 재시도 루프(`if curl\|grep`, set -e 안전). ⚠️ **실환경 검증은 T7** — `[10]` DNS 전환 후에야 전파·캐시 흡수를 실측할 수 있다(오늘은 로직만 검증) |
-> | **4** | `notify` 에 재시도 없음 | Discord 429/장애면 **성공·실패 알림 둘 다 유실**. `[13]` 이 죽으면 Catch → NotifyFailed 도 같은 이유로 죽는다 → **무음** (미해소 — T5) |
-> | **4b** ✅ | ~~`notify` 실패 알림이 무조건 "DNS 는 온프렘"~~ (codex P2) | **해소** — `failedState` allowlist(`RestartApps`·`VerifyServing`·`NotifyComplete`)로 분기. `[10]` SwitchDNS 이후 실패면 "이미 EKS 전환됨" 안내. SwitchDNS 자체 실패는 fail-closed 라 "온프렘"(참), 미지 단계는 보수적 "온프렘". 6케이스 검증 |
-> | **5** | `04` 의 `grep -cw Ready` 가 `Ready,SchedulingDisabled` 를 Ready 로 셈(실측) | cordon 된 노드를 통과시킨다. 현 흐름에 cordon 주체가 없어 저위험이나, `[3]` P1e 가 §11.15 상태를 만나면 운영자가 수동 cordon 할 수 있다 |
-> | **6** | `04` 의 `WANT=3` 하드코딩 vs terraform nodegroup desired | 한쪽만 바뀌면 **조용히** 어긋난다. `[4]` 가 올린 desired 를 읽거나 최소한 양쪽에 교차 주석 |
+> | **4** | `notify` 에 재시도 없음 | Discord 429/장애면 **성공·실패 알림 둘 다 유실**. → **SFN `Retry`(5s×3, backoff 2)를 `NotifyComplete`·`NotifyFailed` 에.** `urlopen` 은 429·5xx 에 `HTTPError` 를 던지므로 Lambda 가 실패하고 SFN 이 재시도한다(Python 변경 0, 재시도 이력이 콘솔에 남음). ⚠️ **`NotifyComplete` 에 `Catch` 를 달지 않는다** — 달면 성공한 페일오버에 "❌ 실패" 알림이 가는 **C2 재현**이다. 소진 시 실행 FAILED 로 두고, 콘솔의 FAILED 가 "알림이 왜 안 왔나"의 단서가 된다 |
+> | **4b** 🔴 | ~~`failedState` allowlist 로 DNS 안내 분기 — **"해소" 였다**~~ | **거짓이었다. 되돌린다(스펙 §11.18 (c) 실측).** `.sync:2` 가 자식 `Error` 를 감싸 `failedState` 엔 **`States.TaskFailed`** 가 온다 → allowlist 3개(`RestartApps`·`VerifyServing`·`NotifyComplete`) **전부 영원히 안 맞아 `post_dns` 는 도달 불가**. `[11]`·`[12]` 실패 = **DNS 가 이미 EKS 인데** "온프렘 — 트래픽은 안전합니다" 를 보낸다(수정 전보다 나쁘다: 틀린 내용에 근거 없는 안심이 붙었다). → **이름 추론을 버리고 `$.dns.alb` `IsPresent`(지상 진실)로 분기**(아래 Step 1) |
+> | **5** | `04` 의 `grep -cw Ready` 가 `Ready,SchedulingDisabled` 를 Ready 로 셈(실측) | cordon 된 노드를 통과시킨다. **배제가 목적에 맞다** — cordon 된 노드엔 파드가 안 뜨니 애드온 DEGRADED 를 못 막는다(= `[4.5]` 의 존재 이유를 못 채운다). → `awk '$2=="Ready"'` 정확 매치 |
+> | **6** | `04` 의 `WANT=3` 하드코딩 vs terraform nodegroup desired | 한쪽만 바뀌면 **조용히** 어긋난다. → **`local.dr_hot_node_desired` 단일 출처**로 `[4]` 의 `DesiredSize` 와 `[4.5]` 의 `env`(`export WANT_NODES=…`)를 함께 먹인다. `[7]` 의 `SNAPSHOT_KEY` 와 **같은 검증된 기전**(T2 실측 통과)이라 새 메커니즘이 없다. ⚠️ **04 가 런타임에 EKS API 로 desired 를 읽는 안은 기각** — (1) bastion 엔 `eks:DescribeCluster` 만 있고 `DescribeNodegroup` 이 없다(실측) (2) 더 나쁜 건, `[4]` 가 조용히 실패해 desired=0 이면 **"0대를 기다리면 된다"로 읽어 공허참 통과**한다(§11.14 (f) 의 그 함정을 되밟는다) |
 
-> **🔴 착수 전 결정 2건 (T1 실측에서 도출 — 스펙 §11.9):**
+> **✅ 착수 전 결정 2건 — **둘 다 종결**(2026-07-16). 원문은 T1 실측에서 도출(스펙 §11.9).**
 >
-> **(1) 드릴을 main 에 대고 할 것인가.** [2] 는 `SourceVersion` 을 안 넘겨 **프로젝트 기본값 main** 을
-> 쓴다. **머지 전이면 main 에 buildspec 이 없어 T5 드릴이 "buildspec not found" 로 죽는다**(T1 에서
-> 실제로 겪은 실패). 권장은 **T5 전에 main 머지** — 실재해가 돌리는 게 정확히 main 이라, 브랜치를
-> 드릴하면 **정작 실제로 도는 코드를 한 번도 안 테스트**하는 셈이다.
+> **(1) 드릴을 main 에 대고 할 것인가 → 종결: main 머지 완료(PR #317, squash).**
+> 계획서는 이걸 "머지 전이면 buildspec not found 로 드릴이 죽는다"로만 봤는데 **더 깊었다**: `[2]` 는
+> `source_version = "main"` 이고 SM 은 `SourceVersion` 을 안 넘기므로, 머지 전이면 buildspec 뿐 아니라
+> **`-target` 목록의 `aws_iam_role_policy.eks_dr_bastion_ssm_param` 도 main 에 없어 §11.17 (a) 가 그대로
+> 재현**된다(~40분 복구 후 `[9]` 마지막 줄 AccessDenied → `[10]` fail-closed → 전부 복구됐는데 서비스가
+> 안 돌아옴). **드릴 편의가 아니라 원리적 불능**이었다. → T5 브랜치는 **`origin/main` 에서 딴다**
+> (squash 라 기존 `feat/dr-failover-executors` 를 rebase 하면 이미 main 에 있는 43커밋이 재생된다).
 >
-> **(2) [2] 에 `Retry` 를 붙일 것인가.** terraform state 락은 하나다. **재해 중엔 운영자가 terraform 을
-> 만지고 있을 확률이 오히려 높고**(장애 확인하려고 `plan` 을 친다), 그 순간 승인을 누르면 [2] 가
-> `Error acquiring the state lock` 으로 죽는다(T1 에서 빌드 2개가 4초 차로 부딪혀 재현됨).
-> 빌드↔빌드는 `concurrent_build_limit = 1` 로 막았으나 **사람↔빌드는 안 막힌다.**
-> - 락은 초~분 단위로 풀리니 Retry(예: 60s × 5)로 삼킬 수 있다
-> - 그러나 **"모든 실패를 재시도"하면 `-var` 누락 같은 진짜 실패도 30분 늘어진다**
-> - → **락 에러만 골라낼 수 있는지 Step 4 에서 실측한다.** CodeBuild 실패가 SFN 에 어떤 에러명으로
->   오는지(terraform 내부 에러까지 구분되는지) 확인 후 결정:
->   ```bash
->   aws stepfunctions get-execution-history --region ap-northeast-2 --execution-arn <ARN> \
->     --query 'events[?type==`TaskFailed`].taskFailedEventDetails' --output json
->   ```
->   구분이 안 되면 **Retry 를 붙이지 않는다** — 재해 중 30분 지연이 락 충돌보다 나쁘다. 대신 런북에
->   "승인 전 `terraform` 을 만지지 말 것"을 명시(Task 6).
+> **(2) [2] 에 `Retry` 를 붙일 것인가 → 종결: 붙이지 않는다.**
+> **이 글은 `-lock-timeout` 추가 전에 쓰였다.** `73aad01` 이 `init`·`apply` 양쪽에 `-lock-timeout=5m` 을
+> 넣어 **사람↔빌드 락 충돌을 빌드 안에서 terraform 이 흡수**한다(잔여 #2). 남은 판단은 "락 에러만 골라낼
+> 수 있나"인데, CodeBuild `.sync` 실패는 **락이든 `-var` 누락이든 SFN 엔 같은 에러**로 온다(스펙 §11.18
+> (b) 가 `.sync` 계열의 에러 감싸기를 실측). → **계획서 자신의 규칙("구분이 안 되면 Retry 를 붙이지
+> 않는다 — 재해 중 30분 지연이 락 충돌보다 나쁘다")대로 안 붙인다.** 런북에 "승인 전 `terraform` 을
+> 만지지 말 것"은 그대로 명시(Task 6).
 
 - [ ] **Step 1: 메인 SM 정의**
 
@@ -2254,9 +2253,9 @@ ALB keycloak 타겟 unhealthy 로 404/503. `09` 가 Keycloak Ready 를 기다리
         End = true
       }
 
-      # ⚠️ NotifyFailed 는 $.approval·$.dns 를 **참조하면 안 된다** — [1] 이나 [2] 에서 실패하면 그
+      # ⚠️ NotifyFailed 는 $.approval·$.dns 를 **직접 참조하면 안 된다** — [1] 이나 [2] 에서 실패하면 그
       # 경로가 아직 없어 States.Runtime 이 나고, **실패 알림 자체가 무음으로 죽는다.**
-      # notify 의 실패 분기(index.py else)도 failedState·executionArn·stdoutTail 만 쓴다.
+      # $.failedStep·$.flags.dnsSwitched 는 아래 실패 경로가 **항상** 채워주므로 안전하다.
       NotifyFailed = {
         Type     = "Task"
         Resource = "arn:aws:states:::lambda:invoke"
@@ -2264,18 +2263,34 @@ ALB keycloak 타겟 unhealthy 로 404/503. `09` 가 Keycloak Ready 를 기다리
           FunctionName = aws_lambda_function.dr_notify.arn
           Payload = {
             outcome = "failed"
-            # SFN 은 "어느 상태가 실패했나"를 catcher 에 안 준다 → 에러명으로 대신한다.
-            # 자식 SM 실패는 BastionScriptFailed 로 오고, 어느 스크립트인지는 Cause 로 판별한다.
-            # ⚠️ **스펙 §11.13 (e) 필독** — bastion 7단계가 전부 같은 값으로 온다(자식 SM 의 Fail 은
-            #    Error 하나뿐). `.sync` 가 이를 States.TaskFailed 로 감쌀 가능성이 있으므로 **실제
-            #    문자열은 [2.4] 와 같은 방법으로 실측 확정한다 — 지어내지 말 것.**
-            # ⚠️ stdoutTail 은 **스크립트 출력이 아니다**(§11.13 (b)(c)) — stderr 는 캡처되지 않고
-            #    Fail 타입은 정적 Cause 만 싣는다. B안(§11.13 (d)) 대로 CloudWatch 포인터가 실린다.
-            "failedState.$"  = "$.error.Error"
+            # 🔴 **`$.error.Error` 를 쓰지 않는다 — 실측으로 무용 확정(스펙 §11.18 (b)).**
+            #    `.sync:2` 가 자식 Error 를 감싸 **States.TaskFailed** 가 온다. bastion 7단계뿐 아니라
+            #    `.sync` 를 쓰는 모든 상태가 같은 값이다. 대신 각 Task 의 Catch 가 자기 이름을
+            #    static 으로 주입한 $.failedStep 을 쓴다(아래 "실패 경로" 절).
+            "failedState.$" = "$.failedStep"
+            # DNS 안내는 **이름 추론이 아니라 지상 진실**로 판정한다(§11.18 (c) — allowlist 는 dead code 였다).
+            "dnsSwitched.$" = "$.flags.dnsSwitched"
+            # Cause 는 **날것 그대로** 넘긴다. 파싱은 notify(Python)의 몫이다.
+            # 🔴 **ASL 로 파싱하면 안 된다(§11.18 (e) 재현)** — 평문 Cause 에 States.StringToJson 을 쓰면
+            #    States.Runtime 이고 Pass 는 Catch 를 못 단다(스키마 거부) → **알림이 무음으로 죽는다.**
+            #    Cause 가 JSON 인 건 자식 SM 실패일 때뿐이고 [2]/[2.4]/[2.5] 는 평문이다.
             "stdoutTail.$"   = "$.error.Cause"
             "executionArn.$" = "$$.Execution.Id"
           }
         }
+        # 잔여 #4 — Discord 429/장애로 실패 알림까지 유실되는 것을 막는다.
+        Retry = [{
+          ErrorEquals     = ["States.ALL"]
+          IntervalSeconds = 5
+          MaxAttempts     = 3
+          BackoffRate     = 2.0
+        }]
+        # 재시도 소진 시에도 Fail 상태엔 도달시킨다 — 그래야 실행이 의도한 Error 로 끝난다.
+        Catch = [{
+          ErrorEquals = ["States.ALL"]
+          ResultPath  = null
+          Next        = "Failed"
+        }]
         Next = "Failed"
       }
       Failed = {
@@ -2285,8 +2300,84 @@ ALB keycloak 타겟 unhealthy 로 404/503. `09` 가 Keycloak Ready 를 기다리
       }
 ```
 
-> **`Catch` 의 `ResultPath = "$.error"` 가 위 매핑의 전제다** — `{Error, Cause}` 가 거기 들어간다.
+**실패 경로 — `Catch` 는 NotifyFailed 로 직행하지 않는다(스펙 §11.18 (f)):**
+
+```
+<Task> --Catch(ResultPath="$.error")--> <Task>Failed (Pass) --> DnsSwitched? --> Mark{Post,Pre}Dns --> NotifyFailed
+           17개 Task 각각              자기 이름을 static 주입   Choice: $.dns.alb    flags.dnsSwitched
+                                        → $.failedStep           IsPresent            → notify
+```
+
+```hcl
+# ── 실패 경로 ① 어느 단계인가 — 각 Task 가 자기 이름을 static 으로 주입한다 ──
+# 왜 생성하나: Task 상태가 17개다. 손으로 17번 쓰면 오타가 나고, 오타는 **재해 중에만** 드러난다.
+# Choice·Wait·Pass 는 대상이 아니다 — **Pass 는 Catch 를 못 단다**(스키마 거부, §11.18 (e) 실측).
+locals {
+  # ⚠️ 이 목록은 아래 States 맵의 Task 상태와 **정확히 일치**해야 한다. Step 3 에 대수 검증을 둔다.
+  dr_failover_tasks = [
+    "RequestApproval", "TerraformApply", "ClearAlbParam", "ResolveBastion",
+    "CleanWarmEtcd", "ScaleNodes", "UpdateNodegroup", "WaitNodesReady",
+    "InstallAddons", "CheckAddons", "BootstrapApps", "RestoreVault",
+    "RestoreData", "WaitAppsReady", "SwitchDNS", "RestartApps", "VerifyServing",
+  ]
+
+  # 각 Task 에 붙일 Catch. States.ALL 은 **단독·마지막**이어야 한다(AWS 문서).
+  dr_catch = { for s in local.dr_failover_tasks : s => [
+    { ErrorEquals = ["States.DataLimitExceeded"], ResultPath = "$.error", Next = "${s}Failed" },
+    { ErrorEquals = ["States.ALL"], ResultPath = "$.error", Next = "${s}Failed" },
+  ] }
+
+  # 이름 주입 Pass 17개.
+  dr_failed_states = { for s in local.dr_failover_tasks : "${s}Failed" => {
+    Type       = "Pass"
+    Result     = s
+    ResultPath = "$.failedStep"
+    Next       = "DnsSwitched?"
+  } }
+
+  # ── 실패 경로 ② 트래픽이 어디 있나 — 이름이 아니라 페이로드 실물을 본다 ──
+  dr_dns_states = {
+    # SwitchDNS 가 ResultPath="$.dns" 라 **$.dns.alb 의 존재 ⟺ [10] 통과**다.
+    # ⚠️ IsPresent 가드 필수 — [10] 전에 죽으면 그 경로가 아예 없다. 경로 없는 Variable 을 Choice 가
+    #    어떻게 다루는지는 미확정이나 States.Runtime 이면 **어떤 Catch 로도 못 잡는다**(자식 SM 의
+    #    AgentReady? 가 같은 이유로 같은 가드를 쓴다 — 선례).
+    # ⚠️ **allowlist 로 되돌아가지 말 것.** failedStep 이 정확해져 이름 판정도 "작동은" 하지만,
+    #    [10]↔[11] 사이에 상태가 하나 끼는 순간 **조용히** 틀린다. IsPresent 는 안 틀린다.
+    "DnsSwitched?" = {
+      Type    = "Choice"
+      Choices = [{ Variable = "$.dns.alb", IsPresent = true, Next = "MarkPostDns" }]
+      Default = "MarkPreDns"
+    }
+    MarkPostDns = {
+      Type = "Pass", Result = { dnsSwitched = true }, ResultPath = "$.flags", Next = "NotifyFailed"
+    }
+    # SwitchDNS 자체 실패도 여기로 온다 — [10] 은 fail-closed 라 "온프렘"이 참이다.
+    MarkPreDns = {
+      Type = "Pass", Result = { dnsSwitched = false }, ResultPath = "$.flags", Next = "NotifyFailed"
+    }
+  }
+}
+```
+
+> **`Catch` 의 `ResultPath = "$.error"` 가 매핑의 전제다** — `{Error, Cause}` 가 거기 들어간다.
 > Catch 를 쓰는 모든 상태가 같은 `ResultPath` 를 써야 NotifyFailed 가 한 벌로 동작한다.
+> `Pass` 의 `Result`+`ResultPath` 는 `$.error` 를 덮지 않는다(다른 경로에 쓴다).
+
+**[3][6][7][8][9][11][12] 의 자식 SM `Failed` 를 `CausePath` 로 바꾼다(§11.18 (d) — 3~4홉 → 0홉):**
+
+```hcl
+      # 자식 SM(dr_run_on_bastion)의 Failed. 초안은 정적 Cause 라 commandId 를 못 실었고,
+      # §11.13 (d) 는 그걸 "B안의 비용"으로 수용했다. **그 전제가 실측으로 깨졌다** — CausePath 가 된다.
+      # label 과 commandId 는 시크릿이 아니므로 B안의 안전성(stderr 를 알림에 안 올림)은 그대로다.
+      Failed = {
+        Type  = "Fail"
+        Error = "BastionScriptFailed"
+        CausePath = "States.Format('{} 실패 — aws logs tail ${aws_cloudwatch_log_group.dr_bastion_commands.name} --log-stream-name-prefix {}', $.label, $.cmd.Command.CommandId)"
+      }
+```
+> ⚠️ `$.cmd` 는 `SendCommand` 의 `ResultPath` 라 **SendCommand 성공 후에만** 있다. `WaitForSsmAgent`·
+> `SendCommand` 자체가 실패하면 이 `Failed` 를 안 거치고 Retry 소진 후 자기 에러로 죽는다(부모의 Catch 가
+> 잡는다) → `CausePath` 가 없는 경로를 참조할 일은 없다. **Step 4 에서 이 가정을 확인한다.**
 
 - [ ] **Step 2: 트리거를 메인 SM 으로 교체**
 
@@ -2315,14 +2406,58 @@ data "aws_iam_policy_document" "dr_failover_trigger" {
 - [ ] **Step 3: 정적 검증**
 
 ```bash
-cd /home/user/Cledyu/infra/terraform/aws
-terraform fmt -check dr-orchestration.tf && terraform validate
+cd /home/user/Cledyu
+# ⚠️ shellcheck·shfmt·ruff·terraform_docs 를 로컬 설치 여부로 건너뛰지 말 것 — 훅이 자기 것을 쓰므로
+#    커밋 때 반드시 걸린다(T3 에서 "미설치 — 건너뜀" 했다가 SC2015 로 커밋 거부됐다).
+#    shfmt·terraform_docs 는 **파일을 수정**하므로 먼저 돌려 확정한 뒤 add 한다.
+pre-commit run --files infra/terraform/aws/dr-orchestration.tf \
+  infra/terraform/aws/dr-orchestration-lambda/notify/index.py \
+  infra/terraform/aws/scripts/bastion/04-wait-nodes-ready.sh infra/terraform/aws/README.md
 ```
-**ASL JSONPath 는 여기서 안 잡힌다** — Step 4 가 유일한 검증이다.
+✅ 2026-07-16 실측 전부 Passed (terraform fmt·validate·tflint·docs · shellcheck · shfmt · ruff ·
+mixed-line-ending). `validate` 가 `Error: Cycle` 을 안 냈다 = dr_sfn_child 분리가 유효하다.
+
+**🆕 대수 검증 — `dr_failover_tasks` 목록 == SM 의 실제 Task 집합인가.** 어긋나면 조용히 위험하다:
+목록에만 있으면 고아 `<X>Failed` Pass(혼란), **SM 에만 있으면 그 상태엔 Catch 가 없어 실패가 알림 없이
+실행을 죽인다**(무음 사망). 손으로 17개를 세는 건 §11.11 이 경고한 바로 그 과소 게이트다.
+
+```bash
+cd /home/user/Cledyu/infra/terraform/aws
+# 목록
+awk '/^  dr_failover_tasks = \[/,/^  \]/' dr-orchestration.tf |
+  grep -oE '"[A-Za-z?]+"' | tr -d '"' | sort -u > /tmp/list.txt
+# dr_failover 리소스 블록 안의 Type="Task" 상태 (자식 SM 의 Task 를 안 섞으려면 블록 스코프가 필수)
+awk '/^resource "aws_sfn_state_machine" "dr_failover"/,0' dr-orchestration.tf | awk '
+  /^      "?[A-Za-z?]+"? += \{$/ { n=$1; gsub(/"/,"",n); cur=n; next }
+  /^        Type +=/ { t=$3; gsub(/"/,"",t); if (t=="Task" && cur!="") print cur; cur="" }' | sort -u > /tmp/sm.txt
+# Catch 를 **의도적으로** 안 단 Task 2개. 세 번째가 생기면 그건 진짜 결함이므로 잡혀야 한다.
+#   NotifyComplete : Catch 를 달면 성공한 페일오버에 "❌ 실패" 알림(C2 재현) → 금지
+#   NotifyFailed   : 이미 실패 경로다. 자기 Catch 로 Failed 에 도달시킨다
+printf 'NotifyComplete\nNotifyFailed\n' > /tmp/nocatch.txt
+diff <(comm -23 /tmp/sm.txt /tmp/list.txt) /tmp/nocatch.txt \
+  && echo "✅ Catch 없는 Task 는 의도한 2개뿐" || echo "🔴 Catch 빠진 상태 발견 — 무음 사망"
+# 목록에만 있는 것(= 고아 Failed Pass). 출력이 있으면 결함이다.
+comm -13 /tmp/sm.txt /tmp/list.txt > /tmp/orphan.txt
+[ -s /tmp/orphan.txt ] && { echo "❌ 목록에만 있음 = 고아 Failed Pass:"; cat /tmp/orphan.txt; } \
+  || echo "✅ 고아 Failed Pass 없음"
+```
+✅ 2026-07-16 실측: 일치(17 + 의도적 제외 2 = SM 의 Task 19). **검증기 자체도 음성 대조했다** —
+목록에서 `RestartApps` 를 빼니 `+RestartApps` 로, SM 에 없는 `GhostState` 를 넣으니 고아로 각각 잡혔다.
+(검증기를 안 검증하면 그게 또 하나의 과소 게이트다 — T2 가 `SUCCEEDED` 를 믿었다 로그를 잃은 것과 같다.)
+
+**ASL JSONPath 는 여기서 안 잡힌다** — `States.Runtime` 은 `terraform validate` 도 Catch 도 못 잡으므로
+**Step 4 의 구간별 실행이 유일한 검증이다.**
 
 - [ ] **Step 4: 운영자 실측 — 상태를 붙일 때마다 거기까지 도달하나**
 
-**한 번에 13단계를 다 넣지 말고**, `Next` 를 바꿔가며 구간별로 확인한다:
+**한 번에 13단계를 다 넣지 말고**, `Next` 를 바꿔가며 **3구간**으로 확인한다. `States.Runtime`(JSONPath
+오타·없는 경로)은 **어떤 Catch 로도 못 잡고 `terraform validate` 도 못 잡으므로, 실행이 유일한 검증이다.**
+
+| 구간 | 끝 상태 | 여기서만 볼 수 있는 것 |
+|---|---|---|
+| 1 | `ResolveBastion` | `[1]` 의 `$.approval` 매핑 · `[2]` CodeBuild `.sync` · **`[2.4]` 의 Catch** · `[2.5]` 의 `Reservations[0]` |
+| 2 | `WaitNodesReady` | `[3]` env 계약 · `[4]` 노드그룹 런타임 조회 · **`[4.5]` 의 `WANT_NODES` env 주입**(잔여 #6) |
+| 3 | `NotifyComplete` | `[7]` 의 `States.Format` 스냅샷 주입 · `[10]` 의 `$.Payload.alb` · **`[13]` 의 RTO 2단**(F5 회귀) |
 
 ```bash
 cd /home/user/Cledyu/infra/terraform/aws
@@ -2334,21 +2469,30 @@ aws stepfunctions start-execution --region ap-northeast-2 --state-machine-arn "$
 aws stepfunctions get-execution-history --region ap-northeast-2 --execution-arn <ARN> \
   --query 'events[?type==`TaskStateEntered`].stateEnteredEventDetails.name' --output text
 ```
-Expected: `RequestApproval → TerraformApply → ClearAlbParam → ResolveBastion → CleanWarmEtcd →
-ScaleNodes → UpdateNodegroup → WaitNodes → CheckNodes → InstallAddons → ...` 순서대로.
+Expected(구간 3): `RequestApproval → TerraformApply → ClearAlbParam → ResolveBastion → CleanWarmEtcd →
+ScaleNodes → UpdateNodegroup → WaitNodesReady → InstallAddons → WaitAddons → CheckAddons → ...` 순서대로.
+(초안의 `WaitNodes`/`CheckNodes`/`NodesActive?` 는 **삭제**됐다 — 스펙 §11.14 로 무효 판정)
 
-> **hot 리소스가 이미 떠 있으므로 [2] 는 no-op 에 가깝게 빨리 끝난다**(terraform 이 멱등).
+> ⚠️ **첫 회차는 hot 이 없다**(2026-07-16 실측: bastion 없음·노드 desired 0) → `[2]` 가 NAT·bastion 을
+> **실제로 만든다**(~3분). 2회차부터는 terraform 멱등이라 빠르다. 계획서 초안의 "hot 이 이미 떠 있으므로
+> [2] 는 no-op" 은 T4 드릴 직후를 전제한 서술이었다.
 
-**여기서 확정해야 할 미확정 1건 — `ClearAlbParam` 의 에러명:**
+**✅ `ClearAlbParam` 의 에러명은 착수 전 탐침으로 확정됐다 — `Ssm.ParameterNotFoundException`**
+(스펙 §11.18 (a)). 계획서의 유추가 **맞았다.** SFN 의 SDK 통합은 와이어 코드(`ParameterNotFound`)가 아니라
+**SDK 예외 클래스명**을 에러명으로 쓴다(와이어 코드는 `Cause` 에만). → 코드 변경 불필요. **다만 드릴에서
+회귀 확인은 한다** — 첫 실행은 파라미터가 없으므로 `[2.4]` 가 Catch 를 타고 `ResolveBastion` 으로 넘어가야
+한다(안 넘어가면 여기서 실행이 죽는다):
 
 ```bash
-# 첫 실행은 파라미터가 없으므로 [2.4] 가 Catch 를 타야 한다. 안 타면 여기서 실행이 죽는다.
 aws stepfunctions get-execution-history --region ap-northeast-2 --execution-arn <ARN> \
   --query 'events[?type==`TaskFailed`].taskFailedEventDetails.error' --output text
+# → Ssm.ParameterNotFoundException 하나만 나오고 실행은 계속됐으면 정상(Catch 가 삼킨 것)
 ```
-- 아무것도 안 나오고 `ResolveBastion` 으로 넘어갔으면 → `Ssm.ParameterNotFoundException` 이 맞다. 확정.
-- **문자열이 나왔으면 그게 진짜 에러명이다** → `ErrorEquals` 를 그걸로 교체하고 재배포. **지어내지 말 것**
-  (A3·C-fix 가 정확히 이 실수였다).
+
+**실패 경로도 한 번은 밟아본다** — 성공 경로만 보면 `$.failedStep`·`$.flags.dnsSwitched` 매핑이 틀려도
+모른다. 구간 1에서 `[2.4]` 의 `Catch` 를 잠시 떼면 거기서 실패하므로, `ClearAlbParamFailed → DnsSwitched? →
+MarkPreDns → NotifyFailed` 를 타고 Discord 에 **`실패 단계: ClearAlbParam`**(`States.TaskFailed` 가 아니라)과
+"DNS 는 아직 온프렘" 이 뜨는지 본다. 확인 후 `Catch` 를 되돌린다.
 
 **그리고 [13] 의 RTO 가 `?` 가 아닌지 본다** — `?` 면 `_ts()` 가 아니라 **Payload 매핑**이 틀린 것이다
 (F5 회귀). `$$.Execution.StartTime`·`$.approval.approvedAt` 이 실제로 실렸는지 확인:
@@ -2581,7 +2725,9 @@ git commit -m "docs(dr): Plan 2 전체 드릴 RTO 실측 반영"
         `ownerReferences: Cluster/<name>` 를 붙여 GC 가 연쇄 삭제(kind 실측 ~15초, §11.16 (e))
         → **`08` 에 PVC 삭제 추가 불필요**
   - [ ] **`psql -d cledyu` 인증 통과**(H3) — 여전히 미확정 (T3 Step 10 이 실측 없이 지나갔다) → **T7**
-  - [ ] **`ClearAlbParam` 의 에러명** — 여전히 미확정 (T5 Step 4)
+  - [x] **`ClearAlbParam` 의 에러명** — **`Ssm.ParameterNotFoundException` 확정** (2026-07-16 착수 전 탐침,
+        스펙 §11.18 (a)). 계획서 유추가 맞았다 — SFN 은 와이어 코드가 아니라 SDK 예외 클래스명을 쓴다.
+        **드릴 없이 버릴 SM 하나로 쟀다**(과금 ~$0) — 미확정을 드릴 밖으로 뺄 수 있으면 빼는 게 싸다
 - [x] **`06-` 이 재실행에서도 `SUCCEEDED`** (T3 Step 10 — 두 번 돌린다. H2) — ✅ 2026-07-16 드릴 2회
       연속 통과, 로그에 `git clone`(1회차)→`fetch/reset`(2회차) 두 경로 확인(§11.17)
 - [ ] **`08-` 재생성 후 PVC 가 stale 재사용이 아니다** — [12] 의 `count(*)` 가 **복원 시점 값과 일치**
@@ -2605,6 +2751,40 @@ git commit -m "docs(dr): Plan 2 전체 드릴 RTO 실측 반영"
 - [ ] **[2.4] ClearAlbParam 이 첫 실행(파라미터 없음)에서 Catch 를 타고 넘어간다** (T5 Step 4 — F4)
 - [ ] **드롭다운에서 고른 스냅샷이 [7] 에 도달한다** — 최신이 아닌 걸 골라 검증
 - [ ] **NotifyFailed 가 실제로 Discord 에 뜬다** — 일부러 한 상태를 깨뜨려 확인 (F2 — 무음 실패 방어선)
+- [ ] 🆕 **실패 알림이 `실패 단계: States.TaskFailed` 가 **아니다**** (T5 Step 4 — 스펙 §11.18 (b)(c) 회귀).
+      진짜 상태 이름(예: `ClearAlbParam`)이 찍혀야 한다. `States.TaskFailed` 가 찍히면 `$.failedStep` 배선이
+      빠진 것이고, 그건 **allowlist dead code 시절로 되돌아간 것**이다
+- [ ] 🆕 **`[11]`/`[12]` 실패 시 알림이 "DNS 는 이미 EKS" 라고 말한다** (§11.18 (c) — 이 버그의 본체).
+      "온프렘 — 트래픽은 안전합니다" 가 뜨면 `$.dns.alb` `IsPresent` 분기가 안 먹은 것이다 → **T7 에서 확인**
+      (`[10]` 이 실제로 도는 건 T7 뿐이다)
+- [ ] 🆕 **코드에 있는 것이 AWS 에도 있다** (§11.17 (a)·§11.18 (h) — terraform 은 자동 apply 가 없고
+      드리프트를 **아무도 안 알려준다**. 이 계획에서 **두 번** 물렸다)
+      ⚠️ **"리소스가 존재하나"만 보면 안 된다** — §11.18 (h) 는 **Lambda 는 멀쩡히 있는데 SFN 롤에 부를
+      권한이 없던** 사고다. 존재 체크는 그걸 통과시킨다.
+      ```bash
+      # ① 존재 — SM 이 부르는 Lambda 3종
+      for f in addon-install dns-switch notify; do aws lambda get-function \
+        --function-name cledyu-lab-dr-$f --region ap-northeast-2 --query 'Configuration.FunctionName'; done
+      # ② 권한 — **실행 주체의 롤**에 그 호출 statement 가 있나 (§11.18 (h) 가 여기서 걸린다)
+      # ⚠️ grep 을 파일 전체에 걸지 말 것 — 다른 롤 정책의 sid 까지 긁어 **오탐 28건**이 나온다(실측).
+      #    28번 늑대를 부르는 체크는 아무도 안 본다. dr_sfn 정책 문서 **블록으로 스코프**를 자른다.
+      aws iam get-role-policy --role-name cledyu-lab-dr-sfn --policy-name cledyu-lab-dr-sfn \
+        --query 'PolicyDocument.Statement[].Sid' --output text | tr '\t' '\n' | sort > /tmp/aws_sids.txt
+      awk '/^data "aws_iam_policy_document" "dr_sfn" \{/,/^\}/' dr-orchestration.tf |
+        grep -oE 'sid *= *"[A-Za-z]+"' | sed 's/.*"\(.*\)"/\1/' | sort > /tmp/code_sids.txt
+      comm -13 /tmp/aws_sids.txt /tmp/code_sids.txt   # 출력 = 🔴 코드엔 있고 AWS 엔 없다(드리프트)
+      comm -23 /tmp/aws_sids.txt /tmp/code_sids.txt   # 출력 = AWS 에만 있다(코드에서 지운 게 안 지워짐)
+      # ③ bastion 롤 — SM 이 참조하지 않아 -target 이 안 딸려온다. 별도 확인 필수(§11.17 (a) 의 F3)
+      aws iam list-role-policies --role-name cledyu-dr-bastion   # ssm-put-failover-param 이 있어야 한다
+      ```
+      - ✅ 2026-07-16: Lambda 3종 존재 · bastion 정책 4종 존재(IAM 롤은 hot 파괴 대상이 아니라 살아남는다)
+      - 🔴 2026-07-16: **`InvokeFailoverLambdas` 가 AWS 에 없었다**(§11.18 (h)) — `[5]`·`[10]`·`[13]` 을
+        전부 AccessDenied 로 만들고 **NotifyFailed 까지 죽여 무음**이 될 뻔했다. **T5 apply 가 수리한다**
+        (SM 이 정책을 depends_on → `-target` 이 의존성을 따라간다). Step 4 후 위 ②를 **다시 돌려 공백 확인**
+- [ ] 🆕 **IAM 은 "실제 principal 로" 행사해 검증한다** (§11.18 (h) 의 교훈). `aws lambda invoke` 를 사람
+      자격증명으로 성공시킨 것은 **SFN 롤이 부를 수 있다는 증거가 아니다** — T4 가 그렇게 검증했다고
+      적어놓고 실제론 롤 권한을 한 번도 안 건드렸다(§11.12 와 같은 뿌리: 명령은 맞는데 실행 주체가 다르다).
+      → 이 항목은 **Step 4 의 SM 실행**이 채운다(SFN 이 자기 롤로 Lambda 를 부른다)
 - [ ] `curl https://auth.cledyu.com/realms/cledyu-learn` 이 응답 (T7 Step 4)
 - [ ] `/metrics` 가 403 (WAF 연결)
 - [ ] **RTO 2단 실측** 기록 — 알림에 `?` 가 아니라 실제 분이 찍힌다 (T7 Step 3 — F5)
