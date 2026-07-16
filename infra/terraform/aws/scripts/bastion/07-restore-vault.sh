@@ -47,7 +47,39 @@ aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2
 
 VC="VAULT_CACERT=/vault/tls/ca.crt" # 모든 vault 명령에 필수 — TLS 자체서명(cledyu-ca)
 
-kubectl -n vault wait --for=condition=Ready pod/vault-0 --timeout=300s
+# ── 0) vault-0 의 **API 가 응답할 때까지** 대기 ─────────────────────────────
+# 🔴 **파드 Ready 를 기다리면 안 된다 — 영원히 안 온다**(2026-07-16 T3 드릴 실측).
+# 초안은 `kubectl -n vault wait --for=condition=Ready pod/vault-0 --timeout=300s` 였고
+# **구조적으로 성공이 불가능**했다:
+#   1. 차트의 readinessProbe 가 `vault status -tls-skip-verify` 다(실측으로 확인한 helm 기본값)
+#   2. **초기화 안 된 Vault 는 `vault status` 가 exit 2**(sealed) — 아래 §2 게이트가 쓰는 그 성질
+#   3. → probe 실패 → 파드가 **영원히 0/1**
+#   4. → `wait --for=condition=Ready` 가 300s 타임아웃 → **`vault operator init` 에 도달조차 못 함**
+#   **init 만이 Ready 를 만들 수 있는데 init 이 이 wait 뒤에 있다 — 닭-달걀이다.**
+#   실측: vault-0/1/2 전부 `0/1 Running` · `Ready=False` · `{"initialized":false,"sealed":true}`
+#         → `error: timed out waiting for the condition on pods/vault-0`
+#
+# **왜 지금까지 안 드러났나:** 07 은 오늘 **처음 스크립트로** 돌았다(T3 Step 10 이 실측 없이 지나갔다 —
+# 08-restore-data.sh 의 H5 주석이 같은 사실을 기록). 7/13·14 드릴은 **런북(사람)** 경로였고
+# 사람은 파드가 0/1 이어도 그냥 init 을 친다 — **스크립트만 Ready 를 기다린다.**
+# (§11.12 와 같은 뿌리: "명령은 맞는데 실행 주체가 다르다".)
+#
+# → **Ready 가 아니라 "API 가 응답하는가"를 본다.** sealed 여도 status 는 JSON 을 준다(exit 2 지만
+#   파싱 가능). `kubectl exec` 는 readiness 와 무관하게 Running 컨테이너에 붙는다(실측).
+# ⚠️ 여기서도 **출력을 먼저 캡처**한다 — `exec ... | jq` 직결은 exit 2 가 pipefail 로 jq 판정을 덮는다(§2).
+# 여기서 얻은 $ST 를 아래 §2 게이트가 그대로 쓴다 — 사이에 initialized 를 바꾸는 것이 없다.
+# 5분 (주석을 for 줄 안에 두면 shfmt 가 줄을 쪼갠다)
+for i in $(seq 1 60); do
+  ST=$(kubectl -n vault exec vault-0 -- sh -c "$VC vault status -format=json" 2> /dev/null || true)
+  echo "$ST" | jq -e 'has("initialized")' > /dev/null 2>&1 && break
+  echo "vault-0 API 대기 ($i/60)"
+  sleep 5
+done
+echo "$ST" | jq -e 'has("initialized")' > /dev/null 2>&1 || {
+  echo "❌ vault-0 API 가 5분째 무응답 — kubectl -n vault logs vault-0 확인"
+  exit 1
+}
+echo "vault-0 API 응답 OK ✅ (Ready 는 init 뒤에 온다 — 여기서 기다리지 않는다)"
 
 # ── 1) 스냅샷을 **init 보다 먼저** 파드 안까지 넣어둔다 (런북 :97-98 을 앞으로 재배치) ──────
 # 🔀 **런북과 순서가 다르다 — 의도된 재배치다(2026-07-16).**
@@ -75,11 +107,12 @@ kubectl -n vault cp "$WORK/vault-raft.snap" vault-0:/tmp/vault-raft.snap
 # [3] 의 PVC 정리가 실패했는데 넘어갔거나. **먼저 판정해서 원인을 말해준다.**
 # (여기서 복구를 시도하지 않는 이유: 이미 초기화된 Vault 의 keyring 이 fresh 인지 복원본인지
 #  스크립트가 알 방법이 없고, 그 둘은 root 획득 경로가 서로 다르다. 추측 대신 [3] 부터 재실행이 정답.)
-# ⚠️ 출력을 **먼저 캡처**한다 — `vault status | jq` 로 직결하면 안 된다(2026-07-16 실측).
-#    `vault status` 는 **sealed 면 exit 2** 다. `set -o pipefail` 아래서 그 2 가 jq 의 판정을 덮어써
-#    파이프라인이 non-zero → if 가 false → **"초기화됨 + sealed" 를 그냥 통과시킨다**(= 게이트가
-#    막으려던 바로 그 상태). 3상태(fresh / 초기화+sealed / 초기화+unsealed) 실측으로 확인했다.
-ST=$(kubectl -n vault exec vault-0 -- sh -c "$VC vault status -format=json" 2> /dev/null || true)
+# ⚠️ **§0 이 캡처한 $ST 를 그대로 쓴다 — 다시 조회하지 않는다.**
+#    `vault status | jq` 로 직결하면 안 되기 때문이다(2026-07-16 실측): `vault status` 는 **sealed 면
+#    exit 2** 이고, `set -o pipefail` 아래서 그 2 가 jq 의 판정을 덮어써 파이프라인이 non-zero →
+#    if 가 false → **"초기화됨 + sealed" 를 그냥 통과시킨다**(= 게이트가 막으려던 바로 그 상태).
+#    3상태(fresh / 초기화+sealed / 초기화+unsealed) 실측으로 확인했다. 캡처 형태만이 안전하고,
+#    §0 이 이미 그 형태로 잡아뒀으므로 재조회는 함정을 한 번 더 만들 뿐이다.
 if echo "$ST" | jq -e '.initialized == true' > /dev/null 2>&1; then
   echo "❌ Vault 가 이미 초기화돼 있다 — [7] 은 fresh Vault 를 전제한다."
   echo "   원인: [3] CleanWarmEtcd 의 P1e(Vault raft PVC 정리)가 안 돌았다."
