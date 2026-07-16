@@ -203,11 +203,11 @@ export default function LandingPage() {
                 key={step.num}
                 className={`p-8 ${i < HOW_IT_WORKS.length - 1 ? 'border-b border-white/15 sm:border-b-0 sm:border-r' : ''}`}
               >
-                <div className="font-chakra text-4xl font-bold text-white/45">
+                <div className="font-chakra text-5xl font-bold text-white">
                   {step.num}
                 </div>
-                <div className="mt-3 text-base font-semibold text-white">{step.title}</div>
-                <div className="mt-1.5 text-sm leading-relaxed text-white/50">{step.desc}</div>
+                <div className="mt-6 text-lg font-semibold text-white/90">{step.title}</div>
+                <div className="mt-3 text-sm leading-relaxed text-white/55">{step.desc}</div>
               </div>
             ))}
           </div>
