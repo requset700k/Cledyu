@@ -35,17 +35,80 @@ aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2
 # [P1c] 고아 ALB webhook 제거.
 # ⚠️ 이름은 **2026-07-15 실측 확정**이다(warm 클러스터에서 직접 조회 — validating·mutating 양쪽 존재).
 # 계획 초안은 이 이름을 추측으로 적었고 "틀리면 --ignore-not-found 로 조용히 통과한다"고 경고했으나,
-# 실측 결과 추측이 맞았다. 이름이 바뀌면 여기가 조용히 no-op 이 되므로 아래 검증 게이트를 둔다.
+# 실측 결과 추측이 맞았다. **이름 방어는 그 실측이 하는 것이지 아래 게이트가 하는 게 아니다** —
+# 이름이 틀리면 delete 도 get 도 not-found 라 게이트는 조용히 통과한다(2026-07-16 확인). 아래 게이트가
+# 실제로 잡는 것은 **고아 webhook**(= P1c 그 자체)이다.
+# ⚠️ 살아있는 컨트롤러가 있으면 이 delete 는 2초 만에 되살아나는 **의미 없는 churn** 이다(실측).
+#    그래도 지운다 — warm(노드 0)에서 고아를 치우는 게 이 스크립트의 목적이고, hot 에서 무해하기 때문이다.
+#    "되살아났다"를 실패로 보지 않는 것이 아래 게이트의 핵심이다.
 kubectl delete validatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found
 kubectl delete mutatingwebhookconfiguration aws-load-balancer-webhook --ignore-not-found
 
-# 조용한 실패 방어 — 지운 뒤에도 남아 있으면 이름이 틀렸거나 즉시 재생성된 것이다.
-# (첫 failover 로 애초에 없었으면 아래도 통과한다 — "없음"이 정상 상태다.)
+# 게이트 — **"존재하나"가 아니라 "고아인가"를 본다**(2026-07-16 T5 드릴 실측으로 교체).
+#
+# 🔴 **구 게이트는 재실행에서 오탐으로 죽었다.** "지운 뒤에도 남아 있으면 실패"였는데, 노드가 살아있는
+#    상태(= 부분 실패 후 재실행)에선 **ALB 컨트롤러가 자기 webhook 을 2초 만에 되살린다** → 건강한
+#    클러스터에서 [3] 이 죽었다. 실측 로그: `"aws-load-balancer-webhook" deleted` 직후 `get` 이 성공.
+#    실재해는 [2] 직후 노드가 0이라 컨트롤러가 없어 안 터진다 — **재실행 경로에서만** 터졌다.
+#
+# 🔴 **그리고 구 게이트는 자기가 표방한 목적을 수행한 적이 없다.** 위 주석은 "이름이 바뀌면 조용히
+#    no-op 이 되므로 게이트를 둔다"인데, 이름이 틀리면 `delete` 도 no-op 이고 `get` 도 not-found 라
+#    **게이트가 그냥 통과한다.** 이름 방어는 게이트가 아니라 **실측**(위 2026-07-15)이 하고 있었다.
+#
+# **P1c 의 실체는 "webhook 이 존재한다"가 아니다** — *"컨트롤러가 죽어 endpoint 가 없는 webhook 이
+# coredns 의 admission 을 막는다"* 이다. 그러니 판정도 그 조건으로 한다:
+#   **webhook 이 남아 있다면 endpoint 가 있어야 한다.**
+#   · 실재해(노드 0): 지우면 사라진다 → continue → 통과. **기존 방어 그대로다.**
+#   · 재실행(노드 3): 재생성되나 endpoint 가 있다 → 통과. 살아있는 컨트롤러의 것이라 무해하다.
+#   · **진짜 고아**: 남아있는데 endpoint 0 → ❌. **지금까지 한 번도 구분 못 하던 그 경우다.**
+#
+# ⚠️ service 이름을 박지 않는다 — **webhook 객체에서 읽는다**(A3·C-fix 가 이름 창작으로 물린 그 자리).
+#    2026-07-16 실측값은 kube-system/aws-load-balancer-webhook-service:443 (webhook 9개 전부 동일)이고
+#    endpoint 2개가 컨트롤러 파드 IP 와 일치했다. 그래도 **읽어서** 쓴다.
+# ⚠️ `kubectl get endpoints` 를 쓰지 않는다 — **v1 Endpoints 는 v1.33+ 에서 deprecated** 라
+#    경고를 뿌리고 언젠가 조용히 깨진다(실측 경고 확인). EndpointSlice 가 정식 경로다.
 for k in validatingwebhookconfiguration mutatingwebhookconfiguration; do
-  if kubectl get "$k" aws-load-balancer-webhook > /dev/null 2>&1; then
-    echo "❌ $k/aws-load-balancer-webhook 이 삭제 후에도 존재 — P1c 가 안 고쳐졌다"
+  # 사라졌으면 정상(warm 의 기대 경로 · 첫 failover 로 애초에 없던 경우 포함).
+  kubectl get "$k" aws-load-balancer-webhook > /dev/null 2>&1 || continue
+
+  NS=$(kubectl get "$k" aws-load-balancer-webhook \
+    -o jsonpath='{.webhooks[0].clientConfig.service.namespace}' 2> /dev/null)
+  SVC=$(kubectl get "$k" aws-load-balancer-webhook \
+    -o jsonpath='{.webhooks[0].clientConfig.service.name}' 2> /dev/null)
+  # ⚠️ `[ -n "$NS" ] && [ -n "$SVC" ] || { ... }` 는 SC2015 다(A && B || C 는 if-then-else 가 아니다).
+  #    여기선 동작이 우연히 맞지만 훅이 거부하고, if 가 읽기도 낫다.
+  if [ -z "$NS" ] || [ -z "$SVC" ]; then
+    echo "❌ $k 가 남았는데 clientConfig.service 를 못 읽었다 — webhook 구조가 바뀌었다"
     exit 1
   fi
+
+  # 🔴 **address 가 아니라 conditions.ready 를 본다**(codex P2, 2026-07-16).
+  # controller 파드가 terminating/NotReady 면 EndpointSlice 에 address 는 남아도 ready=false 다.
+  # 그런데 admission webhook 은 **ready endpoint 로만** 호출되므로([5] coredns admission),
+  # `.addresses[0]` 만 세면 ready=0 인데도 통과시켜 → [5] 가 "webhook no endpoints" 로 다시 죽는다.
+  # §11.11 "존재만 보고 값을 안 봄" 의 재발이다 — address 존재 ≠ webhook 호출 가능.
+  #
+  # ⚠️ jsonpath `?()` 필터의 `==true` 지원은 kubectl 버전따라 다르다(bastion 은 v1.34) → 필터로
+  #    지어내지 않고, `ready addr` 를 나란히 뽑아 grep 으로 센다. 출력 예: "true 10.90.3.85".
+  # ⚠️ **재시도 필수** — controller 가 webhook 을 방금 재생성했으면 endpoint 가 아직 ready 전일 수
+  #    있다(§11.18 (k): validating 2초·mutating 10초 재생성). 재시도 없이 즉시 실패시키면 건강한
+  #    재실행을 죽인다(codex 도 "준비될 때까지 재시도" 를 지적). 2분 상한.
+  # ([3] 내부합 여유 480s 라 이 2분은 SSM timeout 정합성을 안 깨뜨린다 — check-timeouts.py 로 확인.)
+  READY=0
+  for _ in $(seq 1 12); do
+    READY=$(kubectl -n "$NS" get endpointslice -l "kubernetes.io/service-name=$SVC" \
+      -o jsonpath='{range .items[*].endpoints[*]}{.conditions.ready}{" "}{.addresses[0]}{"\n"}{end}' 2> /dev/null |
+      grep -c '^true ' || true)
+    [ "${READY:-0}" -gt 0 ] && break
+    echo "  $k: webhook 재생성됨, ${NS}/${SVC} 의 ready endpoint 대기 중"
+    sleep 10
+  done
+  [ "${READY:-0}" -gt 0 ] || {
+    echo "❌ $k 가 남았는데 ${NS}/${SVC} 의 **ready** endpoint 가 2분째 0 — 고아이거나 controller 고장(P1c)."
+    echo "   이 상태로 두면 coredns 애드온이 admission 에 막혀 CREATE_FAILED 로 죽는다."
+    exit 1
+  }
+  echo "$k: 재생성됨 + ready endpoint ${READY}개 (${NS}/${SVC}) — 살아있는 컨트롤러의 것이라 정상"
 done
 
 # [P1d] stale hostAlias — 같은 성격의 warm etcd 잔존물(로테이션된 ALB IP 를 가리켜 api oidc 가 10s hang).

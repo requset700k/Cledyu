@@ -50,6 +50,35 @@ def _mins(a, b):
     return f"{(tb - ta).total_seconds() / 60:.0f}분"
 
 
+def _diagnosis(raw):
+    """$.error.Cause 를 사람이 읽을 진단문으로 푼다.
+
+    ⚠️ **파싱을 여기서 하는 게 설계다 — ASL 로 하면 안 된다**(스펙 §11.18 (e), 재현함):
+    평문 Cause 에 States.StringToJson 을 쓰면 States.Runtime 이 나고, 그건 **어떤 Catch 로도 못 잡으며**,
+    Pass 는 애초에 Catch 를 못 단다(스키마 거부: "Field 'Catch' is not supported").
+    → 실패 경로에서 실패 = **실패 알림 자체가 무음으로 죽는다.** Python 의 try/except 는 두 형태를 다 삼킨다.
+
+    Cause 가 JSON 인 건 **자식 SM(.sync:2) 실패일 때뿐**이다(§11.18 (b)):
+      {"Error":"BastionScriptFailed","Cause":"<label> 실패 — aws logs tail ...","ExecutionArn":...,"Input":...}
+    [2] CodeBuild · [2.4]/[2.5] SDK 실패의 Cause 는 **평문**이다
+    (예: "Service returned error code ParameterNotFound (Service: Ssm, Status Code: 400, ...)").
+    """
+    if not raw:
+        return "(진단 정보 없음)"
+    try:
+        d = json.loads(raw)
+    except (ValueError, TypeError):
+        return raw  # 평문 — 그대로 보여준다
+    if not isinstance(d, dict):
+        return raw
+    # 자식 SM 실패. Cause 엔 CausePath 가 넣은 "<label> 실패 — aws logs tail <그룹> --log-stream-name-prefix
+    # <commandId>" 가 들어 있다(§11.18 (d)) → 운영자가 **그대로 복사해 붙이면 로그 전문**이 나온다.
+    parts = [p for p in (d.get("Error"), d.get("Cause")) if p]
+    if d.get("ExecutionArn"):
+        parts.append(f"자식 실행: {d['ExecutionArn']}")
+    return "\n".join(parts) if parts else raw
+
+
 def handler(event, context):
     now = datetime.now(UTC).isoformat()
     if event.get("outcome") == "success":
@@ -65,24 +94,32 @@ def handler(event, context):
             f"런북: {RUNBOOK}"
         )
     else:
+        # ⚠️ failedState 는 메인 SM 의 **$.failedStep** 이다 — 각 Task 의 Catch 가 자기 이름을 static 으로
+        #   주입한 값이라 진짜 상태 이름(예: "RestoreVault")이 온다.
+        #   🔴 **$.error.Error 를 쓰면 안 된다** — .sync:2 가 자식 Error 를 감싸 **"States.TaskFailed"** 가
+        #   오고, `.sync` 를 쓰는 모든 상태가 같은 값이다(스펙 §11.18 (b) 실측).
         failed = event.get("failedState", "?")
-        # ⚠️ DNS 안내를 **실패 단계로 분기**한다(codex P2). [10] SwitchDNS 가 Route53 UPSERT 를 하므로
-        #   그 **이후**([11] RestartApps·[12] VerifyServing) 실패면 DNS 는 이미 **EKS 를 가리킨다.**
-        #   무조건 "온프렘을 가리킵니다" 로 보내면 운영자가 트래픽 위치를 오판해 롤백 순서를 잘못 잡는다.
-        #   단계 이름은 메인 SM(Task 5)의 State 명 — 스펙 §5 표의 SwitchDNS/RestartApps/VerifyServing 과 일치.
-        #   판정은 **allowlist(전환 후 단계)** 로 한다 — 모르는 이름(?, 오타)은 보수적으로 "온프렘"(안전)으로.
-        post_dns = failed in ("RestartApps", "VerifyServing", "NotifyComplete")
+
+        # ⚠️ DNS 안내는 **이름 추론이 아니라 페이로드 실물**로 판정한다(스펙 §11.18 (c)).
+        #   이전 구현은 allowlist(`failed in ("RestartApps","VerifyServing","NotifyComplete")`)로 분기했는데
+        #   **셋 다 영원히 안 맞는 dead code** 였다(위 §11.18 (b) — 실제로 오는 값은 States.TaskFailed).
+        #   그래서 [11]·[12] 실패 = **DNS 가 이미 EKS 인데** "온프렘 — 트래픽은 안전합니다" 를 보냈다.
+        #   무조건 "온프렘"이던 수정 전보다 나빴다: 틀린 내용에 근거 없는 안심이 붙었다.
+        #   → 메인 SM 의 `DnsSwitched?` Choice 가 **$.dns.alb 의 IsPresent**(= [10] SwitchDNS 통과 여부의
+        #     지상 진실)로 판정해 이 불리언을 넣어준다. 이름이 아니라 실물이라 상태가 끼어들어도 안 틀린다.
+        #   없으면 보수적으로 False("온프렘") — 안전한 쪽이다.
+        dns_switched = bool(event.get("dnsSwitched"))
         dns_line = (
             "⚠️ **DNS 는 이미 EKS 로 전환됐습니다**(SwitchDNS 통과 후 실패) — 사용자는 EKS ALB 로 향합니다.\n"
             "롤백하려면 Route53 을 온프렘으로 되돌리는 것부터(런북 §복귀)."
-            if post_dns
+            if dns_switched
             else "DNS 는 아직 온프렘을 가리킵니다 — 트래픽은 안전합니다."
         )
         text = (
             "❌ **DR 페일오버 실패**\n"
             f"실패 단계: `{failed}`\n"
             f"실행: {event.get('executionArn', '?')}\n\n"
-            f"```\n{(event.get('stdoutTail') or '')[-1200:]}\n```\n"
+            f"```\n{_diagnosis(event.get('stdoutTail'))[-1200:]}\n```\n"
             "**롤백하지 않았습니다** — 여기까지 뜬 것은 그대로 있으니 런북으로 이어받으세요.\n"
             f"{dns_line}"
         )

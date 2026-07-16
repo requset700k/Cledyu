@@ -35,6 +35,7 @@ ignore = [
 "tests/**" = ["S", "T20"]
 "**/airflow/dags/**" = ["T20"]            # DAG 디버깅 print 허용
 "**/notebooks/**" = ["T20", "E402", "F401"]
+"infra/terraform/aws/scripts/*.py" = ["T20"] # CLI 검증기 — stdout 출력이 존재 이유다
 
 [tool.ruff.lint.isort]
 known-first-party = ["cledyu"]

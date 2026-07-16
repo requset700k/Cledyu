@@ -466,8 +466,11 @@ data "aws_iam_policy_document" "dr_failover_trigger" {
   statement {
     sid     = "StartFailover"
     actions = ["states:StartExecution"]
-    # Plan 2 에서 메인 SM 으로 교체된다. 지금은 테스트 SM 을 가리켜 배선을 검증한다.
-    resources = [aws_sfn_state_machine.dr_approval_test.arn]
+    # T5 에서 하네스(dr_approval_test) → **메인 SM** 으로 교체됐다.
+    # ⚠️ 교체 전에는 실재해에 승인 버튼이 떠도 눌러봐야 **아무 일도 안 일어나고 실패 알림도 없었다**
+    #   (하네스는 RequestApproval 하나로 End=true = 성공으로 끝난다) → 운영자는 "페일오버가 돌고 있다"고
+    #   믿는다. 그래서 T5 전까지 dr_orchestration_armed 무장이 금지였다(잔여 #1).
+    resources = [aws_sfn_state_machine.dr_failover.arn]
   }
   statement {
     sid     = "Logs"
@@ -507,7 +510,7 @@ resource "aws_lambda_function" "dr_failover_trigger" {
   timeout          = 15
   environment {
     variables = {
-      STATE_MACHINE_ARN = aws_sfn_state_machine.dr_approval_test.arn
+      STATE_MACHINE_ARN = aws_sfn_state_machine.dr_failover.arn # T5 에서 교체 (was: dr_approval_test)
       SFN_REGION        = var.region
     }
   }
@@ -717,8 +720,15 @@ resource "aws_sfn_state_machine" "dr_run_on_bastion" {
     # ⚠️ 실행 전체 상한. WaitCmd→GetResult→Done?→WaitCmd 는 무한 루프이고 Done? 의 Default 가 Failed 지만
     # Status 가 InProgress 로 계속 오면 영원히 돈다. SSM 의 executionTimeout 이 먼저 걸려 TimedOut 을 주는
     # 게 정상 경로이나, 그마저 안 오는 경우(에이전트 죽음 등)의 backstop 이다.
-    # 가장 긴 스크립트(08=3600) + 폴링 여유. 초과 시 States.Timeout → 부모의 Catch 가 잡는다.
-    TimeoutSeconds = 4200
+    #
+    # ⚠️ **가장 긴 스크립트의 timeoutSeconds 보다 커야 한다** — 안 그러면 이 백스톱이 먼저 걸려
+    # SSM 의 TimedOut 대신 States.Timeout 이 나고, "어느 스크립트가 왜" 가 사라진다.
+    # 가장 긴 것은 **09(4800)** 다(08=3600 이 아니다 — 2026-07-16 codex P2 로 09 를 3000→4800 재산정).
+    # 4800 + 폴링 여유 600 = 5400. 초과 시 States.Timeout → 부모의 Catch 가 잡는다.
+    #
+    # 🔴 **스크립트의 timeoutSeconds 를 올릴 땐 이 값도 같이 본다.** 한쪽만 바꾸면 조용히 어긋난다
+    #    — 아래 Step 3 의 대수 검증(계획서)이 그 정합성을 강제한다.
+    TimeoutSeconds = 5400
     StartAt        = "WaitForSsmAgent"
     States = {
       # ⚠️ module.eks_dr_endpoints 는 s3/kms/sts 만 만든다 — ssm/ssmmessages/ec2messages 인터페이스
@@ -875,10 +885,21 @@ resource "aws_sfn_state_machine" "dr_run_on_bastion" {
         End = true
       }
 
+      # ⚠️ **정적 Cause 가 아니라 CausePath 다**(스펙 §11.18 (d) 실측). 초안은 정적이라 commandId 를 못 실었고
+      # §11.13 (d) 는 그걸 "B안의 비용 — Discord→SFN콘솔→자식실행→commandId→CloudWatch 3~4홉"으로 수용했다.
+      # **그 전제가 실측으로 깨졌다**: CausePath + States.Format 이 정의에도 통과하고 값도 채워지며,
+      # `.sync:2` 를 넘어 부모의 $.error.Cause 안에 그대로 실려 온다 → 알림에 **쳐야 할 명령어 전문**을 싣는다.
+      #
+      # B안의 안전성은 그대로다 — label 과 commandId 는 시크릿이 아니다. stderr(set -x 트레이스, §11.13 (b))
+      # 는 여전히 알림 경로에 안 올린다. 그게 B안을 택한 이유였다(C6 가 07 에서 막은 표면을 안 넓힌다).
+      #
+      # $.label 은 BuildCommands 가, $.cmd 는 SendCommand 의 ResultPath 가 넣는다. Done? 의 Default 로
+      # 여기 오는 경로는 SendCommand 성공 이후뿐이라 둘 다 반드시 있다. (SendCommand 자체가 실패하면
+      # Retry 소진 후 자기 에러로 죽고 이 상태를 안 거친다 → 부모의 Catch 가 잡는다.)
       Failed = {
-        Type  = "Fail"
-        Error = "BastionScriptFailed"
-        Cause = "SSM 명령 실패 — 자식 SM 실행 이력의 GetResult 결과에서 commandId 를 찾아 CloudWatch 로그그룹 ${aws_cloudwatch_log_group.dr_bastion_commands.name} 에서 전문 확인: aws logs tail <그룹> --log-stream-name-prefix <commandId>"
+        Type      = "Fail"
+        Error     = "BastionScriptFailed"
+        CausePath = "States.Format('{} 실패 — aws logs tail ${aws_cloudwatch_log_group.dr_bastion_commands.name} --log-stream-name-prefix {}', $.label, $.cmd.Command.CommandId)"
       }
     }
   })
@@ -988,8 +1009,18 @@ data "aws_iam_policy_document" "dr_dns_switch" {
     resources = ["*"]
   }
   statement {
-    sid     = "CheckWaf"
-    actions = ["wafv2:GetWebACLForResource"]
+    sid = "CheckWaf"
+    # 🔴 **액션이 둘이다.** `GetWebACLForResource` API 한 번을 부르는데 IAM 은 두 가지를 본다:
+    #   · wafv2:GetWebACLForResource → 조회 대상(ALB)에
+    #   · wafv2:GetWebACL            → **반환값(WebACL)에** ← 이게 빠져 있었다
+    # 바로 아래 주석이 "양쪽에 권한이 필요하다"고 정확히 적어놓고 actions 엔 하나만 넣었다.
+    # 2026-07-16 T5 라이브 드릴에서 실측:
+    #   AccessDeniedException ... not authorized to perform: wafv2:GetWebACL
+    #   on resource: .../regional/webacl/cledyu-lab-public/...
+    # **T4 드릴은 이걸 못 잡았다** — dns-switch fail-closed 시험이 index.py:37(SSM ParameterNotFound)에서
+    # 죽어 :47 의 WAF 호출에 **도달조차 못 했다.** 테스트는 통과했는데 정작 검증하려던 경로를 한 번도
+    # 안 밟은 것이다(§11.18 (g) 의 InvokeFailoverLambdas 와 같은 패턴).
+    actions = ["wafv2:GetWebACLForResource", "wafv2:GetWebACL"]
     # ⚠️ ALB(조회 대상)와 WebACL(반환값) **양쪽**에 권한이 필요하다 — ALB ARN 은 런타임에 알고,
     # ACL 은 lab public 스택 소유라 여기서 특정하면 그 스택 게이트에 묶인다.
     resources = ["*"]
@@ -1093,4 +1124,543 @@ resource "aws_lambda_function" "dr_notify" {
       WEBHOOK_SECRET_ARN = aws_secretsmanager_secret.discord_webhook.arn
     }
   }
+}
+
+# ══ [1]~[13] 메인 상태 머신 — 페일오버 본체 (T5) ══════════════════════════════
+#
+# 상태 이름은 설계 §5 표 그대로다. **지어내지 말 것** — 런북·스펙·이 파일이 이 이름으로 서로를 참조하고,
+# 아래 dr_failover_tasks 목록이 그 이름으로 실패 경로를 생성한다.
+
+locals {
+  # [4] 가 올릴 hot 노드 수. **단일 출처**다(잔여 #6) — UpdateNodegroup 의 DesiredSize 와
+  # 04-wait-nodes-ready.sh 의 WANT_NODES env 가 **둘 다 여기서** 나온다. 한쪽만 바꾸는 게 불가능해진다.
+  # (var.eks_dr_node_desired 는 노드그룹 **생성 시점** 값 0 이다 — 모듈이 이후 desired 를 ignore_changes
+  #  하므로 스케일은 terraform 이 아니라 [4] 가 한다. buildspec 이 -var eks_dr_node_desired=0 을 넘기는 이유.)
+  dr_hot_node_desired = 3
+
+  # ── 실패 경로 ① 어느 단계인가 ──
+  #
+  # 🔴 **$.error.Error 를 쓰지 않는다.** `.sync:2` 가 자식 Error 를 감싸 **States.TaskFailed** 가 오고,
+  #   `.sync` 를 쓰는 모든 상태가 같은 값이다(스펙 §11.18 (b) 실측). 이전 구현은 그걸 모르고
+  #   notify 에 allowlist 를 뒀다가 **100% dead code** 가 됐다(§11.18 (c)).
+  # → 각 Task 의 Catch 가 **자기 이름을 static 으로** $.failedStep 에 주입한다. 파싱이 없어 States.Runtime
+  #   위험이 0이고, 상태 타입(CodeBuild·Lambda·자식SM·SDK)과 무관하게 정확하다.
+  #
+  # ⚠️ **Task 상태만** 대상이다 — Choice·Wait 는 Catch 를 지원하지 않고, **Pass 는 스키마가 거부한다**
+  #   ("Field 'Catch' is not supported", §11.18 (e) 실측).
+  # ⚠️ 이 목록은 아래 States 맵의 Task 와 **정확히 일치**해야 한다 — 빠지면 그 상태의 실패가 Catch 없이
+  #   실행을 죽여 **알림이 안 간다.** Step 3 의 대수 검증이 이 일치를 강제한다.
+  dr_failover_tasks = [
+    "RequestApproval", "TerraformApply", "ClearAlbParam", "ResolveBastion",
+    "CleanWarmEtcd", "ScaleNodes", "UpdateNodegroup", "WaitNodesReady",
+    "InstallAddons", "CheckAddons", "BootstrapApps", "RestoreVault",
+    "RestoreData", "WaitAppsReady", "SwitchDNS", "RestartApps", "VerifyServing",
+  ]
+
+  # ⚠️ States.ALL 은 **단독**이어야 하고 **마지막** retrier/catcher 여야 한다(AWS 문서) — 다른 에러명과
+  #   같이 쓰면 CreateStateMachine 이 정의를 거부한다.
+  # ⚠️ States.DataLimitExceeded 를 **명시**한다 — States.ALL 이 안 잡는다(AWS 문서). 우리가 stdout 을
+  #   CloudWatch 로 뺀 이유가 바로 256KB 상한이라, 그게 터졌을 때 무음이면 원인을 못 찾는다.
+  # ⚠️ States.Runtime 은 **어떤 Catch 로도 못 잡는다** — 방어는 Step 4 의 구간별 실측뿐이다.
+  dr_catch = { for s in local.dr_failover_tasks : s => [
+    { ErrorEquals = ["States.DataLimitExceeded"], ResultPath = "$.error", Next = "${s}Failed" },
+    { ErrorEquals = ["States.ALL"], ResultPath = "$.error", Next = "${s}Failed" },
+  ] }
+
+  dr_failed_states = { for s in local.dr_failover_tasks : "${s}Failed" => {
+    Type       = "Pass"
+    Result     = s
+    ResultPath = "$.failedStep" # $.error(= Catch 가 넣은 {Error,Cause})는 그대로 보존된다
+    Next       = "DnsSwitched?"
+  } }
+
+  # ── 실패 경로 ② 트래픽이 어디 있나 — 이름 추론이 아니라 페이로드 실물 ──
+  dr_dns_states = {
+    # SwitchDNS 가 ResultPath="$.dns" 라 **$.dns.alb 의 존재 ⟺ [10] 통과**다. 지상 진실이다.
+    #
+    # ⚠️ IsPresent 가드 필수 — [10] 전에 죽으면 그 경로가 **아예 없다.** 경로 없는 Variable 을 Choice 가
+    #   어떻게 다루는지는 미확정이나 States.Runtime 이면 어떤 Catch 로도 못 잡는다 → IsPresent 를 먼저
+    #   두면 어느 쪽이든 안전하다(자식 SM 의 AgentReady? 가 같은 이유로 같은 가드를 쓴다 — 선례).
+    # ⚠️ **allowlist(failedStep in [RestartApps, VerifyServing])로 되돌아가지 말 것.** $.failedStep 이
+    #   정확해졌으니 이름 판정도 "작동은" 한다. 그러나 [10]↔[11] 사이에 상태가 하나 끼는 순간 **조용히**
+    #   틀리고, 그건 운영자가 트래픽 위치를 오판하는 것이다. IsPresent 는 안 틀린다.
+    "DnsSwitched?" = {
+      Type    = "Choice"
+      Choices = [{ Variable = "$.dns.alb", IsPresent = true, Next = "MarkPostDns" }]
+      Default = "MarkPreDns"
+    }
+    MarkPostDns = {
+      Type       = "Pass"
+      Result     = { dnsSwitched = true }
+      ResultPath = "$.flags"
+      Next       = "NotifyFailed"
+    }
+    # SwitchDNS **자체** 실패도 여기로 온다 — [10] 은 fail-closed(SSM ALB·WAF·존 3중 게이트)라
+    # 검증에 실패하면 Route53 을 안 건드린다 → "온프렘"이 참이다.
+    MarkPreDns = {
+      Type       = "Pass"
+      Result     = { dnsSwitched = false }
+      ResultPath = "$.flags"
+      Next       = "NotifyFailed"
+    }
+  }
+}
+
+resource "aws_sfn_state_machine" "dr_failover" {
+  name     = "${var.name_prefix}-dr-failover"
+  role_arn = aws_iam_role.dr_sfn.arn
+
+  # 두 정책 다 명시 의존 — dr_approval_test 주석의 (1)(2) 와 같은 이유(병렬 생성 시 AccessDenied,
+  # -target 재생성 시 정책 미동반). 이 SM 은 자식 SM 도 부르므로 dr_sfn_child 까지 필요하다.
+  # 사이클 없음 — 이 SM 을 참조하는 정책이 없다(자식 SM 만 그 문제가 있었고 dr_sfn_child 로 분리했다).
+  depends_on = [aws_iam_role_policy.dr_sfn, aws_iam_role_policy.dr_sfn_child]
+
+  logging_configuration {
+    log_destination = "${aws_cloudwatch_log_group.dr_sfn.arn}:*"
+    # ⚠️ false 고정 — true 면 LambdaFunctionScheduled 의 input 에 **해석된 taskToken 이 평문**으로 남는다.
+    # 토큰은 SendTaskSuccess 의 유일한 bearer 자격증명이라 로그 읽기 + states:SendTaskSuccess 만으로
+    # 서명·허용목록·arming 3겹을 전부 우회할 수 있다(설계 §5.4). dr_approval_test 와 같은 값이다.
+    include_execution_data = false
+    level                  = "ALL"
+  }
+
+  definition = jsonencode({
+    Comment = "DR 페일오버 [1]~[13] — 설계 §5"
+    # 승인 대기 24h(86400) + 복구 예산. AddonsDone? 폴링 루프가 영영 안 끝나는 경우의 backstop 이다
+    # (자식 SM 의 4200 과 별개로 부모에도 상한이 필요하다).
+    # 🔴 초안 90000 은 "복구 ~1h(3600)" 로 잡았으나 실측 바운드 예산은 ~16500 이다: CodeBuild 1800(build_timeout=30m)
+    #    + bastion .sync 8단계 14700(600+1200+1200+1800+3600+4800+900+600). 승인이 86400 을 다 쓰면 3600 만 남아
+    #    정상 진행 중인 복구를 top-level States.Timeout 이 끊는데, 그건 **어떤 state Catch 도 못 잡아** 실패 알림
+    #    없이 무음 FAILED 로 죽는다(NotifyFailed 는 per-state Catch 로만 도달). WaitAppsReady 와 같은 "표를 믿고
+    #    실물을 안 셈" 패턴이었다(codex P2, 2026-07-16). → 86400 + 16500 + 애드온 루프·여유 = 108000.
+    TimeoutSeconds = 108000
+    StartAt        = "RequestApproval"
+
+    States = merge({
+      # ── [1] 승인 — Plan 1 의 approval-request 를 그대로 재사용 ──
+      RequestApproval = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::lambda:invoke.waitForTaskToken"
+        Parameters = {
+          FunctionName = aws_lambda_function.dr_approval_request.arn
+          Payload = {
+            "taskToken.$" = "$$.Task.Token"
+            # ⚠️ "mode.$"="$.mode" 금지 — 실재해(failover-trigger)는 입력에 mode 를 안 넣어 그 JSONPath 가
+            # 없고 States.Runtime 으로 즉시 죽는다. 전체를 넘기고 mode 판정은 Lambda 안에서 한다.
+            "input.$" = "$"
+          }
+        }
+        # [7] 이 쓸 스냅샷과 [13] 이 쓸 RTO 기준점만 남긴다.
+        ResultSelector = { "snapshot.$" = "$.snapshot", "approvedAt.$" = "$.approvedAt" }
+        ResultPath     = "$.approval"
+        TimeoutSeconds = 86400 # DynamoDB TTL 과 일치
+        Catch          = local.dr_catch["RequestApproval"]
+        Next           = "TerraformApply"
+      }
+
+      # ── [2] hot 리소스 기동 (CodeBuild .sync) ──
+      # ⚠️ SourceVersion 을 넘기지 않는다 → 프로젝트 기본값 **main**. 실재해는 검증된 main 을 돌린다.
+      # ⚠️ Retry 를 붙이지 않는다 — buildspec 의 -lock-timeout=5m 이 사람↔빌드 락 충돌을 빌드 안에서
+      #   흡수하고(잔여 #2), CodeBuild .sync 실패는 락이든 -var 누락이든 SFN 엔 같은 에러로 와서 구분이
+      #   불가능하다. 모든 실패를 재시도하면 진짜 실패가 재해 중 30분 늘어진다(계획서 착수 전 결정 (2)).
+      TerraformApply = {
+        Type       = "Task"
+        Resource   = "arn:aws:states:::codebuild:startBuild.sync"
+        Parameters = { ProjectName = aws_codebuild_project.dr_failover_tf.name }
+        ResultPath = null # Build 객체가 크다 — 페이로드에 안 싣는다(256KB 상한)
+        Catch      = local.dr_catch["TerraformApply"]
+        Next       = "ClearAlbParam"
+      }
+
+      # ── [2.4] stale ALB 파라미터 삭제 — 설계 §5.1.2 의 2중 방어 ① ──
+      # [9] 가 쓰기 전에 항상 비운다. 안 비우면 [10] 이 **이전 사이클의 ALB** 로 DNS 를 넘길 수 있다
+      # (P1d stale hostAlias 와 같은 버그 클래스).
+      ClearAlbParam = {
+        Type       = "Task"
+        Resource   = "arn:aws:states:::aws-sdk:ssm:deleteParameter"
+        Parameters = { Name = "/cledyu-dr/failover/alb-hostname" }
+        # ✅ **에러명은 실측 확정**이다(스펙 §11.18 (a) — 버릴 SM 하나로 드릴 없이 쟀다):
+        #      error = Ssm.ParameterNotFoundException  /  cause = "...error code ParameterNotFound..."
+        #    SFN 의 SDK 통합은 **와이어 코드가 아니라 SDK 예외 클래스명**을 에러명으로 쓴다.
+        #    (CLI 가 "An error occurred (ParameterNotFound)" 로 찍는 걸 근거로 이 이름이 틀렸다고 의심했으나
+        #     실측이 반증했다 — 그럴듯한 간접 증거로 확정된 것을 뒤집을 때도 재는 게 먼저다.)
+        # ⚠️ 이 에러**만** 삼킨다. AccessDenied 까지 삼키면 stale 방어가 조용히 죽는다.
+        Catch = concat([{
+          # 첫 failover 엔 파라미터가 없는 게 정상이다 → 없으면 무시하고 진행("없으면 무시", §5.1.2).
+          ErrorEquals = ["Ssm.ParameterNotFoundException"]
+          ResultPath  = null
+          Next        = "ResolveBastion"
+        }], local.dr_catch["ClearAlbParam"])
+        ResultPath = null
+        Next       = "ResolveBastion"
+      }
+
+      # ── [2.5] bastion instance id — CodeBuild 에서 받지 않는다(exported-variables 결합 회피, §5.1.1a) ──
+      ResolveBastion = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::aws-sdk:ec2:describeInstances"
+        Parameters = {
+          Filters = [
+            { Name = "tag:Name", Values = ["${local.eks_dr_name}-bastion"] },
+            # ⚠️ running 필터 필수 — user_data_replace_on_change=true 라 교체 시 옛 인스턴스가
+            # shutting-down 으로 남는다. 없으면 죽어가는 id 를 집어 이후 SSM 이 전부 실패한다.
+            { Name = "instance-state-name", Values = ["running"] },
+          ]
+        }
+        ResultSelector = { "instanceId.$" = "$.Reservations[0].Instances[0].InstanceId" }
+        ResultPath     = "$.bastion"
+        Catch          = local.dr_catch["ResolveBastion"]
+        Next           = "CleanWarmEtcd"
+      }
+
+      # ── [3] 이전 사이클 잔존물 정리 ──
+      # ⚠️ **[4] 보다 먼저다.** warm etcd 는 사이클 간 살아남아 고아 ALB webhook 이 남는데, 노드를 먼저
+      # 올리면 coredns 애드온이 그 webhook 때문에 CREATE_FAILED 로 죽는다(P1c, 7/14 드릴). 순서 바꾸지 말 것.
+      CleanWarmEtcd = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::states:startExecution.sync:2"
+        Parameters = {
+          StateMachineArn = aws_sfn_state_machine.dr_run_on_bastion.arn
+          Input = {
+            "instanceId.$" = "$.bastion.instanceId"
+            script         = file("${path.module}/scripts/bastion/03-clean-warm-etcd.sh")
+            # ⚠️ env 는 **항상** 채운다 — 자식 SM 의 BuildCommands 가 States.Array($.env, $.script) 를
+            # 하므로 없으면 States.Runtime 으로 즉시 죽는다. ":" 는 셸 no-op.
+            env            = ":"
+            timeoutSeconds = 600 # 내부 대기: cloud-init wait
+            label          = "CleanWarmEtcd"
+          }
+        }
+        ResultPath = null
+        Catch      = local.dr_catch["CleanWarmEtcd"]
+        Next       = "ScaleNodes"
+      }
+
+      # ── [4] warm(desired 0) → hot ──
+      # 노드그룹 이름을 하드코딩하지 않는다 — 모듈이 접미사를 붙이므로(실물: dr-2026071308012714040000000f)
+      # 런타임 조회가 안전하다.
+      ScaleNodes = {
+        Type           = "Task"
+        Resource       = "arn:aws:states:::aws-sdk:eks:listNodegroups"
+        Parameters     = { ClusterName = local.eks_dr_name }
+        ResultSelector = { "name.$" = "$.Nodegroups[0]" }
+        ResultPath     = "$.ng"
+        Catch          = local.dr_catch["ScaleNodes"]
+        Next           = "UpdateNodegroup"
+      }
+      UpdateNodegroup = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::aws-sdk:eks:updateNodegroupConfig"
+        Parameters = {
+          ClusterName       = local.eks_dr_name
+          "NodegroupName.$" = "$.ng.name"
+          # ⚠️ 모듈이 desired 를 ignore_changes 하므로 [2] 의 terraform 이 아니라 **여기서** 올린다.
+          ScalingConfig = {
+            MinSize     = 0
+            MaxSize     = var.eks_dr_node_max
+            DesiredSize = local.dr_hot_node_desired
+          }
+        }
+        ResultPath = null
+        # 🔴 초안은 여기서 WaitNodes/CheckNodes/NodesActive? 로 갔다. **그 3상태는 삭제했다** —
+        #    Nodegroup.Status 게이트는 아무것도 안 거른다(스펙 §11.14, 2회 측정. §11.17 (e) 가 메커니즘을
+        #    정정했으나 "게이트 무효" 결론은 그대로다: 축소 시 명령 38초 만에 ACTIVE 인데 EC2 는 3대였다).
+        Catch = local.dr_catch["UpdateNodegroup"]
+        Next  = "WaitNodesReady"
+      }
+
+      # ── [4.5] 노드가 **k8s 에 Ready** 인지 — 🆕 T4 실측이 만들어낸 검문소 ──
+      # 목적은 "기다리기"가 아니라 **DEGRADED 의 뜻을 하나로 만드는 것**이다: 노드를 확실히 세운 뒤면
+      # [5] check 가 보는 DEGRADED 는 "노드 없음"이 아니라 **진짜 고장(P1c)** 뿐이라 치명 판정이 옳아진다.
+      # SFN 은 private EKS 에 못 닿고 ASG InService 는 kubelet 조인이 아니다 → 클러스터 안의 bastion 만 안다.
+      WaitNodesReady = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::states:startExecution.sync:2"
+        Parameters = {
+          StateMachineArn = aws_sfn_state_machine.dr_run_on_bastion.arn
+          Input = {
+            "instanceId.$" = "$.bastion.instanceId"
+            script         = file("${path.module}/scripts/bastion/04-wait-nodes-ready.sh")
+            # 잔여 #6 — 04 가 기다릴 대수를 **[4] 가 명령한 그 숫자**로 준다(위 local 단일 출처).
+            # 하드코딩 대조가 아니라서 한쪽만 바뀌어 조용히 어긋나는 일이 없다.
+            env = "export WANT_NODES=${local.dr_hot_node_desired}"
+            # 내부 합 900 = 노드 등장 루프 300 + Ready wait 600 → +300
+            # 🔴 초안은 900 이었고 주석이 "노드 등장 600 + Ready wait 600(**직렬 아님**, 여유)" 였다.
+            #    **직렬이 맞다**(루프로 등장을 기다린 뒤 wait 한다) → 실제 합 1200 > 선언 900 이었다.
+            #    스스로 "직렬 아님" 이라 합리화해놓고 넘어간 것이다. 등장 루프를 300 으로 줄여 해소.
+            timeoutSeconds = 1200
+            label          = "WaitNodesReady"
+          }
+        }
+        ResultPath = null
+        Catch      = local.dr_catch["WaitNodesReady"]
+        Next       = "InstallAddons"
+      }
+
+      # ── [5] 애드온 멱등 설치 — Lambda 는 **시작만**, ACTIVE 대기는 아래 폴링(900s 상한 회피) ──
+      InstallAddons = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::lambda:invoke"
+        Parameters = {
+          FunctionName = aws_lambda_function.dr_addon_install.arn
+          # ⚠️ action 필수 — 없으면 check 경로로 빠져 미설치 상태에서 ResourceNotFoundException 으로 죽는다.
+          Payload = { action = "start" }
+        }
+        ResultPath = null
+        Catch      = local.dr_catch["InstallAddons"]
+        Next       = "WaitAddons"
+      }
+      WaitAddons = {
+        Type    = "Wait"
+        Seconds = 20
+        Next    = "CheckAddons"
+      }
+      CheckAddons = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::lambda:invoke"
+        Parameters = {
+          FunctionName = aws_lambda_function.dr_addon_install.arn
+          Payload      = { action = "check" }
+        }
+        ResultSelector = { "done.$" = "$.Payload.done" }
+        ResultPath     = "$.addons"
+        Catch          = local.dr_catch["CheckAddons"]
+        Next           = "AddonsDone?"
+      }
+      # 이 루프는 **진짜 게이트**다(§11.14 (c) 실측: done=true 가 노드 Ready +70s — CREATING 을 제대로 기다렸다).
+      # 상한은 SM 의 TimeoutSeconds(90000)이 잡는다. check 가 CREATE_FAILED/DEGRADED 에 raise 하므로
+      # 진짜 고장이면 여기서 매달리지 않고 [5] 의 Catch 로 빠진다.
+      "AddonsDone?" = {
+        Type = "Choice"
+        Choices = [{
+          Variable      = "$.addons.done"
+          BooleanEquals = true
+          Next          = "BootstrapApps"
+        }]
+        Default = "WaitAddons"
+      }
+
+      # ── [6] ArgoCD·GitOps 부트스트랩 ──
+      BootstrapApps = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::states:startExecution.sync:2"
+        Parameters = {
+          StateMachineArn = aws_sfn_state_machine.dr_run_on_bastion.arn
+          Input = {
+            "instanceId.$" = "$.bastion.instanceId"
+            script         = file("${path.module}/scripts/bastion/06-bootstrap-apps.sh")
+            env            = ":"
+            timeoutSeconds = 1200 # 내부: rollout 300 + wait 300 → ~2× 여유
+            label          = "BootstrapApps"
+          }
+        }
+        ResultPath = null
+        Catch      = local.dr_catch["BootstrapApps"]
+        Next       = "RestoreVault"
+      }
+
+      # ── [7] Vault 복원 — **승인 때 고른 스냅샷**을 주입한다(드롭다운의 존재 이유) ──
+      RestoreVault = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::states:startExecution.sync:2"
+        Parameters = {
+          StateMachineArn = aws_sfn_state_machine.dr_run_on_bastion.arn
+          Input = {
+            "instanceId.$" = "$.bastion.instanceId"
+            script         = file("${path.module}/scripts/bastion/07-restore-vault.sh")
+            # ⚠️ **스크립트 본문과 문자열 조립을 하지 않는다**(리뷰 C1). States.Format 에 07 전문을 넣으면
+            #   (a) sh -c '...' 의 작은따옴표가 intrinsic 리터럴을 끊고 (b) { echo; exit 1; } 의 중괄호가
+            #   플레이스홀더로 읽히며 (c) \n 이 인자에 못 들어간다 → **CreateStateMachine 이 정의를 거부**해
+            #   apply 가 깨지고, terraform validate 는 이걸 못 잡는다.
+            # → env 를 **별도 필드**로 넘기고 자식 SM 이 commands 배열의 두 원소로 싣는다.
+            #   States.Format 은 **스냅샷 키에만** 쓴다 — S3 키엔 따옴표·중괄호·개행이 없어 안전하다.
+            "env.$"        = "States.Format('export SNAPSHOT_KEY={}', $.approval.snapshot)"
+            timeoutSeconds = 1800 # 내부: restore + generate-root + ESO rollout 120
+            label          = "RestoreVault"
+          }
+        }
+        ResultPath = null
+        Catch      = local.dr_catch["RestoreVault"]
+        Next       = "RestoreData"
+      }
+
+      # ── [8] CNPG 복원 (구 CR 제거 → ArgoCD 재생성 → bootstrap.recovery 가 S3 에서) ──
+      RestoreData = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::states:startExecution.sync:2"
+        Parameters = {
+          StateMachineArn = aws_sfn_state_machine.dr_run_on_bastion.arn
+          Input = {
+            "instanceId.$" = "$.bastion.instanceId"
+            script         = file("${path.module}/scripts/bastion/08-restore-data.sh")
+            env            = ":"
+            # ⚠️ 내부 대기 합(최악) 3000 = ArgoCD 재생성 600 + 1200 + 1200 → +600 여유.
+            #   **스크립트 내부 wait 합보다 커야 한다** — 초안은 1800 이라 느리지만 정상인 복원을 SSM 이 죽였다.
+            timeoutSeconds = 3600
+            label          = "RestoreData"
+          }
+        }
+        ResultPath = null
+        Catch      = local.dr_catch["RestoreData"]
+        Next       = "WaitAppsReady"
+      }
+
+      # ── [9] 앱 Ready 대기 + [10] 이 쓸 ALB 호스트명 기록 ──
+      # ⚠️ [9]→[10] 순서는 강제다(런북 명시): auth 는 Keycloak Ready 이후에만 넘긴다 — 조기 전환 시
+      # ALB keycloak 타겟이 unhealthy 라 404/503 이 뜬다.
+      WaitAppsReady = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::states:startExecution.sync:2"
+        Parameters = {
+          StateMachineArn = aws_sfn_state_machine.dr_run_on_bastion.arn
+          Input = {
+            "instanceId.$" = "$.bastion.instanceId"
+            script         = file("${path.module}/scripts/bastion/09-wait-apps-ready.sh")
+            env            = ":"
+            # 내부 합 4200 = 존재게이트 4×300 + kafka Ready 900 + topic 존재 300 + topic Ready 300
+            #              + VE rollout 600 + KC Ready 600 + ALB 300  → +600
+            #
+            # 🔴 **초안은 3000 이고 주석이 "내부 합 2400" 이었는데 둘 다 틀렸다**(codex P2, 2026-07-16).
+            #    실제 합은 **5700** 이었다 — `kubectl wait --timeout` 4개만 세고 **존재 게이트 5개
+            #    (3000초)를 통째로 빠뜨렸다.** 원인: 계획서 표의 2400 을 베꼈는데 그 표는 존재 게이트가
+            #    추가된 `79e9605`(§11.16 (b)) **이전**에 쓰인 것이다. 표를 믿고 실물을 안 셌다 —
+            #    notify allowlist(§11.18 (c))와 **같은 실패 패턴**이다.
+            #    → 존재 게이트를 600→300 으로 낮춰 합을 4200 으로 줄이고(09 주석 참조) 선언을 4800 으로 올렸다.
+            timeoutSeconds = 4800
+            label          = "WaitAppsReady"
+          }
+        }
+        ResultPath = null
+        Catch      = local.dr_catch["WaitAppsReady"]
+        Next       = "SwitchDNS"
+      }
+
+      # ── [10] DNS 전환 (fail-closed) ──
+      # ⚠️ ResultPath=null 금지 — alb 를 [13] 에 넘겨야 하고, **$.dns 의 존재가 실패 경로에서 "DNS 가
+      #   넘어갔나"의 지상 진실**이 된다(위 dr_dns_states).
+      SwitchDNS = {
+        Type           = "Task"
+        Resource       = "arn:aws:states:::lambda:invoke"
+        Parameters     = { FunctionName = aws_lambda_function.dr_dns_switch.arn }
+        ResultSelector = { "alb.$" = "$.Payload.alb" }
+        ResultPath     = "$.dns"
+        Catch          = local.dr_catch["SwitchDNS"]
+        Next           = "RestartApps"
+      }
+
+      # ── [11] 앱 재기동 (startup 1회 초기화 → 스스로 복구 안 함) ──
+      RestartApps = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::states:startExecution.sync:2"
+        Parameters = {
+          StateMachineArn = aws_sfn_state_machine.dr_run_on_bastion.arn
+          Input = {
+            "instanceId.$" = "$.bastion.instanceId"
+            script         = file("${path.module}/scripts/bastion/11-restart-apps.sh")
+            env            = ":"
+            timeoutSeconds = 900 # 내부: rollout 300×2 = 600 → +300
+            label          = "RestartApps"
+          }
+        }
+        ResultPath = null
+        Catch      = local.dr_catch["RestartApps"]
+        Next       = "VerifyServing"
+      }
+
+      # ── [12] 복원본이 실제로 서빙되는지 — 자격증명을 쓰지 않는다(설계 §5.1.4) ──
+      # **페일오버 전체의 마지막 게이트**다. 여기서 잘못 죽으면 완벽히 복구된 DR 이 ❌ 실패 알림을 보낸다.
+      VerifyServing = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::states:startExecution.sync:2"
+        Parameters = {
+          StateMachineArn = aws_sfn_state_machine.dr_run_on_bastion.arn
+          Input = {
+            "instanceId.$" = "$.bastion.instanceId"
+            script         = file("${path.module}/scripts/bastion/12-verify-serving.sh")
+            env            = ":"
+            timeoutSeconds = 600 # 내부: curl 재시도 30×10s = 300 + psql → +300
+            label          = "VerifyServing"
+          }
+        }
+        ResultPath = null
+        Catch      = local.dr_catch["VerifyServing"]
+        Next       = "NotifyComplete"
+      }
+
+      # ── [13] 완료 알림 ──
+      NotifyComplete = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::lambda:invoke"
+        Parameters = {
+          FunctionName = aws_lambda_function.dr_notify.arn
+          Payload = {
+            outcome = "success"
+            # ⚠️ $.detail.state.timestamp(알람 이벤트)가 **아니라** $$.Execution.StartTime 이다:
+            #   (a) 실행 시작 = 알람→EventBridge→trigger→StartExecution 이라 감지와 몇 초 차 (RTO 보고엔 충분)
+            #   (b) $.detail 은 **테스트 실행({"mode":"test"})에 없어** States.Runtime 이 나고, 그건 어떤
+            #       Catch 로도 못 잡는다
+            #   (c) 컨텍스트 객체는 **항상** 있다 → 실재해·드릴·테스트가 같은 경로를 탄다(C2 의 교훈)
+            "detectedAt.$" = "$$.Execution.StartTime"
+            "approvedAt.$" = "$.approval.approvedAt"
+            "alb.$"        = "$.dns.alb"
+          }
+        }
+        # 잔여 #4 — Discord 429/장애로 성공 알림이 유실되는 것을 막는다. urlopen 은 429·5xx 에
+        # HTTPError 를 던지므로 Lambda 가 실패하고 여기서 재시도된다(Python 변경 0).
+        Retry = [{
+          ErrorEquals     = ["States.ALL"]
+          IntervalSeconds = 5
+          MaxAttempts     = 3
+          BackoffRate     = 2.0
+        }]
+        # 🔴 **Catch 를 달지 않는다.** NotifyFailed 로 보내면 **13단계를 다 성공한 페일오버에 "❌ 실패"
+        #    알림**이 간다 — C2 가 정확히 그 버그였다. 재시도가 소진되면 실행을 FAILED 로 끝내고,
+        #    콘솔·CloudWatch 의 FAILED 가 "알림이 왜 안 왔나"의 단서로 남는다(설계 결정, 스펙 §11.18 (j)).
+        End = true
+      }
+
+      # ── 모든 Catch 의 종착 — 롤백하지 않는다(설계 §5.3) ──
+      # 재해 중엔 부분 완성이 0보다 낫고, 자동 롤백은 사람이 손댈 발판까지 치운다.
+      NotifyFailed = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::lambda:invoke"
+        Parameters = {
+          FunctionName = aws_lambda_function.dr_notify.arn
+          Payload = {
+            outcome = "failed"
+            # ⚠️ $.approval·$.dns 를 **직접 참조하지 않는다** — [1]/[2] 에서 실패하면 그 경로가 아직 없어
+            #   States.Runtime 이 나고 **실패 알림 자체가 무음으로 죽는다.**
+            #   아래 셋은 실패 경로(<X>Failed → DnsSwitched? → Mark*)가 **항상** 채워준다.
+            "failedState.$" = "$.failedStep"        # 진짜 상태 이름 (≠ States.TaskFailed)
+            "dnsSwitched.$" = "$.flags.dnsSwitched" # $.dns.alb IsPresent 로 판정한 지상 진실
+            # Cause 는 **날것 그대로**. 파싱은 notify(Python)의 try/except 가 한다 —
+            # ASL 의 States.StringToJson 은 평문 Cause 에 States.Runtime 이고 Pass 는 Catch 를 못 단다
+            # (스키마 거부) → 실패 경로에서 실패 = 무음(스펙 §11.18 (e) 재현).
+            "stdoutTail.$"   = "$.error.Cause"
+            "executionArn.$" = "$$.Execution.Id"
+          }
+        }
+        Retry = [{
+          ErrorEquals     = ["States.ALL"]
+          IntervalSeconds = 5
+          MaxAttempts     = 3
+          BackoffRate     = 2.0
+        }]
+        # 재시도가 소진돼도 Fail 상태엔 도달시킨다 — 그래야 실행이 의도한 Error 로 끝난다.
+        # (NotifyComplete 와 달리 여기선 Catch 가 안전하다 — 이미 실패 경로다.)
+        Catch = [{
+          ErrorEquals = ["States.ALL"]
+          ResultPath  = null
+          Next        = "Failed"
+        }]
+        Next = "Failed"
+      }
+
+      Failed = {
+        Type  = "Fail"
+        Error = "DrFailoverFailed"
+        Cause = "페일오버 실패 — Discord 알림과 실행 이력 참조. 롤백하지 않았다(설계 §5.3)."
+      }
+    }, local.dr_failed_states, local.dr_dns_states)
+  })
 }
