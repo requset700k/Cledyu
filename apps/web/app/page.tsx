@@ -94,21 +94,6 @@ export default function LandingPage() {
           </div>
         </section>
 
-        {/* 기술스택 마퀴 */}
-        <div className="overflow-hidden border-y border-white/15 bg-white/[0.02] py-4">
-          <div className="flex w-max whitespace-nowrap font-chakra text-sm tracking-[0.18em] text-white/40 motion-safe:animate-[cledyu-marquee_26s_linear_infinite]">
-            {[0, 1].map((dup) => (
-              <span key={dup} className="pr-12">
-                {TECH_STACK.map((t) => (
-                  <span key={t}>
-                    {t} <span className="text-white/70">✦</span>{' '}
-                  </span>
-                ))}
-              </span>
-            ))}
-          </div>
-        </div>
-
         {/* 기능 카드: 왜 Cledyu인가 */}
         <section className="mx-auto w-full max-w-[1280px] px-6 py-24 sm:px-10">
           <p className="font-jbmono text-[13px] tracking-[0.14em] text-white/50">WHY CLEDYU</p>
@@ -235,6 +220,21 @@ export default function LandingPage() {
             </span>
           </div>
         </section>
+
+        {/* 기술스택 마퀴 */}
+        <div className="overflow-hidden border-y border-white/15 bg-white/[0.02] py-4">
+          <div className="flex w-max whitespace-nowrap font-chakra text-sm tracking-[0.18em] text-white/40 motion-safe:animate-[cledyu-marquee_26s_linear_infinite]">
+            {[0, 1].map((dup) => (
+              <span key={dup} className="pr-12">
+                {TECH_STACK.map((t) => (
+                  <span key={t}>
+                    {t} <span className="text-white/70">✦</span>{' '}
+                  </span>
+                ))}
+              </span>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
