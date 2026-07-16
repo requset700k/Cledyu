@@ -55,7 +55,7 @@ export default function LandingPage() {
           style={{ scrollSnapAlign: 'start' }}
           className="flex min-h-screen flex-col px-6 pb-12 pt-28 sm:px-16"
         >
-          <div className="max-w-[620px]">
+          <div className="max-w-[680px]">
             <p className="text-[clamp(16px,1.7vw,24px)] leading-[1.65] tracking-[-0.02em] text-white/90">
               <strong>보는 것</strong>과 <strong>해보는 것</strong>은 다릅니다
               <br />
