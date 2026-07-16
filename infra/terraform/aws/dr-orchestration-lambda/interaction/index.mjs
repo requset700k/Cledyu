@@ -160,8 +160,14 @@ export const handler = async (event) => {
     if (e.name !== 'ConditionalCheckFailedException') throw e;
     // 경합·중복 클릭 — 이미 누군가 claim 했다. **저장된 첫 승인자**로 렌더한다(감사 흔적 보존).
     // SendTaskSuccess 는 이긴 쪽이 이미 했으므로 여기선 호출하지 않는다.
+    // ⚠️ **ConsistentRead 필수**(codex P2) — 방금 저장된 approvedBy 를 eventual read 가 아직 못 볼 수
+    //   있어, 그러면 아래 fallback 이 현재 클릭자(userId)로 렌더해 감사 흔적이 도로 뒤집힌다.
     const re = await ddb.send(
-      new GetItemCommand({ TableName: TABLE, Key: { approvalId: { S: approvalId } } }),
+      new GetItemCommand({
+        TableName: TABLE,
+        Key: { approvalId: { S: approvalId } },
+        ConsistentRead: true,
+      }),
     );
     return res(200, disabledMessage(body.message?.content ?? '', re.Item?.approvedBy?.S ?? userId));
   }
@@ -179,9 +185,11 @@ export const handler = async (event) => {
       }),
     );
   } catch (e) {
-    if (e.name !== 'TaskTimedOut' && e.name !== 'TaskDoesNotExist') throw e;
-    // claim 은 이겼는데 토큰이 죽었다 = 아무도 승인 못 한 채 RequestApproval 86400s 가 진짜 만료.
-    // 방금 찍은 claim 을 롤백한다(내 것일 때만) — 안 그러면 뒤늦은 클릭이 이 값을 "승인됨" 으로 오독한다.
+    // 🔴 **SendTaskSuccess 가 실패하면 SFN 은 이 승인을 못 받았다 — 그러니 claim 을 절대 남기면 안 된다**
+    //   (codex P1). 남기면 뒤늦은 클릭·재시도가 조건부 update 에 막혀 "이미 승인됨" 으로 버튼을 닫는데,
+    //   정작 페일오버는 시작되지 않는다(재해 중 최악: 승인했다고 믿는데 복구가 안 돈다).
+    //   그래서 **만료(TaskTimedOut) 든 일시 오류(throttling·네트워크) 든 모든 실패 경로에서** 롤백한다.
+    //   조건 `approvedBy = 내 값` 으로 내 claim 일 때만 지운다(그 사이 다른 주체가 덮었으면 건드리지 않음).
     await ddb.send(
       new UpdateItemCommand({
         TableName: TABLE,
@@ -191,6 +199,12 @@ export const handler = async (event) => {
         ExpressionAttributeValues: { ':u': { S: userId } },
       }),
     );
+
+    // 일시 오류(만료가 아님)는 삼키면 안 된다 — 롤백만 하고 그대로 던져 Lambda 가 재시도되게 한다.
+    // (claim 을 지웠으니 재시도·다른 승인자가 정상적으로 다시 claim 할 수 있다.)
+    if (e.name !== 'TaskTimedOut' && e.name !== 'TaskDoesNotExist') throw e;
+
+    // 여기부터는 진짜 만료 — 아무도 승인 못 한 채 RequestApproval 86400s 가 지났다. "실패" 로 알린다.
     return res(200, {
       type: 4,
       data: {
