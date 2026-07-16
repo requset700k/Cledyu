@@ -102,10 +102,21 @@ function registerParticleFx() {
           if (!seeded) {
             const dust = [];
             for (let i = 0; i < 260; i++)
-              dust.push({ x: Math.random(), y: Math.random(), al: rand(0.04, 0.28), sz: rand(0.4, 1.1), dr: rand(0.3, 1) });
+              dust.push({
+                x: Math.random(),
+                y: Math.random(),
+                al: rand(0.04, 0.28),
+                sz: rand(0.4, 1.1),
+                dr: rand(0.3, 1),
+              });
             const leds = [];
-            for (let i = 0; i < 8; i++) leds.push({ p1: rand(0, 6), p2: rand(0, 6), s1: rand(1.5, 4), s2: rand(1.5, 4) });
-            const packets = [0, 1, 2].map((i) => ({ vm: i, p: Math.random(), sp: rand(0.18, 0.3) }));
+            for (let i = 0; i < 8; i++)
+              leds.push({ p1: rand(0, 6), p2: rand(0, 6), s1: rand(1.5, 4), s2: rand(1.5, 4) });
+            const packets = [0, 1, 2].map((i) => ({
+              vm: i,
+              p: Math.random(),
+              sp: rand(0.18, 0.3),
+            }));
             seeded = { dust, leds, packets };
           }
           for (const d of seeded.dust) {
@@ -165,7 +176,14 @@ function registerParticleFx() {
             ctx.globalAlpha = 0.4;
             ctx.beginPath();
             ctx.moveTo(outX, outY);
-            ctx.bezierCurveTo(outX + S * 0.14, outY, v.x - S * 0.14, v.y + vh / 2, v.x, v.y + vh / 2);
+            ctx.bezierCurveTo(
+              outX + S * 0.14,
+              outY,
+              v.x - S * 0.14,
+              v.y + vh / 2,
+              v.x,
+              v.y + vh / 2,
+            );
             ctx.stroke();
             ctx.globalAlpha = 1;
             const pulse = 0.65 + 0.35 * Math.sin(t * 1.5 + i * 2.1);
@@ -179,7 +197,8 @@ function registerParticleFx() {
             ctx.moveTo(v.x + vw * 0.12, v.y + vh * 0.38);
             ctx.lineTo(v.x + vw * 0.32, v.y + vh * 0.38);
             ctx.stroke();
-            if (Math.sin(t * 4 + i) > 0) ctx.fillRect(v.x + vw * 0.36, v.y + vh * 0.28, 3, vh * 0.2);
+            if (Math.sin(t * 4 + i) > 0)
+              ctx.fillRect(v.x + vw * 0.36, v.y + vh * 0.28, 3, vh * 0.2);
             ctx.globalAlpha = 1;
           }
           for (const pk of seeded.packets) {
@@ -196,8 +215,10 @@ function registerParticleFx() {
               x2 = v.x - S * 0.14,
               y2 = y3;
             const u = 1 - tt;
-            const bx = u * u * u * x0 + 3 * u * u * tt * x1 + 3 * u * tt * tt * x2 + tt * tt * tt * x3;
-            const by = u * u * u * y0 + 3 * u * u * tt * y1 + 3 * u * tt * tt * y2 + tt * tt * tt * y3;
+            const bx =
+              u * u * u * x0 + 3 * u * u * tt * x1 + 3 * u * tt * tt * x2 + tt * tt * tt * x3;
+            const by =
+              u * u * u * y0 + 3 * u * u * tt * y1 + 3 * u * tt * tt * y2 + tt * tt * tt * y3;
             ctx.save();
             ctx.shadowColor = 'rgba(255,255,255,0.9)';
             ctx.shadowBlur = 7;
@@ -213,7 +234,13 @@ function registerParticleFx() {
           if (!seeded) {
             const dust = [];
             for (let i = 0; i < 200; i++)
-              dust.push({ x: Math.random(), y: Math.random(), al: rand(0.04, 0.25), sz: rand(0.4, 1), dr: rand(0.3, 1) });
+              dust.push({
+                x: Math.random(),
+                y: Math.random(),
+                al: rand(0.04, 0.25),
+                sz: rand(0.4, 1),
+                dr: rand(0.3, 1),
+              });
             seeded = {
               dust,
               term: {

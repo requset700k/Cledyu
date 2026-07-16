@@ -32,7 +32,7 @@ export function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { data: me } = useQuery({
     queryKey: ['me'],
-    queryFn: () => api.auth.me(),
+    queryFn: () => api.auth.optionalMe(),
     retry: false,
   });
 
@@ -58,7 +58,11 @@ export function Navbar() {
 
       <nav className="fixed right-10 top-6 z-[70] hidden items-center gap-1 rounded-full border border-white/30 bg-black/70 p-1.5 backdrop-blur-md sm:flex">
         {links.map((link) => (
-          <Link key={link.href} href={link.href} className={pillClass(isActive(pathname, link.href))}>
+          <Link
+            key={link.href}
+            href={link.href}
+            className={pillClass(isActive(pathname, link.href))}
+          >
             {link.label}
           </Link>
         ))}
@@ -103,7 +107,9 @@ export function Navbar() {
               href={link.href}
               onClick={() => setMobileOpen(false)}
               className={`block rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors ${
-                isActive(pathname, link.href) ? 'bg-white text-black' : 'text-white/70 hover:text-white'
+                isActive(pathname, link.href)
+                  ? 'bg-white text-black'
+                  : 'text-white/70 hover:text-white'
               }`}
             >
               {link.label}

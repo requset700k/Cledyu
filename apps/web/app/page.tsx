@@ -121,7 +121,9 @@ export default function LandingPage() {
             <a href="#" className="text-[13px] tracking-[-0.01em] text-white/45">
               고객센터
             </a>
-            <span className="font-jbmono text-xs tracking-[0.08em] text-white/35">© 2026 CLEDYU</span>
+            <span className="font-jbmono text-xs tracking-[0.08em] text-white/35">
+              © 2026 CLEDYU
+            </span>
           </div>
         </section>
       </div>

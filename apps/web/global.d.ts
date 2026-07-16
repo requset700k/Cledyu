@@ -6,7 +6,9 @@ declare module '*.css';
 declare global {
   namespace JSX {
     interface IntrinsicElements {
-      'particle-fx': DetailedHTMLProps<HTMLAttributes<HTMLElement>, HTMLElement> & { kind?: string };
+      'particle-fx': DetailedHTMLProps<HTMLAttributes<HTMLElement>, HTMLElement> & {
+        kind?: string;
+      };
     }
   }
 }
