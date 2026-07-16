@@ -32,14 +32,17 @@ const LINES: { text: string; color?: string; delay: number; duration: number; st
 export function TerminalDemo() {
   return (
     <div className="overflow-hidden rounded-2xl border border-white/25 bg-black">
-      <div className="flex items-center gap-3 border-b border-white/15 bg-white/[0.03] px-4 py-3">
-        <div className="flex gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-full bg-white/25" />
-          <span className="h-2.5 w-2.5 rounded-full bg-white/18" />
-          <span className="h-2.5 w-2.5 rounded-full bg-white/10" />
+      <div className="flex items-center gap-3 border-b border-black/25 bg-[#f4f4f4] px-3 py-2.5">
+        <div className="flex shrink-0 gap-2">
+          <span className="h-3 w-3 rounded-full border border-black/15 bg-[#ff5f57]" />
+          <span className="h-3 w-3 rounded-full border border-black/15 bg-[#febc2e]" />
+          <span className="h-3 w-3 rounded-full border border-black/15 bg-[#28c840]" />
         </div>
-        <span className="min-w-0 flex-1 truncate text-center font-jbmono text-xs text-white/55">
-          student — cledyu-vm — bash — 120×30
+        <span aria-hidden className="ml-1 text-sm leading-none">
+          📁
+        </span>
+        <span className="min-w-0 flex-1 truncate text-center text-xs font-semibold text-black/60">
+          lab — ~ — bash — 120×30
         </span>
       </div>
       <div className="px-5 py-6 font-jbmono text-[13.5px] leading-[2.05]">
