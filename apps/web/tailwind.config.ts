@@ -18,8 +18,9 @@ const config: Config = {
         },
       },
       fontFamily: {
+        sans: ['var(--font-body)', '"Apple SD Gothic Neo"', '"Malgun Gothic"', 'sans-serif'],
         michroma: ['var(--font-michroma)'],
-        chakra: ['var(--font-chakra)'],
+        chakra: ['var(--font-chakra)', 'var(--font-body)', 'sans-serif'],
         jbmono: ['var(--font-jbmono)', 'monospace'],
       },
     },
