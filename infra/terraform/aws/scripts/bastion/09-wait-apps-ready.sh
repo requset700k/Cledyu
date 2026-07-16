@@ -59,8 +59,15 @@ kubectl -n kafka wait --for=condition=Ready kafka/cledyu-kafka --timeout=900s
 # ⚠️ **`--all` 은 0개일 때 공허참으로 통과하는 게 아니라 에러난다**(위 실측). 이름을 안 박는 대신
 # **대수 검증**을 먼저 한다 — 04-wait-nodes-ready.sh:36-47 과 같은 형태다(거기선 노드 3대,
 # 여기선 "1개 이상"). 개수를 박으면 랩이 늘 때 위 주석의 문제가 그대로 돌아오므로 `>0` 만 본다.
+#
+# ⚠️ **`|| true` 필수 — 이게 없으면 이 루프가 CRD 미등록을 못 흡수하고 죽는다**(2026-07-16 실측, codex P2).
+#   kafkatopic CRD 가 아직 없으면 `get` 이 non-zero 를 내고, `set -o pipefail` 아래서 그게 `wc -l` 파이프의
+#   종료코드가 되어 `NT=$(...)` 대입이 실패 → **set -e 로 스크립트가 여기서 죽는다**(재시도 못 함).
+#   `cmd | wc -l || true` 는 실패해도 wc 가 빈 입력에 "0" 을 내므로 NT=0 → 루프가 정상 재시도한다.
+#   (실제 흐름에선 위 `wait kafka/cledyu-kafka` 가 Strimzi CRD 존재를 이미 보장하지만 — Kafka·KafkaTopic
+#    CRD 는 한 오퍼레이터가 함께 깐다 — 그 방어에 기대지 않고 이 줄 자체를 자기완결로 둔다.)
 for i in $(seq 1 60); do
-  NT=$(kubectl -n kafka get kafkatopic --no-headers 2> /dev/null | wc -l)
+  NT=$(kubectl -n kafka get kafkatopic --no-headers 2> /dev/null | wc -l || true)
   [ "${NT:-0}" -gt 0 ] && break
   echo "ArgoCD sync 대기: kafkatopic ($i/60)"
   sleep 10
