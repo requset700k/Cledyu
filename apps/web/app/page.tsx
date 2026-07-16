@@ -97,8 +97,7 @@ export default function LandingPage() {
         {/* 기술스택 마퀴 */}
         <div className="overflow-hidden border-y border-white/15 bg-white/[0.02] py-4">
           <div
-            className="flex w-max whitespace-nowrap font-chakra text-sm tracking-[0.18em] text-white/40"
-            style={{ animation: 'cledyu-marquee 26s linear infinite' }}
+            className="flex w-max whitespace-nowrap font-chakra text-sm tracking-[0.18em] text-white/40 motion-safe:animate-[cledyu-marquee_26s_linear_infinite]"
           >
             {[0, 1].map((dup) => (
               <span key={dup} className="pr-12">
@@ -229,7 +228,7 @@ export default function LandingPage() {
             DOING.
           </h2>
           <p className="mt-7 max-w-[440px] text-center text-base leading-[1.7] tracking-[-0.02em] text-white/60">
-            결제 정보 없이 첫 번째 Lab을 시작하세요
+            지금 바로 첫 번째 Lab을 시작하세요
           </p>
           <Link
             href="/login"

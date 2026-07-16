@@ -16,12 +16,17 @@ const LINES: { text: string; color?: string; delay: number; duration: number; st
     duration: 0.6,
     steps: 28,
   },
-  { text: '$ docker run -d -p 8080:80 nginx', delay: 3.6, duration: 0.9, steps: 30 },
+  {
+    text: '$ docker run -d --name web -p 8080:80 nginx:alpine',
+    delay: 3.6,
+    duration: 0.9,
+    steps: 52,
+  },
   { text: '9f2c1a7e33b0', color: 'text-white/45', delay: 4.8, duration: 0.5, steps: 14 },
-  { text: '$ curl -s localhost:8080 | head -1', delay: 5.5, duration: 0.8, steps: 26 },
+  { text: '$ curl http://localhost:8080', delay: 5.5, duration: 0.8, steps: 27 },
   { text: '<!DOCTYPE html>', color: 'text-white/45', delay: 6.5, duration: 0.5, steps: 16 },
   {
-    text: '✔ LAB COMPLETED · +10 pts',
+    text: '✔ STEP 1/4 passed',
     color: 'text-white/80',
     delay: 7.3,
     duration: 0.6,
@@ -31,7 +36,7 @@ const LINES: { text: string; color?: string; delay: number; duration: number; st
 
 export function TerminalDemo() {
   return (
-    <div className="relative">
+    <div aria-hidden="true" className="relative">
       {/* 은은한 그라디언트 글로우 링 — 히어로에서 터미널이 살아있는 느낌을 주는 포인트 */}
       <div
         aria-hidden
