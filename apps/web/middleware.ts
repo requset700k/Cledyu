@@ -7,7 +7,7 @@ import type { NextRequest } from 'next/server';
 import { pathWithSearch } from './lib/auth-return.mjs';
 
 // 인증 없이 접근 가능한 경로
-const PUBLIC_PATHS = ['/login', '/callback'];
+const PUBLIC_PATHS = ['/', '/login', '/callback'];
 
 // Keycloak 미연동 환경에서 인증 게이트 비활성화. K8s에서 AUTH_ENABLED=true 주입 시 활성화.
 const authEnabled = process.env.AUTH_ENABLED === 'true';

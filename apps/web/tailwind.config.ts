@@ -17,6 +17,11 @@ const config: Config = {
           900: '#0c4a6e',
         },
       },
+      fontFamily: {
+        michroma: ['var(--font-michroma)'],
+        chakra: ['var(--font-chakra)'],
+        jbmono: ['var(--font-jbmono)', 'monospace'],
+      },
     },
   },
   plugins: [],
