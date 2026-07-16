@@ -16,11 +16,27 @@ aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2
 # ⚠️ 여기서는 **DNS 를 일부러 탄다** — [10] SwitchDNS 가 실제로 먹었는지가 이 검증의 일부다.
 # ([11] 의 게이트는 api 내부 상태를 보는 것이라 ALB 직결이었지만, 여기는 "사용자가 도달하나"를 본다.)
 # Route53 헬스체크(onprem_pull)와 동일 신호라 검증된 재사용이다.
-curl -sf https://auth.cledyu.com/realms/cledyu-learn | grep -q cledyu-learn ||
-  {
-    echo "❌ realm 미응답 — Keycloak/DNS/복원 중 하나 실패"
-    exit 1
-  }
+#
+# ⚠️ **단발 curl 이 아니라 재시도한다**(codex P2). [10] 이 Route53 UPSERT 를 보낸 **직후** [12] 가 도는데,
+#   변경이 INSYNC 되기 전이거나 auth.cledyu.com 의 기존 alias 가 리졸버에 캐시돼 있으면 단발 curl 은
+#   **실제 EKS Keycloak 이 정상인데도** 옛 대상(온프렘)이나 미전파로 실패할 수 있다.
+#   [11] 은 ALB 직결이라 DNS 전파 시간을 안 벌어준다 → 여기서 흡수한다.
+#   **[12] 는 페일오버의 마지막 게이트**라 여기서 죽으면 완벽히 복구된 DR 이 ❌ 실패 알림을 보낸다.
+# ⚠️ `if curl | grep` 형태로 쓴다 — `curl -sf` 는 4xx/5xx 에 non-zero 라 `set -o pipefail` 아래서
+#   `A || {...}` 로 쓰면 매 실패가 set -e 를 건드릴 수 있다. if 조건은 set -e 면제다.
+# 5분 — DNS 전파·alias 캐시 (주석을 for 줄 안에 두면 shfmt 가 줄을 쪼갠다)
+for i in $(seq 1 30); do
+  if curl -sf https://auth.cledyu.com/realms/cledyu-learn 2> /dev/null | grep -q cledyu-learn; then
+    REALM_OK=1
+    break
+  fi
+  echo "(1) realm 대기 — DNS 전파/alias 캐시 흡수 ($i/30)"
+  sleep 10
+done
+[ "${REALM_OK:-0}" = 1 ] || {
+  echo "❌ realm 미응답(5분) — Keycloak/DNS/복원 중 하나 실패"
+  exit 1
+}
 echo "(1) realm 응답 OK ✅"
 
 # ── (2) 복원 데이터가 실제로 들어왔는가 — DB 직접 ────────────────────────────
