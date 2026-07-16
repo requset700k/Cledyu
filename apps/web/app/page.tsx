@@ -5,7 +5,7 @@ import { ParticleFx } from '@/components/ui/ParticleFx';
 
 export default function LandingPage() {
   return (
-    <div className="relative min-h-screen overflow-x-hidden bg-black text-[#F2F2F2]">
+    <div className="relative isolate min-h-screen overflow-x-hidden bg-black text-[#F2F2F2]">
       <Navbar />
 
       {/* 전역 배경: 은은한 성운 + 별 */}
