@@ -31,45 +31,67 @@ const LINES: { text: string; color?: string; delay: number; duration: number; st
 
 export function TerminalDemo() {
   return (
-    <div className="overflow-hidden rounded-2xl border border-white/25 bg-black">
-      <div className="grid grid-cols-[1fr_auto_1fr] items-center border-b border-black/25 bg-[#f4f4f4] px-3 py-2.5">
-        <div className="flex shrink-0 gap-2">
-          <span className="h-3 w-3 rounded-full border border-black/15 bg-[#ff5f57]" />
-          <span className="h-3 w-3 rounded-full border border-black/15 bg-[#febc2e]" />
-          <span className="h-3 w-3 rounded-full border border-black/15 bg-[#28c840]" />
-        </div>
-        <div className="flex min-w-0 items-center justify-center gap-2">
-          <span aria-hidden className="text-sm leading-none">
-            📁
-          </span>
-          <span className="truncate text-xs font-semibold text-black/60">
-            lab — docker-basics — bash
-          </span>
-        </div>
-        <span aria-hidden />
-      </div>
-      <div className="px-5 py-6 font-jbmono text-[13.5px] leading-[2.05]">
-        {LINES.map((line, i) => (
-          <div key={i} className="overflow-hidden">
-            <span
-              className={`inline-block max-w-0 overflow-hidden whitespace-nowrap ${line.color ?? 'text-white'}`}
-              style={{
-                animation: `cledyu-typing ${line.duration}s steps(${line.steps},end) ${line.delay}s forwards`,
-              }}
-            >
-              {line.text}
-            </span>
-            {i === LINES.length - 1 && (
-              <span
-                className="ml-1.5 inline-block h-[17px] w-[9px] bg-white align-middle"
-                style={{
-                  animation: 'cledyu-blink 1s step-end infinite',
-                  animationDelay: `${line.delay}s`,
-                }}
-              />
-            )}
+    <div className="relative">
+      {/* 은은한 그라디언트 글로우 링 — 히어로에서 터미널이 살아있는 느낌을 주는 포인트 */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -inset-px rounded-2xl bg-[linear-gradient(135deg,rgba(255,255,255,0.45),transparent_40%,transparent_65%,rgba(255,255,255,0.18))]"
+      />
+      <div className="relative overflow-hidden rounded-2xl border border-white/25 bg-black">
+        <div className="grid grid-cols-[1fr_auto_1fr] items-center border-b border-black/25 bg-[#f4f4f4] px-3 py-2.5">
+          <div className="flex shrink-0 gap-2">
+            <span className="h-3 w-3 rounded-full border border-black/15 bg-[#ff5f57]" />
+            <span className="h-3 w-3 rounded-full border border-black/15 bg-[#febc2e]" />
+            <span className="h-3 w-3 rounded-full border border-black/15 bg-[#28c840]" />
           </div>
-        ))}
+          <div className="flex min-w-0 items-center justify-center gap-2">
+            <span aria-hidden className="text-sm leading-none">
+              📁
+            </span>
+            <span className="truncate text-xs font-semibold text-black/60">
+              lab — docker-basics — bash
+            </span>
+          </div>
+          <span aria-hidden />
+        </div>
+        <div className="px-5 py-5 font-jbmono text-[13px] leading-[1.7]">
+          {LINES.map((line, i) => (
+            <div key={i} className="overflow-hidden">
+              <span
+                className={`inline-block max-w-0 overflow-hidden whitespace-nowrap ${line.color ?? 'text-white'}`}
+                style={{
+                  animation: `cledyu-typing ${line.duration}s steps(${line.steps},end) ${line.delay}s forwards`,
+                }}
+              >
+                {line.text}
+              </span>
+              {i === LINES.length - 1 && (
+                <span
+                  className="ml-1.5 inline-block h-[17px] w-[9px] bg-white align-middle"
+                  style={{
+                    animation: 'cledyu-blink 1s step-end infinite',
+                    animationDelay: `${line.delay}s`,
+                  }}
+                />
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+      {/* AI 튜터 말풍선 — 타이핑 데모가 끝날 무렵 떠오름 */}
+      <div
+        className="absolute -bottom-5 -right-3 flex items-center gap-3 rounded-xl border border-white/25 bg-black px-4 py-3 opacity-0 shadow-[0_18px_50px_rgba(0,0,0,0.5)]"
+        style={{ animation: 'cledyu-fadeup 0.8s ease 7.9s forwards' }}
+      >
+        <span className="font-jbmono text-base text-white/80">?</span>
+        <div>
+          <div className="font-jbmono text-[10.5px] tracking-[0.08em] text-white/50">
+            AI TUTOR · LEVEL 2
+          </div>
+          <div className="mt-0.5 text-[13px] text-white/85">
+            포트 매핑 옵션을 다시 확인해 볼까요?
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -18,7 +18,7 @@ const FEATURES = [
   {
     tag: '01 VM',
     icon: '>_',
-    title: '진짜 VM, 진짜 셸',
+    title: '회원 전용 VM',
     desc: '격리된 전용 Ubuntu VM이 자동으로 준비됩니다. 브라우저 터미널에서 실제 서버 환경을 직접 다룹니다.',
   },
   {
@@ -55,11 +55,11 @@ export default function LandingPage() {
         {/* S1: 히어로 */}
         <section
           style={{ scrollSnapAlign: 'start' }}
-          className="flex min-h-screen flex-col justify-center px-6 pb-12 pt-28 sm:px-16 sm:pt-[110px]"
+          className="mx-auto flex min-h-screen w-full max-w-[1280px] flex-col justify-center px-6 pb-12 pt-24 sm:px-10"
         >
-          <div className="grid grid-cols-1 items-center gap-12 sm:grid-cols-2 sm:gap-16">
+          <div className="grid grid-cols-1 items-center gap-12 sm:grid-cols-[1.05fr_0.95fr] sm:gap-14">
             <div>
-              <h1 className="break-keep font-chakra text-[clamp(28px,3.4vw,52px)] font-bold leading-[1.2] tracking-[-0.035em] text-white">
+              <h1 className="break-keep font-chakra text-[clamp(34px,4.4vw,68px)] font-bold leading-[1.15] tracking-[-0.035em] text-white">
                 직접 실행하고
                 <br />
                 끝까지 해결하세요
@@ -89,7 +89,7 @@ export default function LandingPage() {
             </div>
             <TerminalDemo />
           </div>
-          <div className="mt-10 whitespace-nowrap font-chakra text-[clamp(28px,6vw,96px)] font-bold leading-none tracking-[-0.01em] text-white">
+          <div className="mt-14 whitespace-nowrap font-chakra text-[clamp(28px,6vw,90px)] font-bold leading-none tracking-[-0.01em] text-white">
             Learn. Break. Rebuild.
           </div>
         </section>
@@ -113,7 +113,7 @@ export default function LandingPage() {
         </div>
 
         {/* 기능 카드: 왜 Cledyu인가 */}
-        <section className="px-6 py-24 sm:px-16">
+        <section className="mx-auto w-full max-w-[1280px] px-6 py-24 sm:px-10">
           <p className="font-jbmono text-[13px] tracking-[0.14em] text-white/50">WHY CLEDYU</p>
           <h2 className="mt-3 max-w-[640px] font-chakra text-[clamp(26px,3.4vw,48px)] font-bold leading-[1.1] tracking-[-0.02em] text-white">
             강의를 보는 것과
@@ -142,7 +142,7 @@ export default function LandingPage() {
         {/* S2: 웨이브 */}
         <section
           style={{ scrollSnapAlign: 'start' }}
-          className="flex min-h-screen flex-col px-6 pb-12 pt-28 sm:px-16"
+          className="mx-auto flex min-h-screen w-full max-w-[1280px] flex-col px-6 pb-12 pt-28 sm:px-10"
         >
           <div className="max-w-[680px]">
             <div className="text-[clamp(16px,1.7vw,24px)] leading-[1.65] tracking-[-0.02em] text-white/90">
@@ -169,7 +169,7 @@ export default function LandingPage() {
         {/* S3: 깔때기 */}
         <section
           style={{ scrollSnapAlign: 'start' }}
-          className="flex min-h-screen flex-col px-6 pb-12 pt-28 sm:px-16"
+          className="mx-auto flex min-h-screen w-full max-w-[1280px] flex-col px-6 pb-12 pt-28 sm:px-10"
         >
           <div className="flex justify-end">
             <div className="max-w-[620px] text-right text-[clamp(15px,1.6vw,22px)] leading-[1.65] tracking-[-0.02em] text-white/85">
@@ -194,7 +194,7 @@ export default function LandingPage() {
         </section>
 
         {/* How it works */}
-        <section id="how-it-works" className="scroll-mt-24 px-6 py-24 sm:px-16">
+        <section id="how-it-works" className="mx-auto w-full max-w-[1280px] scroll-mt-24 px-6 py-24 sm:px-10">
           <h2 className="font-chakra text-[clamp(24px,3vw,40px)] font-bold tracking-[-0.02em] text-white">
             어떻게 진행되나요
           </h2>
@@ -204,7 +204,13 @@ export default function LandingPage() {
                 key={step.num}
                 className={`p-8 ${i < HOW_IT_WORKS.length - 1 ? 'border-b border-white/15 sm:border-b-0 sm:border-r' : ''}`}
               >
-                <div className="font-chakra text-4xl font-bold text-white/20">{step.num}</div>
+                <div
+                  className={`font-chakra text-4xl font-bold ${
+                    'text-white/20'
+                  }`}
+                >
+                  {step.num}
+                </div>
                 <div className="mt-3 text-base font-semibold text-white">{step.title}</div>
                 <div className="mt-1.5 text-sm leading-relaxed text-white/50">{step.desc}</div>
               </div>
@@ -217,9 +223,6 @@ export default function LandingPage() {
           style={{ scrollSnapAlign: 'start' }}
           className="flex min-h-screen flex-col items-center justify-center px-6 py-24 sm:px-16"
         >
-          <p className="font-jbmono text-[13px] tracking-[0.14em] text-white/50">
-            $ cledyu start — 브라우저만 있으면 됩니다
-          </p>
           <h2 className="mt-6 text-center font-chakra text-[clamp(44px,8vw,110px)] font-bold leading-[0.95] tracking-[-0.025em] text-white">
             LEARN BY
             <br />
