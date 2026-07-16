@@ -1,0 +1,80 @@
+version: 0.2
+
+# DR 페일오버 hot 리소스 기동 — Step Functions [2] TerraformApply 가 codebuild:startBuild.sync 로 호출한다.
+#
+# 왜 CodeBuild 인가: Lambda 는 15분 제한이 있고(NAT 생성만 몇 분) terraform 바이너리가 필요하다.
+# AWS SDK 로 직접 생성하면 state 밖 고아가 생겨 failback 의 `terraform apply` 전제를 깬다.
+#
+# ⚠️ -target 목록은 docs/RUNBOOK/dr-eks-bootstrap.md §Phase 1(213-272)의 검증된 **17개**
+#    + T3 이 신설한 bastion 정책 **2개** = **19개**다.
+#    재발명 금지 — 7/14 풀 E2E 드릴로 검증된 목록이고, 2026-07-15 에 목록을 임의로 줄였다가
+#    IAM 정책이 빠져 2분+ hang 을 겪었다. 런북의 17개엔 bastion IAM 3종이 포함돼 있다
+#    (role_policy: describe·vault_restore / attachment: ssm).
+#    개수 검증:
+#      sed -n '213,272p' docs/RUNBOOK/dr-eks-bootstrap.md \
+#        | grep -oE '\-target=[a-zA-Z_.0-9]+' | sort -u | wc -l   # → 17
+#
+#    ⚠️ 신설 2개는 **런북에 없다** — Task 6 이 런북에도 반영한다:
+#      · eks_dr_bastion_ssm_param    : `09-` 의 put-parameter. 없으면 **~40분 복구 후 마지막 줄**에서
+#                                      AccessDenied 로 죽고 [10] 이 fail-closed → 서비스 미복구(F3)
+#      · eks_dr_bastion_command_logs : SSM 명령 로그의 CloudWatch 쓰기. 없으면 **전문이 조용히 유실**
+#                                      (명령 자체는 Success 로 끝난다 — 스펙 §11.11)
+#    aws_instance.eks_dr_bastion 의 depends_on 에도 둘 다 있지만, 이 레포는 **둘 다 하는 것이 컨벤션**이다.
+#
+# ⚠️ -var 3개 필수 — terraform.tfvars 는 .gitignore 라 CodeBuild 체크아웃에 없고, 있더라도
+#    enable_eks_dr 가 들어 있지 않아 기본값 false 다. 안 넘기면 apply 가 생성이 아니라
+#    **destroy** 가 된다(warm DR 129개). 런북 §Phase 1 과 동일한 3개.
+#
+# ⚠️ 노드 desired 는 모듈이 ignore_changes 하므로 여기선 0 이다 — [4] ScaleNodes 가 CLI 로 올린다.
+
+phases:
+  install:
+    # AL2 standard 5.0 은 buildspec 에 runtime-versions 섹션을 요구한다(AWS 문서).
+    # terraform 자체는 python 을 안 쓰지만 섹션이 필수라 명시한다.
+    #
+    # ⚠️ **이 조합(AL2 standard:5.0 + python 3.12)은 실측으로 동작이 확인됐다 — 바꾸지 말 것.**
+    # codex 리뷰가 "available-runtimes 표에 python 3.12 는 AL2023 계열로만 열거되므로 install 단계에서
+    # 런타임 선택 오류로 시작도 못 할 것"이라며 P1 을 걸었으나(2026-07-16), **반증됐다:**
+    #   프로젝트 cledyu-lab-dr-failover-tf / image aws/codebuild/amazonlinux2-x86_64-standard:5.0
+    #   / sourceVersion feat/dr-failover-orchestration / resolved 907cab3(이 시점 buildspec 의
+    #   runtime-versions 는 현재와 동일) → **총 6회 중 5회 SUCCEEDED, INSTALL 단계 SUCCEEDED(2초)**,
+    #   install 의 `terraform version` 까지 실행됨.
+    # available-runtimes 표는 **이미지에 사전 설치된 런타임 목록**이지, 미열거 버전을 지정했을 때
+    # 하드 실패한다는 규정이 아니다. **문서에서 동작을 추론한 것이고 실행이 그 추론을 반증한다.**
+    # (§11.4 의 대칭형 — 거기선 정적 리뷰가 결함을 못 잡았고, 여기선 없는 결함을 만들어냈다.)
+    runtime-versions:
+      python: 3.12
+    commands:
+      - curl -fsSL --retry 5 https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip -o /tmp/tf.zip
+      - unzip -q /tmp/tf.zip -d /usr/local/bin && terraform version
+  build:
+    commands:
+      - cd infra/terraform/aws
+      # backend 는 S3(cledyu-tf-state) — 온프렘이 죽어도 닿는다(versions.tf).
+      # ⚠️ -lock-timeout=5m — DynamoDB(cledyu-tf-lock) state 락 재시도(codex P2). 없으면 재해 시점에
+      #    운영자가 apply 중이거나 직전 실행이 락을 아직 쥐고 있으면 **즉시 Error 로 종료**해 hot 기동이
+      #    막히고, 재해 중에 수동 force-unlock 을 해야 한다. 5분이면 정상적인 짧은 중복 실행은 흡수된다.
+      #    init 도 backend 락을 잡으므로 양쪽에 준다.
+      - terraform init -input=false -lock-timeout=5m
+      - |
+        terraform apply -input=false -auto-approve -lock-timeout=5m \
+          -var enable_eks_dr=true -var eks_dr_active=true -var eks_dr_node_desired=0 \
+          -target=module.eks_dr_vpc \
+          -target=module.eks_dr \
+          -target=module.eks_dr_ebs_csi_irsa \
+          -target=module.eks_dr_alb_irsa \
+          -target=aws_security_group.eks_dr_endpoints \
+          -target=aws_security_group.eks_dr_bastion \
+          -target=module.eks_dr_endpoints \
+          -target=module.eks_dr_vault_unseal_irsa \
+          -target=aws_iam_policy.eks_dr_vault_unseal \
+          -target=aws_iam_policy.eks_dr_cnpg_restore \
+          -target=module.eks_dr_cnpg_restore_irsa \
+          -target=aws_iam_role.eks_dr_bastion \
+          -target=aws_iam_role_policy_attachment.eks_dr_bastion_ssm \
+          -target=aws_iam_role_policy.eks_dr_bastion_describe \
+          -target=aws_iam_role_policy.eks_dr_bastion_vault_restore \
+          -target=aws_iam_role_policy.eks_dr_bastion_ssm_param \
+          -target=aws_iam_role_policy.eks_dr_bastion_command_logs \
+          -target=aws_iam_instance_profile.eks_dr_bastion \
+          -target=aws_instance.eks_dr_bastion
