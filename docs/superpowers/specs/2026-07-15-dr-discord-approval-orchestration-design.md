@@ -880,3 +880,791 @@ Plan 1 구현·배포·실호출에서 나왔다. **넷 다 apply 하거나 실�
 > **P1 이 두 번 정정된 것이 이 프로젝트의 축소판이다.** 진단(숨은 의존)은 맞았으나 처방(`-target` 나열)이
 > `-target` 경로만 막았고, **레포에 이미 정답(`depends_on`)이 있었는데**(`public-ingress.tf:214-218` 이
 > 같은 상황을 주석으로 설명 중) 그걸 안 보고 새로 발명했다. 기존 패턴을 먼저 찾을 것.
+
+### 11.6 Plan 2 계획서 적대적 검증 (2026-07-15) — 구현 전
+
+Plan 2 계획서(`2026-07-15-dr-failover-orchestration.md`)를 구현 착수 전에 공격해 **4건**을 잡았다.
+
+| # | 결함 | 정정 |
+|---|---|---|
+| **A1** | **"bastion 스크립트 7개 전부 런북 이식"이 거짓.** 3개(`03`·`09`·`12`)는 런북에 원본이 없다. 특히 `09` 가 가리킨 `:357-370` 은 **사람용 체크리스트**(`- [ ]` + 백틱 조각)이고 [6][7][8][10][11][12] 까지 다루는 마스터 표라 [9] 의 원본이 아니다 | 대응표를 **이식 4 / 신규 3** 으로 재작성. "이식"의 정의를 Global Constraints 에 못박음 |
+| A2 | 런북 줄번호 3건 오류 — `06` 이 CNPG 가드를, `08` 이 **real-DR `backupEnabled` flip 을 먹고 있었다**(§8.1 이 "수동 PR"로 결정한 것 → 자동화 유입 위험) | 실제 `### ` 경계로 정정(272-331 / 75-160+161-194 / **332-343**) |
+| A3 | `03` 의 정리 대상 webhook 이름이 **계획 작성자의 창작** — 틀리면 `--ignore-not-found` 로 조용히 통과해 P1c 가 안 고쳐진다 | **미확정으로 명시** + T3 Step 9 에서 실측 확정 |
+| A4 | `09` 가 **G1 함정 자리** — 사람용 확인을 기계 게이트로 옮김. 런북이 "미배포는 정상"이라 적은 것(ServiceMonitor·CiliumNetworkPolicy·lab-ssh-key)을 게이트하면 **건강한 DR 에서 오탐** | 오퍼레이터 `condition=Ready` 에만 의존. 토픽은 이름 하드코딩 대신 `--all`(랩 추가 시 자동 확장). bootstrap svc 검사 제외(TLS 9093 — 어설픈 검사가 G1 을 부른다) |
+
+**교훈:** 계획서도 코드처럼 틀린다. **"이식"이라는 단어가 검증을 건너뛰게 만들었다** — 이식이면 런북이
+보증하니까 안 봐도 된다고 믿은 것이다. 실제로는 3개가 창작이었고, 그중 `03` 은 **조용히 실패하는** 종류다.
+
+### 11.7 Plan 2 계획서 적대적 검증 3회차 (2026-07-15) — 구현 전
+
+A1~A4·C1~C6 를 반영한 계획서를 레포와 대조해 다시 공격, **9건**을 잡았다. **1·2·3 은 P0** 다.
+
+| # | 결함 | 정정 |
+|---|---|---|
+| **F1** | **Task 2 가 terraform 순환을 만든다 — `validate` 부터 실패.** 자식 SM 이 `aws_iam_role_policy.dr_sfn` 을 `depends_on` 하는데 `data.aws_iam_policy_document.dr_sfn` 이 그 SM 의 `.arn` 을 참조 → `SM→policy→data→SM`. **스크래치패드에 같은 모양으로 재현해 `Error: Cycle` 확인** | 자식 SM 참조 statement 를 **별도 정책 `dr_sfn_child`** 로 분리. Global Constraints 에 "`depends_on` 거는 리소스를 그 정책이 참조하면 순환" 명시 |
+| **F2** | **SFN 롤에 CodeBuild·Lambda·EKS 권한이 전무.** Plan 1 의 `InvokeApprovalRequest`(approval-request 1개)+`Logs` 가 전부라 [2]·[4]·[5]·[10]·[13] **과 NotifyFailed 까지** AccessDenied. **NotifyFailed 가 죽으면 모든 Catch 가 무음** → "실패해도 사람이 이어받는다"는 마지막 방어선 소멸. 자식 SM `.sync` 의 EventBridge 요구는 정확히 짚어놓고 **CodeBuild `.sync` 의 같은 요구는 놓쳤다** | **§SFN 롤 IAM 배선표** 신설(상태×API×정책×Task). statement 를 T1/T2/T4 에 분배 |
+| **F3** | **bastion 롤에 `ssm:PutParameter` 가 없다**(`eks-dr-bastion.tf` 에 `ssm:` 액션 0건, `AmazonSSMManagedInstanceCore` 는 `GetParameter` 만 준다). `09-` 의 **마지막 줄**이 put-parameter라 **~40분 복구를 다 끝내고** 죽고, [10] 은 **설계대로** fail-closed → **전부 복구됐는데 서비스가 안 돌아온다.** §5.1.2 가 명시했는데 초안은 dns-switch 쪽만 반영 | T3 에 **Step 8 신설**(정책+`depends_on`+`-target` 18번째). T3 Files 에 `.tf` 추가 |
+| F4 | **`ClearAlbParam` 상태가 없다.** §5.1.2 의 stale 2중 방어 ①이 증발. 그런데 `03-` 주석은 *"[2.5] ResolveBastion 이 한다"* 며 **존재하지 않는 구현을 가리켜** 리뷰어를 통과시킨다 | [2.4] `ClearAlbParam` 신설(SFN Task=API 1개라 ResolveBastion 과 못 합침). 에러명은 **미확정 표시** |
+| F5 | **notify 의 입력을 채우는 곳이 없다.** `Payload` 매핑 부재로 **헤드라인 산출물인 RTO 2단이 `?`** 로 나온다 — C2 에서 고친 `_ts()` 가 값을 못 받는다 | NotifyComplete/NotifyFailed 정의 추가. `detectedAt` 은 `$.detail.state.timestamp`(테스트 실행에 없음→States.Runtime) 대신 **`$$.Execution.StartTime`**. NotifyFailed 는 `$.approval` 미참조([1] 실패 시 없음) |
+| F6 | **계획이 자기 계약을 자기 테스트로 위반.** 계약은 "`env` 항상"인데 T2 Step 5 두 커맨드 + T3 Step 9 `run()` 이 전부 `env` 누락 → **첫 실측이 States.Runtime 으로 죽고 운영자가 멀쩡한 ASL 을 뜯는다** | 세 곳 다 `env` 추가. `run()` 에 3번째 인자. env 주입 스모크 신설 |
+| F7 | `AgentReady?` 가 **자기가 막으려던 상황에서 깨질 수 있다** — 미등록 시 빈 목록이라 `[0].PingStatus` 경로 부재. **Step 5 스모크는 에이전트가 이미 Online 이라 이 분기를 원리적으로 못 밟는다**(C2 와 같은 패턴) | `IsPresent` 가드 선행. Choice 의 미존재 경로 거동은 미확정으로 남기되 **어느 쪽이든 안전하게** |
+| F8 | [4] `ScaleNodes` 가 **표에만 있고** HCL·IAM 부재 | `ScaleNodes`→`UpdateNodegroup`→`WaitNodes`→`CheckNodes`→`NodesActive?` 정의. `DEGRADED`·`CREATE_FAILED` 명시 거부 |
+| F9 | `addon-install` 계약이 **세 군데서 다르다** — Interfaces `{coredns, ebsCsi}` vs 코드 `{started}`/`{status,done}` vs Step 5 Expected. Step 5 의 invoke 는 payload 가 없어 **check 경로로 빠져 `ResourceNotFoundException`** | Interfaces 를 코드에 맞춤. invoke 에 `action` 추가 |
+
+**교훈: 잡힌 것과 못 잡은 것의 성격이 갈렸다.** A1~A4·C1~C6 은 전부 **한 파일·한 상태 안에서 완결되는**
+결함(창작한 이름·`States.Format` 파손·타임스탬프 파싱·`set -x` 유출)이었다. 반면 3회차 9건 중 5건(F1~F5)은
+**"A 가 만들고 B 가 쓰는 것"의 배선**이고, 하필 그게 **`Interfaces` 가 선언만 하고 어느 Task 도 구현을
+책임지지 않는 자리**다. **T3 가 `.sh` 만 만들고 `.tf` 를 안 건드린 것이 F3 의 직접 원인**이다.
+
+> **계획서를 Task 단위로 자기완결적으로 쓰면 Task 경계를 넘는 것이 통째로 사라진다.** 랩 검증의
+> 폭포수 dead-end 와 같은 구조다 — 각 스텝은 멀쩡한데 스텝 **사이**가 비어 있다. 다음 계획부터는
+> **"각 상태가 호출하는 API × 실제 롤 권한" 표를 착수 전에 그린다**(이번엔 §SFN 롤 IAM 배선표로 신설).
+
+### 11.8 Plan 2 계획서 적대적 검증 4회차 (2026-07-15) — 구현 전
+
+3회차 반영본을 다시 공격, **6건**. 각도를 바꿨다 — **"이식"이라 라벨된 4개의 *내용*을 원본과 한 줄씩 대조**했다.
+**A1(2회차)이 개수(7→4)만 고치고 내용은 아무도 안 봤다는 것**을 노렸고, 그 4개 안에 P1 이 2건 있었다.
+
+| # | 결함 | 정정 |
+|---|---|---|
+| **H1** | **`06` 을 런북대로 옮기면 건강한 DR 에서 실패한다.** 런북 272-331 끝의 `kubectl get clusterissuer` · `kubectl -n api get configmap cledyu-root-ca-bundle` 은 사람이 **폴링**하는 확인인데, 변환 규칙 2(`set -euo pipefail`)를 먹으면 하드 게이트가 된다. **`service-api.yaml:12` 가 `sync-wave: "2"`** 라 그 시점엔 **api ns 자체가 없다** → `NotFound` → `exit 1`. **Global Constraints 가 "과대 게이트 → 건강한 DR 오탐"이라 경고한 G1 함정 그 자체인데, 그 경고를 `09` 에만 적용하고 `06` 은 "이식/낮음"으로 평가** | 두 줄 **제거**([9] 가 자연히 게이트한다 — Kafka 의존이 곧 cert-manager CA + Bundle). 변환 규칙 4 를 "**그 시점에 이미 참인 것만** 게이트"로 재작성 |
+| **H2** | **`git clone` 은 멱등이 아니고 `set -e` 가 그 실패를 안 잡는다**(실측: `fatal: already exists` 뒤에도 스크립트 계속). `A && B` 는 AND-OR 리스트라 **A 의 실패가 set -e 면제**. → cd 가 안 된 채 진행하다 **뒤의 `git rev-parse` 에서 엉뚱한 에러로 죽는다.** T3 Step 10 이 "실패→고침→재실행"이라 **증분 드릴에서 반드시 밟는다.** 초안의 "`helm upgrade --install` 은 멱등이라 재실행 안전"이 **멱등한 건 helm 인데 clone 까지 안심시켰다** | `[ -d ~/Cledyu/.git ] && fetch+reset --hard \|\| clone` 로 멱등화. `cd` 를 `&&` 로 잇지 않는다. 변환 규칙 5(`A && B` 는 게이트가 아니다)·6(멱등) 신설 |
+| **H3** | **`12` 의 `psql -U cledyu` 가 레포 선례 5건과 어긋난다** — `dr-failback.md:85`·`dr-failback-isolated-drill.md:85·87·90·91·97 **전부 `psql -d <db> -tAc`, `-U` 없음**. CNPG 파드 OS 유저는 postgres 라 local peer 인증에서 `-U cledyu` 는 OS유저≠롤. **[12] 는 페일오버의 마지막 게이트**라 **완벽히 복구된 DR 이 ❌ 실패 알림**을 보낸다(F5 와 같은 결과) | `-U` 제거, 선례 준수. peer 거동은 단정하지 않고 **Step 10 실측으로 확정** |
+| H4 | **"런북 순서 유지"가 사실이 아니다.** 런북 체크리스트는 **Kafka → Vault → CNPG** 인데 우리는 **Vault → CNPG → Kafka** — **이미 바꿔놓고** "런북 순서를 지키니 안전하다"로 자기 변경을 정당화했다 | 근거 교체: Kafka 의존은 `cert-manager CA + trust-manager Bundle + gp3` 로 **Vault 무관**(체크리스트 `:359`). **드릴이 검증한 건 "의존 순서"이지 "줄 순서"가 아니다** |
+| H5 | **`08` 은 이식이 아니라 재배치.** 런북은 "**root-app 직후, 차트가 CR 을 만들기 전에**" 지우라는데 우리는 [7](~30분) 뒤 = **ArgoCD 가 만든 CR 을 지우고 재생성을 기다리는 다른 동작**. 명령 2줄만 같다. **재배치 자체는 옳다**([7] 전엔 ESO 가 `postgres-credentials-cnpg` 를 못 만들어 CR 이 못 뜬다) | 라벨 🔀 재배치/중간. **새 의존(selfHeal) 확인함 — `data-postgres-cnpg-dr.yaml:31`·`data-keycloak-pg-dr.yaml:32` 둘 다 `true` ✅**. **🔴 PVC 재사용 미검증**(Step 10) |
+| H6 | 런북 `:296` 주석이 "api/web **0**" 이라 적었으나 실제 `service-api.yaml:12` 는 **wave 2** | Task 6 에 정정 추가. **이 오해가 H1 을 키웠다** — wave 0 이면 "곧 뜬다"로 보인다 |
+
+**교훈 1 — 라벨은 검증이 아니다.** 2회차(A1)는 *"'이식'이라는 단어가 검증을 건너뛰게 만들었다"* 고
+**정확히 진단해놓고 개수만 고쳤다.** 남은 4개는 여전히 "이식"이라 적힌 채였고 아무도 원본을 안 열었다.
+**진단이 맞아도 처방이 절반이면 같은 자리에서 또 터진다** — §11.5 가 "P1 이 두 번 정정된 것이 이
+프로젝트의 축소판"이라 쓴 그 패턴이 **세 번째**로 반복됐다.
+
+**교훈 2 — "사람용 → 기계" 변환은 규칙이 서로를 배신한다.** 변환 규칙 2(`set -e`)와 4(확인→게이트)를
+곱하면 **런북이 "폴링해서 보라"고 쓴 것이 "없으면 실패"가 된다**(H1). 같은 `A && B` 구문이 `11` 에선
+안전장치이고 `06` 에선 함정이다(H2). **규칙을 스크립트마다 기계적으로 적용하지 말고, 그 줄이 원래
+사람에게 무엇을 시키던 것인지**(확인? 폴링? 게이트?)**를 먼저 판정한다.**
+
+**교훈 3 — 3·4회차가 각각 9건·6건을 냈다.** "이제 됐다"가 세 번 틀렸다. 정적 리뷰의 수확은 아직
+체감하지 않았으나, **남은 결함은 대부분 실행해야 보이는 종류**(PVC 재사용·peer 인증·에러명)로 수렴 중이다
+— 다음은 T1 실측이다.
+
+### 11.9 T1 실측 발견 (2026-07-15) — CodeBuild 첫 실행
+
+**4라운드 정적 리뷰(15건)를 통과한 계획이 첫 실측 5분 만에 P1 을 냈다.** 계획서의 점진적 드릴 전략이
+정확히 의도대로 작동한 것이다. 셋 다 **`.tf` 파일만 봐서는 원리적으로 안 보이는** 종류다.
+
+#### T1-1 (P1) — apply 주체가 바뀌자 EKS access entry·KMS 키 정책이 넘어갔다
+
+첫 CodeBuild 실행이 `Apply complete! Resources: 9 added, 1 changed, 2 destroyed` 를 냈다.
+**그 `2 destroyed` 와 `1 changed` 가 무해하지 않았다:**
+
+| | 이전(사람이 apply) | 이후(CodeBuild 가 apply) |
+|---|---|---|
+| EKS access entry `cluster_creator` | `user/kcy` | `role/cledyu-lab-dr-failover-tf` |
+| KMS 키 `KeyAdministration` | `user/kcy` | `role/cledyu-lab-dr-failover-tf` |
+
+**원인 — eks 모듈이 caller identity 를 기본값으로 쓰는 곳이 두 군데다:**
+```hcl
+# eks-dr.tf:79 (당시)
+enable_cluster_creator_admin_permissions = true   # → main.tf:243 이 caller 를 merge
+# kms_key_administrators 미지정
+# → main.tf:316  coalescelist(var.kms_key_administrators, [session_context.issuer_arn])
+```
+지금까지는 **런북대로 사람이 apply** 해서 늘 `user/kcy` 였다. [2] TerraformApply 가 **CodeBuild** 로
+apply 하게 되면서 주체가 바뀌었다.
+
+**페일오버 자체는 안 깨진다** — bastion entry 는 `access_entries` 로 명시돼 있고(살아남음), 클러스터는
+private-only 라 `user/kcy` 의 노트북 kubectl 은 애초에 불가했으며, KMS 는 root 문이 있어 계정 락아웃이 없다.
+**진짜 문제는 플립플롭이다:** 사람이 apply → kcy, CodeBuild 가 apply → 롤, **terraform 이 영원히
+수렴하지 않는다.** 그리고 **페일오버 경로에 destroy 가 상시로 뜨면 운영자가 destroy 줄을 안 읽게 된다** —
+그건 `-var` 누락으로 warm DR 129개가 날아가는 사고를 놓치는 훈련이다.
+
+**정정:** caller identity 의존을 양쪽 다 제거하고 **명시**로 바꿨다.
+```hcl
+locals { eks_dr_admin_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:user/kcy" }
+enable_cluster_creator_admin_permissions = false
+kms_key_administrators                   = [local.eks_dr_admin_arn]
+access_entries = { bastion = {...}, operator = { principal_arn = local.eks_dr_admin_arn, ... } }
+```
+`account_id` 는 어느 주체든 같은 계정이라 결정적이다. **CodeBuild 롤은 일부러 안 넣었다** —
+`versions.tf` 에 kubernetes provider 가 없어 terraform 이 k8s API 를 호출하지 않는다. 받아간 admin 은
+**애초에 불필요한 권한**이었다.
+
+**검증(실측):** CodeBuild 2회 연속 → 1회차 `2 added, 1 changed, 2 destroyed`(kcy 복구) → 2회차
+**`0 added, 0 changed, 0 destroyed`**. 사람 plan 도 `No changes`. **양쪽 주체 수렴 확인.**
+덤으로 **[2] 가 멱등**임이 증명됐다(계획서가 "hot 이 이미 떠 있으면 [2] 는 no-op" 이라 쓴 전제).
+
+#### T1-2 — terraform state 락은 하나다
+
+빌드 2개가 **4초 간격**으로 시작돼 뒤엣것이 `Error acquiring the state lock`
+(DynamoDB `ConditionalCheckFailedException`)으로 죽었다.
+
+- **막은 것:** `concurrent_build_limit = 1` — 빌드↔빌드 충돌은 **시작 자체를 막아** 즉시·명확히 실패시킨다
+  (락 에러는 20초 뒤에 나고 메시지가 원인을 안 가리켜 진단이 오래 걸린다)
+- **🔴 안 막힌 것 — [2] 의 Retry (T5 에서 판단):** **사람↔빌드** 충돌은 여전하다. 그리고 **재해 중엔
+  운영자가 terraform 을 만지고 있을 확률이 오히려 높다**(장애 확인하려고 `plan` 을 친다). 그 순간 승인을
+  누르면 **[2] 가 락 충돌로 죽는다.** 락은 초~분 단위로 풀리니 Retry 로 삼킬 수 있으나, "모든 실패를
+  재시도"하면 `-var` 누락 같은 진짜 실패도 30분 늘어진다 → **락 에러만 골라낼 수 있는지 T5 에서 실측.**
+
+#### T1-3 — 코드 출처가 둘로 갈렸다 (설계의 본질, 제거 불가)
+
+| 주체 | 코드 출처 | git 인식 |
+|---|---|---|
+| 로컬 `terraform apply` | **운영자 디스크** | ❌ 미커밋도 그대로 씀 |
+| CodeBuild [2] | **GitHub clone** | ✅ **푸시된 것만** |
+
+**둘 다 같은 S3 state 에 쓴다.** T1 실측 중 실제로 사고가 났다 — 로컬에서 T1-1 을 고쳐 apply(→kcy 복구)
+했는데, **커밋·푸시 전에** 빌드를 돌려 **옛 코드가 되돌렸다**(`158ec196`). 제거할 수 없는 성질이다 —
+CodeBuild 는 git 에서 읽어야 재해 때 **검증된 코드**가 돌기 때문이다.
+
+**T1 전에는 없던 위험이다.** 사람만 terraform 을 돌렸고 **디스크 = 진실**이었다. 이제는:
+> **재해가 나서 [2] 가 돌면, 운영자 디스크의 미커밋 수정은 무시되고 main 코드가 apply 된다.**
+> 즉 **로컬에서 급히 고쳐놓은 것이 재해 중에 조용히 롤백된다.**
+
+→ Task 6 에서 **런북에 명시**한다(기술적 방어 수단이 없다 — 문서화가 유일한 완화).
+
+#### T1-4 — T5 드릴은 main 을 봐야 한다 (미결정, T5 에서)
+
+프로젝트 기본값이 `source_version = "main"` 이고 **실재해는 이게 맞다**(재해 중에 브랜치를 굴리지 않는다).
+드릴은 `start-build --source-version <브랜치>` 로 **호출 시 오버라이드**한다 — 프로젝트는 안 건드린다.
+
+**그런데 T5 는 SFN 을 통해 도는데 [2] 는 `SourceVersion` 을 안 넘긴다** → 프로젝트 기본값(main)을 쓴다
+→ **머지 전이면 main 에 buildspec 이 없어 T5 드릴이 죽는다.** 선택지:
+1. **T5 전에 main 으로 머지**(권장) — **fidelity 가 더 높다.** 실재해가 돌리는 게 정확히 main 이라,
+   브랜치를 드릴하면 **정작 실제로 도는 코드를 한 번도 안 테스트**하는 셈이다
+2. `source_version` 을 변수로 빼서 드릴 때 브랜치로 apply → 되돌리기. **되돌리기를 잊으면 실재해가
+   브랜치를 돌린다**
+
+**교훈 — 규칙을 적는 것과 지키는 것은 별개다.** T1 구현 중 "커밋·푸시가 실측보다 먼저"를 발견해
+**계획서 T1 의 스텝 순서를 뒤집어 놓고**(Step 4 Commit+push → Step 5 실측), **그 직후 eks-dr.tf 수정에서
+똑같은 실수를 했다** — 커밋 안 한 채 "빌드 돌려서 검증하자"고 한 것이다. 그 검증은 **원리적으로 성립할 수
+없었다.** §11.7 의 F 계열(배선 누락)·§11.8 의 H 계열(라벨 맹신)과 같은 뿌리다: **아는 것이 지키는 것을
+보장하지 않는다.**
+
+### 11.10 T2 착수 전 발견 (2026-07-15) — SSM 출력 경로
+
+계획서의 자식 SM 은 SSM 명령 출력을 **S3(`dr_backups`)로** 보내게 설계돼 있었다
+(`OutputS3BucketName = aws_s3_bucket.dr_backups.id`). **3중으로 막혀 있었다:**
+
+| # | 사실 | 결과 |
+|---|---|---|
+| 1 | bastion 롤에 **`s3:PutObject` 없음** (`GetObject on vault/*` 만) | 업로드 실패 — SSM 은 **인스턴스 자격증명**으로 올린다 |
+| 2 | 버킷이 **SSE-KMS** 인데 bastion 엔 `kms:Decrypt`·`DescribeKey` 만 | 쓰기용 `kms:GenerateDataKey` 없음 |
+| 3 | 버킷이 **Object Lock GOVERNANCE 30일**(실측 확인) | 드릴 로그가 **30일간 삭제 불가**로 누적 |
+
+**1·2 는 IAM 으로 고쳐지지만 3 은 설계 문제다.** `dr_backups` 는 *"삭제·변조 불가로 굳혀 writer 키 유출·
+랜섬웨어·실수 삭제로부터 보호"*하는 **WORM 금고**다(`backup.tf:11`). **백업 금고와 운영 디버그 로그는
+성격이 정반대다** — 라이프사이클(`expiration 35일`)도 Lock 때문에 제 역할을 못 한다.
+
+**정정 — CloudWatch Logs 로 보낸다.** 이 설계의 다른 로그(SFN·Lambda·CodeBuild)와 같은 곳이고,
+retention(30일)으로 자동 정리되며 `aws logs tail` 로 바로 읽는다(T1 에서 CodeBuild 디버깅하던 그 방식).
+
+```hcl
+CloudWatchOutputConfig = {
+  CloudWatchLogGroupName  = aws_cloudwatch_log_group.dr_bastion_commands.name  # /aws/ssm/cledyu-lab-dr-failover
+  CloudWatchOutputEnabled = true
+}
+```
+**출력 계약이 바뀐다:** `{..., stdoutUrl, stderrUrl}` → `{..., commandId, logGroup}`.
+
+**IAM 도 같이 만들었다 — F3 와 같은 클래스다.** SSM 의 CloudWatch 출력도 **bastion 자격증명**으로 쓰는데,
+붙어 있는 `AmazonSSMManagedInstanceCore` 는 **logs 권한을 하나도 주지 않는다**(실측: 정책에 `logs:*` 0건,
+`s3:*` 0건). 빠뜨렸으면 **stdout 전문이 조용히 유실**되고 잘린 `stdoutTail` 만 남았을 것이다.
+→ `aws_iam_role_policy.eks_dr_bastion_command_logs`(`CreateLogStream`·`PutLogEvents`·`DescribeLogStreams`).
+
+> **왜 전문이 필요한가 — `stdoutTail` 로는 부족할 수 있다.** `GetCommandInvocation` 의
+> `StandardOutputContent` 는 문서상 **"the first 24,000 characters"** 다. **뒤가 아니라 앞**이라면,
+> `set -x` 로 길게 뱉는 `06-bootstrap-apps.sh` 가 **끝에서 실패했을 때 정작 그 에러가 안 담긴다**
+> (notify 가 Discord 에 싣는 `stdoutTail[-1200:]` 도 "앞 24k 의 끝"일 뿐이다).
+> **🔴 "first" 인지는 미실측** — T2 Step 5 스모크에서 긴 출력으로 확인한다.
+
+**교훈 — F3 는 한 번으로 안 끝났다.** §11.7 F3 는 "`09-` 가 `ssm:PutParameter` 를 부르는데 IAM 이 없다"
+였고, 정정으로 **Global Constraints 에 "스크립트를 만드는 Task 는 그 스크립트가 호출하는 AWS API 의 IAM 도
+같이 만든다"** 를 넣었다. 그런데 이번 건은 **스크립트가 아니라 SSM 에이전트가** 부르는 것이라 그 규칙의
+문면에 안 걸렸다. **"bastion 에서 AWS API 를 부르는 주체"는 스크립트만이 아니다** — 에이전트·사이드카·
+오퍼레이터 전부다. 규칙을 문면대로만 읽으면 같은 함정을 다른 이름으로 다시 밟는다.
+
+### 11.11 T2 실측 발견 (2026-07-15) — CloudWatch 출력이 조용히 유실됐다
+
+**§11.10 에서 "S3 가 3중으로 막혔으니 CloudWatch 로 간다"고 정하고 IAM 을 함께 만들었는데, 그 IAM 이
+틀려서 CloudWatch 도 막혀 있었다.** 즉 **T2 가 자기 목적을 배신할 뻔했다.**
+
+**증상 — 모든 게이트가 통과하는데 목적만 달성 안 된다:**
+
+| 신호 | 값 | 판정 |
+|---|---|---|
+| SFN 실행 | `SUCCEEDED` | ✅ |
+| `responseCode` | `0` | ✅ |
+| `stdoutTail` | `hello\nroot\n` | ✅ |
+| **CloudWatch 스트림** | **0개** | ❌ **전문 유실** |
+
+스모크 3종(성공·실패·env 주입)이 **전부 통과**했다. **스트림을 따로 확인하지 않았으면 T2 를 완료로
+넘겼을 것이다** — 정확히 T2 가 없애려던 결함(전문 유실)을 안은 채로.
+
+**원인 — 에이전트 로그가 정확히 말해줬다:**
+```
+ERROR ... not authorized to perform: logs:DescribeLogGroups on resource: ...log-group::log-stream:
+ERROR ... not authorized to perform: logs:CreateLogGroup on resource: .../aws/ssm/cledyu-lab-dr-failover:log-stream:
+ERROR ... Error Creating Log Group for CloudWatchLogs output: AccessDeniedException
+```
+1. **에이전트는 로그그룹이 이미 있어도 `DescribeLogGroups` → `CreateLogGroup` 을 먼저 부른다.**
+   "그룹은 terraform 이 만드니 `CreateLogStream`·`PutLogEvents` 면 충분하다"는 **추론이 틀렸다.**
+   그리고 거기서 막히면 **CloudWatch 출력을 통째로 포기**한다(명령 자체는 Success 로 끝난다).
+2. **`DescribeLogGroups` 는 리소스 한정이 안 된다** — 에이전트 요청이 `log-group::log-stream:`
+   (그룹명이 **비어 있음**)으로 온다. 그룹 ARN 으로 좁힌 것이 원인이었다.
+
+**정정:** `logs:DescribeLogGroups` → `resources = ["*"]` 별도 statement + `CreateLogGroup` 추가.
+**검증(실측):** 재실행 → 스트림
+`78032f12-.../i-016ee73c5891f5230/aws-runShellScript/stdout` 생성 확인, `aws logs tail` 로 마커 문자열까지
+읽힘. **스트림 이름이 `<commandId>/<instanceId>/aws-runShellScript/stdout`** 이라 자식 SM 의 출력 계약
+(`commandId`)으로 정확히 찾힌다.
+
+**교훈 1 — `SUCCEEDED` 는 "명령이 돌았다"이지 "로그가 남았다"가 아니다.** Global Constraints 의
+**"과소 게이트 — 존재만 보고 값을 안 봄"** 그 자체다. 이 계획은 G1 함정을 *스크립트의 게이트*에 대해
+경고했는데, 정작 **우리가 실측을 판정하는 기준**에 같은 함정이 있었다. **"부수효과를 목적으로 하는 변경은
+그 부수효과를 직접 확인해야 한다"** — 성공 코드가 아니라 **스트림 개수**를 봤어야 했고, 실제로 그걸 보고서야
+찾았다.
+
+**교훈 2 — F3 는 세 번째다.** §11.7 F3(스크립트→`ssm:PutParameter`) → §11.10(에이전트→S3/CloudWatch,
+규칙의 문면에 안 걸림) → §11.11(**같은 에이전트, IAM 을 만들었는데 내용이 틀림**). 매번 "이제 IAM 을
+챙긴다"고 하고 매번 다른 층에서 틀렸다. **IAM 은 추론으로 채우면 안 된다** — 호출 주체의 **실제 요청**을
+봐야 한다(에이전트 로그·CloudTrail). 이번에도 답을 준 건 문서나 추론이 아니라 **에이전트 로그 한 줄**이었다.
+
+### 11.12 T3 실측 발견 (2026-07-15) — SSM 은 `HOME` 을 주지 않는다
+
+**런북의 명령은 맞았는데 실행 환경이 달랐다.** SSM RunCommand 는 root 로 돌지만 `HOME` 을 설정하지
+않는다(실측: `HOME=[]`, `PWD=/usr/bin`).
+
+**증상이 원인을 안 가리킨다:**
+
+| 단계 | 실제 동작 |
+|---|---|
+| `aws eks update-kubeconfig` | `/root/.kube/config` 에 **정상적으로 쓴다** ✅ |
+| `kubectl ...` | `$HOME/.kube/config` 를 찾다 **못 찾음** → 기본값 `localhost:8080` 폴백 |
+| 사람이 보는 것 | **`connection refused`** ← "설정 없음"이 아니라 "연결 거부"로 보인다 |
+
+**런북이 이걸 못 잡은 이유:** 런북은 **사람용**이고 `aws ssm start-session` 은 로그인 셸이라 `HOME=/root`
+다. **명령은 맞는데 실행 환경이 다르다** — SSM 변환 규칙 1(`exec -it` 제거: TTY 없음)과 **같은 뿌리**
+(대화형 셸이 아니다)인데 초안은 증상 하나만 잡았다.
+
+**정정:** 7개 스크립트 전부 상단에 `export HOME=/root`. `KUBECONFIG` 명시보다 `HOME` 이 낫다 —
+`helm`(06)·`aws` 도 `$HOME` 을 쓴다.
+
+**회귀 체크(T3 Step 9):** `[ "$(grep -l 'export HOME=/root' $B/*.sh | wc -l)" -eq 7 ]` — 하나라도 빠지면
+그 스크립트만 `localhost:8080` 으로 죽는다.
+
+**교훈 — "이식"은 명령을 옮기는 것이지 환경을 옮기는 것이 아니다.** 런북 이식 4종은 명령 문자열이
+검증됐다는 뜻이지 **실행 컨텍스트가 같다는 뜻이 아니다.** 사람용 절차를 자동화로 옮길 때는
+"누가·어떤 셸에서 도는가"를 매번 다시 물어야 한다.
+
+---
+
+### 11.13 T4 실측 발견 (2026-07-15) — notify 통과 + 실패 진단 경로 확정(B안)
+
+**(a) `_ts` 이중 형식 파싱 — C2 회귀 방어 실측 통과.**
+
+`detectedAt="2026-07-15T05:00:00.328+0000"`(CloudWatch, **Z 아님**) · `approvedAt="...371Z"`(toISOString)
+를 넣고 실행 → Discord 에 **`감지→승인: 10분`** 렌더. `?` 가 아니므로 `fromisoformat` 이 offset·Z 를 둘 다
+파싱함이 **실측 확인**됐다. `strptime("%...%fZ")` 였다면 13단계를 다 성공하고도 "❌ 실패" 알림이 갔다(C2).
+
+> `승인→서빙: 621분` 은 버그가 아니다 — 테스트 payload 의 `approvedAt` 이 손으로 박은 과거 시각이고
+> `now` 는 실시간이라 그 간격이다. 오히려 `now` 가 살아있고 뺄셈이 도는 증거다.
+
+**(b) 🔴 `set -x` 트레이스와 명령 에러는 stdout 이 아니라 **stderr** 로 간다(로컬 실측).**
+
+```
+$ bash t.sh 2>/dev/null          # stdout 만
+이건 echo — 스크립트가 일부러 낸 메시지          ← echo 만 남는다
+$ bash t.sh 2>&1 >/dev/null      # stderr 만
++ ls /nonexistent-path-xyz                       ← set -x 트레이스
+ls: cannot access '...': No such file or directory  ← **진짜 원인**
+```
+
+자식 SM 의 `stdoutTail` 은 `$.result.StandardOutputContent` = **stdout 전용**이다. 즉 **"왜 죽었는가"는
+지금 어느 경로로도 SFN 상태에 들어오지 않는다.** `StandardErrorContent` 는 어디서도 캡처하지 않는다.
+
+**(c) 자식 SM 의 성공/실패 비대칭:**
+
+| 경로 | stdout 전달 |
+|---|---|
+| `Succeeded`(Pass) | `StandardOutputContent` 를 실어 나른다 ✅ |
+| `Failed`(Fail) | **정적 `Cause` 문자열뿐** — `Fail` 타입은 Error/Cause 문자열만 실을 수 있다 ❌ |
+
+정작 출력이 필요한 건 실패할 때인데 실패 경로가 버린다.
+
+**(d) 결정 — B안(현재 설계 유지): 실패 진단은 CloudWatch 경유, 알림엔 포인터만.**
+
+A안(알림에 로그를 욱여넣기)의 길이 산식 — Discord 2000자 기준:
+
+| 항목 | 길이 |
+|---|---|
+| 고정 오버헤드(제목·안내문·코드블록 마크업) | 129자 |
+| `executionArn` 전체 ARN | 112자 |
+| `failedState` | 19자 |
+| **로그에 쓸 수 있는 최대** | **~1,740자**(ARN 유지) / ~1,816자(실행이름만) = `set -x` 약 35줄 |
+
+현재 코드는 `[-1200:]` 이라 460자를 안 쓰고 있으나, **늘려도 stdout 은 엉뚱한 스트림**이라(위 (b))
+A안은 `StandardErrorContent` 캡처 + `Fail` 상태의 데이터 운반(위 (c)) 재설계가 선행돼야 한다.
+
+**B안을 택한 이유:** stderr 를 알림 경로에 올리면 `set -x` 트레이스가 **인자까지** 흐른다 — C6 가
+`07-restore-vault.sh` 에서 막은 바로 그 표면을 나머지 6개로 넓히는 셈이다. B안은 **알림 경로에 시크릿이
+흐를 가능성이 원천적으로 0**이다.
+
+**B안의 비용(수용함):** Discord 알림 → SFN 콘솔 → 자식 SM 실행 → `GetResult` 의 `commandId` → CloudWatch
+`aws logs tail <그룹> --log-stream-name-prefix <commandId>` = **3~4홉.** `Cause` 가 정적이라 `commandId` 가
+알림에 안 실린다.
+
+**(e) T5 주의 — `failedState` 는 상태 이름이 아니다.** `"failedState.$" = "$.error.Error"` 이므로 bastion
+7단계(`[3][6][7][8][9][11][12]`)가 **전부 같은 값**으로 온다(자식 SM 의 `Error = "BastionScriptFailed"` 하나).
+`.sync` 통합이 이를 `States.TaskFailed` 로 감쌀 가능성이 있으므로 **실제 문자열은 §5.1 [2.4] 주석대로
+실측 확정 대상이다 — 지어내지 말 것.**
+
+**(f) 교훈 — 계획서가 예측한 함정에 그대로 빠졌다.** T3 Step 9 의 C6 회귀 체크엔 이렇게 적혀 있다:
+"⚠️ `grep -q '^set -x'` 는 안 된다 — 07 은 시크릿을 다 쓴 뒤(`unset NEWROOT`) **의도적으로 켠다.**
+'있나 없나'가 아니라 **'어디 있나'** 를 봐야 한다." T4 검토 중 `grep -q '^set -x'` 로 7개를 훑어
+**"07 에 set -x 가 켜져 있다 = 루트 토큰 유출"이라는 오탐 경보**를 냈다. 계획서의 awk 체크
+(`unset NEWROOT` 줄번호와 비교)를 돌리니 `✅ line 152 > unset 146` 으로 즉시 클린이었다.
+**§11.11 의 "과소 게이트" 와 짝을 이루는 반대편 함정 — 과대 게이트(존재만 보고 위치를 안 봄)다.**
+그리고 그 방어는 이미 계획서에 **글로 적혀 있었다** — 안 읽고 grep 부터 쳤다.
+
+---
+
+### 11.14 T4 실측 발견 2 (2026-07-15) — `[4]` 의 게이트는 아무것도 안 거른다
+
+**§11.11 의 과소 게이트가 세 번째다.** T2 는 `SUCCEEDED` 를 보고 "로그가 남았다"로 착각했고, 여기선
+`Nodegroup.Status == ACTIVE` 를 보고 **"노드가 떴다"로 착각**했다.
+
+**(a) 게이트 무효 — 2회 측정, 같은 결과:**
+
+| 시각(UTC) | 사건 |
+|---|---|
+| 15:56:52 | `update-nodegroup-config` → update `InProgress` |
+| 15:57:13~14 | EC2 인스턴스 `running`(부팅 시작) |
+| **15:57:21** | **`aws eks wait nodegroup-active` 반환** ← 부팅 8초차 |
+
+`Nodegroup.Status` 는 **스케일 전·중·후 전부 `ACTIVE`** 다 — 대답이 안 바뀌므로 질문이 무의미하다.
+계획 초안의 `CheckNodes`/`NodesActive?` 가 정확히 이 값을 본다 → `WaitNodes`(30s) 한 번 돌고
+**노드 부팅 30초차에 `InstallAddons`** 로 넘어간다.
+
+**(b) 경합 재현 — 여유가 0초였다:**
+
+```
+T0    16:25:30  scale desired 0→3
+T+34  16:26:04  CheckNodes 가 봤을 status = ACTIVE   ← 게이트 통과
+T+35  16:26:05  InstallAddons(start) 호출
+T+35  16:26:05  **노드 3대가 k8s 에 Ready**          ← 같은 초. 순전히 운이었다
+      +58 s     coredns ACTIVE / ebs-csi CREATING
+      +105s     둘 다 ACTIVE, done=true → BootstrapApps
+```
+노드가 **35초** 만에 Ready 된 덕에 살았다. EKS 노드 부팅은 통상 60~120s 라 **다음번엔 진다.**
+(지상 검증: bastion `kubectl get nodes` 의 `Ready` `lastTransitionTime` = `16:26:05Z` 3대 전부)
+
+**(c) 🟢 `[5]` 의 애드온 폴링 루프는 **진짜 게이트**다.** `done=true` 가 **+105s** — 노드 Ready(+35s)보다
+70s 뒤다. `CREATING` 동안 제대로 기다렸다. **가짜 게이트와 진짜 게이트가 둘 다 있었고 우리가 믿은 건
+가짜 쪽이었다.**
+
+**(d) ✅ 해소 — 노드 0 → 애드온 DEGRADED 는 **실재한다. 다만 2분 25초 늦게 온다.**
+
+경합 실행 자체는 `CREATING → ACTIVE` 로 갔고 DEGRADED 를 안 거쳤다(노드가 이미 Ready 였으니 당연).
+그래서 뒷정리(노드 3→0) 중에 따로 관측했다:
+
+| 시각(UTC) | 노드 | coredns | ebs-csi |
+|---|---|---|---|
+| 16:43:15 | **0** | ACTIVE | ACTIVE |
+| 16:45:40 | 0 | **DEGRADED** | **DEGRADED** |
+
+→ "warm node0 → DEGRADED(InsufficientNumberOfReplicas)" 라는 §pilot-light 의 주장은 **참**이다.
+**그리고 애드온 status 는 양방향으로 지연 지표다** — 노드가 사라진 뒤 **2분 25초** 동안 ACTIVE 라고
+계속 답했다.
+
+**이게 왜 위험한가:** `[5]` 가 부팅 중에 뜨면(= (a)(b) 의 상황) 애드온은 `CREATING` 으로 시작한다.
+노드가 **2분 반 안에** 조인하면 `CREATING → ACTIVE` 로 살고, 늦으면 `DEGRADED` 가 뜬다 →
+`check` 가 raise → **페일오버 중단.** 노드 조인은 이번엔 35s 였지만 통상 60~120s 이고 AZ·용량에 따라
+더 길 수 있다. **즉 "DEGRADED 로 죽을 위험"은 가설이 아니라 타이밍 문제일 뿐이다.**
+`check` 의 `DEGRADED → raise` 는 (a)노드 미기동 / (b)진짜 고장을 **구분하지 못한다** — 아래 (e) 가 그 답이다.
+
+**⚠️ `status` 와 `health` 는 별개다 — 진입 경로에 따라 다른 값이 나온다(추가 실측):**
+
+| 진입 경로 | `status` | `health.issues[0].code` |
+|---|---|---|
+| ACTIVE 애드온 + 노드 소멸 | **`DEGRADED`**(2분25초 뒤) | `InsufficientNumberOfReplicas` |
+| **`update_addon`** + 노드 0 | **`UPDATING`**(끝나지 않음) | `InsufficientNumberOfReplicas` |
+
+**같은 "노드가 없다"가 한 번은 `DEGRADED`, 한 번은 `UPDATING` 으로 온다.** `check` 는 `status` 만 보므로
+후자는 `done=false` 로 계속 폴링한다(우연히 옳은 동작). **`health` 를 안 보는 한 (a)/(b) 판별은 불가능하고,
+`health` 를 보더라도 `InsufficientNumberOfReplicas` 는 (a)(b) 양쪽에서 나온다** — 결국 `[4.5]` 로 (a) 를
+발생 자체가 불가능하게 만드는 것 외에 깨끗한 해법이 없다.
+
+> **부수 사실:** 노드 0 에서 `update_addon` 하면 **`UPDATING` 이 영영 안 끝난다**(파드가 뜰 노드가 없으니
+> 애드온이 healthy 판정을 못 받는다). 실측 정리 중 "UPDATING 이 끝나면 지우자"는 루프가 **무한 대기**에
+> 걸렸다. `delete_addon` 은 **`UPDATING` 중에도 즉시 수리된다**(→ `DELETING`) — 정리 시 상태 전이를
+> 기다릴 필요 없다.
+
+**(e) 결정 — `[4]` 뒤에 `[4.5] WaitNodesReady`(자식 SM, `04-wait-nodes-ready.sh`) 신설.**
+초안의 `WaitNodes`/`CheckNodes`/`NodesActive?` 3상태는 **삭제**한다.
+**이유는 "노드를 기다리려고"가 아니라 "DEGRADED 의 뜻을 하나로 만들려고"다** — 노드를 확실히 세운 뒤면
+이후 DEGRADED 는 (b) 뿐이므로 `check` 의 치명 판정이 비로소 옳아진다.
+**(d) 의 실측이 이 결정을 사후 확증했다** — DEGRADED 는 실재하고(가설이 아니었다) 노드 조인이 2분 반을
+넘기면 뜬다. `[4.5]` 는 그 타이밍 의존을 **통째로 제거**한다: 노드가 Ready 인 뒤에만 애드온을 만드므로
+(a) 는 발생할 수 없고, DEGRADED 가 보이면 그건 무조건 (b) 다.
+- **대안 기각:** DEGRADED 를 참고 폴링 → (b) 일 때 `TimeoutSeconds`(90000=**25시간**)까지 매달린다.
+  재해 중 25시간 매달림은 **빠른 실패보다 나쁘다**(사람이 이어받을 기회를 뺏는다).
+- **ASG `InService` 기각:** EC2 헬스체크지 kubelet 조인이 아니다 — 같은 함정의 다른 층.
+  (실측: 인스턴스 `running` 시각 < 노드 `Ready` 시각)
+- 비용: 자식 SM 왕복 ~30s. RTO 40분에서 30초.
+
+**(f) ⚠️ 새 검문소를 만들면서 같은 함정을 또 밟을 뻔했다.**
+`kubectl wait --for=condition=Ready node --all` 은 **노드가 0대면 즉시 통과한다** — "모든 노드가 Ready" 가
+노드가 없으면 **공허참**이다. 스케일 직후엔 노드가 0대일 수 있으므로 이 한 줄만 쓰면
+**초안과 똑같이 아무것도 안 거르는 게이트**가 된다.
+→ `04-wait-nodes-ready.sh` 는 **대수 검증을 함께** 한다: `[ "$(kubectl get nodes --no-headers | wc -l)" -eq 3 ]`.
+
+**(g) 멱등성 방어가 절반이었다 — `ResourceInUseException` 은 두 가지 뜻이다.**
+
+3회 연속 `start` 실측:
+
+| 회차 | 결과 |
+|---|---|
+| 1 | ✅ `{"started": [...]}` |
+| 2 | ✅ 성공(애드온 ACTIVE → `update_addon`) |
+| **3** | ❌ **`ResourceInUseException: cannot be updated as it is currently in UPDATING state`** |
+
+초안은 이 예외를 **"create 인데 이미 존재함"** 으로만 이해하고 `describe → update` 로 막았다. 그런데
+**`update_addon` 도 UPDATING 중인 애드온에 같은 예외를 낸다.** 2회차가 UPDATING 을 만들고 3회차가 거기
+부딪혔다. **재-failover(애드온이 ACTIVE 로 남음)는 커버되지만, `[5]` 재시도·운영자의 재실행(UPDATING
+창 ~1-3분)은 안 커버된다** — 재해 중 "안 되네? 다시 눌러보자"는 충분히 있을 법하다.
+**정정:** `contextlib.suppress(ResourceInUseException)` — 어느 뜻이든 **설치는 이미 진행 중**이니 성공으로
+흘린다. 완료 판정은 `check`(=SFN 폴링)의 몫이지 `_start` 가 아니다.
+
+**(h) 해소된 미확정:** "`update_addon` 의 `resolveConflicts` 값 집합이 create 와 다를 수 있다"(계획서 T4
+Step 1 주석) → **다르지 않다.** 2회차 `start` 가 `update_addon(resolveConflicts="OVERWRITE")` 로 200 반환.
+
+**교훈 — "기다린다"고 적힌 코드가 기다리는지 확인해야 한다.** `wait nodegroup-active`·`CheckNodes`·
+`kubectl wait --all` 셋 다 **이름은 기다림인데 실제로는 즉시 통과**한다. §11.11 의 교훈("부수효과를
+목적으로 하는 변경은 그 부수효과를 직접 확인해야 한다")의 쌍둥이다: **대기를 목적으로 하는 게이트는
+그 대기가 실제로 일어났는지를 — 시각을 찍어서 — 확인해야 한다.** 이번에 답을 준 건 추론이 아니라
+`lastTransitionTime` 과 타임스탬프 로그였다.
+
+---
+
+### 11.15 T4 실측 파생 발견 (2026-07-15) — **failback 이 노드를 안 내린다** (범위 밖·미수정)
+
+**T4 실측의 뒷정리(노드 3→0)가 30분 걸려 원인을 파다 나왔다. failover 가 아니라 failback 의 결함이다.**
+
+**(a) `dr-failback.md` §8 "EKS 축소" 는 축소를 하지 않는다.**
+
+두 런북이 다르다:
+
+| 런북 | 노드 N→0 | 결과 |
+|---|---|---|
+| `dr-eks-bootstrap.md` §destroy | **`aws eks update-nodegroup-config ... desiredSize=0`(CLI)** → 그 다음 terraform | ✅ (주석: `# 3) [P1] 노드 N→0 (CLI)`) |
+| `dr-failback.md` §8 | **terraform 만** (`-var eks_dr_node_desired=0`) | ❌ **아무 일도 안 일어난다** |
+
+`-var eks_dr_node_desired=0` 이 안 먹는 이유 — 모듈이 그 값을 무시한다(소스 확인:
+`.terraform/modules/eks_dr/modules/eks-managed-node-group/main.tf:476-481`):
+```hcl
+lifecycle {
+  create_before_destroy = true
+  ignore_changes = [ scaling_config[0].desired_size ]
+}
+```
+`eks_dr_active=false` 는 **NAT·엔드포인트·bastion 만** 게이트한다(eks-dr.tf:4) — 노드그룹은
+`enable_eks_dr`(warm) 소속이라 그대로 남는다. **failover 의 `[4]` 가 CLI 를 쓰는 바로 그 이유
+(ignore_changes)가 failback 에는 반영되지 않았다 — 대칭이 깨졌다.**
+
+**영향:** 실제 failback 후 **m6i.xlarge 3대가 계속 돈다** = `$0.236/h × 3 × 730h ≈ **$517/월**`.
+terraform 은 "변경 없음"으로 **성공 보고**하고 런북엔 "EKS 축소"라고 적혀 있다 — 조용한 유실이다.
+**격리 드릴로는 안 잡힌다**(드릴은 복원 부품만 검증). 실제 full failback 이 아직 없어서 미발견이었다.
+
+**정정(미적용 — failback 소유자 판단 필요):** §8 에 bootstrap §destroy 의 CLI 2줄을 이식.
+
+**(b) 애드온 PDB 가 마지막 노드 드레인을 막는다 — failback 에 30분 꼬리.**
+
+```
+NAMESPACE     NAME                 MAX UNAVAILABLE   ALLOWED DISRUPTIONS
+kube-system   coredns              1                 0     ← 0
+kube-system   ebs-csi-controller   1                 0     ← 0
+```
+replica 2 중 1 Running(마지막 노드) + 1 Pending(갈 노드 없음) = 가용 1 = 최소선 → **eviction 거부.**
+`Terminate-LC-Hook`(timeout 1800s, DefaultResult=CONTINUE)이 만료돼야 강제 종료된다.
+실측: scale-0 요청 16:27:43 → 노드 0 도달 **16:43:15 (약 16분)**.
+
+**이건 `[5]` 가 애드온을 설치하기 때문에 생긴다.** 실측 전 warm 에는 coredns 애드온이 없었고
+(terraform `cluster_addons` 에서 제외 — eks-dr.tf:140-143) PDB 도 없어 스케일다운이 깨끗했다.
+계획서는 **"failback 이 애드온을 warm 에 남긴다"** 를 전제하므로(§11.14 (g) 의 멱등성이 그 전제 위에 있다)
+**첫 실제 failback 부터 이 꼬리가 붙는다.**
+
+**선택지(미결):** ① 30분 꼬리를 문서화하고 수용 ② failback 이 애드온을 delete(그러면 §11.14 (g) 의
+재-failover 멱등 전제가 사라진다 — create 경로만 남음) ③ PDB 를 무시하는 강제 드레인.
+**①②는 서로 얽혀 있다 — 애드온을 지우면 멱등성 방어의 존재 이유가 바뀐다.**
+
+**교훈 — "축소한다"고 적힌 명령이 축소를 안 한다.** 오늘 같은 부류가 **세 번** 나왔다:
+`aws eks wait nodegroup-active`(부팅 8초차 반환) · `CheckNodes`(status 가 안 바뀜) ·
+`terraform -var eks_dr_node_desired=0`(모듈이 무시). 셋 다 **이름은 동작을 약속하는데 실제로는 no-op** 이고,
+셋 다 **성공을 보고**한다. §11.11 의 교훈("`SUCCEEDED` 는 로그가 남았다가 아니다")이 계속 다른 옷을 입고
+돌아온다 — **약속하는 이름을 믿지 말고 그 명령이 바꾼 상태를 직접 봐야 한다.**
+
+---
+
+### 11.16 브랜치 전수 감사 (2026-07-16) — **정적 감사 + 실측**
+
+**T1~T4 완료 시점의 브랜치(4,714줄) 전체를 대상으로, 확신 없는 항목은 kind·AWS 로 실측했다.**
+발견 5건 중 **3건은 코드가 정상 동작하므로 어떤 테스트로도 안 잡히는 것**들이다.
+
+#### (a) 🔴 **Vault 루트 토큰·복구 키가 EKS 감사 로그에 평문으로 쌓이고 있었다** (수정됨)
+
+`07-restore-vault.sh` 헤더는 `set -x` 를 피해 **stdout 을 막았다.** 그런데 그 스크립트는 전부
+`kubectl exec vault-0 -- sh -c "... VAULT_TOKEN=$X ..."` 형태이고, **exec 의 명령 인자는
+requestURI 쿼리스트링에 실려 API 서버 감사 로그로 나간다.** eks-dr.tf:71 이
+`cluster_enabled_log_types = ["audit", ...]` 라 그게 CloudWatch 로 간다. **방어가 한 층만 있었다.**
+
+실측 (`/aws/eks/cledyu-dr/cluster`, 보존 90일, 07-13~14 드릴 4회분):
+
+| 패턴 | 건수 | 새던 값 |
+|---|---|---|
+| `VAULT_TOKEN=` | 24 | `$INIT_ROOT` · `$NEWROOT` |
+| `generate-root -nonce` | **12** (= 4회 × threshold 3) | **recovery 키 전량** |
+| `generate-root -decode` | 4 | `$ENC`+`$OTP` → 루트 복호 가능 |
+
+가장 나쁜 건 12건이다. 그 키는 DR 것이 아니라 `cledyu/vault/bootstrap` 의 **온프렘 운영 Vault**
+키다(07:88-90 이 그 출처를 명시) → `generate-root` → 루트. `logs:FilterLogEvents` 만 있으면 읽힌다.
+**"Vault admin 획득은 3경로로 차단" 이라는 방어선이 이 경로로 우회됐다.**
+
+**수정(87d74ce): 인자 → stdin.** `printf '%s' "$X" | kubectl exec -i ... -- sh -c "... \$(cat) ..."`.
+`\$(cat)` 은 bastion 셸이 아니라 **파드 안 sh** 가 평가하므로 명령 문자열에 시크릿이 없다.
+kind 실증 — 구 방식은 `command=...VAULT_TOKEN%3Dhvs.CAESIFAKE...`, 신 방식은
+`command=...VAULT_TOKEN%3D%24%28cat%29...`(= `$(cat)` 리터럴)이고 값은 파드에 온전히 도착한다.
+
+**범위 확정:** SSM 명령 로그(`dr_bastion_commands`)와 CloudTrail 은 깨끗하다 — 전자는 `set -x` 부재
+덕에 명령줄이 stdout 에 안 실렸고(**헤더의 방어가 거기선 실제로 작동했다**), 후자는 스크립트 파일
+내용만 싣고 런타임 값을 안 싣는다. 새던 건 감사 로그 하나뿐이다.
+
+**잔여(사용자):** 07-13~14 드릴분 감사 스트림 삭제. 그때까지 노출은 "AWS 로그 읽기 + 온프렘 망 접근"
+둘 다 필요해 즉시 위험은 아니나, **망 격리 하나로만 버티는 상태**다.
+
+**교훈 — 방어를 한 층에만 걸고 "막았다"고 적으면, 다음 사람은 그 주석을 읽고 안심한다.**
+헤더는 위협(루트 토큰 평문 노출)을 **정확히 알고 있었는데** 출구를 하나만 셌다.
+
+#### (b) 🔴 **`kubectl wait` 는 대상이 없으면 기다리지 않고 즉시 에러다** (수정됨)
+
+kubectl **v1.34.0**(bastion 실제 버전 — 감사 로그 userAgent 로 확인) 실측:
+
+| 형태 | 대상 0개일 때 |
+|---|---|
+| `wait ... pod/does-not-exist` | `Error from server (NotFound)` → **exit 1, 즉시** |
+| `wait ... pod --all` | `error: no matching resources found` → **exit 1, 즉시** |
+| `rollout status deploy/x` | 같음 |
+
+**§11.14 (f) 의 전제가 거짓이었다.** `04-wait-nodes-ready.sh:32` 는 이렇게 적고 있다:
+
+> `kubectl wait --for=condition=Ready node --all` 은 **노드가 0대면 즉시 통과한다**(공허참)
+
+**아니다 — 통과가 아니라 에러다.** 04 의 대수 검증 루프는 여전히 **필요하지만**(없으면 즉시 죽는다)
+**이유가 반대**다. 구현이 우연히 옳았다.
+
+그 거짓 전제 때문에 `09-wait-apps-ready.sh` 의 wait 4곳에 게이트가 없었다. 바로 옆
+`08-restore-data.sh:38` 은 **같은 함정을 정확히 알고** 60회 존재 루프로 막는다 — 09 만 빠졌다.
+**[9] 가 죽으면 ALB 파라미터가 안 써지고 → [10] fail-closed → DNS 미전환 = 복구 실패**(F3 와 동일 결말).
+
+**수정(0177f80): 게이트 5곳** — kafka CR · kafkatopic 대수 · VE deploy · keycloak CR ·
+**ingress/api + ALB 호스트명**. 마지막 것은 초안이 `ALB=$(kubectl get ...)` 라 **set -e 가 친절한
+메시지 전에 죽여** `[ -n "$ALB" ]` 게이트에 도달조차 못 했고, ALB 프로비저닝(2~3분)도 안 기다렸다.
+
+#### (c) 🔴 **Vault init 멱등성** (수정됨 — codex PR 리뷰 P1 이 출발점)
+
+`vault operator init` 은 이미 초기화된 Vault 에서 죽는데, 07 은 init 산물을 **일부러 안 남긴다**(위 (a))
+→ 재실행 시 root 획득 불가 → **DR 중단**. PVC 도 warm etcd 처럼 사이클 간 살아남는다(gp3).
+
+**kind 실측이 설계를 두 번 바꿨다:**
+
+| 가설(초안) | 실측 | 결론 |
+|---|---|---|
+| Pending 파드가 PVC 삭제를 막는다 → **STS 도 지워야** | **안 막는다**(pvc-protection 이 `nodeName` 없는 파드를 in-use 로 안 봄) | **STS 삭제 불필요** → ArgoCD selfHeal 과 안 싸움 |
+| `-l app.kubernetes.io/name=vault` 로 PVC 삭제 | 차트 volumeClaimTemplates 에 **라벨이 없다**(`name: data`/`audit` 뿐) | **0개 매칭 = 조용한 no-op** 이 될 뻔 → ns 통째 `--all` |
+| — | Running 파드면 PVC 가 `deletionTimestamp` 만 받고 **Bound 에 머문다** | 기본 `--wait=true` 는 timeout + **지뢰**(파드 죽는 순간 삭제) |
+
+**수정(772df47):**
+- `[3]` 에 P1e — `delete pvc --all --wait=false`(표시) → `delete pod -l ...`(손 떼게) → deletionTimestamp
+  게이트. 노드 0(정상 warm)과 노드 3(§11.15 상태) **양쪽에서 같은 코드가 수렴한다**(실측 10초).
+- `07` 의 `aws s3 cp`·`kubectl cp` 를 **init 앞으로** — 되돌릴 수 없는 구간을 "3-peer 대기 + restore
+  한 줄"로 축소.
+- `07` init 앞 initialized 게이트 — 원인을 가리키는 메시지("[3] 부터 재실행").
+
+**codex 의 처방 중 "복원 가능한 root 토큰 경로를 별도 처리" 는 의도적으로 안 했다.** init 만 된
+fresh keyring 인지 restore 된 온프렘 keyring 인지 **스크립트가 구분할 수 없고**, 둘은 root 획득 경로가
+다르다. 구분 못 하는 걸 분기하면 절반은 틀린다 → **분기 대신 상태 자체를 제거**했다(§11.5 의
+"진단은 맞았는데 처방이 절반" 패턴).
+
+**남은 트레이드오프:** 07 단독 재실행은 여전히 불가 — `[3]` 부터 재실행해야 한다.
+
+#### (d) ⚠️ **`vault status` 는 sealed 면 exit 2** — pipefail 이 판정을 덮는다 (수정됨)
+
+(c) 의 initialized 게이트를 `vault status | jq -e '.initialized == true'` 로 쓰면 **버그다.**
+3상태 실측:
+
+| 상태 | 구 코드(파이프 직결) | 신 코드(출력 먼저 캡처) |
+|---|---|---|
+| fresh (`initialized=false`, exit 2) | 통과 ✅ | 통과 ✅ |
+| **초기화됨 + sealed (exit 2)** | **통과 ❌** | 발동 ✅ |
+| 초기화됨 + unsealed (exit 0) | 발동 ✅ | 발동 ✅ |
+
+`set -o pipefail` 아래서 `vault status` 의 exit 2 가 jq 의 판정을 덮어써 **게이트가 막으려던 상태를
+그냥 통과시킨다.** → `ST=$(... || true)` 로 캡처 후 판정.
+
+#### (e) ✅ **미확정 2건 해소** (코드 변경 불필요)
+
+**H5 — `delete cluster` 가 PVC 도 지우나 → 지운다.** kind + 레포와 동일 차트(cloudnative-pg 0.26.1)
+실측: CNPG 가 PVC 에 `ownerReferences: Cluster/<name>` 를 붙여 GC 가 연쇄 삭제한다(~15초).
+테스트 Cluster 는 PVC 를 만드는 필드가 레포와 일치한다(`instances: 1` + `storage:` 만 —
+walStorage·tablespaces·pvcTemplate 없음). `bootstrap.recovery`(S3 barman)는 kind 에서 못 써서 뺐으나
+PGDATA 초기화 방식일 뿐 PVC 소유권과 무관하다.
+→ **`08` 에 PVC 삭제 추가 불필요.** 단 **T7 표식(`dr_drill_marker`)은 유지한다** — 위 실측은 "지금 이
+버전이 이렇게 동작한다"이고, CNPG 가 동작을 바꾸거나 retention 정책이 붙으면 조용히 되살아난다.
+**실측이 실환경 백스톱을 대체하지 않는다.**
+
+**KafkaTopic 에 Ready 조건이 있나 → 있다.** Strimzi 0.45.2 의 CRD 직접 확인
+(`helm template --include-crds`): kafkatopics v1beta2 가 additionalPrinterColumns 에
+`Ready ← .status.conditions[?(@.type=="Ready")].status` 를 선언하고 status.properties 에 conditions 가
+있다. → **`09` 의 `wait kafkatopic --all` 유지**(그 wait 은 `kafka/cledyu-kafka` Ready 뒤라 Topic
+Operator 가 이미 떠 있다).
+
+#### (f) 기각된 가설 4건 (세워놓고 실측으로 떨어뜨림)
+
+| 출처 | 가설 | 실측 | 판정 |
+|---|---|---|---|
+| 자체 | dns-switch 의 UPSERT 가 failover 라우팅을 깬다 | api/app/auth 는 **단순 A alias**(SetIdentifier·헬스체크 없음) | 기각 |
+| 자체 | dns-switch 의 wafv2 가 리전 불일치(us-east-1) | provider alias 없음 = ap-northeast-2 = ALB 와 동일 scope | 기각 |
+| 자체 | `11:55` 의 `grep && { exit 1; }` 이 set -e 로 오작동 | AND-OR 리스트 면제 — 의도대로 동작 | 기각 |
+| **codex P1** | **buildspec 의 `python: 3.12` 가 AL2 standard:5.0 에서 런타임 선택 오류 → `[2]` 가 시작도 못 한다** | **이미 5회 SUCCEEDED**(INSTALL 2초 통과, `terraform version` 실행됨). 빌드가 쓴 buildspec·이미지·커밋 전부 확인 | **기각** |
+
+**codex 건이 중요한 이유 — 정적 리뷰는 없는 결함도 만든다.**
+codex 는 AWS `available-runtimes` 표를 읽고 "표에 python 3.12 가 AL2023 계열로만 열거되므로 AL2
+standard:5.0 에선 실패할 것"이라고 **문서에서 동작을 추론**했다. 그 표는 **이미지에 사전 설치된 런타임
+목록**이지 미열거 버전 지정 시 하드 실패한다는 규정이 아니다.
+
+반증 근거 (2026-07-16 조회, 프로젝트 `cledyu-lab-dr-failover-tf`):
+
+| 항목 | 값 |
+|---|---|
+| buildspec | `infra/terraform/aws/dr-failover-buildspec.yml` (**이 파일**) |
+| image | `aws/codebuild/amazonlinux2-x86_64-standard:5.0` (**지목된 그 이미지**) |
+| sourceVersion / resolved | `feat/dr-failover-orchestration` / `907cab3` — 그 시점 buildspec 의 `runtime-versions` 는 현재와 **동일**(`git log -S` 로 최초 커밋 4518824 이후 무변경 확인) |
+| INSTALL | **SUCCEEDED (2초)** ← "시작도 못 한다"던 단계 |
+| 전체 | 6회 중 **5회 SUCCEEDED** |
+
+**§11.4 의 대칭형이다.** 거기선 "정적 검토가 원리적으로 못 잡는 결함 4건"이 실측으로 나왔고, 여기선
+**정적 검토가 실재하지 않는 결함을 만들어냈다.** 방향이 반대일 뿐 결론은 같다 — **실행이 문서를
+이긴다.** 그래서 buildspec 주석에 이 실측 근거를 박아 같은 리뷰가 반복되지 않게 했다
+(근거를 "AWS 문서"로만 대면 문서를 다시 읽는 사람이 계속 같은 시비를 건다).
+
+#### (g) 미수정 잔여 — **T5 에서 함께 처리**
+
+| # | 내용 | 결말 |
+|---|---|---|
+| 1 | **실재해 트리거가 하네스를 부른다** — `STATE_MACHINE_ARN = dr_approval_test.arn`(State 가 `RequestApproval` 하나, `End=true`) | 승인 버튼을 눌러도 **아무 일도 안 일어나고 실패 알림도 없다**. T5 가 해소. 그전까진 `dr_orchestration_armed` 를 켜면 안 된다 |
+| 2 | buildspec 에 `-lock-timeout` 없음 | `cledyu-tf-lock`(DynamoDB) 이 잡혀 있으면 `[2]` 즉시 실패 → 재해 중 수동 `force-unlock` |
+| 3 | `12` 의 `curl https://auth.cledyu.com` 에 재시도 없음 | alias TTL 60s. `[11]` 의 rollout 이 시간을 벌어주지만 **설계가 아니라 운**(§11.14 의 "여유 0초 — 우연히 살았다"와 같은 형태) |
+| 4 | `notify` 에 재시도 없음 | Discord 429/장애면 **성공·실패 알림 둘 다 유실** |
+| 5 | `04` 의 `grep -cw Ready` 가 `Ready,SchedulingDisabled` 를 Ready 로 셈(실측) | cordon 된 노드를 통과. 현 흐름에 cordon 주체가 없어 저위험 |
+| 6 | `04` 의 `WANT=3` 하드코딩 vs terraform nodegroup desired | 한쪽만 바뀌면 조용히 어긋남 |
+
+**교훈 — "동작하는데 틀린 것"은 테스트가 못 잡는다.** (a)(d)(e) 셋 다 **스크립트가 정상 종료하고
+게이트가 통과하는데** 틀렸다. (a) 는 유출, (d) 는 게이트 무효, (e) 는 근거 없는 미확정이 관문을
+막고 있던 것이다. §11.11("`SUCCEEDED` 는 로그가 남았다가 아니다")의 또 다른 옷이다.
+
+---
+
+### 11.17 T1~T4 라이브 드릴 (2026-07-16) — **정적 감사가 못 잡은 결함 4건 + 문서 정정 2건**
+
+**§11.16 의 정적 감사를 마친 뒤, warm 클러스터에 실제로 T1~T4 를 굴렸다**(자식 SM 으로 bastion
+스크립트 실행, 노드 3 스케일업, Vault·CNPG 실복원). §11.4 의 교훈("정적 검토가 원리적으로 못 잡는
+결함")이 다시 확인됐다 — **아래 4건은 코드가 정상 종료하거나 게이트가 통과하는데 틀렸고, 실행해야만
+드러났다.** 셋(b·c·d)은 **§11.16 에서 이미 손댄 파일에서, 정적으론 안 보이던 다른 결함**이 나왔다.
+
+성공 요약: T1 `Apply complete`(python 3.12 pyenv 설치 로그로 codex P1 최종 반박, §11.16 (f)) ·
+T2 성공/실패(exit 3→FAILED)/env 주입/CloudWatch 12스트림 · T3 `[3]×2·[4.5]·[6]×2·[7]·[8]·[9]·[11]` ·
+T4 addon 3회 연속·dns-switch fail-closed·notify 양쪽. 그 과정에서:
+
+#### (a) 🔴 **F3 가 살아 있었다 — bastion 롤에 `ssm:PutParameter` 가 없었다** (드릴이 apply)
+
+`[9]` 의 마지막 줄(`aws ssm put-parameter /cledyu-dr/failover/alb-hostname`)이 쓰는 정책
+`aws_iam_role_policy.eks_dr_bastion_ssm_param` 이 **AWS 에 없었다.** 코드엔 `9aec3d8`(T3)에서 들어왔는데
+그 뒤 CodeBuild apply 가 한 번도 안 돌아 **드리프트**로 남아 있었다(직전 빌드가 체크아웃한 커밋은
+`907cab3` = 정책 이전). **진짜 재해였으면 ~40분 복구를 다 하고 `[9]` 마지막 줄에서 AccessDenied 로 죽고,
+`[10]` 이 fail-closed 라 DNS 미전환 → 전부 복구됐는데 서비스가 안 돌아왔다**(계획서가 F3 로 예견한 그것).
+T1 드릴의 `Apply complete! 1 added` 가 이 정책을 만들었고, `[9]` 가 `{"Version": 1}` 로 실증했다.
+
+> **구조적 원인 — terraform 은 자동 apply 가 없다.** k8s 는 ArgoCD `selfHeal`(19개 앱)이 코드=실물을
+> 강제하지만, terraform 은 사람이 쳐야 반영되고 **드리프트를 아무도 알려주지 않는다.** 같은 병으로
+> dns-switch Lambda 도 미배포 상태였다(§계획서 T4 순서 구멍). → T5 완료 기준에 "SM 이 부르는 Lambda·
+> 정책이 실제로 배포돼 있다"를 넣는다(계획서 반영).
+
+#### (b) 🔴 **`[7]` 은 한 번도 성공한 적이 없었다 — Ready wait 이 닭-달걀** (수정: API 폴링)
+
+`07` 첫 줄이 `kubectl -n vault wait --for=condition=Ready pod/vault-0 --timeout=300s` 였다.
+**구조적으로 성공 불가**다: Vault 차트의 readinessProbe 가 `vault status` 인데 **초기화 전 Vault 는
+status 가 exit 2**(sealed) → probe 실패 → 파드 영원히 `0/1` → wait 300s 타임아웃 → **`vault operator init`
+에 도달조차 못 함.** init 만이 Ready 를 만드는데 init 이 그 wait 뒤에 있다.
+실측: vault-0/1/2 전부 `0/1 Running`·`{"initialized":false,"sealed":true}` → `timed out ... pods/vault-0`.
+
+**§11.16 (c) 에서 07 을 이미 고쳤는데도 정적으론 이게 안 보였다** — 그 수정은 init 앞의 게이트·순서였고,
+이 줄은 그 위에 멀쩡히 있었다. **왜 지금까지 안 드러났나:** 07 은 오늘 **처음 스크립트로** 돌았다.
+7/13·14 드릴은 런북(사람) 경로이고 **사람은 파드가 0/1 이어도 그냥 init 을 친다** — 스크립트만 Ready 를
+기다린다(§11.12 와 같은 뿌리: "명령은 맞는데 실행 주체가 다르다"). 감사 로그의 init 24건이 전부
+사람이 친 것이었던 이유다.
+→ **Ready 가 아니라 "API 가 응답하는가"를 폴링**한다(sealed 여도 status 는 JSON 을 준다). 그 $ST 를
+아래 initialized 게이트가 그대로 쓴다. 수정 후 `[7]` 이 처음으로 완주(66초, 복원 확인·quorum·ESO 재기동).
+**그리고 이 실행의 감사 로그를 다시 세니 stdin 수정(§11.16 (a))이 실환경에서 확증됐다: 유출 0건**
+(안전 형태 18 · 유출 0 · 무관 16. 7/13~14 는 24/12/4 였다).
+
+#### (c) 🔴 **`[8]` 이 Keycloak 발밑에서 DB 를 갈아치운다** (수정: [8] 끝에 Keycloak 재기동)
+
+`[8]` 이 keycloak-pg 를 delete→재생성(복원)하면 **새 파드·새 IP** 다. Keycloak 의 JDBC 풀은 구 파드를
+붙든 채 **스스로 복구하지 않아** 헬스가 DOWN 으로 굳는다:
+`{"Keycloak cluster health check":"DOWN","Failing since":"20:44:34"}` — 그 시각이 `[8]` 이 끝난 시각.
+→ readiness 503 → CR `Ready=False :: Waiting for more replicas` → **`[9]` 의 keycloak wait 이 600s 타임아웃.**
+`11-restart-apps.sh` 가 api·web 에 하는 것과 **같은 병**(startup 1회 초기화 → 복구 없음)인데,
+**[11] 에 못 넣는다** — `[9]` 가 Keycloak Ready 를 게이트하므로 `[11]` 도달 전에 막힌다(그 게이트는
+옳다: 조기 DNS 전환 시 ALB keycloak 타겟 unhealthy). → **원인을 만든 `[8]` 끝에서 재기동한다.**
+실측: `delete pod`(rollout restart 아님 — 오퍼레이터 소유 STS 와 플립플롭 회피) → 49초 만에 Ready=True.
+
+#### (d) 🔴 **`[11]` 의 db 게이트가 종료 중인 구 파드를 읽어 오탐** (수정: 최신 파드를 이름으로)
+
+`[11]` 이 `kubectl logs deploy/api --tail=200` 로 "db 연결" 로그를 확인하는데 **오탐으로 죽었다.**
+두 가지가 겹쳤다: (1) `logs deploy/api` 는 셀렉터로 파드 하나를 고르는데 `rollout status` 성공 시점에도
+**구 파드가 graceful shutdown 중**이라 그걸 집었다(로그 마지막 줄이 `"shutting down..."`) (2) 그 구 파드는
+몇 시간째 돌아 **시작 로그가 `--tail=200` 밖**이었다(api 가 `/ready`·`/health` 를 수초마다 로깅).
+**새 파드는 정상**(`db 연결 — 유저/진행 상태 영속화 활성`, 총 67줄)인데 게이트만 실패.
+→ **rollout 이 만든 최신 파드를 이름으로 집고 tail 을 안 자른다.** 수정 후 게이트 2종 통과.
+
+#### (e) 📌 문서 정정 2건 (드릴 실측이 기존 서술을 뒤집음)
+
+**§11.14 — "Nodegroup.Status 는 전·중·후 전부 ACTIVE" 는 틀렸다.** 실제로 `UPDATING` 을 거친다
+(스케일업 +2/+11/+20s 관측). 진짜 메커니즘은 **축소**에서 선명했다: 명령 **38초 만에 ACTIVE 복귀했는데
+EC2 는 3대 그대로**였다. 즉 `Status=ACTIVE` 는 "스케일 완료"를 전혀 뜻하지 않는다 — 게이트가 무효라는
+**결론은 맞고, 근거로 든 메커니즘이 틀렸다.** (§11.14 의 04-wait-nodes-ready.sh 는 노드 대수를 직접
+세므로 이 정정에 영향받지 않는다.)
+
+**§11.15 — 노드 축소 꼬리의 원인은 coredns 단독이 아니라 2겹이다.** 두 번 측정으로 확정:
+| 측정 | 조건 | 노드 0 까지 | 막은 것 |
+|---|---|---|---|
+| 1차 | 워크로드 **남긴 채** 축소 | **15분 25초**(드레인 타임아웃 만료) | 앱 PDB(Kafka `minAvailable=2`) |
+| 2차 | 워크로드 **먼저 삭제** 후 축소 | 2대는 118초, **마지막 1대는 여전히 막힘** | kube-system PDB(coredns·ebs-csi `maxUnavailable=1`) |
+→ **"즉시 0" 은 불가능**하다(정상 드레인으로는). 워크로드 정리(8.1)로 앱 PDB 는 없앨 수 있으나
+**kube-system 꼬리는 남는다**(노드 1대에 마지막 coredns·ebs-csi replica). `dr-failback.md` §8 을
+"in-cluster 정리(8.1) → CLI 축소(8.0) → terraform(8.2)" 로 정정.
+**§8.0 에 가드 둘 뒤 강제 종료(terminate-instances)를 넣어 15분 꼬리를 제거했다**(2026-07-16 결정 변경):
+초기엔 "안 넣기로" 했으나(RTO 이득 0 인데 PDB 를 뚫는 게 부담) — **위험은 오직 "워크로드가 살아있는데
+coredns 를 죽이는 것" 하나**이고 그건 **가드 A(앱 파드 0 확인) + 가드 B(desired=0 확인)**로 정확히 막힌다.
+가드가 통과했다는 건 8.1 이 끝나 의존하는 앱이 없다는 뜻이라, 그 시점 coredns 강제 종료는 무해하다.
+**가드 없는 무조건 강제는 금지**(순서 어김·8.1 스킵 시 실사용 필수서비스 절단) — 그게 초기 반대의 실체였고,
+가드가 그 시나리오를 제거하므로 "가드부 강제"는 안전하다.
+
+#### (f) 뒷정리에서 밟은 순서 함정 (에이전트 실수 — 기록)
+
+드릴 후 뒷정리에서 **노드를 먼저 0 으로 내렸다** — 런북 §destroy 가 "반드시 in-cluster 부터"라고 못 박은
+순서를 어겼다. 결과: ALB 컨트롤러·EBS CSI 가 함께 죽어 **DR ALB 1·gp3 EBS 11 이 고아**로 남았다(PV 는
+etcd 에 살아있어 EBS 만 CLI 로 지우면 **PV 가 붕 뜬다** — 다음 failover 의 kafka PVC 마운트가 깨진다).
+→ **노드를 도로 3 으로 올려** 런북 순서(selfHeal 정지→워크로드→Ingress→PVC→ENI)대로 재정리하니
+ALB·EBS·ENI 전부 0 으로 깨끗이 소멸. **교훈: 잘못된 순서를 CLI 로 억지 만회하려다 더 깊은 구멍(붕 뜬 PV)을
+팔 뻔했다.** 이 순서 강제를 계획서 T7 "hot 파괴"(현재 한 줄)에도 반영해야 한다 — 계획서만 보면 밟는다.

@@ -152,6 +152,86 @@ kubectl --context onprem -n api logs deploy/api | grep -E "db 연결|in-memory" 
 ```
 
 ### 8. EKS 축소
+
+> **⚠️ terraform 만으로는 노드가 안 내려간다 — CLI 로 먼저 축소한다**(2026-07-15 도출·2026-07-16 실측,
+> 설계 스펙 `2026-07-15-dr-discord-approval-orchestration-design.md` §11.15).
+> 아래 apply 의 `-var eks_dr_node_desired=0` 은 **모듈이 무시한다**(`.terraform/modules/eks_dr/modules/
+> eks-managed-node-group/main.tf:476-481` → `ignore_changes = [scaling_config[0].desired_size]`).
+> `eks_dr_active=false` 도 NAT·엔드포인트·bastion 만 게이트하고(eks-dr.tf:4) **노드그룹은 warm 소속이라
+> 안 건드린다.** → terraform 은 "변경 없음"으로 **성공 보고**하는데 **m6i.xlarge 3대가 영영 계속 돈다
+> (≈ $517/월).** 페일오버 `[4]` 가 노드를 **CLI 로** 올리는 바로 그 이유(ignore_changes)가 내릴 때도
+> 똑같이 적용된다 — **올릴 때 CLI 면 내릴 때도 CLI 여야 대칭이 맞는다.** 그래서 아래 step 8.0 을 둔다.
+>
+> ⚠️ **이건 RTO 와 무관하다.** 노드 축소는 failback(재해 종료 후 복귀)이고, 그 시점엔 서비스가 이미
+> DNS 로 온프렘에 넘어가 있다(§7). 축소 중 다운타임은 0 이며, 아래 ~15분은 아무도 기다리지 않는다.
+> **속도가 아니라 "명령이 씹혀 영영 안 내려가는 것"을 고치는 것**이 이 step 의 목적이다.
+
+**8.1) in-cluster 정리 (노드 살아있을 때 — 순서 절대 준수)**
+
+> ⚠️ **노드보다 먼저 이걸 한다.** 노드를 먼저 0 으로 내리면 ALB 컨트롤러·EBS CSI 컨트롤러가 함께
+> 죽어 **스스로 정리할 주체가 없어진다** → DR ALB·gp3 EBS 가 고아로 남는다(2026-07-16 실측: 노드부터
+> 내렸다가 ALB 1·EBS 11 고아 발생, 노드를 도로 올려 정상 정리). **in-cluster 정리 → 8.0 축소 →
+> 8.2 terraform** 순이다.
+
+`dr-eks-bootstrap.md §destroy` 의 **0)~4.5) 스텝을 그대로 수행**한다(terraform destroy 는 아님 —
+in-cluster 정리만). 요지·실측 함정만 옮기면:
+- **0) ArgoCD selfHeal 정지** — `kubectl -n argocd scale statefulset argocd-application-controller --replicas=0`.
+  안 끄면 지운 Ingress/PVC 를 즉시 되살려 ALB/EBS 삭제가 안 끝난다. (`patch --all` 은 미지원, 앱별
+  loop 는 root-app 이 되살림 → **컨트롤러 scale 0** 만이 확실 — §destroy 실측.)
+- **1) PVC 를 문 워크로드 종료** — vault StatefulSet · CNPG Cluster · **Kafka 는 `kafkas` + `kafkanodepool`
+  둘 다**(NodePool 을 안 지우면 StrimziPodSet 브로커가 남아 PVC 가 Terminating 고착). 파드 빠질 때까지 대기.
+- **2) `delete ingress -A --all`** → 컨트롤러가 ALB/TG/SG 정리. DR VPC 의 ALB 가 0 될 때까지 대기.
+- **3) `delete pvc -A --all`** → 마운트 없어 즉시 → EBS CSI 가 gp3 볼륨 삭제. `get pv` 빌 때까지 대기.
+- **4.5) 고아 ENI(`aws-K8S-*`, available) 삭제** — 8.0 으로 노드 빠진 **뒤** 생긴다. 안 지우면
+  서브넷/VPC 삭제를 `DependencyViolation` 으로 막는다.
+
+**8.0) 노드 N→0 (CLI — in-cluster 정리 후, terraform 앞)**
+```bash
+NG=$(aws eks list-nodegroups --cluster-name cledyu-dr --region ap-northeast-2 --query 'nodegroups[0]' --output text)
+aws eks update-nodegroup-config --cluster-name cledyu-dr --region ap-northeast-2 \
+  --nodegroup-name "$NG" --scaling-config minSize=0,maxSize=6,desiredSize=0
+
+# ── 15분 꼬리 제거: 가드 둘 뒤에만 마지막 노드를 강제 종료 ──────────────────────────────
+# ⚠️ 마지막 1대는 kube-system PDB(coredns·ebs-csi `maxUnavailable=1`)가 막아 드레인 타임아웃
+#    (~15분, 2026-07-16 실측 15분25초)까지 안 빠진다. failback 은 서비스가 이미 온프렘(§7)이라
+#    **그 coredns 를 의존하는 것이 없으므로** 강제 종료해도 안전하다. 단 **가드 없이 강제하면 위험**하다
+#    (워크로드가 살아있는 상황에서 돌면 실사용 중인 coredns 를 죽인다) → 아래 2가드 뒤에만 강제한다.
+export HOME=/root; aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2
+
+# 가드 A: 8.1 이 실제로 끝났나 — **앱 네임스페이스에 파드가 하나도 없어야** 한다.
+#   kube-system·amazon-guardduty(daemonset)만 남는 게 정상. 하나라도 앱 파드가 있으면 8.1 미완이므로
+#   강제하지 않고 멈춘다(순서 어김·8.1 스킵 방어). NS 목록은 앱 소속만 — 필수 시스템 ns 는 제외.
+APPNS="vault postgres keycloak kafka api web validation-engine"
+LEFT=$(kubectl get pod --all-namespaces --field-selector=status.phase=Running -o json 2>/dev/null \
+  | jq --argjson ns "$(printf '%s\n' $APPNS | jq -R . | jq -s .)" \
+      '[.items[] | select(.metadata.namespace as $n | $ns | index($n))] | length')
+if [ "${LEFT:-1}" -ne 0 ]; then
+  echo "❌ 앱 파드가 아직 ${LEFT}개 남았다 — 8.1 in-cluster 정리가 안 끝났다. 강제 종료 중단."
+  echo "   8.1 을 완료한 뒤 재실행하라(순서: 8.1 → 8.0)."
+  exit 1
+fi
+
+# 가드 B: 노드가 딱 kube-system PDB 꼬리만 남았나 — desired 는 이미 0 이어야 한다(위 CLI).
+DESIRED=$(aws eks describe-nodegroup --cluster-name cledyu-dr --region ap-northeast-2 \
+  --nodegroup-name "$NG" --query 'nodegroup.scalingConfig.desiredSize' --output text)
+[ "$DESIRED" = "0" ] || { echo "❌ desired=$DESIRED (0 아님) — 위 update-nodegroup-config 확인"; exit 1; }
+
+# 두 가드 통과 → 남은 노드의 EC2 를 강제 종료. desired 가 0 이라 ASG 가 대체하지 않는다.
+for id in $(aws ec2 describe-instances --region ap-northeast-2 \
+    --filters "Name=tag:eks:nodegroup-name,Values=$NG" "Name=instance-state-name,Values=running" \
+    --query 'Reservations[].Instances[].InstanceId' --output text); do
+  echo "가드 통과 — 마지막 노드 강제 종료: $id"
+  aws ec2 terminate-instances --region ap-northeast-2 --instance-ids "$id" >/dev/null
+done
+```
+> **왜 강제해도 되나(그리고 언제 안 되나):** failback 축소는 **RTO 밖**이다 — 서비스는 이미 DNS 로
+> 온프렘에 넘어가 있어(§7) 이 15분 동안 다운타임이 0 이고, DR 클러스터의 coredns 를 의존하는 것도 없다.
+> **위험은 오직 "워크로드가 살아있는데 coredns 를 죽이는 것"** 하나인데, 가드 A 가 앱 파드 0 을 확인하고서야
+> 강제하므로 그 시나리오를 막는다. 순서가 어긋나거나(8.1 스킵) 워크로드가 남아있으면 강제하지 않고 멈춘다.
+> **⚠️ 이 두 가드를 빼고 무조건 강제하지 말 것** — 그건 실사용 중인 필수 서비스를 끊을 수 있다.
+> 순번 8.0 이 8.1 뒤인 것은 오타가 아니다 — **정리(8.1)가 강제 종료의 전제**다.
+
+**8.2) hot 회수 (terraform)**
 ```bash
 cd infra/terraform/aws && terraform apply \
   -var enable_eks_dr=true -var eks_dr_active=false -var eks_dr_node_desired=0 \
