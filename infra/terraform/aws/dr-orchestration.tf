@@ -1226,9 +1226,14 @@ resource "aws_sfn_state_machine" "dr_failover" {
 
   definition = jsonencode({
     Comment = "DR 페일오버 [1]~[13] — 설계 §5"
-    # 승인 대기 24h(86400) + 복구 ~1h. AddonsDone? 폴링 루프가 영영 안 끝나는 경우의 backstop 이다
+    # 승인 대기 24h(86400) + 복구 예산. AddonsDone? 폴링 루프가 영영 안 끝나는 경우의 backstop 이다
     # (자식 SM 의 4200 과 별개로 부모에도 상한이 필요하다).
-    TimeoutSeconds = 90000
+    # 🔴 초안 90000 은 "복구 ~1h(3600)" 로 잡았으나 실측 바운드 예산은 ~16500 이다: CodeBuild 1800(build_timeout=30m)
+    #    + bastion .sync 8단계 14700(600+1200+1200+1800+3600+4800+900+600). 승인이 86400 을 다 쓰면 3600 만 남아
+    #    정상 진행 중인 복구를 top-level States.Timeout 이 끊는데, 그건 **어떤 state Catch 도 못 잡아** 실패 알림
+    #    없이 무음 FAILED 로 죽는다(NotifyFailed 는 per-state Catch 로만 도달). WaitAppsReady 와 같은 "표를 믿고
+    #    실물을 안 셈" 패턴이었다(codex P2, 2026-07-16). → 86400 + 16500 + 애드온 루프·여유 = 108000.
+    TimeoutSeconds = 108000
     StartAt        = "RequestApproval"
 
     States = merge({
