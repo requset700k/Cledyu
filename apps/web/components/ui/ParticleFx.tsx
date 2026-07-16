@@ -59,7 +59,7 @@ function registerParticleFx() {
               stars.push({
                 x: Math.random(),
                 y: Math.random(),
-                al: rand(0.05, 0.5),
+                al: rand(0.1, 0.65),
                 sz: Math.random() < 0.06 ? rand(1.2, 2) : rand(0.4, 1.1),
                 tw: rand(0.4, 2.2),
                 ph: rand(0, 6),
@@ -71,7 +71,7 @@ function registerParticleFx() {
                 x: Math.random(),
                 y: Math.random(),
                 r: rand(0.18, 0.34),
-                al: rand(0.025, 0.05),
+                al: rand(0.012, 0.025),
                 sp: rand(0.01, 0.03),
                 ph: rand(0, 6),
               });

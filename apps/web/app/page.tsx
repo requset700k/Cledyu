@@ -9,7 +9,7 @@ export default function LandingPage() {
       <Navbar />
 
       {/* 전역 배경: 은은한 성운 + 별 */}
-      <ParticleFx kind="stars" className="pointer-events-none fixed inset-0 -z-10 opacity-[0.85]" />
+      <ParticleFx kind="stars" className="pointer-events-none fixed inset-0 -z-10 opacity-95" />
 
       {/* HUD 프레임 */}
       <div className="pointer-events-none fixed inset-2.5 z-[60] rounded border border-white/[0.16]">
