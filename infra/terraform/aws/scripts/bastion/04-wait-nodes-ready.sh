@@ -46,11 +46,14 @@ aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2
 #
 # 기본값 3 은 env 주입이 빠졌을 때의 안전망이다(빈 값이면 산술이 깨져 조용히 이상해지느니 3 으로 간다).
 WANT="${WANT_NODES:-3}"
-# 최대 10분 — 노드 등장(부팅 + kubelet 등록)까지. 통상 35~120s.
-for i in $(seq 1 60); do
+# ⚠️ **5분이다 — 10분이 아니다**(2026-07-16 하향, codex P2 파생).
+# 이 루프(등장)와 아래 `kubectl wait`(Ready)은 **직렬**이라 합이 SSM executionTimeout 과 대조돼야 하는데,
+# 초안 주석은 "직렬 아님, 여유"라고 **스스로 합리화**하고 600+600=1200 을 900 선언 아래 뒀다.
+# 5분도 넉넉하다 — 노드 등장은 실측 35~120s 다(스펙 §11.14).
+for i in $(seq 1 30); do
   N=$(kubectl get nodes --no-headers 2> /dev/null | wc -l)
   [ "$N" -ge "$WANT" ] && break
-  echo "노드 등장 대기 ${N}/${WANT} ($i/60)"
+  echo "노드 등장 대기 ${N}/${WANT} ($i/30)"
   sleep 10
 done
 [ "$N" -ge "$WANT" ] || {

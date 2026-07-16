@@ -720,8 +720,15 @@ resource "aws_sfn_state_machine" "dr_run_on_bastion" {
     # ⚠️ 실행 전체 상한. WaitCmd→GetResult→Done?→WaitCmd 는 무한 루프이고 Done? 의 Default 가 Failed 지만
     # Status 가 InProgress 로 계속 오면 영원히 돈다. SSM 의 executionTimeout 이 먼저 걸려 TimedOut 을 주는
     # 게 정상 경로이나, 그마저 안 오는 경우(에이전트 죽음 등)의 backstop 이다.
-    # 가장 긴 스크립트(08=3600) + 폴링 여유. 초과 시 States.Timeout → 부모의 Catch 가 잡는다.
-    TimeoutSeconds = 4200
+    #
+    # ⚠️ **가장 긴 스크립트의 timeoutSeconds 보다 커야 한다** — 안 그러면 이 백스톱이 먼저 걸려
+    # SSM 의 TimedOut 대신 States.Timeout 이 나고, "어느 스크립트가 왜" 가 사라진다.
+    # 가장 긴 것은 **09(4800)** 다(08=3600 이 아니다 — 2026-07-16 codex P2 로 09 를 3000→4800 재산정).
+    # 4800 + 폴링 여유 600 = 5400. 초과 시 States.Timeout → 부모의 Catch 가 잡는다.
+    #
+    # 🔴 **스크립트의 timeoutSeconds 를 올릴 땐 이 값도 같이 본다.** 한쪽만 바꾸면 조용히 어긋난다
+    #    — 아래 Step 3 의 대수 검증(계획서)이 그 정합성을 강제한다.
+    TimeoutSeconds = 5400
     StartAt        = "WaitForSsmAgent"
     States = {
       # ⚠️ module.eks_dr_endpoints 는 s3/kms/sts 만 만든다 — ssm/ssmmessages/ec2messages 인터페이스
@@ -1371,8 +1378,12 @@ resource "aws_sfn_state_machine" "dr_failover" {
             script         = file("${path.module}/scripts/bastion/04-wait-nodes-ready.sh")
             # 잔여 #6 — 04 가 기다릴 대수를 **[4] 가 명령한 그 숫자**로 준다(위 local 단일 출처).
             # 하드코딩 대조가 아니라서 한쪽만 바뀌어 조용히 어긋나는 일이 없다.
-            env            = "export WANT_NODES=${local.dr_hot_node_desired}"
-            timeoutSeconds = 900 # 내부: 노드 등장 600 + Ready wait 600(직렬 아님, 여유)
+            env = "export WANT_NODES=${local.dr_hot_node_desired}"
+            # 내부 합 900 = 노드 등장 루프 300 + Ready wait 600 → +300
+            # 🔴 초안은 900 이었고 주석이 "노드 등장 600 + Ready wait 600(**직렬 아님**, 여유)" 였다.
+            #    **직렬이 맞다**(루프로 등장을 기다린 뒤 wait 한다) → 실제 합 1200 > 선언 900 이었다.
+            #    스스로 "직렬 아님" 이라 합리화해놓고 넘어간 것이다. 등장 루프를 300 으로 줄여 해소.
+            timeoutSeconds = 1200
             label          = "WaitNodesReady"
           }
         }
@@ -1501,7 +1512,16 @@ resource "aws_sfn_state_machine" "dr_failover" {
             "instanceId.$" = "$.bastion.instanceId"
             script         = file("${path.module}/scripts/bastion/09-wait-apps-ready.sh")
             env            = ":"
-            timeoutSeconds = 3000 # 내부 합 2400 = kafka 900 + topic 300 + VE 600 + KC 600 → +600
+            # 내부 합 4200 = 존재게이트 4×300 + kafka Ready 900 + topic 존재 300 + topic Ready 300
+            #              + VE rollout 600 + KC Ready 600 + ALB 300  → +600
+            #
+            # 🔴 **초안은 3000 이고 주석이 "내부 합 2400" 이었는데 둘 다 틀렸다**(codex P2, 2026-07-16).
+            #    실제 합은 **5700** 이었다 — `kubectl wait --timeout` 4개만 세고 **존재 게이트 5개
+            #    (3000초)를 통째로 빠뜨렸다.** 원인: 계획서 표의 2400 을 베꼈는데 그 표는 존재 게이트가
+            #    추가된 `79e9605`(§11.16 (b)) **이전**에 쓰인 것이다. 표를 믿고 실물을 안 셌다 —
+            #    notify allowlist(§11.18 (c))와 **같은 실패 패턴**이다.
+            #    → 존재 게이트를 600→300 으로 낮춰 합을 4200 으로 줄이고(09 주석 참조) 선언을 4800 으로 올렸다.
+            timeoutSeconds = 4800
             label          = "WaitAppsReady"
           }
         }

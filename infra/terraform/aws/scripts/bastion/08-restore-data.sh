@@ -43,10 +43,15 @@ kubectl -n keycloak get pvc -l cnpg.io/cluster=keycloak-pg 2>&1 | head -3 || tru
 #
 # **방금 지운 CR 을 바로 기다리면 안 된다** — ArgoCD 가 재생성하기 전이라 객체가 없어 `wait` 가
 # "no matching resources found" 로 **즉시 에러**난다. ArgoCD sync 를 기다린 뒤 대기한다.
-for i in $(seq 1 60); do
+# ⚠️ **5분이다 — 10분이 아니다**(2026-07-16 하향, codex P2 파생). 이 스크립트의 내부 합이
+# SSM executionTimeout(3600)과 **정확히 같아** 여유가 0이었다 — 최악의 경우 정상 복원을 SSM 이
+# 경계에서 죽인다. 계획서가 08 에 대해 고쳤다던 바로 그 결함이 덜 고쳐진 채였다.
+# 5분도 넉넉하다: selfHeal 재생성은 실측 10초 수준이고(§11.18 (k) 의 webhook 복구 관측), 여기서
+# 기다리는 건 "ArgoCD 가 CR 을 다시 만드는 것"이지 "복원 완료"가 아니다(그건 아래 1200s wait 이 한다).
+for i in $(seq 1 30); do
   if kubectl -n postgres get cluster cledyu-pg > /dev/null 2>&1 &&
     kubectl -n keycloak get cluster keycloak-pg > /dev/null 2>&1; then break; fi
-  echo "ArgoCD 가 CNPG CR 을 재생성하기를 대기 $i/60"
+  echo "ArgoCD 가 CNPG CR 을 재생성하기를 대기 $i/30"
   sleep 10
 done
 kubectl -n postgres get cluster cledyu-pg > /dev/null || {

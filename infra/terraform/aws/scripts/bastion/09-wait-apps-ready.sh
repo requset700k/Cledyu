@@ -34,17 +34,22 @@ aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2
 #
 # ⚠️ CRD 자체가 아직 없는 경우(오퍼레이터 sync 가 늦음)도 이 루프가 함께 흡수한다 —
 #    `get` 이 "server doesn't have a resource type" 으로 실패하는 것도 재시도 대상이다.
+# ⚠️ **5분이다 — 10분이 아니다**(2026-07-16 하향, codex P2).
+# 이 함수는 4번 불리므로 10분이면 그것만 40분이고, 스크립트 내부 합이 SSM executionTimeout 을 넘겨
+# **정상 진행 중인 [9] 를 SSM 이 죽인다**(아래 "타임아웃 정합성" 주석).
+# 5분도 넉넉하다: [6] 이 root-app 을 apply 한 뒤 [7](~66s)·[8](~240s)이 지나 **ArgoCD 는 이미 5분+
+# 동안 sync 했고**, 드릴 실측에서 [9] 전체가 **30초**였다(RestoreData 06:24:10 → WaitAppsReady 06:24:40).
 wait_exists() { # $1=설명, $2.. = kubectl 인자
   local desc=$1
   shift
   local i
-  # 10분 — 08 의 ArgoCD 재생성 대기와 동일. (주석을 for 줄 안에 두면 shfmt 가 줄을 쪼갠다)
-  for i in $(seq 1 60); do
+  # 5분 (주석을 for 줄 안에 두면 shfmt 가 줄을 쪼갠다)
+  for i in $(seq 1 30); do
     kubectl "$@" > /dev/null 2>&1 && return 0
-    echo "ArgoCD sync 대기: $desc ($i/60)"
+    echo "ArgoCD sync 대기: $desc ($i/30)"
     sleep 10
   done
-  echo "❌ $desc 가 10분 안에 안 나타남 — ArgoCD sync 상태 확인"
+  echo "❌ $desc 가 5분 안에 안 나타남 — ArgoCD sync 상태 확인"
   return 1 # set -e 가 여기서 스크립트를 끝낸다
 }
 
@@ -66,10 +71,12 @@ kubectl -n kafka wait --for=condition=Ready kafka/cledyu-kafka --timeout=900s
 #   `cmd | wc -l || true` 는 실패해도 wc 가 빈 입력에 "0" 을 내므로 NT=0 → 루프가 정상 재시도한다.
 #   (실제 흐름에선 위 `wait kafka/cledyu-kafka` 가 Strimzi CRD 존재를 이미 보장하지만 — Kafka·KafkaTopic
 #    CRD 는 한 오퍼레이터가 함께 깐다 — 그 방어에 기대지 않고 이 줄 자체를 자기완결로 둔다.)
-for i in $(seq 1 60); do
+# 5분 — wait_exists 와 같은 근거로 하향(2026-07-16, codex P2). 위 kafka Ready 가 이미 통과한 뒤라
+# Strimzi 오퍼레이터가 떠 있고 CRD 도 있다 → 토픽 CR 이 5분 안에 안 보이면 sync 가 고장난 것이다.
+for i in $(seq 1 30); do
   NT=$(kubectl -n kafka get kafkatopic --no-headers 2> /dev/null | wc -l || true)
   [ "${NT:-0}" -gt 0 ] && break
-  echo "ArgoCD sync 대기: kafkatopic ($i/60)"
+  echo "ArgoCD sync 대기: kafkatopic ($i/30)"
   sleep 10
 done
 [ "${NT:-0}" -gt 0 ] || {
