@@ -228,7 +228,7 @@ function registerParticleFx() {
             ctx.restore();
           }
         } else if (kind === 'desk') {
-          const S = Math.min(w, h) * 1.15;
+          const S = w >= 768 ? Math.min(w * 0.82, h * 1.8) : Math.min(w, h) * 1.15;
           const cx = w / 2,
             base = h * 0.78;
           if (!seeded) {
