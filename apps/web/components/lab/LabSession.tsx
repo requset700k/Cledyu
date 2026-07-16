@@ -248,7 +248,7 @@ export function LabSession({
         </div>
 
         {/* 우측 — 작업 영역(터미널/IDE). xl 미만에서는 문제 아래로 쌓인다. */}
-        <div className="xl:sticky xl:top-6">
+        <div className="xl:sticky xl:top-24">
           {terminalUrl ? (
             session?.ide_url ? (
               <LabWorkspace

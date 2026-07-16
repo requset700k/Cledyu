@@ -17,6 +17,12 @@ const config: Config = {
           900: '#0c4a6e',
         },
       },
+      fontFamily: {
+        sans: ['var(--font-body)', '"Apple SD Gothic Neo"', '"Malgun Gothic"', 'sans-serif'],
+        michroma: ['var(--font-michroma)'],
+        chakra: ['var(--font-chakra)', 'var(--font-body)', 'sans-serif'],
+        jbmono: ['var(--font-jbmono)', 'monospace'],
+      },
     },
   },
   plugins: [],

@@ -113,7 +113,7 @@ function PaymentModal({
   ] as const;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 p-4">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/75 p-4">
       <div className="w-full max-w-lg rounded-xl border border-slate-700 bg-slate-950 shadow-2xl">
         <div className="border-slate-800 border-b p-5">
           <div className="flex items-start justify-between gap-4">

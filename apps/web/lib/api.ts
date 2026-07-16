@@ -31,6 +31,11 @@ interface ApiErrorPayload {
   [key: string]: unknown;
 }
 
+interface RequestBehavior {
+  allowAnonymous?: boolean;
+  retried?: boolean;
+}
+
 // HTTP 상태만으로는 복구 가능한 충돌(session_exists 등)을 구분할 수 없다.
 // 백엔드의 구조화된 에러 필드를 보존해 화면이 이어가기/교체 같은 후속 흐름을 결정하게 한다.
 export class ApiRequestError extends Error {
@@ -63,7 +68,11 @@ async function readErrorPayload(res: Response): Promise<ApiErrorPayload> {
 }
 
 /** 모든 API 요청의 공통 래퍼. 에러 응답은 백엔드의 { error: string } 포맷으로 throw. */
-async function request<T>(path: string, options?: RequestInit, retried = false): Promise<T> {
+async function request<T>(
+  path: string,
+  options?: RequestInit,
+  behavior: RequestBehavior = {},
+): Promise<T> {
   const headers: Record<string, string> = {
     ...DEV_HEADERS,
     ...(options?.headers as Record<string, string>),
@@ -88,8 +97,11 @@ async function request<T>(path: string, options?: RequestInit, retried = false):
   // access_token 만료 → silent refresh 후 원 요청 1회 재시도.
   // refresh 실패(SSO 세션 종료/refresh_token 만료)면 로그인 페이지로 강제 이동.
   if (res.status === 401) {
-    if (!retried && (await refreshSession())) {
-      return request<T>(path, options, true);
+    if (!behavior.retried && (await refreshSession())) {
+      return request<T>(path, options, { ...behavior, retried: true });
+    }
+    if (behavior.allowAnonymous) {
+      return null as T;
     }
     if (typeof window !== 'undefined') {
       window.location.href = `/login?from=${encodeURIComponent(pathWithSearch(window.location))}`;
@@ -187,6 +199,7 @@ export const api = {
 
   auth: {
     me: () => request<User>('/api/v1/me'),
+    optionalMe: () => request<User | null>('/api/v1/me', undefined, { allowAnonymous: true }),
     // 로그아웃은 전체 페이지 이동으로 처리한다 — 백엔드가 세션 쿠키를 지우고
     // Keycloak end-session(SSO 로그아웃)을 거쳐 프론트로 되돌려보낸다. fetch로는
     // 크로스 오리진 리다이렉트(Keycloak)를 의미있게 따라갈 수 없다.

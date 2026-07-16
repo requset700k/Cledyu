@@ -7,34 +7,40 @@ import { useState } from 'react';
 import { api } from '@/lib/api';
 import type { UserRole } from '@/lib/types';
 
-const DASHBOARD_LINK = { href: '/dashboard', label: '내 학습' };
-
 const NAV_LINKS = [
+  { href: '/', label: 'Home' },
   { href: '/labs', label: 'Labs' },
   { href: '/billing', label: '요금제' },
 ];
 
+const DASHBOARD_LINK = { href: '/dashboard', label: '내 학습' };
 const INSTRUCTOR_LINK = { href: '/instructor', label: '강사 모드' };
 
-function navLinkClass(pathname: string, href: string) {
-  return `px-3 py-1.5 rounded-md text-sm transition-colors ${
-    pathname.startsWith(href)
-      ? 'text-white bg-slate-800'
-      : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+function isActive(pathname: string, href: string) {
+  return href === '/' ? pathname === '/' : pathname.startsWith(href);
+}
+
+function pillClass(active: boolean) {
+  return `whitespace-nowrap rounded-full px-5 py-2 text-sm font-semibold tracking-tight transition-colors ${
+    active ? 'bg-white text-black' : 'text-white/65 hover:text-white'
   }`;
 }
 
 export function Navbar() {
   const pathname = usePathname();
-  // 모바일(xs) 햄버거 메뉴 토글 상태. sm 이상에서는 항상 데스크톱 네비를 노출.
+  // 모바일(xs) 햄버거 메뉴 토글 상태. sm 이상에서는 항상 데스크톱 필 네비를 노출.
   const [mobileOpen, setMobileOpen] = useState(false);
   const { data: me } = useQuery({
     queryKey: ['me'],
-    queryFn: () => api.auth.me(),
+    queryFn: () => api.auth.optionalMe(),
     retry: false,
   });
-  const navLinks = canAccessInstructor(me?.role) ? [...NAV_LINKS, INSTRUCTOR_LINK] : NAV_LINKS;
-  const mobileNavLinks = [DASHBOARD_LINK, ...navLinks];
+
+  const links = [
+    ...NAV_LINKS,
+    ...(me ? [DASHBOARD_LINK] : []),
+    ...(canAccessInstructor(me?.role) ? [INSTRUCTOR_LINK] : []),
+  ];
 
   function handleLogout() {
     // 백엔드 GET /auth/logout 으로 전체 페이지 이동 → 쿠키 삭제 + Keycloak SSO 로그아웃.
@@ -42,68 +48,92 @@ export function Navbar() {
   }
 
   return (
-    <nav className="sticky top-0 z-50 border-b border-slate-800 bg-slate-900/80 backdrop-blur">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
-        <div className="flex items-center gap-6">
-          <Link href="/labs" className="text-white font-bold text-base tracking-tight">
-            Cledyu
-          </Link>
-          <div className="hidden sm:flex items-center gap-1">
-            {navLinks.map((link) => (
-              <Link key={link.href} href={link.href} className={navLinkClass(pathname, link.href)}>
-                {link.label}
-              </Link>
-            ))}
-          </div>
-        </div>
+    <>
+      <Link
+        href="/"
+        className="fixed left-6 top-6 z-[70] select-none font-michroma text-[15px] tracking-[0.08em] text-white sm:left-10 sm:top-[34px]"
+      >
+        CLEDYU
+      </Link>
 
-        <div className="flex items-center gap-2">
+      <nav className="fixed right-10 top-6 z-[70] hidden items-center gap-1 rounded-full border border-white/30 bg-black/70 p-1.5 backdrop-blur-md sm:flex">
+        {links.map((link) => (
           <Link
-            href={DASHBOARD_LINK.href}
-            className={`hidden sm:inline-flex ${navLinkClass(pathname, DASHBOARD_LINK.href)}`}
+            key={link.href}
+            href={link.href}
+            className={pillClass(isActive(pathname, link.href))}
           >
-            {DASHBOARD_LINK.label}
+            {link.label}
           </Link>
+        ))}
+        {me ? (
           <button
             onClick={handleLogout}
-            className="text-slate-400 hover:text-white text-sm transition-colors px-3 py-1.5 rounded-md hover:bg-slate-800/50"
+            className={`${pillClass(false)} ml-1 border-l border-white/20 pl-5`}
           >
             로그아웃
           </button>
-          {/* 모바일 전용 햄버거 토글 — sm 미만에서만 노출 */}
-          <button
-            type="button"
-            onClick={() => setMobileOpen((open) => !open)}
-            className="sm:hidden text-slate-400 hover:text-white p-1.5 rounded-md hover:bg-slate-800/50 transition-colors"
-            aria-label="네비게이션 메뉴 토글"
-            aria-controls="mobile-nav"
-            aria-expanded={mobileOpen}
+        ) : (
+          <Link
+            href="/login"
+            className="ml-1 rounded-full border border-white/40 px-5 py-[7px] text-sm font-semibold text-white transition-colors hover:bg-white hover:text-black"
           >
-            <MenuIcon open={mobileOpen} />
-          </button>
-        </div>
-      </div>
+            로그인
+          </Link>
+        )}
+      </nav>
+
+      {/* 모바일 전용 햄버거 토글 — sm 미만에서만 노출 */}
+      <button
+        type="button"
+        onClick={() => setMobileOpen((open) => !open)}
+        className="fixed right-6 top-6 z-[70] rounded-full border border-white/30 bg-black/70 p-2 text-white backdrop-blur-md sm:hidden"
+        aria-label="네비게이션 메뉴 토글"
+        aria-controls="mobile-nav"
+        aria-expanded={mobileOpen}
+      >
+        <MenuIcon open={mobileOpen} />
+      </button>
 
       {/* 모바일 드롭다운 — 햄버거 클릭 시 nav 링크를 세로로 펼침 */}
       {mobileOpen && (
-        <div id="mobile-nav" className="sm:hidden border-t border-slate-800 px-4 py-2 space-y-1">
-          {mobileNavLinks.map((link) => (
+        <div
+          id="mobile-nav"
+          className="fixed inset-x-4 top-20 z-[70] space-y-1 rounded-2xl border border-white/20 bg-black/90 p-3 backdrop-blur-md sm:hidden"
+        >
+          {links.map((link) => (
             <Link
               key={link.href}
               href={link.href}
               onClick={() => setMobileOpen(false)}
-              className={`block px-3 py-2 rounded-md text-sm transition-colors ${
-                pathname.startsWith(link.href)
-                  ? 'text-white bg-slate-800'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+              className={`block rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors ${
+                isActive(pathname, link.href)
+                  ? 'bg-white text-black'
+                  : 'text-white/70 hover:text-white'
               }`}
             >
               {link.label}
             </Link>
           ))}
+          {me ? (
+            <button
+              onClick={handleLogout}
+              className="block w-full rounded-xl px-4 py-2.5 text-left text-sm font-semibold text-white/70 hover:text-white"
+            >
+              로그아웃
+            </button>
+          ) : (
+            <Link
+              href="/login"
+              onClick={() => setMobileOpen(false)}
+              className="block rounded-xl px-4 py-2.5 text-sm font-semibold text-white/70 hover:text-white"
+            >
+              로그인
+            </Link>
+          )}
         </div>
       )}
-    </nav>
+    </>
   );
 }
 
@@ -113,7 +143,7 @@ function canAccessInstructor(role?: UserRole) {
 
 function MenuIcon({ open }: { open: boolean }) {
   return (
-    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       {open ? (
         <path
           strokeLinecap="round"
