@@ -40,13 +40,13 @@ export default function LandingPage() {
           </div>
           <div className="flex justify-end">
             <p className="max-w-[480px] text-right text-[clamp(15px,1.6vw,22px)] leading-[1.6] tracking-[-0.02em] text-white/85">
-              격리된 실제 VM 위에서,
+              격리된 실제 VM에서,
               <br />
-              클라우드 엔지니어링을 손으로 익힙니다
+              직접 명령을 실행하며 배웁니다
             </p>
           </div>
-          <div className="mt-6 whitespace-nowrap font-chakra text-[clamp(34px,6.8vw,110px)] font-bold leading-none tracking-[-0.01em] text-white">
-            Learn. Break. Rebuild
+          <div className="mt-6 whitespace-nowrap font-chakra text-[clamp(32px,6.8vw,110px)] font-bold leading-none tracking-[-0.01em] text-white">
+            Learn. Break. Rebuild.
           </div>
         </section>
 
@@ -56,17 +56,24 @@ export default function LandingPage() {
           className="flex min-h-screen flex-col px-6 pb-12 pt-28 sm:px-16"
         >
           <div className="max-w-[680px]">
-            <p className="text-[clamp(16px,1.7vw,24px)] leading-[1.65] tracking-[-0.02em] text-white/90">
-              <strong>보는 것</strong>과 <strong>해보는 것</strong>은 다릅니다
-              <br />
-              모니터 앞에 앉아 <strong>직접 명령을 치는 순간</strong>, 진짜 학습이 시작됩니다
-            </p>
+            <div className="text-[clamp(16px,1.7vw,24px)] leading-[1.65] tracking-[-0.02em] text-white/90">
+              <p>
+                강의를 보는 것만으로는
+                <br />
+                실전 감각을 익히기 어렵습니다
+              </p>
+              <p className="mt-4">
+                직접 명령을 실행하고,
+                <br />
+                실패하고, 다시 해결해 보세요
+              </p>
+            </div>
           </div>
           <div className="relative mt-10 min-h-[280px] flex-1 sm:min-h-[380px]">
             <ParticleFx kind="desk" className="absolute inset-0" />
           </div>
           <div className="whitespace-nowrap font-chakra text-[clamp(28px,5.6vw,92px)] font-bold leading-none tracking-[-0.01em] text-white">
-            Skill comes from repetition
+            Practice builds skill.
           </div>
         </section>
 
@@ -76,21 +83,24 @@ export default function LandingPage() {
           className="flex min-h-screen flex-col px-6 pb-12 pt-28 sm:px-16"
         >
           <div className="flex justify-end">
-            <p className="max-w-[620px] text-right text-[clamp(15px,1.6vw,22px)] leading-[1.65] tracking-[-0.02em] text-white/85">
-              단계를 마칠 때마다 채점 엔진이 실제 시스템 상태를 확인합니다
-              <br />
-              정답을 외우는 게 아니라,{' '}
-              <Link href="/labs" className="cursor-pointer border-b border-white/50">
-                되는 걸 만드는 연습
-              </Link>
-              입니다
-            </p>
+            <div className="max-w-[620px] text-right text-[clamp(15px,1.6vw,22px)] leading-[1.65] tracking-[-0.02em] text-white/85">
+              <p>
+                단계를 마칠 때마다
+                <br />
+                채점 엔진이 실제 시스템 상태를 확인합니다
+              </p>
+              <p className="mt-4">
+                정답을 외우는 대신,
+                <br />
+                실제로 동작하는 환경을 완성하세요
+              </p>
+            </div>
           </div>
           <div className="relative min-h-[280px] flex-1 sm:min-h-[400px]">
             <ParticleFx kind="check" className="absolute inset-0" />
           </div>
           <div className="whitespace-nowrap font-chakra text-[clamp(26px,5vw,84px)] font-bold leading-none tracking-[-0.01em] text-white">
-            You be the learner, I&apos;ll be the lab
+            Build it. Prove it.
           </div>
         </section>
 
@@ -99,17 +109,17 @@ export default function LandingPage() {
           style={{ scrollSnapAlign: 'start' }}
           className="flex min-h-screen flex-col items-center justify-center gap-10 px-6 py-24 sm:px-16"
         >
-          <h2 className="text-center font-michroma text-[clamp(24px,3.4vw,52px)] tracking-[0.06em] text-white">
-            START TODAY
+          <h2 className="text-center font-chakra text-[clamp(24px,3.4vw,52px)] font-bold tracking-[-0.02em] text-white">
+            첫 번째 실습을 시작하세요
           </h2>
           <p className="text-center text-base tracking-[-0.02em] text-white/60">
-            로그인하고 첫 번째 Lab을 시작하세요
+            브라우저만 있으면 바로 시작할 수 있습니다
           </p>
           <Link
             href="/login"
             className="rounded-full bg-white px-14 py-[17px] text-base font-bold tracking-[-0.01em] text-black transition-colors hover:bg-white/85"
           >
-            로그인 하러 가기 →
+            실습 시작하기 →
           </Link>
           <div className="mt-12 flex flex-wrap items-center justify-center gap-7">
             <a href="#" className="text-[13px] tracking-[-0.01em] text-white/45">
