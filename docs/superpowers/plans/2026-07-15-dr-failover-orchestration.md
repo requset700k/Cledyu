@@ -2503,6 +2503,18 @@ aws stepfunctions get-execution-history --region ap-northeast-2 --execution-arn 
 > ⚠️ **redrive 가 통하는 유일한 경우:** 수정이 **SM 정의 밖**(Lambda 코드·IAM)이고 실행이 **Catch 없는
 > 지점**에서 죽었을 때. 우리 SM 엔 그런 Task 가 `NotifyComplete` 뿐이다.
 
+> **🔴 재실행 전 필수 점검 — bastion 스크립트를 고쳤으면 `terraform apply` 를 해야 반영된다**(스펙 §11.18 (l)).
+> 스크립트는 `file()` 로 **apply 시점에 SM 정의 안에 구워지는 복사본**이다 → `git commit` 만으론 AWS 가
+> 모른다. **`[2]` 의 CodeBuild 도 자가 수리 못 한다**(SM 은 `-target` 18개에 없다).
+> 2026-07-16 실측: `[3]` 을 고치고 재실행 직전에 확인하니 **배포된 SM 엔 구 게이트가 그대로**였다.
+> ```bash
+> terraform apply -target=aws_sfn_state_machine.dr_failover
+> aws stepfunctions describe-state-machine --state-machine-arn <메인SM> --query definition --output text \
+>   | python3 -c "import json,sys;print(json.load(sys.stdin)['States']['CleanWarmEtcd']['Parameters']['Input']['script'])" \
+>   | grep -c endpointslice     # 0 이면 미반영 — 이대로 돌리면 [3] 에서 또 죽는다
+> ```
+
+
 **실패 경로도 한 번은 밟아본다** — 성공 경로만 보면 `$.failedStep`·`$.flags.dnsSwitched` 매핑이 틀려도
 모른다. 구간 1에서 `[2.4]` 의 `Catch` 를 잠시 떼면 거기서 실패하므로, `ClearAlbParamFailed → DnsSwitched? →
 MarkPreDns → NotifyFailed` 를 타고 Discord 에 **`실패 단계: ClearAlbParam`**(`States.TaskFailed` 가 아니라)과
@@ -2767,7 +2779,10 @@ git commit -m "docs(dr): Plan 2 전체 드릴 RTO 실측 반영"
       (⚠️ 이 검증 위해 dns-switch 를 먼저 apply 해야 했다 — T4 순서 구멍, 계획서 T4 Step 5 반영)
 - [ ] 🆕 **`[10]` 이 WAF 게이트를 통과해 실제로 Route53 을 바꾼다** (T5/T7) — `wafv2:GetWebACL` 추가 후
       재실행. `:47` 이 실행되는 건 `[9]` 가 SSM 파라미터를 채운 뒤뿐이라 **드릴 전체를 돌려야만 검증된다**
-- [ ] 메인 SM 이 [1]→[13] 을 완주한다 (T5 Step 4)
+- [x] 메인 SM 이 [1]→[13] 을 완주한다 (T5 Step 4) — ✅ **2026-07-16 3회차 `SUCCEEDED`**.
+      서비스가 EKS DR 에서 실제 서빙(`auth.cledyu.com` HTTP 200/0.19s, ALB=`k8s-cledyudr-...`).
+      드릴이 결함 3건을 잡았다(§11.18 (g) IAM 드리프트 · (h) `wafv2:GetWebACL` · (k) `[3]` 비멱등) —
+      **셋 다 라이브가 아니면 원리적으로 못 잡고, 앞의 둘은 T4 가 "검증했다"고 체크해둔 항목이었다**
 - [ ] **[2.4] ClearAlbParam 이 첫 실행(파라미터 없음)에서 Catch 를 타고 넘어간다** (T5 Step 4 — F4)
 - [ ] **드롭다운에서 고른 스냅샷이 [7] 에 도달한다** — 최신이 아닌 걸 골라 검증
 - [ ] **NotifyFailed 가 실제로 Discord 에 뜬다** — 일부러 한 상태를 깨뜨려 확인 (F2 — 무음 실패 방어선)

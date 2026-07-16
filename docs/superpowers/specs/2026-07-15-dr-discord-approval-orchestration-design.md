@@ -1915,3 +1915,82 @@ redrive 를 눌러보고 1초 만에 실패하는 걸 보며 혼란스러워한�
 - **AWS 실측(2026-07-16): Lambda 3종 전부 배포됨** · bastion 롤 `cledyu-dr-bastion` 의
   `ssm-put-failover-param` **살아있음**(IAM 롤은 hot 파괴 대상이 아니다 — §11.17 (a) 의 F3 수정이 지속) ·
   warm 상태 정상(컨트롤플레인 ACTIVE·노드 desired 0·bastion 없음·ALB 파라미터 없음 = `[2.4]` 첫 실행 조건).
+
+#### (k) 🔴 **`[3]` 이 hot 클러스터에 비멱등 — "재실행이 유일한 복구" 를 스스로 깨고 있었다** (수정)
+
+(i) 대로 `start-execution` 으로 재실행하니 **`[3] CleanWarmEtcd` 에서 죽었다.** 지난 회차엔 통과한 단계다.
+
+```
+validatingwebhookconfiguration "aws-load-balancer-webhook" deleted   ← 지워졌고
+❌ ... 삭제 후에도 존재 — P1c 가 안 고쳐졌다                          ← 2초 뒤 다시 있다
+```
+
+**원인:** 게이트가 "지운 뒤에도 남아 있으면 실패"였는데 **노드가 살아있으면 ALB 컨트롤러가 자기 webhook 을
+2초 만에 되살린다** → **건강한 클러스터에서 `[3]` 이 죽는다.**
+
+| 상황 | 노드 | 컨트롤러 | 삭제 후 | 구 게이트 |
+|---|---|---|---|---|
+| **실재해** | 0 (buildspec 이 desired=0) | 없음 | 안 돌아옴 | ✅ 통과 |
+| **부분 실패 후 재실행** | 3 (직전 회차가 올려둠) | 살아있음 | **즉시 재생성** | ❌ 오탐 사망 |
+
+**실재해엔 영향이 없다. 그런데 (i) 가 "재실행이 유일한 복구 경로"라고 결론지은 바로 그 경로가 깨져 있었다** —
+(i) 를 문서에 적은 30분 뒤 실측이 반증했다.
+
+**게이트가 표방한 목적은 애초에 작동한 적이 없다.** 주석은 *"이름이 바뀌면 조용히 no-op 이 되므로 게이트를
+둔다"* 인데 **이름이 틀리면 `delete` 도 `get` 도 not-found 라 게이트는 그냥 통과한다.** 이름 방어는 게이트가
+아니라 **2026-07-15 실측**이 하고 있었다. 게이트가 실제로 잡은 유일한 것이 "재생성"이고 그게 오탐이었다.
+
+**수정 — 판정을 P1c 의 실제 조건으로.** P1c 는 *"webhook 이 존재한다"* 가 아니라 *"**컨트롤러가 죽어
+endpoint 가 없는** webhook 이 coredns 의 admission 을 막는다"* 이다 → **"webhook 이 남아 있다면 endpoint 가
+있어야 한다."**
+
+| | 삭제 후 | endpoint | 판정 |
+|---|---|---|---|
+| 실재해(노드 0) | 사라짐 | — | `continue` → 통과. **기존 방어 그대로** |
+| 재실행(노드 3) | 재생성됨 | 2개 | 통과 — 살아있는 컨트롤러의 것이라 무해 |
+| **진짜 고아** | 남아있음 | **0** | ❌ 실패 — **지금까지 한 번도 구분 못 하던 경우** |
+
+**실측 확정값(지어내지 않았다):**
+- webhook → service = `kube-system/aws-load-balancer-webhook-service:443` (validating 3 · mutating 6 전부 동일).
+  **그래도 코드는 이름을 박지 않고 `clientConfig.service` 에서 읽는다** — A3·C-fix 가 이름 창작으로 물린 자리다.
+- endpoint 2개(`10.90.3.185`·`10.90.3.85`)가 컨트롤러 파드 IP 와 일치. service AGE `2d20h` =
+  **warm etcd 가 사이클을 넘어 보존한 증거**.
+- ⚠️ **`kubectl get endpoints` 금지** — `v1 Endpoints is deprecated in v1.33+` 경고(실측). `EndpointSlice`
+  가 정식 경로다. 첫 초안이 `endpoints` 였다.
+- 🆕 **validating 과 mutating 의 거동이 다르다:** validating 은 **컨트롤러가 2초 만에 reconcile** 하지만
+  **mutating 은 컨트롤러가 관리하지 않는다**(10초 미복구 → ArgoCD `eks-platform-alb-controller` selfHeal 이
+  10초에 복구). 즉 `[3]` 은 정상 흐름에서 mutating 을 지우고 `[6]` 의 ArgoCD sync 가 되살리는 구조로 이미
+  돌고 있었다. 새 게이트는 두 경우 모두 올바르게 통과한다.
+- shellcheck 가 `[ -n "$NS" ] && [ -n "$SVC" ] || {...}` 를 **SC2015** 로 거부 → `if` 로 교체
+  (§T3 의 "shellcheck 를 로컬 설치 여부로 건너뛰지 말 것"이 또 유효했다).
+
+**검증:** 고친 `[3]` 을 **죽었던 그 hot 클러스터에서** 자식 SM 으로 실행 → `SUCCEEDED`.
+`재생성됨 + endpoint 2개 — 살아있는 컨트롤러의 것이라 정상` + P1d·P1e 완주.
+
+#### (l) ✅ **T5 완주 — `[1]`→`[13]` `SUCCEEDED`, DNS 실제 전환** (2026-07-16)
+
+3회차가 13단계를 완주하고 **서비스가 EKS DR 에서 실제로 서빙**했다: `auth.cledyu.com` → **HTTP 200 / 0.19s**,
+ALB = `k8s-cledyudr-9218b8e80b-396923050...`(온프렘 아님). `[12] VerifyServing` 이 realm 응답 + DB row 카운트를
+**자격증명 없이** 검증하고 통과(설계 §5.1.4).
+
+**RTO 2단이 `?` 가 아니라 실제 값으로 찍혔다(F5 회귀 방어 통과):**
+```
+detectedAt = 2026-07-16T06:07:43.215Z   ($$.Execution.StartTime)
+approvedAt = 2026-07-16T06:08:00.648Z   (interaction Lambda 의 toISOString)
+alb        = k8s-cledyudr-...            ($.dns.alb)
+→ 감지→승인 17초 · 승인→서빙 11분 18초
+```
+⚠️ **이 11분을 RTO 로 인용하지 말 것 — "hot 이 이미 떠 있던" 수치다.** 실재해는 `[2]` 가 NAT·bastion 을
+만들고(~3분) 노드가 부팅된다. 계획서가 겨냥한 ~40분과 대조하려면 **T7 의 클린 실행**이 필요하다.
+
+**⚠️ 재실행 전 점검 — bastion 스크립트를 고쳤으면 `terraform apply` 를 해야 반영된다.**
+스크립트는 `file()` 로 **apply 시점에 SM 정의 안에 구워지는 복사본**이라 `git commit` 만으론 AWS 가 모른다.
+실제로 (k) 수정 후 재실행 직전에 확인하니 **배포된 SM 엔 구 게이트가 그대로 있었다** — 그냥 돌렸으면 `[3]`
+에서 또 죽고 헤맸을 것이다. **§11.17 (a)·§11.18 (g) 의 드리프트와 같은 가족**이고(코드는 고쳤는데 AWS 엔
+안 갔다) 이번엔 IAM 이 아니라 **스크립트**다. 게다가 **`[2]` 의 CodeBuild 가 자가 수리하지 못한다**
+(SM 은 `-target` 18개에 없다). 확인법:
+```bash
+aws stepfunctions describe-state-machine --state-machine-arn <메인SM> --query definition --output text \
+  | python3 -c "import json,sys;print(json.load(sys.stdin)['States']['CleanWarmEtcd']['Parameters']['Input']['script'])" \
+  | grep -c endpointslice     # 0 이면 미반영
+```
