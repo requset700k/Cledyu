@@ -132,14 +132,27 @@ export const handler = async (event) => {
   // 드롭다운을 건드리지 않고 바로 승인했으면 최신 스냅샷으로 폴백.
   const snapshot = got.Item.snapshot?.S ?? got.Item.latestSnapshot.S;
 
-  // ⚠️ **승인은 멱등이어야 한다** — 버튼을 두 번 누르거나, SendTaskSuccess 가 3초를 넘겨(실측 ~1.6s)
-  // Discord 가 같은 클릭을 재전송하면, 두 번째는 **이미 소비된 taskToken** 에 응답하게 된다.
-  // SFN 은 그 경우 TaskTimedOut("Provided task does not exist anymore") 또는 TaskDoesNotExist 를 낸다.
-  // 이걸 안 잡으면 Lambda 가 던져 500 → Discord 가 "⚠️ 상호작용 실패" 를 띄운다 —
-  // **승인은 실제로 통과했는데(SM 은 이미 다음 단계로 진행) 운영자에겐 실패로 보인다.**
-  // 그럼 운영자가 "안 눌렸나?" 하고 또 눌러 악순환이고, 촬영·데모에선 치명적이다(2026-07-16 리허설 실측).
-  // → 이 두 에러는 "이미 승인됨" 이라는 정상 상태다. 위 dr-snap 의 ConditionalCheckFailed 처리와 같은
-  //   멱등 관용구로, 조용히 성공(버튼 비활성 메시지)으로 흘린다.
+  // ⚠️ **승인은 멱등이어야 하고, 감사 흔적은 첫 승인자로 고정돼야 한다**(codex P2 ×2).
+  //
+  // 버튼 두 번 클릭 / SendTaskSuccess 가 3초 초과(실측 ~1.6s)로 Discord 재전송 시, 두 번째는
+  // 이미 소비된 taskToken 에 응답해 TaskTimedOut·TaskDoesNotExist 를 받는다. 이걸 안 잡으면
+  // Lambda 500 → "상호작용 실패" 가 뜨는데 **승인은 실제로 통과**했다(SM 은 다음 단계로 진행).
+  //
+  // 처음엔 ttl 로 "중복 vs 진짜 만료" 를 갈랐으나 두 결함이 있었다:
+  //   · 감사 왜곡: 중복을 현재 클릭자(userId)로 렌더하면, A 승인 직후 B 클릭 시 "B 가 승인" 으로 덮인다.
+  //   · 경계 오판: ttl 저장이 RequestApproval 진입보다 **늦다**(approval-request 가 S3 조회 뒤 저장).
+  //     24h 경계에서 토큰은 만료됐는데 ttl 은 몇 초 남아, 진짜 만료를 중복으로 오판한다.
+  // → **시간 추론을 버리고, 첫 승인 사실을 DynamoDB 에 조건부로 못박는다.**
+  //   approvedBy 가 있으면 = 이미 처리된 승인 → 그 값으로 렌더(현재 클릭자 아님).
+  //   approvedBy 가 없는데 토큰이 죽었으면 = 아무도 승인 못 한 채 만료 → 진짜 만료.
+
+  const approvedBy = got.Item.approvedBy?.S;
+  if (approvedBy) {
+    // 이미 누군가 승인함 = 중복 클릭. **저장된 첫 승인자**로 렌더한다(감사 흔적 보존, SendTaskSuccess 재호출 안 함).
+    return res(200, disabledMessage(body.message?.content ?? '', approvedBy));
+  }
+
+  let recorded = userId; // 렌더에 쓸 승인자 — 아래 조건부 저장이 경합에 지면 저장된 값으로 바뀐다.
   try {
     await sfn.send(
       new SendTaskSuccessCommand({
@@ -153,8 +166,48 @@ export const handler = async (event) => {
     );
   } catch (e) {
     if (e.name !== 'TaskTimedOut' && e.name !== 'TaskDoesNotExist') throw e;
-    // 이미 처리된 승인 — 성공으로 본다(첫 클릭이 이미 SM 을 진행시켰다).
+    // 토큰이 죽었다. approvedBy 가 없음을 위에서 확인했으니 두 경우다:
+    //   (a) 방금 다른 클릭이 SendTaskSuccess 를 먼저 성공시켰다(경합) → 곧 approvedBy 가 찍힌다.
+    //   (b) 아무도 승인 못 한 채 RequestApproval 86400s 가 만료됐다 = 진짜 만료.
+    // 다시 읽어 approvedBy 유무로 가른다 — ttl 시간 비교(경계 취약)를 쓰지 않는다.
+    const re = await ddb.send(
+      new GetItemCommand({ TableName: TABLE, Key: { approvalId: { S: approvalId } } }),
+    );
+    const who = re.Item?.approvedBy?.S;
+    if (!who) {
+      // (b) 진짜 만료 — 승인 성립 안 함. "만료" 로 정직하게 알린다(성공 표시 금지).
+      return res(200, {
+        type: 4,
+        data: {
+          content: '⚠️ 만료된 승인 요청입니다(24h TTL). 페일오버는 시작되지 않았습니다.',
+          flags: 64,
+        },
+      });
+    }
+    // (a) 경합 — 먼저 성공한 승인자로 렌더한다.
+    return res(200, disabledMessage(body.message?.content ?? '', who));
   }
 
-  return res(200, disabledMessage(body.message?.content ?? '', userId));
+  // SendTaskSuccess 성공 → **첫 승인 사실을 조건부로 못박는다**. attribute_not_exists 로 경합의
+  // 늦은 쪽이 값을 덮지 못하게 한다(먼저 저장한 승인자가 감사 흔적의 주인이 된다).
+  try {
+    await ddb.send(
+      new UpdateItemCommand({
+        TableName: TABLE,
+        Key: { approvalId: { S: approvalId } },
+        UpdateExpression: 'SET approvedBy = :u',
+        ExpressionAttributeValues: { ':u': { S: userId } },
+        ConditionExpression: 'attribute_not_exists(approvedBy)',
+      }),
+    );
+  } catch (e) {
+    if (e.name !== 'ConditionalCheckFailedException') throw e;
+    // 경합에 졌다 — 다른 승인자가 먼저 못박았다. 그 값으로 렌더한다(SM 은 어차피 진행 중).
+    const re = await ddb.send(
+      new GetItemCommand({ TableName: TABLE, Key: { approvalId: { S: approvalId } } }),
+    );
+    recorded = re.Item?.approvedBy?.S ?? userId;
+  }
+
+  return res(200, disabledMessage(body.message?.content ?? '', recorded));
 };
