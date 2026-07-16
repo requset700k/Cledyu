@@ -76,7 +76,7 @@ export default function LandingPage() {
           className="flex min-h-screen flex-col px-6 pb-12 pt-28 sm:px-16"
         >
           <div className="flex justify-end">
-            <p className="max-w-[520px] text-right text-[clamp(15px,1.6vw,22px)] leading-[1.65] tracking-[-0.02em] text-white/85">
+            <p className="max-w-[620px] text-right text-[clamp(15px,1.6vw,22px)] leading-[1.65] tracking-[-0.02em] text-white/85">
               단계를 마칠 때마다 채점 엔진이 실제 시스템 상태를 확인합니다
               <br />
               정답을 외우는 게 아니라,{' '}
