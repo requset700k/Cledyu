@@ -63,7 +63,7 @@ export function TerminalDemo() {
           {LINES.map((line, i) => (
             <div key={i} className="overflow-hidden">
               <span
-                className={`inline-block max-w-0 overflow-hidden whitespace-nowrap ${line.color ?? 'text-white'}`}
+                className={`cledyu-terminal-line inline-block max-w-0 overflow-hidden whitespace-nowrap ${line.color ?? 'text-white'}`}
                 style={{
                   animation: `cledyu-typing ${line.duration}s steps(${line.steps},end) ${line.delay}s forwards`,
                 }}
@@ -72,7 +72,7 @@ export function TerminalDemo() {
               </span>
               {i === LINES.length - 1 && (
                 <span
-                  className="ml-1.5 inline-block h-[17px] w-[9px] bg-white align-middle"
+                  className="cledyu-terminal-cursor ml-1.5 inline-block h-[17px] w-[9px] bg-white align-middle"
                   style={{
                     animation: 'cledyu-blink 1s step-end infinite',
                     animationDelay: `${line.delay}s`,
@@ -85,7 +85,7 @@ export function TerminalDemo() {
       </div>
       {/* AI 튜터 말풍선 — 타이핑 데모가 끝날 무렵 떠오름 */}
       <div
-        className="absolute -bottom-5 -right-3 flex items-center gap-3 rounded-xl border border-white/25 bg-black px-4 py-3 opacity-0 shadow-[0_18px_50px_rgba(0,0,0,0.5)]"
+        className="cledyu-terminal-tutor absolute -bottom-5 -right-3 flex items-center gap-3 rounded-xl border border-white/25 bg-black px-4 py-3 opacity-0 shadow-[0_18px_50px_rgba(0,0,0,0.5)]"
         style={{ animation: 'cledyu-fadeup 0.8s ease 7.9s forwards' }}
       >
         <span className="font-jbmono text-base text-white/80">?</span>

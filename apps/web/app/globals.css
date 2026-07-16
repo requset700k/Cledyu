@@ -64,3 +64,21 @@
     transform: translateY(0);
   }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .cledyu-terminal-line {
+    animation: none !important;
+    max-width: 100% !important;
+  }
+
+  .cledyu-terminal-cursor {
+    animation: none !important;
+    opacity: 1;
+  }
+
+  .cledyu-terminal-tutor {
+    animation: none !important;
+    opacity: 1;
+    transform: none;
+  }
+}
