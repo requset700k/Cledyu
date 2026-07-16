@@ -1,13 +1,13 @@
 // 앱 루트 레이아웃 — 모든 페이지에 공통 적용.
-// Noto Sans KR 폰트, TanStack Query Provider, 전역 CSS 설정.
+// IBM Plex Sans KR 폰트, TanStack Query Provider, 전역 CSS 설정.
 import type { Metadata } from 'next';
-import { Noto_Sans_KR, Michroma, Chakra_Petch, JetBrains_Mono } from 'next/font/google';
+import { IBM_Plex_Sans_KR, Michroma, Chakra_Petch, JetBrains_Mono } from 'next/font/google';
 import { Providers } from '@/components/Providers';
 import './globals.css';
 
-const notoSansKr = Noto_Sans_KR({
+const ibmPlexSansKr = IBM_Plex_Sans_KR({
   subsets: ['latin'],
-  weight: 'variable',
+  weight: ['400', '500', '600', '700'],
   variable: '--font-body',
   display: 'swap',
 });
@@ -33,7 +33,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="ko">
       <body
-        className={`${notoSansKr.variable} ${michroma.variable} ${chakraPetch.variable} ${jbMono.variable} font-sans`}
+        className={`${ibmPlexSansKr.variable} ${michroma.variable} ${chakraPetch.variable} ${jbMono.variable} font-sans`}
       >
         <Providers>{children}</Providers>
       </body>

@@ -26,7 +26,7 @@ export default function LandingPage() {
           className="flex min-h-screen flex-col px-6 pb-12 pt-28 sm:px-16 sm:pt-[110px]"
         >
           <div>
-            <h1 className="font-chakra text-[clamp(32px,4.6vw,72px)] font-extrabold leading-[1.15] tracking-[-0.035em] text-white">
+            <h1 className="font-chakra text-[clamp(32px,4.6vw,72px)] font-bold leading-[1.15] tracking-[-0.035em] text-white">
               터미널에서 배우는
               <br />
               클라우드 엔지니어링
