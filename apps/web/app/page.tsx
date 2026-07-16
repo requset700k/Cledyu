@@ -107,40 +107,30 @@ export default function LandingPage() {
         {/* S4: 로그인 CTA */}
         <section
           style={{ scrollSnapAlign: 'start' }}
-          className="flex min-h-screen flex-col px-6 pb-8 pt-28 sm:px-16 sm:pb-10 sm:pt-32"
+          className="flex min-h-screen flex-col items-center justify-center gap-10 px-6 py-24 sm:px-16"
         >
-          <div className="flex flex-1 items-center">
-            <div className="mx-auto grid w-full max-w-[1120px] items-end gap-10 border-y border-white/15 py-12 sm:grid-cols-[minmax(0,1fr)_minmax(280px,340px)] sm:gap-12 sm:py-16 lg:gap-16">
-              <h2 className="max-w-[820px] text-left font-chakra text-[clamp(32px,4.8vw,72px)] font-bold leading-[1.12] tracking-[-0.03em] text-white">
-                첫 번째 실습을
-                <br className="hidden sm:block" /> 시작하세요
-              </h2>
-              <div>
-                <p className="text-left text-base leading-relaxed tracking-[-0.02em] text-white/60">
-                  브라우저만 있으면 바로 시작할 수 있습니다
-                </p>
-                <Link
-                  href="/login"
-                  className="mt-7 flex w-full items-center justify-between border border-white bg-white px-7 py-5 text-base font-bold tracking-[-0.01em] text-black transition-colors hover:bg-white/85"
-                >
-                  <span>실습 시작하기</span>
-                  <span aria-hidden="true">→</span>
-                </Link>
-              </div>
-            </div>
-          </div>
-          <div className="mx-auto mt-8 flex w-full max-w-[1120px] flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-wrap items-center gap-x-7 gap-y-3">
-              <a href="#" className="text-[13px] tracking-[-0.01em] text-white/45">
-                이용약관
-              </a>
-              <a href="#" className="text-[13px] tracking-[-0.01em] text-white/45">
-                개인정보처리방침
-              </a>
-              <a href="#" className="text-[13px] tracking-[-0.01em] text-white/45">
-                고객센터
-              </a>
-            </div>
+          <h2 className="text-center font-chakra text-[clamp(24px,3.4vw,52px)] font-bold tracking-[-0.02em] text-white">
+            첫 번째 실습을 시작하세요
+          </h2>
+          <p className="text-center text-base tracking-[-0.02em] text-white/60">
+            브라우저만 있으면 바로 시작할 수 있습니다
+          </p>
+          <Link
+            href="/login"
+            className="rounded-full bg-white px-14 py-[17px] text-base font-bold tracking-[-0.01em] text-black transition-colors hover:bg-white/85"
+          >
+            실습 시작하기 →
+          </Link>
+          <div className="mt-12 flex flex-wrap items-center justify-center gap-7">
+            <a href="#" className="text-[13px] tracking-[-0.01em] text-white/45">
+              이용약관
+            </a>
+            <a href="#" className="text-[13px] tracking-[-0.01em] text-white/45">
+              개인정보처리방침
+            </a>
+            <a href="#" className="text-[13px] tracking-[-0.01em] text-white/45">
+              고객센터
+            </a>
             <span className="font-jbmono text-xs tracking-[0.08em] text-white/35">
               © 2026 CLEDYU
             </span>
