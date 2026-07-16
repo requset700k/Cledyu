@@ -51,15 +51,11 @@ function LabsCatalog() {
       <ParticleFx kind="stars" className="pointer-events-none fixed inset-0 z-0 opacity-95" />
       <div className="relative z-10 pb-10 pt-8 sm:pt-14">
         <header>
-          <p className="font-jbmono text-xs tracking-[0.18em] text-white/45">LAB INDEX</p>
-          <h1 className="mt-4 font-chakra text-[clamp(36px,5vw,68px)] font-bold leading-none tracking-[-0.035em] text-white">
-            Lab 카탈로그
+          <h1 className="font-michroma text-[clamp(36px,5vw,68px)] leading-none tracking-[0.05em] text-white">
+            LABS
           </h1>
           <p className="mt-5 max-w-[680px] text-[clamp(15px,1.5vw,18px)] leading-relaxed tracking-[-0.02em] text-white/55">
             실제 VM 환경에서 클라우드 엔지니어링 기술을 실습하세요
-            <span className="mt-1 block font-jbmono text-xs tracking-[0.04em] text-white/35 sm:ml-2 sm:mt-0 sm:inline">
-              {isLoading ? 'Lab을 불러오는 중입니다' : `${data?.total ?? labs.length}개의 Lab · 계속 추가됩니다`}
-            </span>
           </p>
         </header>
 
