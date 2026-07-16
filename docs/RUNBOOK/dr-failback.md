@@ -190,16 +190,46 @@ in-cluster 정리만). 요지·실측 함정만 옮기면:
 NG=$(aws eks list-nodegroups --cluster-name cledyu-dr --region ap-northeast-2 --query 'nodegroups[0]' --output text)
 aws eks update-nodegroup-config --cluster-name cledyu-dr --region ap-northeast-2 \
   --nodegroup-name "$NG" --scaling-config minSize=0,maxSize=6,desiredSize=0
+
+# ── 15분 꼬리 제거: 가드 둘 뒤에만 마지막 노드를 강제 종료 ──────────────────────────────
+# ⚠️ 마지막 1대는 kube-system PDB(coredns·ebs-csi `maxUnavailable=1`)가 막아 드레인 타임아웃
+#    (~15분, 2026-07-16 실측 15분25초)까지 안 빠진다. failback 은 서비스가 이미 온프렘(§7)이라
+#    **그 coredns 를 의존하는 것이 없으므로** 강제 종료해도 안전하다. 단 **가드 없이 강제하면 위험**하다
+#    (워크로드가 살아있는 상황에서 돌면 실사용 중인 coredns 를 죽인다) → 아래 2가드 뒤에만 강제한다.
+export HOME=/root; aws eks update-kubeconfig --name cledyu-dr --region ap-northeast-2
+
+# 가드 A: 8.1 이 실제로 끝났나 — **앱 네임스페이스에 파드가 하나도 없어야** 한다.
+#   kube-system·amazon-guardduty(daemonset)만 남는 게 정상. 하나라도 앱 파드가 있으면 8.1 미완이므로
+#   강제하지 않고 멈춘다(순서 어김·8.1 스킵 방어). NS 목록은 앱 소속만 — 필수 시스템 ns 는 제외.
+APPNS="vault postgres keycloak kafka api web validation-engine"
+LEFT=$(kubectl get pod --all-namespaces --field-selector=status.phase=Running -o json 2>/dev/null \
+  | jq --argjson ns "$(printf '%s\n' $APPNS | jq -R . | jq -s .)" \
+      '[.items[] | select(.metadata.namespace as $n | $ns | index($n))] | length')
+if [ "${LEFT:-1}" -ne 0 ]; then
+  echo "❌ 앱 파드가 아직 ${LEFT}개 남았다 — 8.1 in-cluster 정리가 안 끝났다. 강제 종료 중단."
+  echo "   8.1 을 완료한 뒤 재실행하라(순서: 8.1 → 8.0)."
+  exit 1
+fi
+
+# 가드 B: 노드가 딱 kube-system PDB 꼬리만 남았나 — desired 는 이미 0 이어야 한다(위 CLI).
+DESIRED=$(aws eks describe-nodegroup --cluster-name cledyu-dr --region ap-northeast-2 \
+  --nodegroup-name "$NG" --query 'nodegroup.scalingConfig.desiredSize' --output text)
+[ "$DESIRED" = "0" ] || { echo "❌ desired=$DESIRED (0 아님) — 위 update-nodegroup-config 확인"; exit 1; }
+
+# 두 가드 통과 → 남은 노드의 EC2 를 강제 종료. desired 가 0 이라 ASG 가 대체하지 않는다.
+for id in $(aws ec2 describe-instances --region ap-northeast-2 \
+    --filters "Name=tag:eks:nodegroup-name,Values=$NG" "Name=instance-state-name,Values=running" \
+    --query 'Reservations[].Instances[].InstanceId' --output text); do
+  echo "가드 통과 — 마지막 노드 강제 종료: $id"
+  aws ec2 terminate-instances --region ap-northeast-2 --instance-ids "$id" >/dev/null
+done
 ```
-> ⚠️ **마지막 노드 1대는 ~15분 걸린다 — 이건 정상이다, 기다린다**(2026-07-16 실측: 15분 25초).
-> 원인이 **2겹**이다(둘 다 `ALLOWED DISRUPTIONS: 0` 이라 eviction 이 원리적으로 불가 → EKS 드레인
-> 타임아웃 만료로 풀림):
->   · 앱 워크로드 PDB(Kafka `minAvailable=2` 등) — 위 8.1 이 워크로드를 먼저 지우면 사라진다
->   · **kube-system PDB(coredns·ebs-csi `maxUnavailable=1`)** — 노드가 1대 남으면 마지막 replica 를
->     못 뺀다. **워크로드를 지워도 이 꼬리는 남는다**(2026-07-16 실측으로 확정 — §11.15 (b)).
-> **강제 종료(terminate-instances)로 이 15분을 없애지 않는다** — PDB 는 안전장치이고, 이 15분은
-> failback(서비스는 이미 온프렘, §7)이라 **RTO 이득이 0** 인데 안전장치를 코드로 뚫는 건 나쁜 거래다
-> (드릴 편의로도 안 넣기로 결정, 2026-07-16). 순번 8.0 이 8.1 뒤인 것은 오타가 아니다 — **정리가 먼저**다.
+> **왜 강제해도 되나(그리고 언제 안 되나):** failback 축소는 **RTO 밖**이다 — 서비스는 이미 DNS 로
+> 온프렘에 넘어가 있어(§7) 이 15분 동안 다운타임이 0 이고, DR 클러스터의 coredns 를 의존하는 것도 없다.
+> **위험은 오직 "워크로드가 살아있는데 coredns 를 죽이는 것"** 하나인데, 가드 A 가 앱 파드 0 을 확인하고서야
+> 강제하므로 그 시나리오를 막는다. 순서가 어긋나거나(8.1 스킵) 워크로드가 남아있으면 강제하지 않고 멈춘다.
+> **⚠️ 이 두 가드를 빼고 무조건 강제하지 말 것** — 그건 실사용 중인 필수 서비스를 끊을 수 있다.
+> 순번 8.0 이 8.1 뒤인 것은 오타가 아니다 — **정리(8.1)가 강제 종료의 전제**다.
 
 **8.2) hot 회수 (terraform)**
 ```bash
