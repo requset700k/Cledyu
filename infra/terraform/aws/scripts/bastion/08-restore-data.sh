@@ -64,6 +64,33 @@ kubectl -n keycloak wait --for=condition=Ready cluster/keycloak-pg --timeout=120
 
 echo "✅ cledyu-pg·keycloak-pg Ready (S3 복원 완료)"
 
+# ── Keycloak 재기동 — **이 스크립트가 발밑에서 DB 를 갈아치웠기 때문이다** ────────────────────
+# 🔴 **2026-07-16 T3 드릴 실측 — 이게 없으면 [9] 가 600s 타임아웃하고 페일오버가 거기서 멈춘다.**
+#
+# 위 delete/재생성으로 keycloak-pg 는 **새 파드·새 IP** 다. Keycloak 의 JDBC 커넥션 풀은 구 파드를
+# 붙든 채이고 **스스로 복구하지 않는다** → 헬스가 DOWN 으로 굳는다:
+#   {"name":"Keycloak Initialized","status":"UP"},                     ← 떠 있고 초기화도 됐는데
+#   {"name":"Keycloak cluster health check","status":"DOWN",
+#    "data":{"Failing since":"2026-07-15 20:44:34"}}                   ← 이 시각 = 위 wait 이 끝난 시각
+# → readiness 503 → CR 이 `Ready=False :: Waiting for more replicas` 로 고착
+# → [9] 의 `wait --for=condition=Ready keycloak/cledyu-keycloak` 이 타임아웃.
+#
+# **11-restart-apps.sh 가 api·web 에 대해 하는 것과 같은 병이다**(startup 1회 초기화 → 복구 없음).
+# 그런데 **[11] 에 넣을 수 없다** — [9] 가 Keycloak Ready 를 게이트하므로 [11] 에 도달하기 전에 막힌다.
+# 그리고 그 게이트는 옳다(조기 DNS 전환 시 ALB keycloak 타겟 unhealthy → 404/503, 런북 :406).
+# → **원인을 만든 여기서 치운다.** [8] 은 이미 keycloak-pg Ready 를 알고 있으니 자리도 여기가 맞다.
+#
+# ⚠️ `rollout restart` 를 쓰지 않는다 — STS 를 keycloak-operator 가 소유해서(ownerReferences 확인)
+#    파드 템플릿 annotation 을 되돌리면 **플립플롭**이 날 수 있다. `delete pod` 는 spec 을 안 건드려
+#    오퍼레이터와 다투지 않는다(실측: 삭제 → 49초 만에 Ready=True).
+# ⚠️ 이름(`cledyu-keycloak-0`)을 박지 않고 **라벨로** 지운다 — replicas 가 늘면 조용히 일부만 재기동된다.
+#    셀렉터는 실측값이다(app=keycloak, app.kubernetes.io/instance=cledyu-keycloak).
+# ⚠️ 대기는 **STS rollout** 으로 한다 — 삭제 직후 Keycloak CR 은 아직 Ready=True(구 상태)라
+#    `wait --for=condition=Ready keycloak/...` 을 여기서 바로 쓰면 **stale 통과**한다.
+kubectl -n keycloak delete pod -l app=keycloak,app.kubernetes.io/instance=cledyu-keycloak
+kubectl -n keycloak rollout status statefulset/cledyu-keycloak --timeout=600s
+echo "✅ Keycloak 재기동 완료 — 새 keycloak-pg 로 재연결됨"
+
 # ⚠️ 런북 344 부터(§real-DR: DR-창 쓰기 캡처 — backupEnabled: false → true flip)는 **이식하지 않는다.**
 # 설계 §8.1 이 "수동 PR"로 결정한 것이다 — 자동화하면 재해 중에 main 으로 push 할 GitHub 자격이
 # 필요해지고, 온프렘 앱들도 같은 repoURL·main 을 sync 하므로 폭발 반경이 **살아 있는 운영 클러스터**까지
