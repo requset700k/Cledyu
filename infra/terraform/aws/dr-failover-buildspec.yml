@@ -51,9 +51,13 @@ phases:
     commands:
       - cd infra/terraform/aws
       # backend 는 S3(cledyu-tf-state) — 온프렘이 죽어도 닿는다(versions.tf).
-      - terraform init -input=false
+      # ⚠️ -lock-timeout=5m — DynamoDB(cledyu-tf-lock) state 락 재시도(codex P2). 없으면 재해 시점에
+      #    운영자가 apply 중이거나 직전 실행이 락을 아직 쥐고 있으면 **즉시 Error 로 종료**해 hot 기동이
+      #    막히고, 재해 중에 수동 force-unlock 을 해야 한다. 5분이면 정상적인 짧은 중복 실행은 흡수된다.
+      #    init 도 backend 락을 잡으므로 양쪽에 준다.
+      - terraform init -input=false -lock-timeout=5m
       - |
-        terraform apply -input=false -auto-approve \
+        terraform apply -input=false -auto-approve -lock-timeout=5m \
           -var enable_eks_dr=true -var eks_dr_active=true -var eks_dr_node_desired=0 \
           -target=module.eks_dr_vpc \
           -target=module.eks_dr \
