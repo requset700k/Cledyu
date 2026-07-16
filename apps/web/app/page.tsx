@@ -122,15 +122,6 @@ export default function LandingPage() {
             실습 시작하기 →
           </Link>
           <div className="mt-12 flex flex-wrap items-center justify-center gap-7">
-            <a href="#" className="text-[13px] tracking-[-0.01em] text-white/45">
-              이용약관
-            </a>
-            <a href="#" className="text-[13px] tracking-[-0.01em] text-white/45">
-              개인정보처리방침
-            </a>
-            <a href="#" className="text-[13px] tracking-[-0.01em] text-white/45">
-              고객센터
-            </a>
             <span className="font-jbmono text-xs tracking-[0.08em] text-white/35">
               © 2026 CLEDYU
             </span>
