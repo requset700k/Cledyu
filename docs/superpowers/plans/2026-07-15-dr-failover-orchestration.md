@@ -1762,6 +1762,39 @@ Expected: 끝에 `{"status": {"coredns": "ACTIVE", "aws-ebs-csi-driver": "ACTIVE
 **dns-switch 는 [9] 가 파라미터를 쓴 뒤**(Task 3 Step 10 의 `09-` 실행 후) 검증한다 — 그전엔
 `ParameterNotFound` 로 **실패하는 게 정상**이고, 그게 fail-closed 검증이기도 하다.
 
+> **🔴 순서 구멍 (2026-07-16 발견·수정) — 이 Step 에 dns-switch 의 apply 가 없었다.**
+>
+> 계획서 전체의 `terraform apply -target` 은 **3줄뿐**이었다: `dr_failover_tf`(T1) · `dr_addon_install`
+> (위) · `dr_failover`(T5 :2295). **dns-switch 와 notify 는 apply 줄이 없다.**
+> 그런데 아래 완료 기준엔 **"dns-switch 가 SSM 파라미터 없으면 실패한다(fail-closed)"** 가 있다 —
+> **Lambda 가 있어야 확인 가능한데 만드는 줄이 T4 에 없다.** T4 기준을 T5 없이는 못 채운다.
+>
+> **왜 T5 면 되나:** `-target` 은 **의존성을 따라간다**(이 레포 dr-orchestration.tf:411 이 이미 기록:
+> "`-target` 은 의존성만 따라가고 의존하는 것은 안 따라감"). T5 의 SM 정의가
+> `FunctionName = aws_lambda_function.dr_dns_switch.arn`(:2197)을 참조하므로 T5 의 apply 가
+> dns-switch 를 **딸려 올린다.** 그래서 "코드에 있는데 AWS 엔 없는" 상태가 T5 까지 조용히 유지됐다
+> (2026-07-16 실측: ap-northeast-2 의 DR Lambda 4개 중 dns-switch 만 부재).
+>
+> **⚠️ 이게 가능한 구조적 이유:** terraform 은 **자동 apply 가 없다**(워크플로 12개 중 `terraform apply`
+> 0개). k8s 쪽은 ArgoCD `selfHeal: true`(19개 앱)가 코드=실물을 강제하지만, terraform 은 사람이 쳐야
+> 반영되고 **코드와 실물의 드리프트를 아무도 알려주지 않는다.** 발견도 우연이었다(Lambda 목록 조회 중).
+>
+> **수정: 아래 apply 를 이 Step 에 명시한다.** T5 에서 다시 apply 되면 `0 to change` 로 지나가므로 손해 없다.
+
+```bash
+# dns-switch — apply 후 fail-closed 검증. [9] **전**이라 SSM 파라미터가 없는 지금이 적기다.
+terraform apply -target=aws_lambda_function.dr_dns_switch
+```
+Expected: `4 to add, 0 to change, 0 to destroy` (Lambda + IAM 롤·정책 + 로그그룹).
+**`0 to destroy` 를 반드시 확인한다** — tfvars 부재로 전체 apply 였다면 게이트 리소스가 날아간다.
+
+```bash
+# fail-closed — 파라미터가 없으므로 **실패해야 정상**이다.
+aws lambda invoke --function-name cledyu-lab-dr-dns-switch --region ap-northeast-2 \
+  --payload '{}' --cli-binary-format raw-in-base64-out /tmp/dns.json; cat /tmp/dns.json
+```
+Expected: `ParameterNotFound` 로 **에러**. **성공하면 그게 버그다** — 폴백·추측으로 DNS 를 건드렸다는 뜻.
+
 ```bash
 # notify — 성공/실패 양쪽 렌더 확인 (Discord 에 실제로 뜬다)
 #
@@ -2502,7 +2535,20 @@ terraform apply \
   -target=aws_cloudwatch_event_target.dr_disaster \
   -target=aws_lambda_permission.dr_disaster    # 무장 해제
 
-# hot 리소스 파괴 — 런북 §destroy 의 고아 방지 순서 필수
+# hot 리소스 파괴 — 런북 §destroy 의 고아 방지 순서 **절대 준수**
+#
+# 🔴 **순서: in-cluster 정리 → CLI 노드 축소 → terraform. 뒤바꾸면 고아가 남는다**(2026-07-16 실측, §11.17 (f)).
+#   드릴 뒷정리에서 **노드를 먼저 0 으로 내렸다가** ALB 컨트롤러·EBS CSI 가 죽어 DR ALB 1·gp3 EBS 11 이
+#   고아로 남았다. PV 는 etcd 에 살아있어 **EBS 만 CLI 로 지우면 PV 가 붕 떠 다음 failover 의 kafka PVC
+#   마운트가 깨진다** → 노드를 도로 올려 런북 순서대로 재정리해야 했다.
+# 절차(dr-eks-bootstrap.md §destroy 0~4.5 = dr-failback.md §8.1 과 동일):
+#   0) argocd application-controller scale 0 (selfHeal 정지 — 안 끄면 지운 걸 되살림)
+#   1) vault STS · CNPG Cluster · Kafka(`kafkas`+`kafkanodepool` 둘 다) 삭제 → 파드 빠질 때까지 대기
+#   2) delete ingress → ALB/TG 소멸 대기   3) delete pvc → EBS 소멸 대기
+#   4.5) 고아 ENI(aws-K8S-*, available) 삭제 — 노드 빠진 뒤
+# 그 다음 CLI 노드 N→0(§11.15 — terraform -var 는 ignore_changes 로 씹힌다. 마지막 1대 ~15분은 정상,
+#   kube-system PDB 꼬리. 강제 종료 안 함 — RTO 이득 0). 마지막에 terraform(hot 회수 또는 enable_eks_dr=false).
+# ✅ 이 순서로 하면 ALB·EBS·ENI 전부 0 으로 소멸 실측(2026-07-16).
 ```
 
 - [ ] **Step 6: 결과 기록 + Commit** (사용자가 실행)
@@ -2520,11 +2566,12 @@ git commit -m "docs(dr): Plan 2 전체 드릴 RTO 실측 반영"
 ## 완료 기준
 
 - [ ] **`terraform validate` 가 통과한다 — `Error: Cycle` 이 없다** (T2 Step 4 — F1)
-- [ ] CodeBuild 가 hot 리소스를 올린다 (T1 Step 4)
-- [ ] 자식 SM 이 성공/실패를 정확히 구분한다 (T2 Step 5 — `exit 3` → `FAILED`)
-- [ ] **자식 SM 이 `env` 를 스크립트에 주입한다** (T2 Step 5 env-test — `got=vault/test.snap`)
-- [ ] **명령 로그 전문이 CloudWatch 에 실제로 쌓인다** (T2 Step 5 — 스트림 개수 ≥1.
-      `SUCCEEDED` 만으로는 부족하다 — 3종 다 통과하는데 유실됐던 이력, 스펙 §11.11)
+- [x] CodeBuild 가 hot 리소스를 올린다 (T1 Step 4) — ✅ 2026-07-16 드릴 `Apply complete! 1 added`
+      (그 1개가 F3 정책이었다, §11.17 (a)). python 3.12 는 pyenv 로 설치됨(codex P1 반박, §11.16 (f))
+- [x] 자식 SM 이 성공/실패를 정확히 구분한다 (T2 Step 5 — `exit 3` → `FAILED`) — ✅ 드릴 확인(§11.17)
+- [x] **자식 SM 이 `env` 를 스크립트에 주입한다** (T2 Step 5 env-test — `got=vault/test.snap`) — ✅ 드릴 확인
+- [x] **명령 로그 전문이 CloudWatch 에 실제로 쌓인다** (T2 Step 5 — 스트림 개수 ≥1.
+      `SUCCEEDED` 만으로는 부족하다 — 3종 다 통과하는데 유실됐던 이력, 스펙 §11.11) — ✅ 12스트림 실측
 - [x] ~~**미확정 5건 확정**~~ → **3건 해소, 2건 남음** (2026-07-16 감사 — 스펙 §11.16):
   - [x] `03-` 의 webhook 이름 — 2026-07-15 warm 클러스터 직접 조회로 확정(03 주석)
   - [x] KafkaTopic 의 Ready 조건 유무 — **있다.** Strimzi 0.45.2 CRD 가 printer column
@@ -2534,23 +2581,25 @@ git commit -m "docs(dr): Plan 2 전체 드릴 RTO 실측 반영"
         → **`08` 에 PVC 삭제 추가 불필요**
   - [ ] **`psql -d cledyu` 인증 통과**(H3) — 여전히 미확정 (T3 Step 10 이 실측 없이 지나갔다) → **T7**
   - [ ] **`ClearAlbParam` 의 에러명** — 여전히 미확정 (T5 Step 4)
-- [ ] **`06-` 이 재실행에서도 `SUCCEEDED`** (T3 Step 10 — 두 번 돌린다. H2)
+- [x] **`06-` 이 재실행에서도 `SUCCEEDED`** (T3 Step 10 — 두 번 돌린다. H2) — ✅ 2026-07-16 드릴 2회
+      연속 통과, 로그에 `git clone`(1회차)→`fetch/reset`(2회차) 두 경로 확인(§11.17)
 - [ ] **`08-` 재생성 후 PVC 가 stale 재사용이 아니다** — [12] 의 `count(*)` 가 **복원 시점 값과 일치**
       (H5 — Ready 통과·count>0 통과인데 데이터가 옛것일 수 있는 유일한 무음 경로)
       ⚠️ **위 H5 해소에도 이 항목은 남긴다.** kind 실측은 "지금 이 버전이 이렇게 동작한다"이고,
       CNPG 가 동작을 바꾸거나 retention 정책이 붙으면 조용히 되살아난다 — **실측이 실환경 백스톱을
       대체하지 않는다**(§11.16 (e)). T7 표식(`dr_drill_marker`)이 그 회귀를 잡는다.
-- [ ] **`03-` 이 Vault raft PVC 를 실제로 비운다** (🆕 2026-07-16, §11.16 (c)) — `[7]` 직전
-      `vault status` 의 `initialized == false`. 이게 아니면 `[7]` 이 already-initialized 로 죽고
-      **재실행 경로가 없다**(07 이 init 산물을 안 남기므로)
-- [ ] **`07` 이 감사 로그에 시크릿을 안 남긴다** (🆕 2026-07-16, §11.16 (a)) — 드릴 후
-      `/aws/eks/cledyu-dr/cluster` 에서 `VAULT_TOKEN` · `generate-root -nonce` 가 **0건**.
-      (07-13~14 드릴분은 24 / 12건이었다. 코드는 정상 동작하므로 **이 확인 없이는 회귀를 못 잡는다**)
-- [ ] **bastion 이 `put-parameter` 에 성공한다** (T3 Step 10 의 `09-` — F3. 이게 없으면 40분 뒤 죽는다)
-- [ ] bastion 스크립트 **8개**가 각각 `SUCCEEDED` (T3 Step 10 — T4 가 `04-wait-nodes-ready` 를
-      더해 7→8, §11.14 (e))
-- [ ] `addon-install` 이 멱등하다 — `action=start` 를 두 번 돌려도 성공 (T4)
-- [ ] `dns-switch` 가 SSM 파라미터 없으면 **실패**한다 (fail-closed)
+- [x] **`03-` 이 Vault raft PVC 를 실제로 비운다** (🆕 2026-07-16, §11.16 (c)) — `[7]` 직전
+      `vault status` 의 `initialized == false`. ✅ 드릴에서 `[7]` 이 fresh Vault 만나 init 성공(§11.17 (b))
+- [x] **`07` 이 감사 로그에 시크릿을 안 남긴다** (🆕 2026-07-16, §11.16 (a)) — ✅ 드릴 실행 구간 실측:
+      안전형태 18 · **유출 0** · 무관 16 (07-13~14 는 24/12/4 였다). stdin 수정이 실환경에서 확증(§11.17 (b))
+- [x] **bastion 이 `put-parameter` 에 성공한다** (T3 Step 10 의 `09-` — F3) — ✅ 다만 **정책이 없어서
+      드릴이 처음 apply 했다**(§11.17 (a) — 진짜 재해였으면 여기서 죽었다). `[9]` 가 `{"Version":1}` 로 실증
+- [x] bastion 스크립트 **8개**가 각각 `SUCCEEDED` (T3 Step 10) — ✅ `[3]×2·[4.5]·[6]×2·[7]·[8]·[9]·[11]`
+      (드릴 스코프는 `[10]`/`[12]` 제외 — DNS 전환은 T7, §11.17 도입부)
+- [x] `addon-install` 이 멱등하다 — `action=start` 를 두 번 돌려도 성공 (T4) — ✅ **3회 연속** 통과
+      (§11.14 (g): 2회로는 UPDATING 충돌을 못 잡는다 → 3회로 검증)
+- [x] `dns-switch` 가 SSM 파라미터 없으면 **실패**한다 (fail-closed) — ✅ `ParameterNotFound`, DNS 무변경 확인
+      (⚠️ 이 검증 위해 dns-switch 를 먼저 apply 해야 했다 — T4 순서 구멍, 계획서 T4 Step 5 반영)
 - [ ] 메인 SM 이 [1]→[13] 을 완주한다 (T5 Step 4)
 - [ ] **[2.4] ClearAlbParam 이 첫 실행(파라미터 없음)에서 Catch 를 타고 넘어간다** (T5 Step 4 — F4)
 - [ ] **드롭다운에서 고른 스냅샷이 [7] 에 도달한다** — 최신이 아닌 걸 골라 검증
