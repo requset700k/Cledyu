@@ -42,12 +42,24 @@ function registerParticleFx() {
       let seeded = null;
       let t = 0;
 
+      const shouldAnimate = () =>
+        this._intersecting && document.visibilityState === 'visible';
+      const stopAnimation = () => {
+        if (!this._raf) return;
+        cancelAnimationFrame(this._raf);
+        this._raf = 0;
+      };
+
       const loop = () => {
-        this._raf = requestAnimationFrame(loop);
+        this._raf = 0;
+        if (!shouldAnimate()) return;
         t += 0.016;
         const w = canvas.width / dpr,
           h = canvas.height / dpr;
-        if (w < 4 || h < 4) return;
+        if (w < 4 || h < 4) {
+          this._raf = requestAnimationFrame(loop);
+          return;
+        }
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, w, h);
         ctx.fillStyle = '#fff';
@@ -482,12 +494,33 @@ function registerParticleFx() {
             ctx.globalAlpha = 1;
           }
         }
+        if (shouldAnimate()) this._raf = requestAnimationFrame(loop);
       };
-      loop();
+
+      const syncAnimation = () => {
+        if (!shouldAnimate()) {
+          stopAnimation();
+          return;
+        }
+        if (!this._raf) this._raf = requestAnimationFrame(loop);
+      };
+
+      this._intersecting = false;
+      this._io = new IntersectionObserver(([entry]) => {
+        this._intersecting = entry.isIntersecting;
+        syncAnimation();
+      });
+      this._io.observe(this);
+      this._onVisibilityChange = syncAnimation;
+      document.addEventListener('visibilitychange', this._onVisibilityChange);
     }
     disconnectedCallback() {
       cancelAnimationFrame(this._raf);
+      this._raf = 0;
+      if (this._io) this._io.disconnect();
       if (this._ro) this._ro.disconnect();
+      if (this._onVisibilityChange)
+        document.removeEventListener('visibilitychange', this._onVisibilityChange);
     }
   }
   customElements.define('particle-fx', ParticleFxElement);
