@@ -153,26 +153,55 @@ kubectl --context onprem -n api logs deploy/api | grep -E "db 연결|in-memory" 
 
 ### 8. EKS 축소
 
-> **🔴 이 apply 는 노드를 축소하지 않는다 — 미수정 결함이다**(2026-07-15 실측, 설계 스펙
-> `2026-07-15-dr-discord-approval-orchestration-design.md` §11.15).
-> `-var eks_dr_node_desired=0` 은 **모듈이 무시한다**(`.terraform/modules/eks_dr/modules/
+> **⚠️ terraform 만으로는 노드가 안 내려간다 — CLI 로 먼저 축소한다**(2026-07-15 도출·2026-07-16 실측,
+> 설계 스펙 `2026-07-15-dr-discord-approval-orchestration-design.md` §11.15).
+> 아래 apply 의 `-var eks_dr_node_desired=0` 은 **모듈이 무시한다**(`.terraform/modules/eks_dr/modules/
 > eks-managed-node-group/main.tf:476-481` → `ignore_changes = [scaling_config[0].desired_size]`).
-> `eks_dr_active=false` 는 NAT·엔드포인트·bastion 만 게이트하고(eks-dr.tf:4) **노드그룹은 warm 소속이라
-> 그대로 남는다.** → terraform 은 "변경 없음"으로 **성공 보고**하는데 **m6i.xlarge 3대가 계속 돈다
-> (≈ $517/월).** 페일오버 `[4]` 가 CLI 로 스케일업하는 바로 그 이유(ignore_changes)가 여기엔 반영되지
-> 않았다 — **대칭이 깨져 있다.**
+> `eks_dr_active=false` 도 NAT·엔드포인트·bastion 만 게이트하고(eks-dr.tf:4) **노드그룹은 warm 소속이라
+> 안 건드린다.** → terraform 은 "변경 없음"으로 **성공 보고**하는데 **m6i.xlarge 3대가 영영 계속 돈다
+> (≈ $517/월).** 페일오버 `[4]` 가 노드를 **CLI 로** 올리는 바로 그 이유(ignore_changes)가 내릴 때도
+> 똑같이 적용된다 — **올릴 때 CLI 면 내릴 때도 CLI 여야 대칭이 맞는다.** 그래서 아래 step 8.0 을 둔다.
 >
-> **`dr-eks-bootstrap.md` §destroy 는 맞게 돼 있다**(`# 3) [P1] 노드 N→0 (CLI)` → CLI 2줄 후 terraform).
-> 정정하려면 그 2줄을 아래 apply **앞에** 이식한다:
-> ```bash
-> NG=$(aws eks list-nodegroups --cluster-name cledyu-dr --region ap-northeast-2 --query 'nodegroups[0]' --output text)
-> aws eks update-nodegroup-config --cluster-name cledyu-dr --region ap-northeast-2 \
->   --nodegroup-name "$NG" --scaling-config minSize=0,maxSize=6,desiredSize=0
-> ```
-> ⚠️ 이식해도 **마지막 노드 1대는 ~16분 걸린다** — coredns·ebs-csi PDB 가 `ALLOWED DISRUPTIONS: 0` 이라
-> 드레인을 막고 `Terminate-LC-Hook`(1800s, CONTINUE) 만료로 풀린다(§11.15 (b), 실측). 애드온을 남길지
-> 지울지는 미결이며 **재-failover 멱등 전제와 얽혀 있다.**
+> ⚠️ **이건 RTO 와 무관하다.** 노드 축소는 failback(재해 종료 후 복귀)이고, 그 시점엔 서비스가 이미
+> DNS 로 온프렘에 넘어가 있다(§7). 축소 중 다운타임은 0 이며, 아래 ~15분은 아무도 기다리지 않는다.
+> **속도가 아니라 "명령이 씹혀 영영 안 내려가는 것"을 고치는 것**이 이 step 의 목적이다.
 
+**8.1) in-cluster 정리 (노드 살아있을 때 — 순서 절대 준수)**
+
+> ⚠️ **노드보다 먼저 이걸 한다.** 노드를 먼저 0 으로 내리면 ALB 컨트롤러·EBS CSI 컨트롤러가 함께
+> 죽어 **스스로 정리할 주체가 없어진다** → DR ALB·gp3 EBS 가 고아로 남는다(2026-07-16 실측: 노드부터
+> 내렸다가 ALB 1·EBS 11 고아 발생, 노드를 도로 올려 정상 정리). **in-cluster 정리 → 8.0 축소 →
+> 8.2 terraform** 순이다.
+
+`dr-eks-bootstrap.md §destroy` 의 **0)~4.5) 스텝을 그대로 수행**한다(terraform destroy 는 아님 —
+in-cluster 정리만). 요지·실측 함정만 옮기면:
+- **0) ArgoCD selfHeal 정지** — `kubectl -n argocd scale statefulset argocd-application-controller --replicas=0`.
+  안 끄면 지운 Ingress/PVC 를 즉시 되살려 ALB/EBS 삭제가 안 끝난다. (`patch --all` 은 미지원, 앱별
+  loop 는 root-app 이 되살림 → **컨트롤러 scale 0** 만이 확실 — §destroy 실측.)
+- **1) PVC 를 문 워크로드 종료** — vault StatefulSet · CNPG Cluster · **Kafka 는 `kafkas` + `kafkanodepool`
+  둘 다**(NodePool 을 안 지우면 StrimziPodSet 브로커가 남아 PVC 가 Terminating 고착). 파드 빠질 때까지 대기.
+- **2) `delete ingress -A --all`** → 컨트롤러가 ALB/TG/SG 정리. DR VPC 의 ALB 가 0 될 때까지 대기.
+- **3) `delete pvc -A --all`** → 마운트 없어 즉시 → EBS CSI 가 gp3 볼륨 삭제. `get pv` 빌 때까지 대기.
+- **4.5) 고아 ENI(`aws-K8S-*`, available) 삭제** — 8.0 으로 노드 빠진 **뒤** 생긴다. 안 지우면
+  서브넷/VPC 삭제를 `DependencyViolation` 으로 막는다.
+
+**8.0) 노드 N→0 (CLI — in-cluster 정리 후, terraform 앞)**
+```bash
+NG=$(aws eks list-nodegroups --cluster-name cledyu-dr --region ap-northeast-2 --query 'nodegroups[0]' --output text)
+aws eks update-nodegroup-config --cluster-name cledyu-dr --region ap-northeast-2 \
+  --nodegroup-name "$NG" --scaling-config minSize=0,maxSize=6,desiredSize=0
+```
+> ⚠️ **마지막 노드 1대는 ~15분 걸린다 — 이건 정상이다, 기다린다**(2026-07-16 실측: 15분 25초).
+> 원인이 **2겹**이다(둘 다 `ALLOWED DISRUPTIONS: 0` 이라 eviction 이 원리적으로 불가 → EKS 드레인
+> 타임아웃 만료로 풀림):
+>   · 앱 워크로드 PDB(Kafka `minAvailable=2` 등) — 위 8.1 이 워크로드를 먼저 지우면 사라진다
+>   · **kube-system PDB(coredns·ebs-csi `maxUnavailable=1`)** — 노드가 1대 남으면 마지막 replica 를
+>     못 뺀다. **워크로드를 지워도 이 꼬리는 남는다**(2026-07-16 실측으로 확정 — §11.15 (b)).
+> **강제 종료(terminate-instances)로 이 15분을 없애지 않는다** — PDB 는 안전장치이고, 이 15분은
+> failback(서비스는 이미 온프렘, §7)이라 **RTO 이득이 0** 인데 안전장치를 코드로 뚫는 건 나쁜 거래다
+> (드릴 편의로도 안 넣기로 결정, 2026-07-16). 순번 8.0 이 8.1 뒤인 것은 오타가 아니다 — **정리가 먼저**다.
+
+**8.2) hot 회수 (terraform)**
 ```bash
 cd infra/terraform/aws && terraform apply \
   -var enable_eks_dr=true -var eks_dr_active=false -var eks_dr_node_desired=0 \
