@@ -3,9 +3,12 @@ package checker
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/requset700k/cledyu/validation-engine/internal/executor"
 	"github.com/requset700k/cledyu/validation-engine/internal/model"
 )
 
@@ -24,7 +27,19 @@ func (m *mockExecutor) DefaultTimeout() time.Duration { return 20 * time.Second 
 func (m *mockExecutor) Close() {}
 
 func mockOk(output string) *mockExecutor { return &mockExecutor{output: output} }
-func mockFail(msg string) *mockExecutor  { return &mockExecutor{err: errors.New(msg)} }
+
+// mockFail은 **명령이 VM에서 실행됐고 0이 아닌 상태로 끝난** 경우를 흉내낸다
+// (예: test -d /없는경로 → exit 1). 조건 불충족이지 인프라 오류가 아니다.
+//
+// ⚠️ 그냥 errors.New 를 쓰면 안 된다 — 그러면 checker 가 인프라 오류로 분류해 requestError 를 낸다.
+// 실제 executor 들도 이 경우를 ErrCommandFailed 로 감싼다(EC2: SSM status=Failed / KubeVirt: ExitError).
+func mockFail(msg string) *mockExecutor {
+	return &mockExecutor{err: fmt.Errorf("%w: %s", executor.ErrCommandFailed, msg)}
+}
+
+// mockInfraFail은 **명령을 실행조차 못 한** 경우를 흉내낸다(SSM 전파 지연·AccessDenied·virtctl 부재 등).
+// 이때 "파일 없음" 이라고 말하면 거짓말이다 — 우리는 조건이 충족됐는지 **모른다**.
+func mockInfraFail(msg string) *mockExecutor { return &mockExecutor{err: errors.New(msg)} }
 
 // --- command ---
 
@@ -507,5 +522,67 @@ func TestRun_PerExecutorDefault_Applied(t *testing.T) {
 	// 고정 20s가 아니라 executor 기본(5분)을 따라야 한다.
 	if cap.remaining <= 4*time.Minute {
 		t.Errorf("executor 기본 5분을 따라야 하는데 남은 deadline=%v (4분 초과 기대) — 고정 20s 상수를 쓰고 있음", cap.remaining)
+	}
+}
+
+// ── 인프라 오류를 "없음" 으로 오분류하지 않는다 (2026-07-16 DR 랩 회귀) ────────────────
+//
+// 이전엔 Exec 의 **모든** 에러가 "파일 없음"/"디렉터리 없음" 으로 뭉개졌다. SSM 전파 지연이 그 문구로
+// 둔갑해 **맞게 푼 사용자가 계속 틀렸다고 나왔고**, 로그·결과·UI 어디에도 원인이 없어 CloudTrail 을
+// 뒤져서야 찾았다. 사용자에게 "없다" 고 말하려면 정말 봤어야 한다.
+
+func TestDirExists_인프라오류는_없음이_아니라_requestError(t *testing.T) {
+	result := Run(context.Background(), mockInfraFail("InvocationDoesNotExist"), model.Check{
+		Type: model.CheckDirExists,
+		Path: "/home/lab/work/logs",
+	})
+	if result.Type != model.CheckRequestError {
+		t.Errorf("인프라 오류는 request_error 여야 한다. type=%s detail=%q", result.Type, result.Detail)
+	}
+	if strings.Contains(result.Detail, "디렉터리 없음") {
+		t.Errorf("보지도 않고 '없음' 이라 하면 안 된다: %q", result.Detail)
+	}
+}
+
+func TestFileExists_인프라오류는_없음이_아니라_requestError(t *testing.T) {
+	result := Run(context.Background(), mockInfraFail("AccessDeniedException"), model.Check{
+		Type: model.CheckFileExists,
+		Path: "/home/lab/work/logs/app1.log",
+	})
+	if result.Type != model.CheckRequestError {
+		t.Errorf("인프라 오류는 request_error 여야 한다. type=%s detail=%q", result.Type, result.Detail)
+	}
+}
+
+// 🔴 가장 나쁜 경우 — 이전엔 인프라 오류가 **거짓 통과**였다.
+// 체크가 돌지도 않았는데 학습자를 정답 처리하는 것이라 검증 엔진에선 최악이다.
+func TestFileContentAbsent_인프라오류는_거짓통과하면_안된다(t *testing.T) {
+	result := Run(context.Background(), mockInfraFail("InvocationDoesNotExist"), model.Check{
+		Type:   model.CheckFileContentAbsent,
+		Path:   "/home/lab/work/bash-users.txt",
+		Expect: "nologin",
+	})
+	if result.Passed {
+		t.Fatal("인프라 오류를 통과로 처리하면 안 된다 — 체크가 돌지도 않았다")
+	}
+	if result.Type != model.CheckRequestError {
+		t.Errorf("request_error 여야 한다. type=%s", result.Type)
+	}
+}
+
+// 반대편 — 명령이 실제로 돌아 실패한 건 여전히 "없음" 이어야 한다(온프렘 KubeVirt 경로 회귀).
+func TestDirExists_명령실패는_여전히_없음(t *testing.T) {
+	result := Run(context.Background(), mockFail("exit 1"), model.Check{
+		Type: model.CheckDirExists,
+		Path: "/home/lab/nope",
+	})
+	if result.Passed {
+		t.Error("없으면 실패해야 한다")
+	}
+	if result.Type != model.CheckDirExists {
+		t.Errorf("조건 불충족은 원래 타입이어야 한다(request_error 아님). type=%s", result.Type)
+	}
+	if !strings.Contains(result.Detail, "디렉터리 없음") {
+		t.Errorf("사용자에게 '없음' 이라고 말해야 한다: %q", result.Detail)
 	}
 }

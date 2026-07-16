@@ -91,10 +91,10 @@ func runCommand(ctx context.Context, exe executor.VMExecutor, check model.Check)
 
 	// VM에서 명령어를 실행
 	output, err := exe.Exec(ctx, check.Command)
+	if r := execFailure(err); r != nil {
+		return *r
+	}
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return requestError("VM 연결 timeout")
-		}
 		return fail(check.Type, fmt.Sprintf("명령어 실행 실패: %s", err))
 	}
 
@@ -119,10 +119,10 @@ func runFileExists(ctx context.Context, exe executor.VMExecutor, check model.Che
 
 	// 쉘의 'test -f' 명령어를 사용하여 파일이 존재하는지 확인
 	_, err := exe.Exec(ctx, "test -f "+check.Path)
+	if r := execFailure(err); r != nil {
+		return *r
+	}
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return requestError("VM 연결 timeout")
-		}
 		return fail(check.Type, fmt.Sprintf("파일 없음: %s", check.Path))
 	}
 	return pass(check.Type)
@@ -137,10 +137,10 @@ func runDirExists(ctx context.Context, exe executor.VMExecutor, check model.Chec
 
 	// 쉘의 'test -d' 명령어를 사용하여 디렉터리가 존재하는지 확인
 	_, err := exe.Exec(ctx, "test -d "+check.Path)
+	if r := execFailure(err); r != nil {
+		return *r
+	}
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return requestError("VM 연결 timeout")
-		}
 		return fail(check.Type, fmt.Sprintf("디렉터리 없음: %s", check.Path))
 	}
 	return pass(check.Type)
@@ -155,10 +155,10 @@ func runFileAbsent(ctx context.Context, exe executor.VMExecutor, check model.Che
 
 	// 'test ! -f' 로 파일이 없을 때(=조건 충족) 종료코드 0이 되게 한다
 	_, err := exe.Exec(ctx, "test ! -f "+check.Path)
+	if r := execFailure(err); r != nil {
+		return *r
+	}
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return requestError("VM 연결 timeout")
-		}
 		return fail(check.Type, fmt.Sprintf("존재하면 안 되는 파일이 있음: %s", check.Path))
 	}
 	return pass(check.Type)
@@ -176,10 +176,10 @@ func runFileContent(ctx context.Context, exe executor.VMExecutor, check model.Ch
 
 	// 'cat' 명령어로 파일 내용을 읽어온다
 	output, err := exe.Exec(ctx, "cat "+check.Path)
+	if r := execFailure(err); r != nil {
+		return *r
+	}
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return requestError("VM 연결 timeout")
-		}
 		return fail(check.Type, fmt.Sprintf("파일 읽기 실패: %s", err))
 	}
 
@@ -205,18 +205,20 @@ func runFileContentAbsent(ctx context.Context, exe executor.VMExecutor, check mo
 	// file_content_absent 를 단독으로 쓰는 랩에서 파일 미생성을 'cat 실패'라는 혼동되는
 	// 사유로 떨어뜨리지 않기 위해, cat 전에 존재 여부를 먼저 확인한다.
 	if _, err := exe.Exec(ctx, "test -e "+check.Path); err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return requestError("VM 연결 timeout")
+		// ⚠️ 인프라 오류를 여기서 pass 로 흘리면 **체크가 돌지도 않았는데 정답 처리**된다.
+		if r := execFailure(err); r != nil {
+			return *r
 		}
+		// 파일이 정말 없다 → 찾을 내용도 없으므로 공허하게 충족(vacuous pass).
 		return pass(check.Type)
 	}
 
 	// 'cat' 명령어로 파일 내용을 읽어온다
 	output, err := exe.Exec(ctx, "cat "+check.Path)
+	if r := execFailure(err); r != nil {
+		return *r
+	}
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return requestError("VM 연결 timeout")
-		}
 		return fail(check.Type, fmt.Sprintf("파일 읽기 실패: %s", err))
 	}
 
@@ -236,10 +238,10 @@ func runProcessRunning(ctx context.Context, exe executor.VMExecutor, check model
 
 	// 'pgrep' 명령어로 해당 이름의 프로세스가 실행 중인지 확인
 	_, err := exe.Exec(ctx, "pgrep "+check.Name)
+	if r := execFailure(err); r != nil {
+		return *r
+	}
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return requestError("VM 연결 timeout")
-		}
 		return fail(check.Type, fmt.Sprintf("프로세스 실행 중 아님: %s", check.Name))
 	}
 	return pass(check.Type)
@@ -257,10 +259,10 @@ func runHTTPResponse(ctx context.Context, exe executor.VMExecutor, check model.C
 	// curl 명령어를 사용해 HTTP 응답 코드(예: 200)만 추출
 	cmd := fmt.Sprintf("curl -s -o /dev/null -w %%{http_code} %s", check.URL)
 	output, err := exe.Exec(ctx, cmd)
+	if r := execFailure(err); r != nil {
+		return *r
+	}
 	if err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return requestError("VM 연결 timeout")
-		}
 		return fail(check.Type, fmt.Sprintf("HTTP 요청 실패: %s", err))
 	}
 
@@ -286,4 +288,31 @@ func fail(t model.CheckType, detail string) model.CheckResult {
 // 학습자 정답 여부와 무관한 시스템 오류로, Session API가 별도 처리해야 한다.
 func requestError(detail string) model.CheckResult {
 	return model.CheckResult{Type: model.CheckRequestError, Passed: false, Detail: detail}
+}
+
+// execFailure는 Exec 에러 중 **"명령을 실행조차 못 한"** 것만 골라 CheckResult로 돌려준다.
+// nil이면 호출자가 "명령은 실제로 돌았고 조건이 불충족"으로 해석해도 안전하다.
+//
+// 🔴 **왜 필요한가 — 2026-07-16 실측.** 이전엔 Exec의 **모든** 에러가 "파일 없음"/"디렉터리 없음"으로
+// 뭉개졌다. DR 랩(EC2/SSM 채점)에서 SSM 전파 지연(InvocationDoesNotExist)이 그 문구로 둔갑해
+// **맞게 푼 사용자가 계속 틀렸다고 나왔고**, 로그·결과·UI 어디에도 진짜 원인이 없어 CloudTrail을
+// 뒤져서야 찾았다. 사용자에게 "없다"고 말하려면 **정말 봤어야** 한다.
+//
+// ⚠️ runFileContentAbsent는 더 나빴다 — 에러를 pass로 처리해 **인프라 오류가 거짓 통과**가 됐다.
+// 체크가 돌지도 않았는데 정답 처리하는 것이라 검증 엔진에선 가장 나쁜 실패다.
+func execFailure(err error) *model.CheckResult {
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, context.DeadlineExceeded):
+		r := requestError("VM 연결 timeout")
+		return &r
+	case errors.Is(err, executor.ErrCommandFailed):
+		// 명령이 VM에서 실제로 실행됐고 0이 아닌 상태로 끝났다 = 조건 불충족. 호출자가 판단한다.
+		return nil
+	default:
+		// SSM/SSH 인프라 오류 — 조건이 충족됐는지 **모른다**. 모르면 모른다고 해야 한다.
+		r := requestError(fmt.Sprintf("VM 명령 실행 실패: %v", err))
+		return &r
+	}
 }
