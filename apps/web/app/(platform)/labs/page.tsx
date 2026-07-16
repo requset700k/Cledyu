@@ -110,23 +110,23 @@ function LabsCatalog() {
                 <Link
                   key={lab.id}
                   href={href}
-                  className="group grid grid-cols-[44px_minmax(0,1fr)] gap-x-4 gap-y-5 border-b border-l-2 border-b-white/20 border-l-transparent px-3 py-7 transition-colors hover:border-l-white hover:bg-white focus-visible:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-black sm:grid-cols-[72px_minmax(0,1fr)_auto] sm:items-center sm:gap-8 sm:px-6 sm:py-9"
+                  className="group grid grid-cols-[44px_minmax(0,1fr)] gap-x-4 gap-y-5 border-b border-l-2 border-b-white/20 border-l-transparent px-3 py-7 transition-colors hover:border-l-[#E8E8E3] hover:bg-[#E8E8E3] focus-visible:bg-[#E8E8E3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-black sm:grid-cols-[72px_minmax(0,1fr)_auto] sm:items-center sm:gap-8 sm:px-6 sm:py-9"
                 >
-                  <span className="font-michroma text-lg text-white/35 transition-colors group-hover:text-black/45 group-focus-visible:text-black/45 sm:text-[22px]">
+                  <span className="font-michroma text-xl text-white/35 transition-colors group-hover:text-black/45 group-focus-visible:text-black/45 sm:text-[26px]">
                     {String(i + 1).padStart(2, '0')}
                   </span>
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                      <h2 className="font-chakra text-[clamp(19px,2vw,27px)] font-semibold leading-tight tracking-[-0.025em] text-white transition-colors group-hover:text-black group-focus-visible:text-black">
+                      <h2 className="font-chakra text-[clamp(21px,2.2vw,30px)] font-semibold leading-tight tracking-[-0.025em] text-white transition-colors group-hover:text-black group-focus-visible:text-black">
                         {lab.title}
                       </h2>
                       <span
-                        className={`whitespace-nowrap rounded-full border px-2.5 py-1 font-jbmono text-[10px] tracking-[0.08em] transition-colors group-hover:border-black/20 group-hover:bg-black/[0.04] group-hover:text-black/65 group-focus-visible:border-black/20 group-focus-visible:bg-black/[0.04] group-focus-visible:text-black/65 ${difficulty.classes}`}
+                        className={`whitespace-nowrap rounded-full border px-2.5 py-1 font-jbmono text-[11px] tracking-[0.08em] transition-colors group-hover:border-black/20 group-hover:bg-black/[0.04] group-hover:text-black/65 group-focus-visible:border-black/20 group-focus-visible:bg-black/[0.04] group-focus-visible:text-black/65 ${difficulty.classes}`}
                       >
                         {difficulty.label}
                       </span>
                     </div>
-                    <p className="mt-2.5 max-w-[680px] break-keep text-sm leading-[1.65] tracking-[-0.015em] text-white/50 transition-colors group-hover:text-black/60 group-focus-visible:text-black/60">
+                    <p className="mt-2.5 max-w-[680px] break-keep text-[15px] leading-[1.7] tracking-[-0.015em] text-white/50 transition-colors group-hover:text-black/60 group-focus-visible:text-black/60 sm:text-base">
                       {lab.description}
                     </p>
                     {lab.tags.length > 0 && (
@@ -134,7 +134,7 @@ function LabsCatalog() {
                         {lab.tags.map((tag) => (
                           <span
                             key={tag}
-                            className="rounded bg-white/[0.06] px-2 py-1 font-jbmono text-[10px] tracking-[0.04em] text-white/45 transition-colors group-hover:bg-black/[0.06] group-hover:text-black/55 group-focus-visible:bg-black/[0.06] group-focus-visible:text-black/55"
+                            className="rounded bg-white/[0.06] px-2 py-1 font-jbmono text-[11px] tracking-[0.04em] text-white/45 transition-colors group-hover:bg-black/[0.06] group-hover:text-black/55 group-focus-visible:bg-black/[0.06] group-focus-visible:text-black/55"
                           >
                             {tag}
                           </span>
@@ -142,11 +142,11 @@ function LabsCatalog() {
                       </div>
                     )}
                   </div>
-                  <div className="col-span-2 flex items-center justify-between gap-5 pl-[60px] sm:col-span-1 sm:min-w-[190px] sm:justify-end sm:pl-0">
-                    <span className="whitespace-nowrap font-jbmono text-[11px] text-white/45 transition-colors group-hover:text-black/55 group-focus-visible:text-black/55 sm:text-xs">
+                  <div className="col-span-2 flex items-center justify-between gap-5 pl-[60px] sm:col-span-1 sm:min-w-[220px] sm:justify-end sm:pl-0">
+                    <span className="whitespace-nowrap font-jbmono text-xs text-white/45 transition-colors group-hover:text-black/55 group-focus-visible:text-black/55 sm:text-sm">
                       {lab.duration_min}분 · {lab.step_count}단계
                     </span>
-                    <span className="flex items-center gap-2 whitespace-nowrap text-sm font-semibold text-white/75 transition-colors group-hover:text-black group-focus-visible:text-black">
+                    <span className="flex items-center gap-2 whitespace-nowrap text-[15px] font-semibold text-white/75 transition-colors group-hover:text-black group-focus-visible:text-black">
                       {actionLabel}
                       <span aria-hidden="true" className="transition-transform group-hover:translate-x-1">
                         →
