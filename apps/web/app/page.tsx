@@ -96,9 +96,7 @@ export default function LandingPage() {
 
         {/* 기술스택 마퀴 */}
         <div className="overflow-hidden border-y border-white/15 bg-white/[0.02] py-4">
-          <div
-            className="flex w-max whitespace-nowrap font-chakra text-sm tracking-[0.18em] text-white/40 motion-safe:animate-[cledyu-marquee_26s_linear_infinite]"
-          >
+          <div className="flex w-max whitespace-nowrap font-chakra text-sm tracking-[0.18em] text-white/40 motion-safe:animate-[cledyu-marquee_26s_linear_infinite]">
             {[0, 1].map((dup) => (
               <span key={dup} className="pr-12">
                 {TECH_STACK.map((t) => (
@@ -130,9 +128,7 @@ export default function LandingPage() {
                   {f.icon}
                 </div>
                 <h3 className="mt-5 font-chakra text-xl font-semibold text-white">{f.title}</h3>
-                <p className="mt-2.5 break-keep text-sm leading-[1.75] text-white/55">
-                  {f.desc}
-                </p>
+                <p className="mt-2.5 break-keep text-sm leading-[1.75] text-white/55">{f.desc}</p>
               </div>
             ))}
           </div>
@@ -193,7 +189,10 @@ export default function LandingPage() {
         </section>
 
         {/* How it works */}
-        <section id="how-it-works" className="mx-auto w-full max-w-[1280px] scroll-mt-24 px-6 py-24 sm:px-10">
+        <section
+          id="how-it-works"
+          className="mx-auto w-full max-w-[1280px] scroll-mt-24 px-6 py-24 sm:px-10"
+        >
           <h2 className="font-chakra text-[clamp(24px,3vw,40px)] font-bold tracking-[-0.02em] text-white">
             어떻게 진행되나요
           </h2>
@@ -203,9 +202,7 @@ export default function LandingPage() {
                 key={step.num}
                 className={`p-8 ${i < HOW_IT_WORKS.length - 1 ? 'border-b border-white/15 sm:border-b-0 sm:border-r' : ''}`}
               >
-                <div className="font-chakra text-5xl font-bold text-white">
-                  {step.num}
-                </div>
+                <div className="font-chakra text-5xl font-bold text-white">{step.num}</div>
                 <div className="mt-6 text-lg font-semibold text-white/90">{step.title}</div>
                 <div className="mt-3 text-sm leading-relaxed text-white/55">{step.desc}</div>
               </div>
