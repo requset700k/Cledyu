@@ -51,7 +51,23 @@ echo "게이트 1 OK ✅ (keycloak=connected)"
 # 런북 원본이 `grep -E "db 연결|in-memory"` 인 것은 **사람에게 둘 다 보여 판단시키려는 용도**이며
 # 그대로 기계 게이트로 옮기면 안 된다 → **실패 명시 거부 → 성공 전문 매치** 순서.
 # (`"in-memory 전용"` 은 main.go:105 의 redis 경고 `"...세션 락 in-memory 폴백..."` 과 안 겹친다 — 확인함)
-LOG=$(kubectl -n api logs deploy/api --tail=200)
+# ⚠️ **`kubectl logs deploy/api --tail=200` 을 쓰면 안 된다 — 2026-07-16 T3 드릴에서 오탐으로 죽었다.**
+# 두 가지가 겹친다:
+#   (a) `logs deploy/api` 는 셀렉터(app=api)로 파드를 **하나 고른다.** `rollout status` 가 성공을
+#       반환한 시점에도 **구 파드는 아직 graceful shutdown 중**이라 그걸 집을 수 있다.
+#       실측: 게이트가 읽은 로그의 마지막 줄이 `"shutting down..."` 이었다 = 구 파드.
+#   (b) 그 구 파드는 몇 시간째 돌던 것이라 **시작 로그가 `--tail=200` 밖으로 밀려나 있다** —
+#       api 는 `/ready`·`/health` 프로브를 수초마다 로깅해서 200줄이 금방 프로브로 찬다.
+#   → 새 파드는 정상(`db 연결 — 유저/진행 상태 영속화 활성` 있음, 총 67줄)인데 **게이트만 실패**했다.
+# → **rollout 이 만든 최신 파드를 이름으로 집고, tail 을 자르지 않는다**(재기동 직후라 로그가 짧다).
+# ⚠️ replicas>1 이면 최신 1개만 본다 — 원래 `logs deploy/api` 도 1개만 봤으므로 검사 범위는 동일하다.
+POD=$(kubectl -n api get pod -l app=api \
+  --sort-by=.metadata.creationTimestamp -o jsonpath='{.items[-1:].metadata.name}')
+[ -n "$POD" ] || {
+  echo "❌ api 파드를 못 찾음 — 셀렉터(app=api) 확인"
+  exit 1
+}
+LOG=$(kubectl -n api logs "$POD")
 echo "$LOG" | grep -q "in-memory 전용" && {
   echo "❌ in-memory 폴백 — DB 미연결(영구 degraded)"
   exit 1
