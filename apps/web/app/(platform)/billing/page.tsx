@@ -300,9 +300,13 @@ function BillingPageContent() {
     plans.data.items.find((plan) => plan.id === selectedPlanID) ??
     plans.data.items.find((plan) => plan.id === subscription.data.plan_id) ??
     plans.data.items[0];
+  const isSelectedPlanCurrent =
+    selectedPlan.id === subscription.data.plan_id && subscription.data.status === 'active';
   const paymentPlan = paymentPlanID
     ? plans.data.items.find((plan) => plan.id === paymentPlanID)
     : null;
+  const isPaymentPlanCurrent =
+    paymentPlan?.id === subscription.data.plan_id && subscription.data.status === 'active';
 
   return (
     <div className="space-y-8">
@@ -346,7 +350,7 @@ function BillingPageContent() {
           흐름으로 전환합니다.
         </p>
 
-        {paymentSimulationEnabled && selectedPlan.price_krw > 0 && (
+        {paymentSimulationEnabled && selectedPlan.price_krw > 0 && !isSelectedPlanCurrent && (
           <div className="mt-5">
             <button
               type="button"
@@ -360,6 +364,10 @@ function BillingPageContent() {
               결제가 완료되면 선택한 요금제 권한이 계정에 반영됩니다.
             </p>
           </div>
+        )}
+
+        {isSelectedPlanCurrent && (
+          <p className="mt-5 text-emerald-300 text-sm">현재 이용 중인 요금제입니다.</p>
         )}
 
         {activationMessage && <p className="mt-3 text-emerald-300 text-sm">{activationMessage}</p>}
@@ -384,7 +392,7 @@ function BillingPageContent() {
         ))}
       </section>
 
-      {paymentPlan && (
+      {paymentPlan && !isPaymentPlanCurrent && (
         <PaymentModal
           plan={paymentPlan}
           pending={activatePlan.isPending}
