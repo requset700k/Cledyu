@@ -132,16 +132,29 @@ export const handler = async (event) => {
   // 드롭다운을 건드리지 않고 바로 승인했으면 최신 스냅샷으로 폴백.
   const snapshot = got.Item.snapshot?.S ?? got.Item.latestSnapshot.S;
 
-  await sfn.send(
-    new SendTaskSuccessCommand({
-      taskToken: got.Item.taskToken.S,
-      output: JSON.stringify({
-        snapshot,
-        approvedBy: userId,
-        approvedAt: new Date().toISOString(),
+  // ⚠️ **승인은 멱등이어야 한다** — 버튼을 두 번 누르거나, SendTaskSuccess 가 3초를 넘겨(실측 ~1.6s)
+  // Discord 가 같은 클릭을 재전송하면, 두 번째는 **이미 소비된 taskToken** 에 응답하게 된다.
+  // SFN 은 그 경우 TaskTimedOut("Provided task does not exist anymore") 또는 TaskDoesNotExist 를 낸다.
+  // 이걸 안 잡으면 Lambda 가 던져 500 → Discord 가 "⚠️ 상호작용 실패" 를 띄운다 —
+  // **승인은 실제로 통과했는데(SM 은 이미 다음 단계로 진행) 운영자에겐 실패로 보인다.**
+  // 그럼 운영자가 "안 눌렸나?" 하고 또 눌러 악순환이고, 촬영·데모에선 치명적이다(2026-07-16 리허설 실측).
+  // → 이 두 에러는 "이미 승인됨" 이라는 정상 상태다. 위 dr-snap 의 ConditionalCheckFailed 처리와 같은
+  //   멱등 관용구로, 조용히 성공(버튼 비활성 메시지)으로 흘린다.
+  try {
+    await sfn.send(
+      new SendTaskSuccessCommand({
+        taskToken: got.Item.taskToken.S,
+        output: JSON.stringify({
+          snapshot,
+          approvedBy: userId,
+          approvedAt: new Date().toISOString(),
+        }),
       }),
-    }),
-  );
+    );
+  } catch (e) {
+    if (e.name !== 'TaskTimedOut' && e.name !== 'TaskDoesNotExist') throw e;
+    // 이미 처리된 승인 — 성공으로 본다(첫 클릭이 이미 SM 을 진행시켰다).
+  }
 
   return res(200, disabledMessage(body.message?.content ?? '', userId));
 };
