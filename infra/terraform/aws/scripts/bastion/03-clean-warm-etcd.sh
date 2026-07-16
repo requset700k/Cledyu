@@ -82,15 +82,33 @@ for k in validatingwebhookconfiguration mutatingwebhookconfiguration; do
     exit 1
   fi
 
-  N=$(kubectl -n "$NS" get endpointslice -l "kubernetes.io/service-name=$SVC" \
-    -o jsonpath='{range .items[*].endpoints[*]}{.addresses[0]}{"\n"}{end}' 2> /dev/null |
-    grep -c . || true)
-  [ "${N:-0}" -gt 0 ] || {
-    echo "❌ $k 가 남았는데 ${NS}/${SVC} 의 endpoint 가 0 — **고아다(P1c)**."
+  # 🔴 **address 가 아니라 conditions.ready 를 본다**(codex P2, 2026-07-16).
+  # controller 파드가 terminating/NotReady 면 EndpointSlice 에 address 는 남아도 ready=false 다.
+  # 그런데 admission webhook 은 **ready endpoint 로만** 호출되므로([5] coredns admission),
+  # `.addresses[0]` 만 세면 ready=0 인데도 통과시켜 → [5] 가 "webhook no endpoints" 로 다시 죽는다.
+  # §11.11 "존재만 보고 값을 안 봄" 의 재발이다 — address 존재 ≠ webhook 호출 가능.
+  #
+  # ⚠️ jsonpath `?()` 필터의 `==true` 지원은 kubectl 버전따라 다르다(bastion 은 v1.34) → 필터로
+  #    지어내지 않고, `ready addr` 를 나란히 뽑아 grep 으로 센다. 출력 예: "true 10.90.3.85".
+  # ⚠️ **재시도 필수** — controller 가 webhook 을 방금 재생성했으면 endpoint 가 아직 ready 전일 수
+  #    있다(§11.18 (k): validating 2초·mutating 10초 재생성). 재시도 없이 즉시 실패시키면 건강한
+  #    재실행을 죽인다(codex 도 "준비될 때까지 재시도" 를 지적). 2분 상한.
+  # ([3] 내부합 여유 480s 라 이 2분은 SSM timeout 정합성을 안 깨뜨린다 — check-timeouts.py 로 확인.)
+  READY=0
+  for _ in $(seq 1 12); do
+    READY=$(kubectl -n "$NS" get endpointslice -l "kubernetes.io/service-name=$SVC" \
+      -o jsonpath='{range .items[*].endpoints[*]}{.conditions.ready}{" "}{.addresses[0]}{"\n"}{end}' 2> /dev/null |
+      grep -c '^true ' || true)
+    [ "${READY:-0}" -gt 0 ] && break
+    echo "  $k: webhook 재생성됨, ${NS}/${SVC} 의 ready endpoint 대기 중"
+    sleep 10
+  done
+  [ "${READY:-0}" -gt 0 ] || {
+    echo "❌ $k 가 남았는데 ${NS}/${SVC} 의 **ready** endpoint 가 2분째 0 — 고아이거나 controller 고장(P1c)."
     echo "   이 상태로 두면 coredns 애드온이 admission 에 막혀 CREATE_FAILED 로 죽는다."
     exit 1
   }
-  echo "$k: 재생성됨 + endpoint ${N}개 (${NS}/${SVC}) — 살아있는 컨트롤러의 것이라 정상"
+  echo "$k: 재생성됨 + ready endpoint ${READY}개 (${NS}/${SVC}) — 살아있는 컨트롤러의 것이라 정상"
 done
 
 # [P1d] stale hostAlias — 같은 성격의 warm etcd 잔존물(로테이션된 ALB IP 를 가리켜 api oidc 가 10s hang).
