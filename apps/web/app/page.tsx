@@ -19,7 +19,7 @@ const FEATURES = [
     tag: '01 / VM',
     icon: '>_',
     title: '진짜 VM, 진짜 셸',
-    desc: 'KubeVirt 기반 전용 Ubuntu VM이 자동으로 준비됩니다. 브라우저 터미널에서 실제 서버 환경을 직접 다룹니다.',
+    desc: '격리된 전용 Ubuntu VM이 자동으로 준비됩니다. 브라우저 터미널에서 실제 서버 환경을 직접 다룹니다.',
   },
   {
     tag: '02 / AI',
@@ -59,10 +59,10 @@ export default function LandingPage() {
         >
           <div className="grid grid-cols-1 items-center gap-12 sm:grid-cols-2 sm:gap-16">
             <div>
-              <h1 className="font-chakra text-[clamp(32px,4.6vw,72px)] font-bold leading-[1.15] tracking-[-0.035em] text-white">
-                터미널에서 배우는
+              <h1 className="break-keep font-chakra text-[clamp(28px,3.4vw,52px)] font-bold leading-[1.2] tracking-[-0.035em] text-white">
+                직접 실행하고
                 <br />
-                클라우드 엔지니어링
+                끝까지 해결하세요
               </h1>
               <p className="mt-[22px] font-michroma text-[clamp(11px,1vw,15px)] tracking-[0.08em] text-white/60">
                 HANDS-ON CLOUD ENGINEERING
@@ -80,16 +80,11 @@ export default function LandingPage() {
                   무료로 시작하기 →
                 </Link>
                 <Link
-                  href="/labs"
+                  href="#how-it-works"
                   className="rounded-full border border-white/35 px-8 py-3.5 text-sm font-semibold tracking-[-0.01em] text-white transition-colors hover:border-white/70"
                 >
-                  Lab 둘러보기
+                  학습 방식 보기
                 </Link>
-              </div>
-              <div className="mt-8 flex flex-wrap gap-x-6 gap-y-2 font-jbmono text-xs text-white/45">
-                <span>✓ 격리된 전용 VM</span>
-                <span>✓ 세션당 3시간</span>
-                <span>✓ 수료 포인트 적립</span>
               </div>
             </div>
             <TerminalDemo />
@@ -197,7 +192,7 @@ export default function LandingPage() {
         </section>
 
         {/* How it works */}
-        <section className="px-6 py-24 sm:px-16">
+        <section id="how-it-works" className="scroll-mt-24 px-6 py-24 sm:px-16">
           <h2 className="font-chakra text-[clamp(24px,3vw,40px)] font-bold tracking-[-0.02em] text-white">
             어떻게 진행되나요
           </h2>
