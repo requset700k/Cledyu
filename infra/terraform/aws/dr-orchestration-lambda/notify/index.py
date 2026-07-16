@@ -65,13 +65,26 @@ def handler(event, context):
             f"런북: {RUNBOOK}"
         )
     else:
+        failed = event.get("failedState", "?")
+        # ⚠️ DNS 안내를 **실패 단계로 분기**한다(codex P2). [10] SwitchDNS 가 Route53 UPSERT 를 하므로
+        #   그 **이후**([11] RestartApps·[12] VerifyServing) 실패면 DNS 는 이미 **EKS 를 가리킨다.**
+        #   무조건 "온프렘을 가리킵니다" 로 보내면 운영자가 트래픽 위치를 오판해 롤백 순서를 잘못 잡는다.
+        #   단계 이름은 메인 SM(Task 5)의 State 명 — 스펙 §5 표의 SwitchDNS/RestartApps/VerifyServing 과 일치.
+        #   판정은 **allowlist(전환 후 단계)** 로 한다 — 모르는 이름(?, 오타)은 보수적으로 "온프렘"(안전)으로.
+        post_dns = failed in ("RestartApps", "VerifyServing", "NotifyComplete")
+        dns_line = (
+            "⚠️ **DNS 는 이미 EKS 로 전환됐습니다**(SwitchDNS 통과 후 실패) — 사용자는 EKS ALB 로 향합니다.\n"
+            "롤백하려면 Route53 을 온프렘으로 되돌리는 것부터(런북 §복귀)."
+            if post_dns
+            else "DNS 는 아직 온프렘을 가리킵니다 — 트래픽은 안전합니다."
+        )
         text = (
             "❌ **DR 페일오버 실패**\n"
-            f"실패 단계: `{event.get('failedState', '?')}`\n"
+            f"실패 단계: `{failed}`\n"
             f"실행: {event.get('executionArn', '?')}\n\n"
             f"```\n{(event.get('stdoutTail') or '')[-1200:]}\n```\n"
             "**롤백하지 않았습니다** — 여기까지 뜬 것은 그대로 있으니 런북으로 이어받으세요.\n"
-            "DNS 는 아직 온프렘을 가리킵니다."
+            f"{dns_line}"
         )
 
     req = urllib.request.Request(  # noqa: S310
