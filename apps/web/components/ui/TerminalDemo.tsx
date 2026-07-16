@@ -38,8 +38,9 @@ export function TerminalDemo() {
           <span className="h-2.5 w-2.5 rounded-full bg-white/18" />
           <span className="h-2.5 w-2.5 rounded-full bg-white/10" />
         </div>
-        <span className="font-jbmono text-xs text-white/45">student@cledyu-vm — ubuntu 22.04</span>
-        <span className="ml-auto font-jbmono text-[11px] text-white/60">● live</span>
+        <span className="min-w-0 flex-1 truncate text-center font-jbmono text-xs text-white/55">
+          student — cledyu-vm — bash — 120×30
+        </span>
       </div>
       <div className="px-5 py-6 font-jbmono text-[13.5px] leading-[2.05]">
         {LINES.map((line, i) => (
