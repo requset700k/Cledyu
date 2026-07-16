@@ -875,10 +875,21 @@ resource "aws_sfn_state_machine" "dr_run_on_bastion" {
         End = true
       }
 
+      # ⚠️ **정적 Cause 가 아니라 CausePath 다**(스펙 §11.18 (d) 실측). 초안은 정적이라 commandId 를 못 실었고
+      # §11.13 (d) 는 그걸 "B안의 비용 — Discord→SFN콘솔→자식실행→commandId→CloudWatch 3~4홉"으로 수용했다.
+      # **그 전제가 실측으로 깨졌다**: CausePath + States.Format 이 정의에도 통과하고 값도 채워지며,
+      # `.sync:2` 를 넘어 부모의 $.error.Cause 안에 그대로 실려 온다 → 알림에 **쳐야 할 명령어 전문**을 싣는다.
+      #
+      # B안의 안전성은 그대로다 — label 과 commandId 는 시크릿이 아니다. stderr(set -x 트레이스, §11.13 (b))
+      # 는 여전히 알림 경로에 안 올린다. 그게 B안을 택한 이유였다(C6 가 07 에서 막은 표면을 안 넓힌다).
+      #
+      # $.label 은 BuildCommands 가, $.cmd 는 SendCommand 의 ResultPath 가 넣는다. Done? 의 Default 로
+      # 여기 오는 경로는 SendCommand 성공 이후뿐이라 둘 다 반드시 있다. (SendCommand 자체가 실패하면
+      # Retry 소진 후 자기 에러로 죽고 이 상태를 안 거친다 → 부모의 Catch 가 잡는다.)
       Failed = {
-        Type  = "Fail"
-        Error = "BastionScriptFailed"
-        Cause = "SSM 명령 실패 — 자식 SM 실행 이력의 GetResult 결과에서 commandId 를 찾아 CloudWatch 로그그룹 ${aws_cloudwatch_log_group.dr_bastion_commands.name} 에서 전문 확인: aws logs tail <그룹> --log-stream-name-prefix <commandId>"
+        Type      = "Fail"
+        Error     = "BastionScriptFailed"
+        CausePath = "States.Format('{} 실패 — aws logs tail ${aws_cloudwatch_log_group.dr_bastion_commands.name} --log-stream-name-prefix {}', $.label, $.cmd.Command.CommandId)"
       }
     }
   })
