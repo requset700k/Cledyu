@@ -43,14 +43,6 @@ export default function LandingPage() {
       {/* 전역 배경: 은은한 성운 + 별 */}
       <ParticleFx kind="stars" className="pointer-events-none fixed inset-0 -z-10 opacity-95" />
 
-      {/* HUD 코너 장식 */}
-      <div className="pointer-events-none fixed inset-6 z-[60] sm:inset-8">
-        <div className="absolute left-0 top-0 h-px w-12 bg-white/35" />
-        <div className="absolute left-0 top-0 h-12 w-px bg-white/35" />
-        <div className="absolute bottom-0 right-0 h-px w-12 bg-white/35" />
-        <div className="absolute bottom-0 right-0 h-12 w-px bg-white/35" />
-      </div>
-
       <div style={{ scrollSnapType: 'y proximity' }}>
         {/* S1: 히어로 */}
         <section
@@ -87,7 +79,9 @@ export default function LandingPage() {
                 </Link>
               </div>
             </div>
-            <TerminalDemo />
+            <div className="sm:-translate-y-4">
+              <TerminalDemo />
+            </div>
           </div>
           <div className="mt-14 whitespace-nowrap font-chakra text-[clamp(28px,6vw,90px)] font-bold leading-none tracking-[-0.01em] text-white">
             Learn. Break. Rebuild.
