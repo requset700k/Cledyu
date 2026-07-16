@@ -1571,3 +1571,95 @@ standard:5.0 에선 실패할 것"이라고 **문서에서 동작을 추론**했
 **교훈 — "동작하는데 틀린 것"은 테스트가 못 잡는다.** (a)(d)(e) 셋 다 **스크립트가 정상 종료하고
 게이트가 통과하는데** 틀렸다. (a) 는 유출, (d) 는 게이트 무효, (e) 는 근거 없는 미확정이 관문을
 막고 있던 것이다. §11.11("`SUCCEEDED` 는 로그가 남았다가 아니다")의 또 다른 옷이다.
+
+---
+
+### 11.17 T1~T4 라이브 드릴 (2026-07-16) — **정적 감사가 못 잡은 결함 4건 + 문서 정정 2건**
+
+**§11.16 의 정적 감사를 마친 뒤, warm 클러스터에 실제로 T1~T4 를 굴렸다**(자식 SM 으로 bastion
+스크립트 실행, 노드 3 스케일업, Vault·CNPG 실복원). §11.4 의 교훈("정적 검토가 원리적으로 못 잡는
+결함")이 다시 확인됐다 — **아래 4건은 코드가 정상 종료하거나 게이트가 통과하는데 틀렸고, 실행해야만
+드러났다.** 셋(b·c·d)은 **§11.16 에서 이미 손댄 파일에서, 정적으론 안 보이던 다른 결함**이 나왔다.
+
+성공 요약: T1 `Apply complete`(python 3.12 pyenv 설치 로그로 codex P1 최종 반박, §11.16 (f)) ·
+T2 성공/실패(exit 3→FAILED)/env 주입/CloudWatch 12스트림 · T3 `[3]×2·[4.5]·[6]×2·[7]·[8]·[9]·[11]` ·
+T4 addon 3회 연속·dns-switch fail-closed·notify 양쪽. 그 과정에서:
+
+#### (a) 🔴 **F3 가 살아 있었다 — bastion 롤에 `ssm:PutParameter` 가 없었다** (드릴이 apply)
+
+`[9]` 의 마지막 줄(`aws ssm put-parameter /cledyu-dr/failover/alb-hostname`)이 쓰는 정책
+`aws_iam_role_policy.eks_dr_bastion_ssm_param` 이 **AWS 에 없었다.** 코드엔 `9aec3d8`(T3)에서 들어왔는데
+그 뒤 CodeBuild apply 가 한 번도 안 돌아 **드리프트**로 남아 있었다(직전 빌드가 체크아웃한 커밋은
+`907cab3` = 정책 이전). **진짜 재해였으면 ~40분 복구를 다 하고 `[9]` 마지막 줄에서 AccessDenied 로 죽고,
+`[10]` 이 fail-closed 라 DNS 미전환 → 전부 복구됐는데 서비스가 안 돌아왔다**(계획서가 F3 로 예견한 그것).
+T1 드릴의 `Apply complete! 1 added` 가 이 정책을 만들었고, `[9]` 가 `{"Version": 1}` 로 실증했다.
+
+> **구조적 원인 — terraform 은 자동 apply 가 없다.** k8s 는 ArgoCD `selfHeal`(19개 앱)이 코드=실물을
+> 강제하지만, terraform 은 사람이 쳐야 반영되고 **드리프트를 아무도 알려주지 않는다.** 같은 병으로
+> dns-switch Lambda 도 미배포 상태였다(§계획서 T4 순서 구멍). → T5 완료 기준에 "SM 이 부르는 Lambda·
+> 정책이 실제로 배포돼 있다"를 넣는다(계획서 반영).
+
+#### (b) 🔴 **`[7]` 은 한 번도 성공한 적이 없었다 — Ready wait 이 닭-달걀** (수정: API 폴링)
+
+`07` 첫 줄이 `kubectl -n vault wait --for=condition=Ready pod/vault-0 --timeout=300s` 였다.
+**구조적으로 성공 불가**다: Vault 차트의 readinessProbe 가 `vault status` 인데 **초기화 전 Vault 는
+status 가 exit 2**(sealed) → probe 실패 → 파드 영원히 `0/1` → wait 300s 타임아웃 → **`vault operator init`
+에 도달조차 못 함.** init 만이 Ready 를 만드는데 init 이 그 wait 뒤에 있다.
+실측: vault-0/1/2 전부 `0/1 Running`·`{"initialized":false,"sealed":true}` → `timed out ... pods/vault-0`.
+
+**§11.16 (c) 에서 07 을 이미 고쳤는데도 정적으론 이게 안 보였다** — 그 수정은 init 앞의 게이트·순서였고,
+이 줄은 그 위에 멀쩡히 있었다. **왜 지금까지 안 드러났나:** 07 은 오늘 **처음 스크립트로** 돌았다.
+7/13·14 드릴은 런북(사람) 경로이고 **사람은 파드가 0/1 이어도 그냥 init 을 친다** — 스크립트만 Ready 를
+기다린다(§11.12 와 같은 뿌리: "명령은 맞는데 실행 주체가 다르다"). 감사 로그의 init 24건이 전부
+사람이 친 것이었던 이유다.
+→ **Ready 가 아니라 "API 가 응답하는가"를 폴링**한다(sealed 여도 status 는 JSON 을 준다). 그 $ST 를
+아래 initialized 게이트가 그대로 쓴다. 수정 후 `[7]` 이 처음으로 완주(66초, 복원 확인·quorum·ESO 재기동).
+**그리고 이 실행의 감사 로그를 다시 세니 stdin 수정(§11.16 (a))이 실환경에서 확증됐다: 유출 0건**
+(안전 형태 18 · 유출 0 · 무관 16. 7/13~14 는 24/12/4 였다).
+
+#### (c) 🔴 **`[8]` 이 Keycloak 발밑에서 DB 를 갈아치운다** (수정: [8] 끝에 Keycloak 재기동)
+
+`[8]` 이 keycloak-pg 를 delete→재생성(복원)하면 **새 파드·새 IP** 다. Keycloak 의 JDBC 풀은 구 파드를
+붙든 채 **스스로 복구하지 않아** 헬스가 DOWN 으로 굳는다:
+`{"Keycloak cluster health check":"DOWN","Failing since":"20:44:34"}` — 그 시각이 `[8]` 이 끝난 시각.
+→ readiness 503 → CR `Ready=False :: Waiting for more replicas` → **`[9]` 의 keycloak wait 이 600s 타임아웃.**
+`11-restart-apps.sh` 가 api·web 에 하는 것과 **같은 병**(startup 1회 초기화 → 복구 없음)인데,
+**[11] 에 못 넣는다** — `[9]` 가 Keycloak Ready 를 게이트하므로 `[11]` 도달 전에 막힌다(그 게이트는
+옳다: 조기 DNS 전환 시 ALB keycloak 타겟 unhealthy). → **원인을 만든 `[8]` 끝에서 재기동한다.**
+실측: `delete pod`(rollout restart 아님 — 오퍼레이터 소유 STS 와 플립플롭 회피) → 49초 만에 Ready=True.
+
+#### (d) 🔴 **`[11]` 의 db 게이트가 종료 중인 구 파드를 읽어 오탐** (수정: 최신 파드를 이름으로)
+
+`[11]` 이 `kubectl logs deploy/api --tail=200` 로 "db 연결" 로그를 확인하는데 **오탐으로 죽었다.**
+두 가지가 겹쳤다: (1) `logs deploy/api` 는 셀렉터로 파드 하나를 고르는데 `rollout status` 성공 시점에도
+**구 파드가 graceful shutdown 중**이라 그걸 집었다(로그 마지막 줄이 `"shutting down..."`) (2) 그 구 파드는
+몇 시간째 돌아 **시작 로그가 `--tail=200` 밖**이었다(api 가 `/ready`·`/health` 를 수초마다 로깅).
+**새 파드는 정상**(`db 연결 — 유저/진행 상태 영속화 활성`, 총 67줄)인데 게이트만 실패.
+→ **rollout 이 만든 최신 파드를 이름으로 집고 tail 을 안 자른다.** 수정 후 게이트 2종 통과.
+
+#### (e) 📌 문서 정정 2건 (드릴 실측이 기존 서술을 뒤집음)
+
+**§11.14 — "Nodegroup.Status 는 전·중·후 전부 ACTIVE" 는 틀렸다.** 실제로 `UPDATING` 을 거친다
+(스케일업 +2/+11/+20s 관측). 진짜 메커니즘은 **축소**에서 선명했다: 명령 **38초 만에 ACTIVE 복귀했는데
+EC2 는 3대 그대로**였다. 즉 `Status=ACTIVE` 는 "스케일 완료"를 전혀 뜻하지 않는다 — 게이트가 무효라는
+**결론은 맞고, 근거로 든 메커니즘이 틀렸다.** (§11.14 의 04-wait-nodes-ready.sh 는 노드 대수를 직접
+세므로 이 정정에 영향받지 않는다.)
+
+**§11.15 — 노드 축소 꼬리의 원인은 coredns 단독이 아니라 2겹이다.** 두 번 측정으로 확정:
+| 측정 | 조건 | 노드 0 까지 | 막은 것 |
+|---|---|---|---|
+| 1차 | 워크로드 **남긴 채** 축소 | **15분 25초**(드레인 타임아웃 만료) | 앱 PDB(Kafka `minAvailable=2`) |
+| 2차 | 워크로드 **먼저 삭제** 후 축소 | 2대는 118초, **마지막 1대는 여전히 막힘** | kube-system PDB(coredns·ebs-csi `maxUnavailable=1`) |
+→ **"즉시 0" 은 불가능**하다. 워크로드 정리(8.1)로 앱 PDB 는 없앨 수 있으나 **kube-system 꼬리는 남는다**
+(노드 1대에 마지막 replica). **강제 종료로 없애지 않기로 결정** — failback 축소는 서비스가 이미 온프렘
+(§7)이라 **RTO 이득 0** 인데 PDB(안전장치)를 코드로 뚫는 건 나쁜 거래다. `dr-failback.md` §8 을
+"in-cluster 정리(8.1) → CLI 축소(8.0) → terraform(8.2)" 로 정정하고 ~15분을 정상으로 명시(2026-07-16).
+
+#### (f) 뒷정리에서 밟은 순서 함정 (에이전트 실수 — 기록)
+
+드릴 후 뒷정리에서 **노드를 먼저 0 으로 내렸다** — 런북 §destroy 가 "반드시 in-cluster 부터"라고 못 박은
+순서를 어겼다. 결과: ALB 컨트롤러·EBS CSI 가 함께 죽어 **DR ALB 1·gp3 EBS 11 이 고아**로 남았다(PV 는
+etcd 에 살아있어 EBS 만 CLI 로 지우면 **PV 가 붕 뜬다** — 다음 failover 의 kafka PVC 마운트가 깨진다).
+→ **노드를 도로 3 으로 올려** 런북 순서(selfHeal 정지→워크로드→Ingress→PVC→ENI)대로 재정리하니
+ALB·EBS·ENI 전부 0 으로 깨끗이 소멸. **교훈: 잘못된 순서를 CLI 로 억지 만회하려다 더 깊은 구멍(붕 뜬 PV)을
+팔 뻔했다.** 이 순서 강제를 계획서 T7 "hot 파괴"(현재 한 줄)에도 반영해야 한다 — 계획서만 보면 밟는다.
