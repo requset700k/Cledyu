@@ -1002,8 +1002,18 @@ data "aws_iam_policy_document" "dr_dns_switch" {
     resources = ["*"]
   }
   statement {
-    sid     = "CheckWaf"
-    actions = ["wafv2:GetWebACLForResource"]
+    sid = "CheckWaf"
+    # 🔴 **액션이 둘이다.** `GetWebACLForResource` API 한 번을 부르는데 IAM 은 두 가지를 본다:
+    #   · wafv2:GetWebACLForResource → 조회 대상(ALB)에
+    #   · wafv2:GetWebACL            → **반환값(WebACL)에** ← 이게 빠져 있었다
+    # 바로 아래 주석이 "양쪽에 권한이 필요하다"고 정확히 적어놓고 actions 엔 하나만 넣었다.
+    # 2026-07-16 T5 라이브 드릴에서 실측:
+    #   AccessDeniedException ... not authorized to perform: wafv2:GetWebACL
+    #   on resource: .../regional/webacl/cledyu-lab-public/...
+    # **T4 드릴은 이걸 못 잡았다** — dns-switch fail-closed 시험이 index.py:37(SSM ParameterNotFound)에서
+    # 죽어 :47 의 WAF 호출에 **도달조차 못 했다.** 테스트는 통과했는데 정작 검증하려던 경로를 한 번도
+    # 안 밟은 것이다(§11.18 (g) 의 InvokeFailoverLambdas 와 같은 패턴).
+    actions = ["wafv2:GetWebACLForResource", "wafv2:GetWebACL"]
     # ⚠️ ALB(조회 대상)와 WebACL(반환값) **양쪽**에 권한이 필요하다 — ALB ARN 은 런타임에 알고,
     # ACL 은 lab public 스택 소유라 여기서 특정하면 그 스택 게이트에 묶인다.
     resources = ["*"]
@@ -1580,7 +1590,7 @@ resource "aws_sfn_state_machine" "dr_failover" {
         }]
         # 🔴 **Catch 를 달지 않는다.** NotifyFailed 로 보내면 **13단계를 다 성공한 페일오버에 "❌ 실패"
         #    알림**이 간다 — C2 가 정확히 그 버그였다. 재시도가 소진되면 실행을 FAILED 로 끝내고,
-        #    콘솔·CloudWatch 의 FAILED 가 "알림이 왜 안 왔나"의 단서로 남는다(설계 결정, 스펙 §11.18 (g)).
+        #    콘솔·CloudWatch 의 FAILED 가 "알림이 왜 안 왔나"의 단서로 남는다(설계 결정, 스펙 §11.18 (j)).
         End = true
       }
 

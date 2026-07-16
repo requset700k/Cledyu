@@ -1789,7 +1789,7 @@ ASL 상태가 안 늘고, States.Runtime 위험이 0이다. **"어디서 파싱�
 | **트래픽이 어디 있나** | `DnsSwitched?` Choice — **`$.dns.alb` `IsPresent`** | `SwitchDNS` 의 `ResultPath="$.dns"` 라 존재 ⟺ `[10]` 통과. **지상 진실**. `failedStep` 이 정확해져 허용목록도 작동은 하나 **안 쓴다** — `[10]`↔`[11]` 사이에 상태가 끼면 이름 추론은 **조용히** 틀리고 `IsPresent` 는 안 틀린다(§11.11 의 교훈). `AgentReady?` 에 선례 있음 |
 | **왜 죽었나** | 자식 `CausePath`(label+commandId) + `notify` 가 Python 에서 파싱 | (d)(e). 평문이면 그대로 출력 — 어느 쪽이든 안전 |
 
-#### (h) 🔴 **§11.17 (a) 드리프트가 두 번째로 재현됐다 — 이번엔 "마지막 방어선"에서** (T5 apply 가 수리)
+#### (g) 🔴 **§11.17 (a) 드리프트가 두 번째로 재현됐다 — 이번엔 "마지막 방어선"에서** (T5 apply 가 수리)
 
 T5 의 `-target` plan 이 IAM 정책 update 를 띄우길래 파고드니, **AWS 의 `cledyu-lab-dr-sfn` 정책에
 `InvokeFailoverLambdas` statement 가 없었다.** 그게 `[5] addon-install`·`[10] dns-switch`·**`[13] notify`**
@@ -1824,7 +1824,81 @@ Catch → `NotifyFailed` → **거기서도 AccessDenied** → 실행은 FAILED,
 2. **완료 기준의 드리프트 체크를 Lambda 존재 여부로만 두면 안 된다**(내가 처음 그렇게 썼다) — 리소스는
    있는데 **부를 권한이 없는** 게 이 사고다. 아래 완료 기준에 SFN 롤 정책 대조를 추가했다.
 
-#### (g) 함께 확정된 것
+#### (h) 🔴 **T5 라이브 드릴 — `[10]` 이 `wafv2:GetWebACL` 누락으로 죽었다** (2026-07-16)
+
+`[1]`~`[9]` 를 전부 통과하고 `[10] SwitchDNS` 에서 실패:
+
+```
+AccessDeniedException ... is not authorized to perform: wafv2:GetWebACL
+  on resource: .../regional/webacl/cledyu-lab-public/...
+index.py:47  acl = _waf.get_web_acl_for_resource(ResourceArn=lb["LoadBalancerArn"])
+```
+
+**`GetWebACLForResource` API 하나를 부르는데 IAM 액션은 둘이다** — 조회 대상(ALB)에
+`wafv2:GetWebACLForResource`, **반환값(WebACL)에 `wafv2:GetWebACL`**. 코드엔 앞의 하나만 있었다.
+
+**그리고 바로 그 아래 주석이 답을 적어놨다:** *"⚠️ ALB(조회 대상)와 WebACL(반환값) **양쪽**에 권한이
+필요하다"*. **정확히 진단해놓고 `actions` 엔 한 줄만 넣었다.** §11.13 (f)("그 방어는 이미 계획서에 글로
+적혀 있었다 — 안 읽고 grep 부터 쳤다")와 같은 패턴이 **또** 나왔다.
+
+**왜 T4 가 못 잡았나 — 테스트가 그 줄에 도달한 적이 없다.** 계획서 완료 기준엔
+`dns-switch 가 SSM 파라미터 없으면 실패한다(fail-closed) — ✅ ParameterNotFound, DNS 무변경 확인` 이라고
+**체크까지 돼 있다.** 그런데 그 시험은 `index.py:37`(`_ssm.get_parameter`)에서 죽었고 **`:47` 의 WAF 호출에
+도달조차 못 했다.** 오늘 `[9]` 가 파라미터를 제대로 채워 `:37` 을 통과하고 나서야 `:47` 이 처음 실행됐다.
+
+**§11.18 (g) 와 같은 병이다** — 둘 다 "테스트는 통과했는데 정작 검증하려던 경로를 한 번도 안 밟았다".
+(h) 는 사람 자격증명으로 Lambda 를 불러 SFN 롤을 안 건드렸고, 여기선 앞단에서 죽어 뒷단을 안 건드렸다.
+**하루에 이 클래스가 세 번 나왔다**((h) · 여기 · §11.13 (f)). → **fail-closed 테스트는 "실패했다"가 아니라
+"의도한 그 줄에서 실패했다"를 확인해야 한다.**
+
+**수정:** `actions = ["wafv2:GetWebACLForResource", "wafv2:GetWebACL"]`.
+**그 외 `[1]`~`[9]` 는 전부 실측 통과** — 승인 매핑 · CodeBuild `main`(`b2e717d`) · `[2.4]` Catch(에러명
+(a) 가 실환경 확증) · bastion 조회 · 노드 3대 · 애드온 · **`[7]` 이 고른 스냅샷(`20260715T060001Z`, 최신
+아님)을 정확히 주입** · CNPG 복원 · 앱 Ready. **fail-closed 가 작동해 DNS 는 안 바뀌었고 프로덕션은 무사.**
+
+**실패 경로 3층이 실측 통과했다(§11.18 (f) 의 설계):**
+```
+SwitchDNS → SwitchDNSFailed → DnsSwitched? → MarkPreDns → NotifyFailed → Failed
+```
+NotifyFailed 가 받은 payload: `"failedState":"SwitchDNS"`(States.TaskFailed 가 **아니다**) ·
+`"dnsSwitched":false`(`$.dns.alb` 부재로 판정 — `[10]` 이 fail-closed 라 "온프렘"이 **참**).
+Discord 에 `실패 단계: SwitchDNS` + AccessDenied 전문 + "DNS 는 아직 온프렘" 이 떴다.
+**구 allowlist 였다면 여기서도 "온프렘"이라 우연히 맞았겠지만, `[11]`/`[12]` 에서 죽었으면 똑같이 "온프렘"
+이라 거짓말을 했을 것이다.** 이번 설계는 우연이 아니라 구조로 맞다.
+
+#### (i) 🔴 **`Catch` 설계가 `redrive` 를 원리적으로 무력화한다** (설계의 숨은 대가 — 문서화 필요)
+
+(i) 의 IAM 을 고친 뒤 `redrive-execution` 으로 `[10]` 부터 재개하려 했다. **1초 만에 실패했고 `[10]` 은
+다시 실행되지도 않았다:**
+
+```
+14:07:28  FailStateEntered   Failed        ← 실행이 실패한 지점은 Fail 상태다
+14:07:28  ExecutionFailed
+14:19:46  ExecutionRedriven
+14:19:46  ExecutionFailed               ← 같은 초. dns-switch Lambda 로그 0건(안 불렸다)
+```
+
+**원인:** redrive 는 *"unsuccessful step 부터 재개"* 한다. 그런데 **`SwitchDNS` 는 unsuccessful step 이
+아니다** — `Catch` 가 그 에러를 **성공적으로 처리**해 `SwitchDNSFailed` → `DnsSwitched?` → `MarkPreDns` →
+`NotifyFailed`(**TaskSucceeded**)로 흘려보냈고, 실행이 실제로 실패한 곳은 **종착지 `Fail` 상태**다.
+redrive 는 그 `Fail` 을 다시 밟았고 `Fail` 은 당연히 또 실패한다.
+
+| | Discord 알림 | redrive |
+|---|---|---|
+| 모든 상태에 Catch (현재 설계) | ✅ 어디서 왜 죽었는지 통보 | ❌ `Fail` 만 재실행 = 무의미 |
+| Catch 없음 | ❌ 무음 | ✅ 진짜 실패 지점부터 재개 |
+
+**설계 §5.3("롤백하지 않는다 — 사람이 이어받는다")상 알림 쪽이 옳다.** 재해 중 무음보다 재실행이 낫다.
+**그러나 그 대가를 몰랐고 어디에도 안 적혀 있었다** → **실패 시 재개는 `start-execution` 으로 `[1]` 부터가
+유일하다**(승인 재클릭 + `[7]`·`[8]` 재복원 20~30분). 런북·계획서에 명시한다. 안 적으면 재해 중 운영자가
+redrive 를 눌러보고 1초 만에 실패하는 걸 보며 혼란스러워한다.
+
+> **에이전트 실수 기록:** `describeExecution` 의 `redriveStatus: REDRIVABLE` 만 보고 "`[10]` 부터 재개된다"
+> 고 단정해 사용자에게 권했다. 그 값은 **"redrive 호출이 거부되지 않는다"** 는 뜻이지 "원하는 지점부터
+> 간다"가 아니다. **내가 만든 Catch 설계가 redrive 의미론에 뭘 하는지 생각하지 않고** AWS 문서 한 줄만
+> 인용했다. 대가는 작았으나(1초·과금 0·DNS 무변경) 그건 운이다.
+
+#### (j) 함께 확정된 것 (착수 전)
 
 - **`[2]` 에 `Retry` 를 붙이지 않는다** (계획서 "착수 전 결정 (2)" 종결). 그 글은 `-lock-timeout` **추가
   전**에 쓰였다 — `73aad01` 이 `init`·`apply` 양쪽에 `-lock-timeout=5m` 을 넣어 **사람↔빌드 락 충돌을

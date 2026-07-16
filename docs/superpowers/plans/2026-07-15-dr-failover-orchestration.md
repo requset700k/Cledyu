@@ -2489,6 +2489,20 @@ aws stepfunctions get-execution-history --region ap-northeast-2 --execution-arn 
 # → Ssm.ParameterNotFoundException 하나만 나오고 실행은 계속됐으면 정상(Catch 가 삼킨 것)
 ```
 
+> **🔴 실패하면 `redrive` 가 아니라 `start-execution` 으로 `[1]` 부터다** (2026-07-16 실측, 스펙 §11.18 (j)).
+> `redrive-execution` 은 **이 SM 에선 아무것도 못 한다** — "unsuccessful step 부터 재개"인데, 우리 설계는
+> **모든 Task 의 실패를 `Catch` 가 성공적으로 처리**해 `NotifyFailed`(TaskSucceeded)까지 흘려보내므로
+> 실행이 실제로 실패한 지점은 **종착지 `Fail` 상태**다. redrive 는 그 `Fail` 만 다시 밟고 **1초 만에 끝난다**
+> (실측: `ExecutionRedriven` → 같은 초 `ExecutionFailed`, 대상 Lambda 로그 0건).
+> `describeExecution` 이 `redriveStatus: REDRIVABLE` 이라고 답하지만 그건 **"호출이 거부되지 않는다"** 는
+> 뜻이지 "원하는 지점부터 간다"가 아니다 — 에이전트가 그걸 보고 오판했다.
+> **알림(Catch)과 redrive 는 양립하지 않고, 설계 §5.3 상 알림이 옳다.** 대신 재개 비용을 알고 있어야 한다:
+> 승인 재클릭 + `[3]` 이 Vault PVC 를 비우고 `[7]`·`[8]` 이 **S3 에서 재복원** = 20~30분. hot 은 그대로라
+> `[2]`~`[6]` 은 빠르다. **런북(T6)에 명시할 것.**
+>
+> ⚠️ **redrive 가 통하는 유일한 경우:** 수정이 **SM 정의 밖**(Lambda 코드·IAM)이고 실행이 **Catch 없는
+> 지점**에서 죽었을 때. 우리 SM 엔 그런 Task 가 `NotifyComplete` 뿐이다.
+
 **실패 경로도 한 번은 밟아본다** — 성공 경로만 보면 `$.failedStep`·`$.flags.dnsSwitched` 매핑이 틀려도
 모른다. 구간 1에서 `[2.4]` 의 `Catch` 를 잠시 떼면 거기서 실패하므로, `ClearAlbParamFailed → DnsSwitched? →
 MarkPreDns → NotifyFailed` 를 타고 Discord 에 **`실패 단계: ClearAlbParam`**(`States.TaskFailed` 가 아니라)과
@@ -2745,8 +2759,14 @@ git commit -m "docs(dr): Plan 2 전체 드릴 RTO 실측 반영"
       (드릴 스코프는 `[10]`/`[12]` 제외 — DNS 전환은 T7, §11.17 도입부)
 - [x] `addon-install` 이 멱등하다 — `action=start` 를 두 번 돌려도 성공 (T4) — ✅ **3회 연속** 통과
       (§11.14 (g): 2회로는 UPDATING 충돌을 못 잡는다 → 3회로 검증)
-- [x] `dns-switch` 가 SSM 파라미터 없으면 **실패**한다 (fail-closed) — ✅ `ParameterNotFound`, DNS 무변경 확인
+- [x] ~~`dns-switch` 가 SSM 파라미터 없으면 **실패**한다 (fail-closed)~~ — **이 체크는 거짓이었다**
+      (2026-07-16 T5 드릴, 스펙 §11.18 (i)). `ParameterNotFound` 로 실패한 건 맞으나 그건 `index.py:37`
+      이고, **`:47` 의 WAF 호출엔 도달조차 못 했다** → 거기 `wafv2:GetWebACL` 이 빠진 걸 못 잡았고
+      T5 드릴이 `[10]` 에서 죽었다. 🔴 **fail-closed 테스트는 "실패했다" 가 아니라 "의도한 그 줄에서
+      실패했다" 를 확인해야 한다** — 앞단에서 죽으면 뒷단은 시험된 적이 없다.
       (⚠️ 이 검증 위해 dns-switch 를 먼저 apply 해야 했다 — T4 순서 구멍, 계획서 T4 Step 5 반영)
+- [ ] 🆕 **`[10]` 이 WAF 게이트를 통과해 실제로 Route53 을 바꾼다** (T5/T7) — `wafv2:GetWebACL` 추가 후
+      재실행. `:47` 이 실행되는 건 `[9]` 가 SSM 파라미터를 채운 뒤뿐이라 **드릴 전체를 돌려야만 검증된다**
 - [ ] 메인 SM 이 [1]→[13] 을 완주한다 (T5 Step 4)
 - [ ] **[2.4] ClearAlbParam 이 첫 실행(파라미터 없음)에서 Catch 를 타고 넘어간다** (T5 Step 4 — F4)
 - [ ] **드롭다운에서 고른 스냅샷이 [7] 에 도달한다** — 최신이 아닌 걸 골라 검증
@@ -2757,15 +2777,15 @@ git commit -m "docs(dr): Plan 2 전체 드릴 RTO 실측 반영"
 - [ ] 🆕 **`[11]`/`[12]` 실패 시 알림이 "DNS 는 이미 EKS" 라고 말한다** (§11.18 (c) — 이 버그의 본체).
       "온프렘 — 트래픽은 안전합니다" 가 뜨면 `$.dns.alb` `IsPresent` 분기가 안 먹은 것이다 → **T7 에서 확인**
       (`[10]` 이 실제로 도는 건 T7 뿐이다)
-- [ ] 🆕 **코드에 있는 것이 AWS 에도 있다** (§11.17 (a)·§11.18 (h) — terraform 은 자동 apply 가 없고
+- [ ] 🆕 **코드에 있는 것이 AWS 에도 있다** (§11.17 (a)·§11.18 (g) — terraform 은 자동 apply 가 없고
       드리프트를 **아무도 안 알려준다**. 이 계획에서 **두 번** 물렸다)
-      ⚠️ **"리소스가 존재하나"만 보면 안 된다** — §11.18 (h) 는 **Lambda 는 멀쩡히 있는데 SFN 롤에 부를
+      ⚠️ **"리소스가 존재하나"만 보면 안 된다** — §11.18 (g) 는 **Lambda 는 멀쩡히 있는데 SFN 롤에 부를
       권한이 없던** 사고다. 존재 체크는 그걸 통과시킨다.
       ```bash
       # ① 존재 — SM 이 부르는 Lambda 3종
       for f in addon-install dns-switch notify; do aws lambda get-function \
         --function-name cledyu-lab-dr-$f --region ap-northeast-2 --query 'Configuration.FunctionName'; done
-      # ② 권한 — **실행 주체의 롤**에 그 호출 statement 가 있나 (§11.18 (h) 가 여기서 걸린다)
+      # ② 권한 — **실행 주체의 롤**에 그 호출 statement 가 있나 (§11.18 (g) 가 여기서 걸린다)
       # ⚠️ grep 을 파일 전체에 걸지 말 것 — 다른 롤 정책의 sid 까지 긁어 **오탐 28건**이 나온다(실측).
       #    28번 늑대를 부르는 체크는 아무도 안 본다. dr_sfn 정책 문서 **블록으로 스코프**를 자른다.
       aws iam get-role-policy --role-name cledyu-lab-dr-sfn --policy-name cledyu-lab-dr-sfn \
@@ -2778,10 +2798,10 @@ git commit -m "docs(dr): Plan 2 전체 드릴 RTO 실측 반영"
       aws iam list-role-policies --role-name cledyu-dr-bastion   # ssm-put-failover-param 이 있어야 한다
       ```
       - ✅ 2026-07-16: Lambda 3종 존재 · bastion 정책 4종 존재(IAM 롤은 hot 파괴 대상이 아니라 살아남는다)
-      - 🔴 2026-07-16: **`InvokeFailoverLambdas` 가 AWS 에 없었다**(§11.18 (h)) — `[5]`·`[10]`·`[13]` 을
+      - 🔴 2026-07-16: **`InvokeFailoverLambdas` 가 AWS 에 없었다**(§11.18 (g)) — `[5]`·`[10]`·`[13]` 을
         전부 AccessDenied 로 만들고 **NotifyFailed 까지 죽여 무음**이 될 뻔했다. **T5 apply 가 수리한다**
         (SM 이 정책을 depends_on → `-target` 이 의존성을 따라간다). Step 4 후 위 ②를 **다시 돌려 공백 확인**
-- [ ] 🆕 **IAM 은 "실제 principal 로" 행사해 검증한다** (§11.18 (h) 의 교훈). `aws lambda invoke` 를 사람
+- [ ] 🆕 **IAM 은 "실제 principal 로" 행사해 검증한다** (§11.18 (g) 의 교훈). `aws lambda invoke` 를 사람
       자격증명으로 성공시킨 것은 **SFN 롤이 부를 수 있다는 증거가 아니다** — T4 가 그렇게 검증했다고
       적어놓고 실제론 롤 권한을 한 번도 안 건드렸다(§11.12 와 같은 뿌리: 명령은 맞는데 실행 주체가 다르다).
       → 이 항목은 **Step 4 의 SM 실행**이 채운다(SFN 이 자기 롤로 Lambda 를 부른다)
