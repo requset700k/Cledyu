@@ -3,6 +3,7 @@ package executor
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -81,6 +82,27 @@ func (e *KubeVirtExecutor) Exec(ctx context.Context, cmd string) (string, error)
 	command.Stderr = &stderr
 
 	if err := command.Run(); err != nil {
+		// ⚠️ ctx 만료를 **먼저** 본다. CommandContext 는 ctx 가 끝나면 프로세스를 SIGKILL 하고
+		// Run 은 "signal: killed" **ExitError** 를 준다 — ctx.Err() 를 체인에 넣어주지 않는다.
+		// 그래서 이 줄이 없으면 checker 의 DeadlineExceeded 분기가 영영 안 걸리고, 타임아웃이
+		// 아래 ErrCommandFailed 로 흘러 "파일 없음" 으로 둔갑한다(EC2 에서 겪은 것과 같은 오분류).
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return "", fmt.Errorf("virtctl 실행 중단: %w\nstderr: %s", ctxErr, stderr.String())
+		}
+
+		// 명령이 VM 에서 **실행됐고** 0 이 아닌 상태로 끝난 경우(예: test -d → exit 1 = 없음).
+		// 이건 "조건 불충족" 이지 인프라 오류가 아니다 → checker 가 "없음" 으로 렌더해도 참이다.
+		//
+		// ⚠️ ssh 관례상 **exit 255 는 ssh 자체 실패**(연결·인증)라 여기서 갈라내는 게 더 정확하다.
+		// 그러나 virtctl 이 그 관례를 그대로 전달하는지 **확인하지 못했다**(이 환경엔 KubeVirt 가 없다).
+		// 지어내지 않고 **현행 동작을 그대로 보존**한다 — 255 를 인프라로 가르는 건 온프렘에서
+		// 실측한 뒤에 한다. (지금도 그 경우는 "없음" 으로 나오지만, 그건 이 커밋 이전과 동일하다.)
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return "", fmt.Errorf("%w: virtctl exit %d\nstderr: %s", ErrCommandFailed, exitErr.ExitCode(), stderr.String())
+		}
+
+		// virtctl 바이너리 부재·spawn 실패 등 — 명령을 실행조차 못 했다.
 		return "", fmt.Errorf("virtctl 실행 실패: %w\nstderr: %s", err, stderr.String())
 	}
 
