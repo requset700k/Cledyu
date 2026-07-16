@@ -23,3 +23,62 @@
     scrollbar-color: theme('colors.slate.700') transparent;
   }
 }
+
+/* 랜딩 페이지 히어로 터미널 데모 + 기술스택 마퀴 전용 키프레임 */
+@keyframes cledyu-typing {
+  from {
+    max-width: 0;
+  }
+  to {
+    max-width: 100%;
+  }
+}
+
+@keyframes cledyu-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes cledyu-marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes cledyu-fadeup {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cledyu-terminal-line {
+    animation: none !important;
+    max-width: 100% !important;
+  }
+
+  .cledyu-terminal-cursor {
+    animation: none !important;
+    opacity: 1;
+  }
+
+  .cledyu-terminal-tutor {
+    animation: none !important;
+    opacity: 1;
+    transform: none;
+  }
+}

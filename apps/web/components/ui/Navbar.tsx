@@ -51,12 +51,12 @@ export function Navbar() {
     <>
       <Link
         href="/"
-        className="fixed left-6 top-6 z-[70] select-none font-michroma text-[15px] tracking-[0.08em] text-white sm:left-10 sm:top-[34px]"
+        className="fixed left-6 top-8 z-[70] select-none font-michroma text-[15px] tracking-[0.08em] text-white sm:left-10 sm:top-10"
       >
         CLEDYU
       </Link>
 
-      <nav className="fixed right-10 top-6 z-[70] hidden items-center gap-1 rounded-full border border-white/30 bg-black/70 p-1.5 backdrop-blur-md sm:flex">
+      <nav className="fixed right-10 top-8 z-[70] hidden items-center gap-1 rounded-full border border-white/30 bg-black/70 p-1.5 backdrop-blur-md sm:flex">
         {links.map((link) => (
           <Link
             key={link.href}
@@ -87,7 +87,7 @@ export function Navbar() {
       <button
         type="button"
         onClick={() => setMobileOpen((open) => !open)}
-        className="fixed right-6 top-6 z-[70] rounded-full border border-white/30 bg-black/70 p-2 text-white backdrop-blur-md sm:hidden"
+        className="fixed right-6 top-8 z-[70] rounded-full border border-white/30 bg-black/70 p-2 text-white backdrop-blur-md sm:hidden"
         aria-label="네비게이션 메뉴 토글"
         aria-controls="mobile-nav"
         aria-expanded={mobileOpen}
@@ -99,7 +99,7 @@ export function Navbar() {
       {mobileOpen && (
         <div
           id="mobile-nav"
-          className="fixed inset-x-4 top-20 z-[70] space-y-1 rounded-2xl border border-white/20 bg-black/90 p-3 backdrop-blur-md sm:hidden"
+          className="fixed inset-x-4 top-24 z-[70] space-y-1 rounded-2xl border border-white/20 bg-black/90 p-3 backdrop-blur-md sm:hidden"
         >
           {links.map((link) => (
             <Link
