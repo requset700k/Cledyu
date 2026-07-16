@@ -466,8 +466,11 @@ data "aws_iam_policy_document" "dr_failover_trigger" {
   statement {
     sid     = "StartFailover"
     actions = ["states:StartExecution"]
-    # Plan 2 에서 메인 SM 으로 교체된다. 지금은 테스트 SM 을 가리켜 배선을 검증한다.
-    resources = [aws_sfn_state_machine.dr_approval_test.arn]
+    # T5 에서 하네스(dr_approval_test) → **메인 SM** 으로 교체됐다.
+    # ⚠️ 교체 전에는 실재해에 승인 버튼이 떠도 눌러봐야 **아무 일도 안 일어나고 실패 알림도 없었다**
+    #   (하네스는 RequestApproval 하나로 End=true = 성공으로 끝난다) → 운영자는 "페일오버가 돌고 있다"고
+    #   믿는다. 그래서 T5 전까지 dr_orchestration_armed 무장이 금지였다(잔여 #1).
+    resources = [aws_sfn_state_machine.dr_failover.arn]
   }
   statement {
     sid     = "Logs"
@@ -507,7 +510,7 @@ resource "aws_lambda_function" "dr_failover_trigger" {
   timeout          = 15
   environment {
     variables = {
-      STATE_MACHINE_ARN = aws_sfn_state_machine.dr_approval_test.arn
+      STATE_MACHINE_ARN = aws_sfn_state_machine.dr_failover.arn # T5 에서 교체 (was: dr_approval_test)
       SFN_REGION        = var.region
     }
   }
