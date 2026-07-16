@@ -1869,7 +1869,8 @@ git commit -m "feat(dr): 애드온 멱등 설치·DNS 전환·완료/실패 알�
 > | **1** | **`STATE_MACHINE_ARN` 이 하네스를 가리킨다** — `dr_approval_test`(State 가 `RequestApproval` 하나, `End=true`) | **T5 의 본체.** 지금 `dr_orchestration_armed=true` 면 실재해에 승인 버튼이 뜨고, 눌러도 **아무 일도 안 일어나며 실패 알림도 없다**(성공으로 끝나므로). 운영자는 "페일오버가 돌고 있다"고 믿는다 → **T5 전까지 무장 금지** |
 > | **2** ✅ | ~~buildspec 에 `-lock-timeout` 없음~~ (codex P2 도 지적) | **해소** — `init`·`apply` 양쪽에 `-lock-timeout=5m`. `cledyu-tf-lock` 이 잡혀 있어도 5분 재시도로 흡수(즉시 실패 → 수동 force-unlock 회피) |
 > | **3** ✅ | ~~`12` 의 `curl https://auth.cledyu.com` 에 재시도 없음~~ (codex P2 도 지적) | **해소(로직)** — 30회×10s 재시도 루프(`if curl\|grep`, set -e 안전). ⚠️ **실환경 검증은 T7** — `[10]` DNS 전환 후에야 전파·캐시 흡수를 실측할 수 있다(오늘은 로직만 검증) |
-> | **4** | `notify` 에 재시도 없음 | Discord 429/장애면 **성공·실패 알림 둘 다 유실**. `[13]` 이 죽으면 Catch → NotifyFailed 도 같은 이유로 죽는다 → **무음** |
+> | **4** | `notify` 에 재시도 없음 | Discord 429/장애면 **성공·실패 알림 둘 다 유실**. `[13]` 이 죽으면 Catch → NotifyFailed 도 같은 이유로 죽는다 → **무음** (미해소 — T5) |
+> | **4b** ✅ | ~~`notify` 실패 알림이 무조건 "DNS 는 온프렘"~~ (codex P2) | **해소** — `failedState` allowlist(`RestartApps`·`VerifyServing`·`NotifyComplete`)로 분기. `[10]` SwitchDNS 이후 실패면 "이미 EKS 전환됨" 안내. SwitchDNS 자체 실패는 fail-closed 라 "온프렘"(참), 미지 단계는 보수적 "온프렘". 6케이스 검증 |
 > | **5** | `04` 의 `grep -cw Ready` 가 `Ready,SchedulingDisabled` 를 Ready 로 셈(실측) | cordon 된 노드를 통과시킨다. 현 흐름에 cordon 주체가 없어 저위험이나, `[3]` P1e 가 §11.15 상태를 만나면 운영자가 수동 cordon 할 수 있다 |
 > | **6** | `04` 의 `WANT=3` 하드코딩 vs terraform nodegroup desired | 한쪽만 바뀌면 **조용히** 어긋난다. `[4]` 가 올린 desired 를 읽거나 최소한 양쪽에 교차 주석 |
 
