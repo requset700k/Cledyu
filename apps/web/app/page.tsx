@@ -16,19 +16,19 @@ const HOW_IT_WORKS = [
 
 const FEATURES = [
   {
-    tag: '01 / VM',
+    tag: '01 VM',
     icon: '>_',
     title: '진짜 VM, 진짜 셸',
     desc: '격리된 전용 Ubuntu VM이 자동으로 준비됩니다. 브라우저 터미널에서 실제 서버 환경을 직접 다룹니다.',
   },
   {
-    tag: '02 / AI',
+    tag: '02 AI',
     icon: '?',
     title: '정답 대신 힌트를 주는 AI',
     desc: '막힌 지점에 맞춰 개념 → 방향 → 구체 3단계 힌트를 제공합니다. 정답을 대신 알려주지 않습니다.',
   },
   {
-    tag: '03 / CHECK',
+    tag: '03 CHECK',
     icon: '✔',
     title: '단계별 자동 채점',
     desc: '검증 엔진이 프로세스·포트·설정 파일 등 VM 내부 상태를 직접 확인하고, 통과한 단계만 다음으로 진행합니다.',
