@@ -7,6 +7,7 @@ declare namespace JSX {
       import('react').HTMLAttributes<HTMLElement>,
       HTMLElement
     > & {
+      class?: string;
       kind?: string;
     };
   }

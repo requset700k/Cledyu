@@ -506,5 +506,5 @@ export function ParticleFx({
     registerParticleFx();
   }, []);
 
-  return <particle-fx kind={kind} className={className} style={style} />;
+  return <particle-fx kind={kind} class={className} style={style} />;
 }
