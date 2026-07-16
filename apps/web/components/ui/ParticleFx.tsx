@@ -42,8 +42,7 @@ function registerParticleFx() {
       let seeded = null;
       let t = 0;
 
-      const shouldAnimate = () =>
-        this._intersecting && document.visibilityState === 'visible';
+      const shouldAnimate = () => this._intersecting && document.visibilityState === 'visible';
       const stopAnimation = () => {
         if (!this._raf) return;
         cancelAnimationFrame(this._raf);
