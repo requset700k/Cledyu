@@ -1668,3 +1668,176 @@ etcd 에 살아있어 EBS 만 CLI 로 지우면 **PV 가 붕 뜬다** — 다음
 → **노드를 도로 3 으로 올려** 런북 순서(selfHeal 정지→워크로드→Ingress→PVC→ENI)대로 재정리하니
 ALB·EBS·ENI 전부 0 으로 깨끗이 소멸. **교훈: 잘못된 순서를 CLI 로 억지 만회하려다 더 깊은 구멍(붕 뜬 PV)을
 팔 뻔했다.** 이 순서 강제를 계획서 T7 "hot 파괴"(현재 한 줄)에도 반영해야 한다 — 계획서만 보면 밟는다.
+
+---
+
+### 11.18 T5 착수 전 탐침 (2026-07-16) — **드릴 없이 SFN 통합 거동 4건 실측**
+
+**방법 — "지어내지 말고 재라"를 드릴 밖으로 뺐다.** 계획서는 미확정 에러명 2건을 **T5 Step 4 드릴 중에**
+확정하라고 지시했다. 그런데 그 자리들은 `[2]`(NAT·bastion 생성 ~3분) **뒤**라, 한 번 틀릴 때마다 그
+비용을 다시 낸다. → **버릴 SM 5개**로 같은 통합(`aws-sdk:ssm`·`states:startExecution.sync:2`)을
+**드릴 없이** 쟀다. bastion·노드 불필요, 과금 ~$0, 소요 ~10분. 측정 후 SM·임시 롤 전부 삭제하고
+잔여 0·프로덕션 무영향을 확인했다.
+
+> **재현 시 주의(에이전트 실수 2건 기록):** ① 임시 롤 생성이 권한 분류기에 차단됐다 — `Resource: "*"`
+> 로 넓게 쓴 것이 사유였고 타당했다. `probe-*` 로 좁히고 **사용자가 직접 생성**했다(§Vault admin 과 같은
+> 패턴). ② `aws iam create-role --description` 에 **한글**을 넣어 `ValidationError` 로 조용히
+> 실패했다 — IAM description 은 **ASCII + Latin-1 만** 받는다(허용 코드포인트 0009·000A·000D·
+> 0020-007E·00A1-00FF). 그런데 그 실패를 보고 **사용자에게 "명령어가 조용히 실패한 것 같다"고
+> 원인을 되물었다** — 내가 넘긴 인자가 틀린 것이었다. **남의 실행 결과를 의심하기 전에 내가 준
+> 명령을 먼저 읽을 것.** ③ 이 문장을 쓰면서 그 코드포인트를 **실제 제어문자로** 박아
+> `mixed-line-ending` 훅에 걸렸고, 그걸 고치려던 스크립트가 **앵커를 유일성 확인 없이 써서 문서
+> 뒷부분을 통째로 복제**했다(1803→2083줄). git index 에서 복구했다 — **문자열 앵커는 쓰기 전에
+> 유일한지, start < end 인지 확인한다.**
+
+#### (a) ✅ `[2.4] ClearAlbParam` 의 에러명 — **계획서의 유추가 맞았다**
+
+```
+error : Ssm.ParameterNotFoundException      ← 계획서 유추 그대로. 코드 변경 불필요
+cause : Service returned error code ParameterNotFound (Service: Ssm, Status Code: 400, ...)
+```
+
+**메커니즘이 드러났다: SFN 의 AWS SDK 통합은 와이어 에러코드가 아니라 SDK 예외 클래스명을 쓴다.**
+와이어 코드(`ParameterNotFound`)는 `Cause` 에만 있다. CLI 가 `An error occurred (ParameterNotFound)` 로
+찍는 것을 근거로 **에이전트가 "계획서가 틀렸다(`Ssm.ParameterNotFound` 여야 한다)"고 주장했다가 실측으로
+반증됐다** — A3·C-fix 와 **같은 클래스의 실수를 반대 방향으로** 저지를 뻔한 것이다. 그럴듯한 간접 증거로
+확정된 것을 뒤집으려 할 때도 재는 게 먼저다.
+
+#### (b) 🔴 `.sync:2` 는 자식의 `Error` 를 **감싼다** — §11.13 (e) 의 의심이 사실
+
+`Error = "BastionScriptFailed"` 로 즉시 Fail 하는 더미 자식 + `.sync:2` 로 부르는 부모:
+
+```
+$.error.Error = "States.TaskFailed"        ← BastionScriptFailed 가 아니다
+$.error.Cause = {"Cause":"SSM 명령 실패 — ...","Error":"BastionScriptFailed",
+                 "ExecutionArn":"arn:aws:states:...:execution:probe-child-fail:c24eb80f...",
+                 "Input":"{\"label\":\"RestoreVault\"}",   ← 우리가 넘긴 label 이 살아 돌아온다
+                 "Status":"FAILED","RedriveStatus":"REDRIVABLE","StartDate":...,"StopDate":...}
+```
+
+**`failedState` 는 `States.TaskFailed` 로 온다** — bastion 7단계뿐 아니라 **`.sync` 를 쓰는 모든 상태**가
+같은 값이다. §11.13 (e) 는 "7단계가 전부 `BastionScriptFailed` 하나로 온다"고 봤는데 **실제로는 그보다
+한 겹 더 무의미**하다. 다만 `Cause` 에 자식 `ExecutionArn` 이 실려 오므로 §11.13 (d) 의 "정적 Cause" 전제는
+깨졌다(→ (d)).
+
+#### (c) 🔴 **`notify` 의 `failedState` 허용목록(§11.16 (g) #4b)은 dead code였다 — "해소" 표기는 거짓**
+
+`b7b9f16` 이 넣은 `notify/index.py:74`:
+
+```python
+post_dns = failed in ("RestartApps", "VerifyServing", "NotifyComplete")
+```
+
+| 허용목록 항목 | 실제로 오는 값 | 매치 |
+|---|---|---|
+| `RestartApps` | `States.TaskFailed` (자식 SM `.sync`) | ❌ |
+| `VerifyServing` | `States.TaskFailed` (자식 SM `.sync`) | ❌ |
+| `NotifyComplete` | **도달 불가** — Catch 를 달면 성공한 페일오버에 "❌ 실패" 알림(C2 그 자체) | ❌ |
+
+**셋 다 영원히 안 맞아 `post_dns` 분기는 도달 불가능하다.** 그래서 `[11]`·`[12]` 실패 시 — 즉 **`[10]` 이
+DNS 를 EKS 로 넘긴 뒤** — 운영자에게 `DNS 는 아직 온프렘을 가리킵니다 — 트래픽은 안전합니다` 가 간다.
+**정확히 이 수정이 막으려던 오판이고, 수정 전(무조건 "온프렘")보다 나쁘다** — 틀린 내용에 "안전합니다"라는
+근거 없는 안심이 붙었다.
+
+**왜 놓쳤나:** `index.py:72` 주석이 스스로 밝힌다 — *"단계 이름은 메인 SM(Task 5)의 State 명 — 스펙 §5 표의
+SwitchDNS/RestartApps/VerifyServing 과 일치."* **스펙 표에서 이름을 가져왔지 그 값이 런타임에 뭘로 오는지는
+안 봤다.** 답은 바로 옆 §11.13 (e) 에 이미 적혀 있었다. §11.13 (f)("그 방어는 이미 계획서에 글로 적혀
+있었다 — 안 읽고 grep 부터 쳤다")와 **같은 패턴이 연속 2회**다.
+
+#### (d) ✅ 자식 `Fail` 의 `CausePath` 가 된다 — §11.13 (d) 의 "3~4홉" 수용은 무효
+
+`Fail` 상태에 `CausePath` + `States.Format` 으로 `$.label`·`$.cmd.Command.CommandId` 를 넣어 실측:
+
+```
+childError : BastionScriptFailed
+childCause : RestoreVault 실패 — aws logs tail /aws/ssm/cledyu-lab-dr-failover
+             --log-stream-name-prefix aaaa1111-bbbb-2222-cccc-333344445555
+```
+
+정의도 통과하고(`CreateStateMachine` 수락) 값도 채워져 `.sync:2` 를 넘어 부모까지 온다. §11.13 (d) 는
+"`Cause` 가 정적이라 `commandId` 가 알림에 안 실린다 → 3~4홉 수용"이라 결론지었는데 **그 전제가 틀렸다.**
+→ **Discord 알림에 쳐야 할 명령어 전문을 실어 0홉으로 만든다.** B안의 시크릿 안전성(stderr 를 안 올림)은
+그대로 유지된다 — `label` 과 `commandId` 는 시크릿이 아니다.
+
+#### (e) 🔴 **ASL 에서 `Cause` 를 파싱하면 알림이 무음으로 죽는다** (재현)
+
+(b)(d) 가 열어준 길("Cause 를 풀면 진짜 단계 이름이 있다")을 ASL 로 가면 함정이다. 평문 `Cause` 를
+`States.StringToJson` 에 넣어 실측:
+
+```
+status : FAILED
+error  : States.Runtime          ← 어떤 Catch 로도 못 잡는다
+cause  : ... error while evaluating the intrinsic function: States.StringToJson($.error.Cause).
+         Cannot convert String to Json ... Unrecognized token 'State'
+밟은 상태: CallMissingChild → ParseCause → (끝)   ← NotifyFailedStandIn 미도달 = Discord 무음
+```
+
+**그리고 `Pass` 는 `Catch` 를 달 수 없다** — 스키마 레벨 거부:
+`InvalidDefinition: Field 'Catch' is not supported at /States/ParseCause`.
+즉 방어 수단이 **원리적으로 없다.** `Cause` 가 JSON 인 것은 **자식 SM 실패일 때뿐**이고, `[2]` CodeBuild ·
+`[2.4]`/`[2.5]` SDK 실패의 `Cause` 는 평문이다((a) 의 `Service returned error code ...` 가 그 증거).
+**실패 경로에서 실패하면 그게 곧 무음이다.**
+
+→ **파싱은 `notify`(Python)에서 한다.** `try: json.loads(cause) except ValueError:` 는 두 형태를 다 삼키고,
+ASL 상태가 안 늘고, States.Runtime 위험이 0이다. **"어디서 파싱하나"가 안전성을 가르는 설계 결정이다.**
+
+#### (f) 결정 — T5 의 실패 진단을 3층으로 분리 (각 층이 하나만 책임진다)
+
+| 질문 | 수단 | 왜 |
+|---|---|---|
+| **어느 단계인가** | 각 Task 의 `Catch` → **자기 이름을 static 주입하는 전용 Pass**(`$.failedStep`) | `$.error.Error` 는 (b) 로 무용. 파싱 없음 → States.Runtime 0. Task 상태 **17개**에 대해 HCL `for` 로 생성(손으로 17번 = 오타). `Choice`·`Wait`·`Pass` 는 Catch 불가라 대상 아님 |
+| **트래픽이 어디 있나** | `DnsSwitched?` Choice — **`$.dns.alb` `IsPresent`** | `SwitchDNS` 의 `ResultPath="$.dns"` 라 존재 ⟺ `[10]` 통과. **지상 진실**. `failedStep` 이 정확해져 허용목록도 작동은 하나 **안 쓴다** — `[10]`↔`[11]` 사이에 상태가 끼면 이름 추론은 **조용히** 틀리고 `IsPresent` 는 안 틀린다(§11.11 의 교훈). `AgentReady?` 에 선례 있음 |
+| **왜 죽었나** | 자식 `CausePath`(label+commandId) + `notify` 가 Python 에서 파싱 | (d)(e). 평문이면 그대로 출력 — 어느 쪽이든 안전 |
+
+#### (h) 🔴 **§11.17 (a) 드리프트가 두 번째로 재현됐다 — 이번엔 "마지막 방어선"에서** (T5 apply 가 수리)
+
+T5 의 `-target` plan 이 IAM 정책 update 를 띄우길래 파고드니, **AWS 의 `cledyu-lab-dr-sfn` 정책에
+`InvokeFailoverLambdas` statement 가 없었다.** 그게 `[5] addon-install`·`[10] dns-switch`·**`[13] notify`**
+호출 권한이다. 코드엔 `218d239`(T4) 때부터 있었고 `#317` 로 main 에도 있다 — **AWS 에만 없었다.**
+
+| | 코드 | AWS |
+|---|---|---|
+| `dr_sfn` statement | 9개 | **8개** (`InvokeFailoverLambdas` 없음) |
+| `dr_sfn_child` | 3개 | 3개 ✅ |
+
+**무장된 채 실재해가 났다면:** `[1]`~`[4.5]` 는 다 통과하고(그 권한들은 있다) `[5]` 에서 AccessDenied →
+Catch → `NotifyFailed` → **거기서도 AccessDenied** → 실행은 FAILED, **Discord 는 완전 무음.**
+운영자는 승인을 누르고 기다리다 아무 소식도 못 받는다. `dr-orchestration.tf` 의 주석이 정확히 이걸
+예언해뒀다: *"notify 를 빠뜨리면 **실패가 무음이 된다** … 이 설계의 마지막 방어선이라 T4 Step 5 에서
+가장 먼저 확인한다."* — **확인했다고 적어놓고 확인하지 않은 것이다.**
+
+**왜 T4 드릴이 못 잡았나 — 틀린 principal 로 쟀다.** T4 Step 5 는 Lambda 3종을 `aws lambda invoke` 로
+**사용자 자격증명**으로 불러 "Lambda 가 동작한다"를 확인했다. 그러나 검증해야 했던 명제는 **"SFN 롤이
+그 Lambda 를 부를 수 있다"** 였고, 그 롤의 권한은 **한 번도 행사된 적이 없다.**
+**§11.12 와 같은 뿌리다** — 거기선 "사람은 파드가 0/1 이어도 그냥 init 을 친다, 스크립트만 Ready 를
+기다린다"였고, 여기선 "사람은 자기 admin 으로 Lambda 를 부른다, SFN 만 롤로 부른다". **명령은 맞는데
+실행 주체가 다르다.** `[2]` 의 `-target` 18개에도 이 정책은 없어(hot 리소스만) 페일오버가 자가 수리하지도
+못한다.
+
+**왜 T5 는 잡았나 — SM 이 정책을 `depends_on` 하고 `-target` 은 의존성을 따라간다.**
+`terraform plan -target=aws_sfn_state_machine.dr_failover` 가 `update aws_iam_role_policy.dr_sfn` 을 띄웠다.
+즉 **T5 apply 가 이 드리프트를 수리한다**(§11.17 (a) 의 F3 정책을 T1 드릴의 apply 가 수리한 것과 같은 구조).
+
+**교훈 2개:**
+1. **"X 가 동작한다" 와 "Y 가 X 를 호출할 수 있다"는 다른 명제다.** IAM 을 검증할 땐 **실제 principal 로**
+   행사해야 한다. 사람 손으로 부른 성공은 롤 권한의 증거가 **아니다.**
+2. **완료 기준의 드리프트 체크를 Lambda 존재 여부로만 두면 안 된다**(내가 처음 그렇게 썼다) — 리소스는
+   있는데 **부를 권한이 없는** 게 이 사고다. 아래 완료 기준에 SFN 롤 정책 대조를 추가했다.
+
+#### (g) 함께 확정된 것
+
+- **`[2]` 에 `Retry` 를 붙이지 않는다** (계획서 "착수 전 결정 (2)" 종결). 그 글은 `-lock-timeout` **추가
+  전**에 쓰였다 — `73aad01` 이 `init`·`apply` 양쪽에 `-lock-timeout=5m` 을 넣어 **사람↔빌드 락 충돌을
+  빌드 안에서 terraform 이 흡수**한다. 그리고 CodeBuild `.sync` 실패는 락이든 `-var` 누락이든 SFN 엔 같은
+  에러로 오므로(구분 불가) **계획서 자신의 규칙("구분이 안 되면 Retry 를 붙이지 않는다")대로** 안 붙인다.
+  런북에 "승인 전 terraform 을 만지지 말 것"은 그대로 명시(T6).
+- **`NotifyComplete` 가 Discord 장애로 죽으면 실행을 FAILED 로 둔다.** `Catch` → `NotifyFailed` 는
+  **금지** — 성공한 페일오버에 "❌ 실패" 알림이 가는 C2 재현이다. 재시도는 SFN `Retry`(5s×3, backoff 2)로
+  하고, 소진되면 콘솔·CloudWatch 의 FAILED 가 "알림이 왜 안 왔나"의 단서로 남는다.
+- **main 머지 완료** (PR #317, squash). `[2]` 는 `source_version = "main"` 이고 SM 은 `SourceVersion` 을
+  안 넘기므로 **머지 전이면 buildspec 도 `-target` 대상인 `eks_dr_bastion_ssm_param` 도 main 에 없어
+  §11.17 (a) 가 그대로 재현**될 뻔했다(드릴 편의 문제가 아니라 원리적 불능). T5 브랜치는 `origin/main`
+  에서 딴다 — squash 라 기존 브랜치를 rebase 하면 이미 main 에 있는 43커밋이 재생된다.
+- **AWS 실측(2026-07-16): Lambda 3종 전부 배포됨** · bastion 롤 `cledyu-dr-bastion` 의
+  `ssm-put-failover-param` **살아있음**(IAM 롤은 hot 파괴 대상이 아니다 — §11.17 (a) 의 F3 수정이 지속) ·
+  warm 상태 정상(컨트롤플레인 ACTIVE·노드 desired 0·bastion 없음·ALB 파라미터 없음 = `[2.4]` 첫 실행 조건).
