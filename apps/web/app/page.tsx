@@ -43,12 +43,12 @@ export default function LandingPage() {
       {/* 전역 배경: 은은한 성운 + 별 */}
       <ParticleFx kind="stars" className="pointer-events-none fixed inset-0 -z-10 opacity-95" />
 
-      {/* HUD 프레임 */}
-      <div className="pointer-events-none fixed inset-2.5 z-[60] rounded border border-white/[0.16]">
-        <div className="absolute -top-px left-6 h-px w-14 bg-white/60" />
-        <div className="absolute left-[-1px] top-6 h-14 w-px bg-white/60" />
-        <div className="absolute -bottom-px right-6 h-px w-14 bg-white/60" />
-        <div className="absolute right-[-1px] bottom-6 h-14 w-px bg-white/60" />
+      {/* HUD 코너 장식 */}
+      <div className="pointer-events-none fixed inset-6 z-[60] sm:inset-8">
+        <div className="absolute left-0 top-0 h-px w-12 bg-white/35" />
+        <div className="absolute left-0 top-0 h-12 w-px bg-white/35" />
+        <div className="absolute bottom-0 right-0 h-px w-12 bg-white/35" />
+        <div className="absolute bottom-0 right-0 h-12 w-px bg-white/35" />
       </div>
 
       <div style={{ scrollSnapType: 'y proximity' }}>

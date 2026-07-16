@@ -49,51 +49,53 @@ export function Navbar() {
 
   return (
     <>
-      <Link
-        href="/"
-        className="fixed left-6 top-6 z-[70] select-none font-michroma text-[15px] tracking-[0.08em] text-white sm:left-10 sm:top-[34px]"
-      >
-        CLEDYU
-      </Link>
+      <header className="pointer-events-none fixed inset-x-0 top-6 z-[70] mx-auto flex w-full max-w-[1280px] items-start justify-between px-4 sm:px-10">
+        <Link
+          href="/"
+          className="pointer-events-auto select-none font-michroma text-[15px] tracking-[0.08em] text-white sm:mt-2.5"
+        >
+          CLEDYU
+        </Link>
 
-      <nav className="fixed right-10 top-6 z-[70] hidden items-center gap-1 rounded-full border border-white/30 bg-black/70 p-1.5 backdrop-blur-md sm:flex">
-        {links.map((link) => (
-          <Link
-            key={link.href}
-            href={link.href}
-            className={pillClass(isActive(pathname, link.href))}
-          >
-            {link.label}
-          </Link>
-        ))}
-        {me ? (
-          <button
-            onClick={handleLogout}
-            className={`${pillClass(false)} ml-1 border-l border-white/20 pl-5`}
-          >
-            로그아웃
-          </button>
-        ) : (
-          <Link
-            href="/login"
-            className="ml-1 rounded-full border border-white/40 px-5 py-[7px] text-sm font-semibold text-white transition-colors hover:bg-white hover:text-black"
-          >
-            로그인
-          </Link>
-        )}
-      </nav>
+        <nav className="pointer-events-auto hidden items-center gap-1 rounded-full border border-white/30 bg-black/70 p-1.5 backdrop-blur-md sm:flex">
+          {links.map((link) => (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={pillClass(isActive(pathname, link.href))}
+            >
+              {link.label}
+            </Link>
+          ))}
+          {me ? (
+            <button
+              onClick={handleLogout}
+              className={`${pillClass(false)} ml-1 border-l border-white/20 pl-5`}
+            >
+              로그아웃
+            </button>
+          ) : (
+            <Link
+              href="/login"
+              className="ml-1 rounded-full border border-white/40 px-5 py-[7px] text-sm font-semibold text-white transition-colors hover:bg-white hover:text-black"
+            >
+              로그인
+            </Link>
+          )}
+        </nav>
 
-      {/* 모바일 전용 햄버거 토글 — sm 미만에서만 노출 */}
-      <button
-        type="button"
-        onClick={() => setMobileOpen((open) => !open)}
-        className="fixed right-6 top-6 z-[70] rounded-full border border-white/30 bg-black/70 p-2 text-white backdrop-blur-md sm:hidden"
-        aria-label="네비게이션 메뉴 토글"
-        aria-controls="mobile-nav"
-        aria-expanded={mobileOpen}
-      >
-        <MenuIcon open={mobileOpen} />
-      </button>
+        {/* 모바일 전용 햄버거 토글 — sm 미만에서만 노출 */}
+        <button
+          type="button"
+          onClick={() => setMobileOpen((open) => !open)}
+          className="pointer-events-auto rounded-full border border-white/30 bg-black/70 p-2 text-white backdrop-blur-md sm:hidden"
+          aria-label="네비게이션 메뉴 토글"
+          aria-controls="mobile-nav"
+          aria-expanded={mobileOpen}
+        >
+          <MenuIcon open={mobileOpen} />
+        </button>
+      </header>
 
       {/* 모바일 드롭다운 — 햄버거 클릭 시 nav 링크를 세로로 펼침 */}
       {mobileOpen && (
