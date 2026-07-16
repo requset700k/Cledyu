@@ -26,7 +26,7 @@ const LINES: { text: string; color?: string; delay: number; duration: number; st
   { text: '$ curl http://localhost:8080', delay: 5.5, duration: 0.8, steps: 27 },
   { text: '<!DOCTYPE html>', color: 'text-white/45', delay: 6.5, duration: 0.5, steps: 16 },
   {
-    text: '✔ STEP 1/4 passed',
+    text: '✔ STEP 1/5 passed',
     color: 'text-white/80',
     delay: 7.3,
     duration: 0.6,
