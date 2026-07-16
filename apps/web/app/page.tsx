@@ -110,7 +110,7 @@ export default function LandingPage() {
           className="flex min-h-screen flex-col px-6 pb-8 pt-28 sm:px-16 sm:pb-10 sm:pt-32"
         >
           <div className="flex flex-1 items-center">
-            <div className="grid w-full items-end gap-10 border-y border-white/15 py-12 sm:grid-cols-[minmax(0,1fr)_minmax(280px,360px)] sm:gap-16 sm:py-16 lg:gap-24">
+            <div className="mx-auto grid w-full max-w-[1120px] items-end gap-10 border-y border-white/15 py-12 sm:grid-cols-[minmax(0,1fr)_minmax(280px,340px)] sm:gap-12 sm:py-16 lg:gap-16">
               <h2 className="max-w-[820px] text-left font-chakra text-[clamp(32px,4.8vw,72px)] font-bold leading-[1.12] tracking-[-0.03em] text-white">
                 첫 번째 실습을
                 <br className="hidden sm:block" /> 시작하세요
@@ -129,7 +129,7 @@ export default function LandingPage() {
               </div>
             </div>
           </div>
-          <div className="mt-8 flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mx-auto mt-8 flex w-full max-w-[1120px] flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-wrap items-center gap-x-7 gap-y-3">
               <a href="#" className="text-[13px] tracking-[-0.01em] text-white/45">
                 이용약관
