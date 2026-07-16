@@ -40,7 +40,7 @@ export default function LandingPage() {
           </div>
           <div className="flex justify-end">
             <p className="max-w-[480px] text-right text-[clamp(15px,1.6vw,22px)] leading-[1.6] tracking-[-0.02em] text-white/85">
-              격리된 실제 VM에서,
+              격리된 실제 VM에서
               <br />
               직접 명령을 실행하며 배웁니다
             </p>
@@ -63,9 +63,9 @@ export default function LandingPage() {
                 실전 감각을 익히기 어렵습니다
               </p>
               <p className="mt-4">
-                직접 명령을 실행하고,
+                직접 명령을 실행하고
                 <br />
-                실패하고, 다시 해결해 보세요
+                실패한 환경을 다시 복구합니다
               </p>
             </div>
           </div>
@@ -90,7 +90,7 @@ export default function LandingPage() {
                 채점 엔진이 실제 시스템 상태를 확인합니다
               </p>
               <p className="mt-4">
-                정답을 외우는 대신,
+                정답을 외우는 대신
                 <br />
                 실제로 동작하는 환경을 완성하세요
               </p>
