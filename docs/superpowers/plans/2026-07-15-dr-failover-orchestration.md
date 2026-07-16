@@ -1861,14 +1861,14 @@ git commit -m "feat(dr): 애드온 멱등 설치·DNS 전환·완료/실패 알�
 - Produces: `aws_sfn_state_machine.dr_failover` — EventBridge 타겟·`failover-trigger` env 가 이걸 가리키게 교체
 - **[1] 의 승인 output `{snapshot, approvedBy, approvedAt}` → [7] 의 `SNAPSHOT_KEY` 로 흐른다**
 
-> **🆕 T5 에서 함께 처리할 잔여 6건 (2026-07-16 브랜치 감사 — 스펙 §11.16 (g)).**
+> **🆕 T5 에서 함께 처리할 잔여 (2026-07-16 브랜치 감사 — 스펙 §11.16 (g)). #2·#3 은 2026-07-16 해소.**
 > 전부 "T5 가 없으면 손대봐야 소용없거나, T5 를 만들면서 자연히 닿는 자리"라 여기로 모았다.
 >
-> | # | 내용 | 안 하면 |
+> | # | 내용 | 안 하면 / 처리 |
 > |---|---|---|
 > | **1** | **`STATE_MACHINE_ARN` 이 하네스를 가리킨다** — `dr_approval_test`(State 가 `RequestApproval` 하나, `End=true`) | **T5 의 본체.** 지금 `dr_orchestration_armed=true` 면 실재해에 승인 버튼이 뜨고, 눌러도 **아무 일도 안 일어나며 실패 알림도 없다**(성공으로 끝나므로). 운영자는 "페일오버가 돌고 있다"고 믿는다 → **T5 전까지 무장 금지** |
-> | **2** | buildspec 에 `-lock-timeout` 없음 | `cledyu-tf-lock`(DynamoDB) 이 잡혀 있으면 `[2]` 가 **즉시** 실패 → 재해 중 수동 `force-unlock`. `-lock-timeout=5m` 이면 대부분 흡수된다 |
-> | **3** | `12` 의 `curl https://auth.cledyu.com` 에 재시도 없음 | alias TTL 60s. `[11]` 의 rollout 이 우연히 시간을 벌어줄 뿐이다(§11.14 의 "여유 0초 — 우연히 살았다"와 같은 형태). **`[12]` 는 마지막 게이트라 여기서 죽으면 완벽히 복구된 DR 이 ❌ 실패 알림**을 보낸다 |
+> | **2** ✅ | ~~buildspec 에 `-lock-timeout` 없음~~ (codex P2 도 지적) | **해소** — `init`·`apply` 양쪽에 `-lock-timeout=5m`. `cledyu-tf-lock` 이 잡혀 있어도 5분 재시도로 흡수(즉시 실패 → 수동 force-unlock 회피) |
+> | **3** ✅ | ~~`12` 의 `curl https://auth.cledyu.com` 에 재시도 없음~~ (codex P2 도 지적) | **해소(로직)** — 30회×10s 재시도 루프(`if curl\|grep`, set -e 안전). ⚠️ **실환경 검증은 T7** — `[10]` DNS 전환 후에야 전파·캐시 흡수를 실측할 수 있다(오늘은 로직만 검증) |
 > | **4** | `notify` 에 재시도 없음 | Discord 429/장애면 **성공·실패 알림 둘 다 유실**. `[13]` 이 죽으면 Catch → NotifyFailed 도 같은 이유로 죽는다 → **무음** |
 > | **5** | `04` 의 `grep -cw Ready` 가 `Ready,SchedulingDisabled` 를 Ready 로 셈(실측) | cordon 된 노드를 통과시킨다. 현 흐름에 cordon 주체가 없어 저위험이나, `[3]` P1e 가 §11.15 상태를 만나면 운영자가 수동 cordon 할 수 있다 |
 > | **6** | `04` 의 `WANT=3` 하드코딩 vs terraform nodegroup desired | 한쪽만 바뀌면 **조용히** 어긋난다. `[4]` 가 올린 desired 를 읽거나 최소한 양쪽에 교차 주석 |
