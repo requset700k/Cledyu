@@ -131,7 +131,9 @@ export default function LandingPage() {
                   {f.icon}
                 </div>
                 <h3 className="mt-5 font-chakra text-xl font-semibold text-white">{f.title}</h3>
-                <p className="mt-2.5 text-sm leading-[1.75] text-white/55">{f.desc}</p>
+                <p className="mt-2.5 break-keep text-sm leading-[1.75] text-white/55">
+                  {f.desc}
+                </p>
               </div>
             ))}
           </div>
