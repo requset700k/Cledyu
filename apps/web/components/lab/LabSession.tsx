@@ -176,18 +176,28 @@ export function LabSession({
           <SessionTimer expiresAt={session.expires_at} onExpire={() => setExpired(true)} />
         </div>
       )}
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(360px,420px)_1fr] gap-6 mt-4 items-start">
-        <div className="space-y-4 xl:max-h-[calc(100vh-9rem)] xl:overflow-y-auto xl:pr-1">
+      <div className="mt-4 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(380px,420px)_1fr]">
+        <div className="space-y-4 lg:max-h-[calc(100vh-9rem)] lg:overflow-y-auto lg:pr-1">
           {allPassed && (
             <div className="border border-white/30 bg-white/[0.05] px-4 py-3 text-sm text-white">
               🎉 모든 단계를 완료했습니다. 수고하셨습니다!
             </div>
           )}
 
-          <div>
-            <h2 className="mb-2 px-3 font-jbmono text-[11px] tracking-[0.12em] text-white/60">
-              STEPS
-            </h2>
+          <section aria-labelledby="lab-progress-title">
+            <div className="mb-3 flex items-end justify-between gap-3 px-1">
+              <div>
+                <p className="font-jbmono text-[10px] tracking-[0.14em] text-white/50">
+                  LAB PROGRESS
+                </p>
+                <h2 id="lab-progress-title" className="mt-1 font-chakra text-lg font-semibold text-white">
+                  하나씩 직접 해결하세요
+                </h2>
+              </div>
+              <span className="font-jbmono text-xs text-white/55">
+                {steps.filter((step) => statusOf(step.id) === 'passed').length} / {steps.length}
+              </span>
+            </div>
             <StepList
               steps={steps}
               statusOf={statusOf}
@@ -195,56 +205,75 @@ export function LabSession({
               onSelect={setSelectedId}
               isSelectable={(id) => isStepSelectable(steps, id, statusOf)}
             />
-          </div>
+          </section>
 
-          <div className="border border-white/20 bg-white/[0.02] p-6">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="font-jbmono text-[11px] tracking-[0.1em] text-white/50">
-                STEP {currentStep.id}
-              </span>
-              <h3 className="font-chakra font-semibold tracking-[-0.02em] text-white">
+          <section
+            className="border border-white/25 bg-white/[0.025]"
+            aria-labelledby="current-step-title"
+          >
+            <header className="border-b border-white/15 px-6 py-5">
+              <div className="flex items-center justify-between gap-3 font-jbmono text-[10px] tracking-[0.12em] text-white/50">
+                <span>CURRENT TASK</span>
+                <span>
+                  {String(currentStep.id).padStart(2, '0')} / {String(steps.length).padStart(2, '0')}
+                </span>
+              </div>
+              <h3
+                id="current-step-title"
+                className="mt-2 font-chakra text-xl font-semibold tracking-[-0.025em] text-white"
+              >
                 {currentStep.title}
               </h3>
-            </div>
-            <p className="mb-4 whitespace-pre-line text-sm leading-relaxed text-white/70">
-              {currentStep.description}
-            </p>
+            </header>
+            <div className="p-6">
+              <p className="whitespace-pre-line text-[15px] leading-[1.75] text-white/75">
+                {currentStep.description}
+              </p>
 
-            <div className="flex items-center gap-3">
+              {currentStatus === 'failed' && failedChecks.length > 0 && (
+                <div className="mt-5 border border-red-500/30 bg-red-500/10 px-4 py-3">
+                  <p className="mb-1.5 text-xs font-medium text-red-300">
+                    아직 통과하지 못한 항목입니다
+                  </p>
+                  <ul className="space-y-1">
+                    {failedChecks.map((ck, i) => (
+                      <li key={i} className="text-xs text-red-200/90">
+                        <span className="font-jbmono text-red-300">{ck.type}</span>
+                        {ck.detail ? `: ${ck.detail}` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+
+            <footer className="flex flex-wrap items-center justify-between gap-4 border-t border-white/15 px-6 py-5">
+              <div>
+                <p className="text-sm font-medium text-white/85">터미널 작업을 마쳤나요?</p>
+                <p className="mt-0.5 text-xs text-white/50">현재 환경을 확인해 다음 단계로 안내합니다.</p>
+              </div>
               <button
                 type="button"
                 onClick={() => validate.mutate(currentStep.id)}
                 disabled={validating || currentStatus === 'passed'}
-                className="rounded-full bg-white px-6 py-2 text-sm font-bold text-black transition-colors hover:bg-white/85 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white"
+                className="rounded-full bg-white px-6 py-2.5 text-sm font-bold text-black transition-colors hover:bg-white/85 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white"
               >
-                {currentStatus === 'passed' ? '완료됨' : validating ? '검증 중...' : '검증'}
+                {currentStatus === 'passed'
+                  ? '이 단계 완료'
+                  : validating
+                    ? '환경 확인 중...'
+                    : '이 단계 검증하기 →'}
               </button>
-              {currentStatus === 'passed' && <span className="text-xs text-emerald-400">통과</span>}
-              {validating && <span className="text-amber-400 text-xs">검증엔진 결과 대기 중…</span>}
-              {currentStatus === 'failed' && failedChecks.length === 0 && (
-                <span className="text-red-400 text-xs">검증에 실패했습니다. 다시 시도하세요.</span>
-              )}
-              {validate.isError && (
-                <span className="text-red-400 text-xs">검증 요청에 실패했습니다.</span>
-              )}
-            </div>
-
-            {currentStatus === 'failed' && failedChecks.length > 0 && (
-              <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3">
-                <p className="text-red-300 text-xs font-medium mb-1.5">
-                  검증 실패 — 아래 항목을 확인하세요
-                </p>
-                <ul className="space-y-1">
-                  {failedChecks.map((ck, i) => (
-                    <li key={i} className="text-red-200/90 text-xs">
-                      <span className="font-mono text-red-300">{ck.type}</span>
-                      {ck.detail ? `: ${ck.detail}` : ''}
-                    </li>
-                  ))}
-                </ul>
+              <div className="w-full text-xs sm:w-auto">
+                {currentStatus === 'passed' && <span className="text-emerald-400">검증 완료</span>}
+                {validating && <span className="text-amber-400">검증 결과를 기다리고 있습니다.</span>}
+                {currentStatus === 'failed' && failedChecks.length === 0 && (
+                  <span className="text-red-400">조건을 다시 확인한 뒤 재시도해 주세요.</span>
+                )}
+                {validate.isError && <span className="text-red-400">검증을 요청하지 못했습니다.</span>}
               </div>
-            )}
-          </div>
+            </footer>
+          </section>
 
           {/* AI 학습 도우미 — 정적 hint 표시를 대체. key=stepId 로 스텝 전환 시 힌트 초기화. */}
           <AiTutorPanel
@@ -255,22 +284,22 @@ export function LabSession({
           />
         </div>
 
-        {/* 우측 — 작업 영역(터미널/IDE). xl 미만에서는 문제 아래로 쌓인다. */}
-        <div className="xl:sticky xl:top-24">
+        {/* 우측 — 작업 영역(터미널/IDE). lg 미만에서는 문제 아래로 쌓인다. */}
+        <div className="lg:sticky lg:top-24">
           {terminalUrl ? (
             session?.ide_url ? (
               <LabWorkspace
                 sessionId={sessionId}
                 terminalPath={terminalUrl}
                 idePath={session.ide_url}
-                heightClass="h-[60vh] xl:h-[calc(100vh-15rem)]"
+                heightClass="h-[520px]"
                 onTerminalOutput={appendTerminalOutput}
                 redrawTerminalOnConnect={session?.vm_provider === 'kubevirt'}
               />
             ) : (
               <LabTerminal
                 terminalPath={terminalUrl}
-                heightClass="h-[60vh] xl:h-[calc(100vh-13rem)]"
+                heightClass="h-[520px]"
                 onOutput={appendTerminalOutput}
                 redrawOnConnect={session?.vm_provider === 'kubevirt'}
               />

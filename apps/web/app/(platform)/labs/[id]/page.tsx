@@ -38,6 +38,12 @@ function LabDetail() {
   >(null);
   const [replaceError, setReplaceError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!resumedExisting) return;
+    const timer = window.setTimeout(() => setResumedExisting(false), 5000);
+    return () => window.clearTimeout(timer);
+  }, [resumedExisting]);
+
   const {
     data: lab,
     isLoading,
@@ -204,8 +210,20 @@ function LabDetail() {
       {sessionId ? (
         <>
           {resumedExisting && (
-            <div className="mt-6 border border-white/25 bg-white/[0.04] px-4 py-3 text-sm text-white/80">
-              ✔ 이미 진행 중인 실습 세션이 있어 기존 세션으로 이어서 열었습니다.
+            <div
+              role="status"
+              className="mt-6 inline-flex items-center gap-3 border border-white/25 bg-white/[0.04] px-4 py-2.5 text-sm text-white/80"
+            >
+              <span aria-hidden="true" className="h-1.5 w-1.5 bg-emerald-400" />
+              <span>진행 중이던 세션을 이어서 열었습니다.</span>
+              <button
+                type="button"
+                onClick={() => setResumedExisting(false)}
+                aria-label="이어보기 안내 닫기"
+                className="ml-1 text-white/45 transition-colors hover:text-white"
+              >
+                ×
+              </button>
             </div>
           )}
           <LabSession sessionId={sessionId} lab={lab} skipBootGrace={skipBootGrace} />
