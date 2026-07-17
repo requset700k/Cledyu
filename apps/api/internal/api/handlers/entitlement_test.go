@@ -20,8 +20,11 @@ import (
 )
 
 type entitlementSessionProvider struct {
-	createCount int
-	createErr   error
+	createCount   int
+	createErr     error
+	activeID      string
+	activeSession *session.Session
+	deletedID     string
 }
 
 func (p *entitlementSessionProvider) Create(_ context.Context, sessionID, labID, userID string, _ session.BootInit) (*session.Session, error) {
@@ -40,12 +43,22 @@ func (p *entitlementSessionProvider) Create(_ context.Context, sessionID, labID,
 	}, nil
 }
 
-func (p *entitlementSessionProvider) Get(context.Context, string) (*session.Session, error) {
+func (p *entitlementSessionProvider) Get(_ context.Context, sessionID string) (*session.Session, error) {
+	if p.activeSession != nil && p.activeID == sessionID {
+		return p.activeSession, nil
+	}
 	return nil, session.ErrNotFound
 }
-func (p *entitlementSessionProvider) Delete(context.Context, string) error { return nil }
+func (p *entitlementSessionProvider) Delete(_ context.Context, sessionID string) error {
+	p.deletedID = sessionID
+	if p.activeID == sessionID {
+		p.activeID = ""
+		p.activeSession = nil
+	}
+	return nil
+}
 func (p *entitlementSessionProvider) FindActiveByUser(context.Context, string) (string, error) {
-	return "", nil
+	return p.activeID, nil
 }
 func (p *entitlementSessionProvider) CountActiveSessions(context.Context) (int, error) { return 0, nil }
 func (p *entitlementSessionProvider) ReapStuckSessions(context.Context, time.Duration) ([]string, error) {
@@ -156,6 +169,66 @@ func TestCreateSessionRemovesInitialProgressWhenProviderCreateFails(t *testing.T
 	}
 	if len(db.progress) != 0 {
 		t.Fatalf("progress rows=%d, want 0", len(db.progress))
+	}
+}
+
+func TestCreateSessionReplacesCompletedActiveSession(t *testing.T) {
+	db := newFakePersistence()
+	completed := twoStepSeed()
+	completed.LabID = "lab-docker-basics"
+	completed.UserID = "u1"
+	for i := range completed.Steps {
+		completed.Steps[i].Status = "passed"
+	}
+	db.progress["completed-session"] = *toStoreProgress(completed)
+	provider := &entitlementSessionProvider{
+		activeID: "completed-session",
+		activeSession: &session.Session{
+			ID:        "completed-session",
+			LabID:     "lab-docker-basics",
+			UserID:    "u1",
+			Status:    "ready",
+			ExpiresAt: time.Now().Add(time.Hour),
+		},
+	}
+	r := newEntitlementRouter(t, "debug", db, provider)
+
+	w, body := postSession(t, r, "lab-docker-basics")
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%v, want 201", w.Code, body)
+	}
+	if provider.deletedID != "completed-session" {
+		t.Fatalf("deleted session=%q, want completed-session", provider.deletedID)
+	}
+	if provider.createCount != 1 {
+		t.Fatalf("provider create count=%d, want 1", provider.createCount)
+	}
+}
+
+func TestCreateSessionKeepsIncompleteActiveSession(t *testing.T) {
+	db := newFakePersistence()
+	incomplete := twoStepSeed()
+	incomplete.LabID = "lab-docker-basics"
+	incomplete.UserID = "u1"
+	db.progress["active-session"] = *toStoreProgress(incomplete)
+	provider := &entitlementSessionProvider{
+		activeID: "active-session",
+		activeSession: &session.Session{
+			ID:        "active-session",
+			LabID:     "lab-docker-basics",
+			UserID:    "u1",
+			Status:    "ready",
+			ExpiresAt: time.Now().Add(time.Hour),
+		},
+	}
+	r := newEntitlementRouter(t, "debug", db, provider)
+
+	w, body := postSession(t, r, "lab-docker-basics")
+	if w.Code != http.StatusConflict || body["code"] != "session_exists" {
+		t.Fatalf("status=%d body=%v, want session_exists", w.Code, body)
+	}
+	if provider.deletedID != "" || provider.createCount != 0 {
+		t.Fatalf("incomplete session changed: deleted=%q creates=%d", provider.deletedID, provider.createCount)
 	}
 }
 

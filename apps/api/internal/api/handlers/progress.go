@@ -98,6 +98,17 @@ func (st *stepStore) put(sessionID string, ss *sessionSteps) error {
 	return nil
 }
 
+// completed는 캐시 또는 DB 진행 스냅샷에서 모든 단계가 통과됐는지 확인한다.
+// 조회 실패나 진행 기록 부재는 미완료로 취급해 실행 중인 세션을 실수로 교체하지 않는다.
+func (st *stepStore) completed(sessionID string) bool {
+	completed := false
+	found := st.withSession(sessionID, func(ss *sessionSteps) bool {
+		completed = ss.allPassed()
+		return false
+	})
+	return found && completed
+}
+
 // take는 세션 진행 상태를 캐시·DB 양쪽에서 제거하고 마지막 상태를 반환한다(DeleteSession).
 // 캐시 미스 시 DB에서 읽어 반환한다 — 재시작 직후 삭제에서도 lab_abandoned 판정이 가능하다.
 func (st *stepStore) take(sessionID string) (*sessionSteps, bool) {

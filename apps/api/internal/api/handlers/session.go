@@ -251,6 +251,18 @@ func (h *Handler) CreateSession(c *gin.Context) {
 		if cleaned != "" {
 			h.steps.remove(cleaned)
 		}
+		if existing != "" && h.steps.completed(existing) {
+			// 완료된 VM은 결과 화면을 위해 TTL까지 유지될 수 있다. 새 실습 요청에서는 종료해
+			// 단일 활성 세션 제약이 재실행을 막지 않도록 한다.
+			if err := h.sessions.Delete(ctx, existing); err != nil && !errors.Is(err, session.ErrNotFound) {
+				recordSpanError(span, err)
+				h.log.Error("replace completed session", zap.Error(err), zap.String("session_id", existing))
+				h.err(c, http.StatusInternalServerError, "replace completed session failed")
+				return
+			}
+			h.steps.remove(existing)
+			existing = ""
+		}
 		if existing != "" {
 			span.SetAttributes(attribute.String("session.create.result", "existing_session"))
 			c.JSON(http.StatusConflict, gin.H{
