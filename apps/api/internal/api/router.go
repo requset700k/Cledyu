@@ -86,6 +86,7 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions session.Provider, v
 		v1.GET("/me", h.GetMe)
 		v1.GET("/me/progress", h.GetMyProgress)
 		v1.GET("/me/dashboard", h.GetMyDashboard)
+		v1.GET("/me/lab-statuses", h.GetMyLabStatuses)
 		v1.GET("/me/subscription", h.GetMySubscription)
 		v1.PATCH("/me/preferences", h.SetMyPreferences)
 		v1.GET("/billing/plans", h.GetBillingPlans)

@@ -36,15 +36,24 @@ function LabsCatalog() {
     queryKey: ['labs'],
     queryFn: () => api.labs.list(),
   });
-  const { data: dashboard } = useQuery({
-    queryKey: ['my-dashboard'],
-    queryFn: () => api.me.dashboard(),
+  const {
+    data: labStatuses,
+    isFetching: isStatusFetching,
+    isError: isStatusError,
+  } = useQuery({
+    queryKey: ['my-lab-statuses'],
+    queryFn: () => api.me.labStatuses(),
     retry: false,
+    staleTime: 0,
+    refetchOnMount: 'always',
   });
 
   const labs = data?.items ?? [];
   const filtered = filter === 'all' ? labs : labs.filter((l) => l.difficulty === filter);
-  const progressByLab = new Map(dashboard?.labs.map((lab) => [lab.lab_id, lab]) ?? []);
+  const statusReady = !isStatusFetching && !isStatusError && labStatuses !== undefined;
+  const progressByLab = new Map(
+    statusReady ? labStatuses.items.map((lab) => [lab.lab_id, lab]) : [],
+  );
 
   return (
     <>
@@ -94,23 +103,36 @@ function LabsCatalog() {
             !isError &&
             filtered.map((lab, i) => {
               const progress = progressByLab.get(lab.id);
+              const detailHref = `/labs/${encodeURIComponent(lab.id)}`;
               const href =
-                progress?.status === 'in_progress' && progress.session_id
+                statusReady && progress?.status === 'in_progress' && progress.session_id
                   ? buildActiveSessionResumeHref(lab.id, progress.session_id)
-                  : `/labs/${encodeURIComponent(lab.id)}`;
-              const actionLabel =
-                progress?.status === 'in_progress'
-                  ? '이어가기'
-                  : progress?.status === 'completed'
-                    ? '다시 하기'
-                    : '시작하기';
+                  : detailHref;
+              const actionLabel = isStatusFetching
+                ? '상태 확인 중'
+                : isStatusError
+                  ? '상세 보기'
+                  : progress?.status === 'in_progress'
+                    ? '이어가기'
+                    : progress?.status === 'completed'
+                      ? '다시 하기'
+                      : '시작하기';
               const difficulty = DIFFICULTY_CONFIG[lab.difficulty];
 
               return (
                 <Link
                   key={lab.id}
-                  href={href}
-                  className="group grid grid-cols-[44px_minmax(0,1fr)] gap-x-4 gap-y-5 border-b border-l-2 border-b-white/20 border-l-transparent px-3 py-7 transition-colors hover:border-l-[#E8E8E3] hover:bg-[#E8E8E3] focus-visible:bg-[#E8E8E3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-black sm:grid-cols-[72px_minmax(0,1fr)_auto] sm:items-center sm:gap-8 sm:px-6 sm:py-9"
+                  href={isStatusFetching ? '#' : href}
+                  aria-disabled={isStatusFetching || undefined}
+                  tabIndex={isStatusFetching ? -1 : undefined}
+                  onClick={(event) => {
+                    if (isStatusFetching) event.preventDefault();
+                  }}
+                  className={`grid grid-cols-[44px_minmax(0,1fr)] gap-x-4 gap-y-5 border-b border-l-2 border-b-white/20 border-l-transparent px-3 py-7 transition-colors sm:grid-cols-[72px_minmax(0,1fr)_auto] sm:items-center sm:gap-8 sm:px-6 sm:py-9 ${
+                    isStatusFetching
+                      ? 'cursor-wait'
+                      : 'group hover:border-l-[#E8E8E3] hover:bg-[#E8E8E3] focus-visible:bg-[#E8E8E3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-black'
+                  }`}
                 >
                   <span className="font-michroma text-xl text-white/35 transition-colors group-hover:text-black/45 group-focus-visible:text-black/45 sm:text-[26px]">
                     {String(i + 1).padStart(2, '0')}

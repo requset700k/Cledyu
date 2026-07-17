@@ -143,8 +143,15 @@ export interface MyProgress {
   recent_completions: { lab_id: string; session_id: string; completed_at: string }[];
 }
 
-/** 랩별 수료 상태 — GET /api/v1/me/dashboard */
+/** 랩별 수료 상태 — Dashboard와 카탈로그 상태 API가 공유 */
 export type LabStatus = 'completed' | 'in_progress' | 'not_started';
+
+/** GET /api/v1/me/lab-statuses의 카탈로그용 최소 상태 */
+export interface LabLearningStatus {
+  lab_id: string;
+  status: LabStatus;
+  session_id?: string;
+}
 
 /** 난이도별 완료/전체 */
 export interface DifficultyProgress {

@@ -9,6 +9,7 @@ import type {
   HintResponse,
   InstructorAnalytics,
   Lab,
+  LabLearningStatus,
   LeaderboardResponse,
   MyProgress,
   Session,
@@ -186,6 +187,7 @@ export const api = {
   me: {
     progress: () => request<MyProgress>('/api/v1/me/progress'),
     dashboard: () => request<DashboardResponse>('/api/v1/me/dashboard'),
+    labStatuses: () => request<Paginated<LabLearningStatus>>('/api/v1/me/lab-statuses'),
     setPreferences: (leaderboardHidden: boolean) =>
       request<{ leaderboard_hidden: boolean }>('/api/v1/me/preferences', {
         method: 'PATCH',

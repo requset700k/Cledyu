@@ -124,3 +124,44 @@ func TestGetMyDashboard_PostgresOnly(t *testing.T) {
 		t.Fatalf("session_id mismatch: %+v", sessionByLab)
 	}
 }
+
+func TestGetMyLabStatuses_DoesNotLoadLeaderboard(t *testing.T) {
+	at := time.Date(2026, 6, 25, 9, 0, 0, 0, time.UTC)
+	fake := newFakePersistence()
+	fake.completions["u1|lab-docker-basics"] = "s1"
+	fake.completionAt = map[string]string{"u1|lab-docker-basics": at.Format(time.RFC3339)}
+	fake.inProgress["u1"] = []store.InProgressLab{{LabID: "lab-k8s-basics", SessionID: "s2"}}
+	h := dashboardTestHandler(t, fake)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/me/lab-statuses", func(c *gin.Context) {
+		c.Set("user_id", "u1")
+		h.GetMyLabStatuses(c)
+	})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/me/lab-statuses", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if fake.leaderboardCalls != 0 {
+		t.Fatalf("leaderboard calls = %d, want 0", fake.leaderboardCalls)
+	}
+	var body struct {
+		Items []labStatus `json:"items"`
+		Total int         `json:"total"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Total != len(h.labs) || len(body.Items) != len(h.labs) {
+		t.Fatalf("status rows mismatch: total=%d items=%d labs=%d", body.Total, len(body.Items), len(h.labs))
+	}
+	statusByLab := map[string]string{}
+	for _, lab := range body.Items {
+		statusByLab[lab.LabID] = lab.Status
+	}
+	if statusByLab["lab-docker-basics"] != "completed" || statusByLab["lab-k8s-basics"] != "in_progress" {
+		t.Fatalf("status mismatch: %+v", statusByLab)
+	}
+}

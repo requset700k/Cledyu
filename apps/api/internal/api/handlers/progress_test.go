@@ -14,17 +14,18 @@ import (
 
 // fakePersistence는 persistence 의 in-memory 테스트 더블이다.
 type fakePersistence struct {
-	mu            sync.Mutex
-	progress      map[string]store.SessionProgress
-	users         map[string]string // id → role
-	completions   map[string]string // user|lab → session
-	completionAt  map[string]string // "user|lab" → RFC3339, 비면 zero time
-	saves         int
-	leaderboard   []store.LeaderboardRow           // LeaderboardRows 가 돌려줄 행
-	hidden        map[string]bool                  // SetLeaderboardHidden 이 기록
-	inProgress    map[string][]store.InProgressLab // user_id → 진행기록 있는 랩
-	subscriptions map[string]store.Subscription
-	checkouts     map[string]store.CheckoutSession
+	mu               sync.Mutex
+	progress         map[string]store.SessionProgress
+	users            map[string]string // id → role
+	completions      map[string]string // user|lab → session
+	completionAt     map[string]string // "user|lab" → RFC3339, 비면 zero time
+	saves            int
+	leaderboard      []store.LeaderboardRow // LeaderboardRows 가 돌려줄 행
+	leaderboardCalls int
+	hidden           map[string]bool                  // SetLeaderboardHidden 이 기록
+	inProgress       map[string][]store.InProgressLab // user_id → 진행기록 있는 랩
+	subscriptions    map[string]store.Subscription
+	checkouts        map[string]store.CheckoutSession
 }
 
 func newFakePersistence() *fakePersistence {
@@ -126,6 +127,7 @@ func (f *fakePersistence) RecordCompletion(_ context.Context, userID, labID, ses
 func (f *fakePersistence) LeaderboardRows(_ context.Context, since *time.Time) ([]store.LeaderboardRow, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.leaderboardCalls++
 	out := make([]store.LeaderboardRow, 0, len(f.leaderboard))
 	for _, r := range f.leaderboard {
 		if since != nil && r.CompletedAt.Before(*since) {

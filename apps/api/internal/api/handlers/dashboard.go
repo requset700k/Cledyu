@@ -38,6 +38,13 @@ type dashboardLab struct {
 	CompletedAt *time.Time `json:"completed_at"`
 }
 
+// labStatus는 카탈로그가 사용하는 최소 상태다. 랭킹·점수·선호 정보는 포함하지 않는다.
+type labStatus struct {
+	LabID     string `json:"lab_id"`
+	Status    string `json:"status"`
+	SessionID string `json:"session_id,omitempty"`
+}
+
 // buildDashboard는 카탈로그·완료·진행중을 대조해 요약과 랩별 상태를 만든다(순수 함수).
 // Score/Rank 는 채우지 않는다(DB 랭킹 필요 — 핸들러가 설정).
 func buildDashboard(labs map[string]content.LabContent, completions []store.Completion, inProgress []store.InProgressLab) (dashboardSummary, []dashboardLab) {
@@ -158,4 +165,38 @@ func (h *Handler) GetMyDashboard(c *gin.Context) {
 		"recent_completions": recent,
 		"leaderboard_hidden": hidden,
 	})
+}
+
+// GetMyLabStatuses는 카탈로그용 랩 상태만 반환한다. 전체 랭킹 집계는 실행하지 않는다.
+// GET /api/v1/me/lab-statuses
+func (h *Handler) GetMyLabStatuses(c *gin.Context) {
+	if h.db == nil {
+		h.err(c, http.StatusServiceUnavailable, "dashboard store not configured")
+		return
+	}
+	ctx := c.Request.Context()
+	uid := c.GetString("user_id")
+
+	completions, err := h.db.ListCompletionsByUser(ctx, uid)
+	if err != nil {
+		h.log.Error("list completions", zap.Error(err))
+		h.err(c, http.StatusInternalServerError, "load lab statuses failed")
+		return
+	}
+	inProgress, err := h.db.ListInProgressLabsByUser(ctx, uid)
+	if err != nil {
+		h.log.Warn("list in-progress labs", zap.Error(err), zap.String("user_id", uid))
+		inProgress = nil
+	}
+
+	_, dashboardRows := buildDashboard(h.labs, completions, inProgress)
+	rows := make([]labStatus, 0, len(dashboardRows))
+	for _, row := range dashboardRows {
+		rows = append(rows, labStatus{
+			LabID:     row.LabID,
+			Status:    row.Status,
+			SessionID: row.SessionID,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"items": rows, "total": len(rows)})
 }

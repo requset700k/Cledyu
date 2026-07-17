@@ -90,6 +90,8 @@ export function LabSession({
     mutationFn: (stepId: number) => api.sessions.validate(sessionId, stepId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['session', sessionId, 'steps'] });
+      qc.invalidateQueries({ queryKey: ['my-lab-statuses'] });
+      qc.invalidateQueries({ queryKey: ['my-dashboard'] });
       setSelectedId(null);
     },
   });
