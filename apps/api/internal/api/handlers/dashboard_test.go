@@ -18,17 +18,21 @@ import (
 
 type dashboardSessionProvider struct {
 	entitlementSessionProvider
-	activeID string
-	session  *session.Session
-	findErr  error
-	getErr   error
+	activeID  string
+	session   *session.Session
+	findErr   error
+	getErr    error
+	findCalls int
+	getCalls  int
 }
 
 func (p *dashboardSessionProvider) FindActiveByUser(context.Context, string) (string, error) {
+	p.findCalls++
 	return p.activeID, p.findErr
 }
 
 func (p *dashboardSessionProvider) Get(context.Context, string) (*session.Session, error) {
+	p.getCalls++
 	return p.session, p.getErr
 }
 
@@ -182,6 +186,29 @@ func TestGetMyLabStatuses_DoesNotLoadLeaderboard(t *testing.T) {
 	}
 	if statusByLab["lab-docker-basics"] != "completed" || statusByLab["lab-k8s-basics"] != "in_progress" {
 		t.Fatalf("status mismatch: %+v", statusByLab)
+	}
+}
+
+func TestGetMyLabStatuses_EmptyProgressSkipsSessionProvider(t *testing.T) {
+	fake := newFakePersistence()
+	h := dashboardTestHandler(t, fake)
+	provider := &dashboardSessionProvider{}
+	h.sessions = provider
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/me/lab-statuses", func(c *gin.Context) {
+		c.Set("user_id", "new-user")
+		h.GetMyLabStatuses(c)
+	})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/me/lab-statuses", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if provider.findCalls != 0 || provider.getCalls != 0 {
+		t.Fatalf("session provider calls: find=%d get=%d, want 0", provider.findCalls, provider.getCalls)
 	}
 }
 

@@ -191,7 +191,7 @@ func (h *Handler) GetMyLabStatuses(c *gin.Context) {
 		h.err(c, http.StatusInternalServerError, "load lab statuses failed")
 		return
 	}
-	if h.sessions != nil {
+	if h.sessions != nil && len(inProgress) > 0 {
 		inProgressFromStore := inProgress
 		activeSessionID, err := h.sessions.FindActiveByUser(ctx, uid)
 		if err != nil {
