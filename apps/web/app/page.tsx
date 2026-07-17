@@ -5,6 +5,8 @@ import { Navbar } from '@/components/ui/Navbar';
 import { ParticleFx } from '@/components/ui/ParticleFx';
 import { TerminalDemo } from '@/components/ui/TerminalDemo';
 
+export const dynamic = 'force-dynamic';
+
 const TECH_STACK = ['LINUX', 'DOCKER', 'KUBERNETES', 'TERRAFORM', 'ANSIBLE', 'HELM', 'CILIUM'];
 
 const HOW_IT_WORKS = [
@@ -38,7 +40,7 @@ const FEATURES = [
 export default function LandingPage() {
   return (
     <div className="relative isolate min-h-screen overflow-x-hidden bg-black text-[#F2F2F2]">
-      <Navbar />
+      <Navbar authEnabled={process.env.AUTH_ENABLED === 'true'} />
 
       {/* 전역 배경: 은은한 성운 + 별 */}
       <ParticleFx kind="stars" className="pointer-events-none fixed inset-0 -z-10 opacity-95" />
@@ -173,7 +175,7 @@ export default function LandingPage() {
           className="mx-auto w-full max-w-[1280px] scroll-mt-24 px-6 py-24 sm:px-10"
         >
           <h2 className="font-chakra text-[clamp(24px,3vw,40px)] font-bold tracking-[-0.02em] text-white">
-            어떻게 진행되나요
+            진행과정
           </h2>
           <div className="mt-10 grid grid-cols-1 border border-white/15 sm:grid-cols-4">
             {HOW_IT_WORKS.map((step, i) => (

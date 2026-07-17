@@ -367,65 +367,120 @@ function SessionBoot({
   }, [graceState.complete, onGraceComplete]);
 
   const stages = bootStageViewStates(status, provisioningStage, vmProvider, graceStartedAt);
+  const progress = Math.round(graceState.progress);
 
   return (
-    <div className="mt-6 bg-slate-800/50 border border-slate-700 rounded-xl p-8">
-      <div className="flex items-center gap-4 mb-6">
-        <Spinner />
+    <section
+      className="mt-10 overflow-hidden border border-white/20 bg-white/[0.015]"
+      aria-labelledby="environment-boot-title"
+    >
+      <div className="grid gap-8 border-b border-white/15 px-6 py-7 sm:grid-cols-[1fr_auto] sm:px-8 sm:py-8">
         <div>
-          <p className="text-white font-semibold">실습 환경을 준비하고 있습니다</p>
-          <p className="text-slate-400 text-sm mt-1">
-            보통 1~2분 안에 완료됩니다. 잠시만 기다려주세요.
+          <div className="flex items-center gap-2 font-jbmono text-[11px] tracking-[0.14em] text-white/45">
+            <span aria-hidden="true" className="h-1.5 w-1.5 bg-white motion-safe:animate-pulse" />
+            ENVIRONMENT BOOT
+          </div>
+          <h2
+            id="environment-boot-title"
+            className="mt-4 break-keep font-chakra text-2xl font-bold tracking-[-0.025em] text-white sm:text-3xl"
+          >
+            실습 환경을 준비하고 있습니다
+          </h2>
+          <p className="mt-2 text-sm leading-relaxed text-white/45">
+            전용 VM과 터미널을 연결하고 있습니다. 보통 1~2분 안에 완료됩니다.
+          </p>
+        </div>
+
+        <div className="self-end sm:min-w-32 sm:text-right">
+          <p className="font-jbmono text-[10px] tracking-[0.14em] text-white/35">PROGRESS</p>
+          <p className="mt-1 font-michroma text-4xl leading-none tracking-[-0.06em] text-white sm:text-5xl">
+            {progress}
+            <span className="ml-1 text-base tracking-normal text-white/45">%</span>
           </p>
         </div>
       </div>
 
-      <div className="h-1.5 w-full bg-slate-700 rounded-full overflow-hidden mb-6">
+      <div
+        className="mx-6 mt-6 h-px overflow-hidden bg-white/15 sm:mx-8"
+        role="progressbar"
+        aria-label="실습 환경 준비 진행률"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={progress}
+      >
         <div
-          className="h-full bg-brand-500 transition-[width] duration-500 ease-out"
-          style={{ width: `${Math.round(graceState.progress)}%` }}
+          className="h-full bg-white transition-[width] duration-500 ease-out motion-reduce:transition-none"
+          style={{ width: `${progress}%` }}
         />
       </div>
 
-      <ul className="space-y-2 text-sm">
-        {stages.map((stage) => (
+      <ol
+        className={`mt-7 grid border-t border-white/15 divide-y divide-white/15 sm:divide-x sm:divide-y-0 ${
+          stages.length === 4 ? 'sm:grid-cols-4' : 'sm:grid-cols-3'
+        }`}
+      >
+        {stages.map((stage, index) => (
           <BootStage
             key={stage.label}
+            index={index + 1}
             done={stage.done}
             inProgress={stage.inProgress}
             label={stage.label}
           />
         ))}
-      </ul>
-    </div>
+      </ol>
+    </section>
   );
 }
 
 function BootStage({
+  index,
   done,
   inProgress,
   label,
 }: {
+  index: number;
   done: boolean;
   inProgress?: boolean;
   label: string;
 }) {
-  return (
-    <li className="flex items-center gap-3">
-      <span
-        className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
-          done ? 'bg-emerald-400' : inProgress ? 'bg-brand-400 animate-pulse' : 'bg-slate-600'
-        }`}
-      />
-      <span className={`${done ? 'text-slate-400' : inProgress ? 'text-white' : 'text-slate-500'}`}>
-        {label}
-      </span>
-    </li>
-  );
-}
+  const stateLabel = done ? '완료' : inProgress ? '진행 중' : '대기';
 
-function Spinner() {
   return (
-    <div className="w-10 h-10 rounded-full border-2 border-slate-700 border-t-brand-400 animate-spin flex-shrink-0" />
+    <li className="px-6 py-5 sm:min-h-32 sm:px-5" aria-current={inProgress ? 'step' : undefined}>
+      <div className="flex items-center justify-between gap-3">
+        <span
+          className={`font-michroma text-xs ${done || inProgress ? 'text-white/70' : 'text-white/25'}`}
+        >
+          {String(index).padStart(2, '0')}
+        </span>
+        <span
+          className={`font-jbmono text-[10px] tracking-[0.08em] ${
+            inProgress ? 'text-white' : done ? 'text-white/45' : 'text-white/25'
+          }`}
+        >
+          {stateLabel}
+        </span>
+      </div>
+      <div className="mt-6 flex items-center gap-2.5">
+        <span
+          aria-hidden="true"
+          className={`h-2 w-2 shrink-0 border ${
+            done
+              ? 'border-white/70 bg-white/70'
+              : inProgress
+                ? 'border-white bg-white motion-safe:animate-pulse'
+                : 'border-white/20'
+          }`}
+        />
+        <span
+          className={`text-sm font-medium ${
+            inProgress ? 'text-white' : done ? 'text-white/60' : 'text-white/30'
+          }`}
+        >
+          {label}
+        </span>
+      </div>
+    </li>
   );
 }

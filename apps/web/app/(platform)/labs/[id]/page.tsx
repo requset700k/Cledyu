@@ -185,7 +185,7 @@ function LabDetail() {
   if (isError) {
     const notFound = error instanceof Error && error.message === 'NOT_FOUND';
     return (
-      <div className="text-center py-20 text-slate-500">
+      <div className="py-20 text-center text-white/45">
         <p>{notFound ? '존재하지 않는 Lab입니다.' : 'Lab을 불러오지 못했습니다.'}</p>
         <BackLink className="mt-4 inline-block" />
       </div>
@@ -198,30 +198,34 @@ function LabDetail() {
 
   return (
     <div>
-      <BackLink className="mb-4 inline-block" />
+      <BackLink className="mb-6 inline-block" />
       <LabHeader lab={lab} />
 
       {sessionId ? (
         <>
           {resumedExisting && (
-            <div className="mt-6 rounded-xl border border-brand-500/30 bg-brand-500/10 px-4 py-3 text-brand-100 text-sm">
-              이미 진행 중인 실습 세션이 있어 기존 세션으로 이어서 열었습니다.
+            <div className="mt-6 border border-white/25 bg-white/[0.04] px-4 py-3 text-sm text-white/80">
+              ✔ 이미 진행 중인 실습 세션이 있어 기존 세션으로 이어서 열었습니다.
             </div>
           )}
           <LabSession sessionId={sessionId} lab={lab} skipBootGrace={skipBootGrace} />
         </>
       ) : (
-        <div className="mt-6 bg-slate-800/50 border border-slate-700 rounded-xl p-6">
+        <div className="mt-10 border border-white/20 bg-white/[0.02] p-8">
           {hasContent ? (
             <>
-              <h2 className="text-white font-semibold mb-3">실습 단계 ({steps.length})</h2>
-              <ol className="space-y-2 mb-6">
+              <h2 className="mb-5 font-jbmono text-xs tracking-[0.12em] text-white/45">
+                STEPS ({steps.length})
+              </h2>
+              <ol className="mb-8 border-t border-white/15">
                 {steps.map((s) => (
-                  <li key={s.id} className="flex gap-3 text-sm">
-                    <span className="text-brand-400 font-semibold flex-shrink-0">{s.id}.</span>
+                  <li key={s.id} className="flex gap-5 border-b border-white/15 px-2 py-4 text-sm">
+                    <span className="flex-shrink-0 pt-0.5 font-michroma text-[13px] text-white/35">
+                      {String(s.id).padStart(2, '0')}
+                    </span>
                     <div>
-                      <p className="text-white">{s.title}</p>
-                      <p className="text-slate-400">{s.description}</p>
+                      <p className="font-semibold tracking-[-0.02em] text-white">{s.title}</p>
+                      <p className="mt-1 leading-relaxed text-white/50">{s.description}</p>
                     </div>
                   </li>
                 ))}
@@ -232,7 +236,7 @@ function LabDetail() {
                 disabled={
                   start.isPending || existingSessionAction !== null || requestedResumeId !== null
                 }
-                className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 text-white text-sm font-medium px-5 py-2.5 rounded-lg transition-colors"
+                className="rounded-full bg-white px-8 py-3 text-sm font-bold text-black transition-colors hover:bg-white/85 disabled:cursor-not-allowed disabled:bg-white/30"
               >
                 {existingSessionAction === 'checking'
                   ? requestedResumeId
@@ -245,16 +249,16 @@ function LabDetail() {
                       : '실습 시작'}
               </button>
               {activeSessionConflict && (
-                <div className="mt-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm max-w-2xl">
+                <div className="mt-5 max-w-2xl border border-white/30 bg-white/[0.04] px-5 py-4 text-sm">
                   {/* 다른 Lab 세션은 사용자가 이어가기나 종료를 명시적으로 선택해야 한다. */}
-                  <p className="text-amber-200 font-medium">
+                  <p className="font-semibold text-white">
                     이미 진행 중인 다른 실습 세션이 있습니다.
                   </p>
-                  <p className="text-amber-100/80 mt-1">
+                  <p className="mt-1.5 leading-relaxed text-white/60">
                     한 계정은 동시에 하나의 실습 세션만 사용할 수 있습니다. 기존 실습으로
                     돌아가거나, 기존 세션을 종료하고 이 실습을 새로 시작할 수 있습니다.
                   </p>
-                  {replaceError && <p className="text-red-200 mt-2 text-xs">{replaceError}</p>}
+                  {replaceError && <p className="mt-2 text-xs text-red-400">{replaceError}</p>}
                   <div className="flex flex-wrap gap-2 mt-3">
                     {activeSessionConflict.labId && (
                       <Link
@@ -262,7 +266,7 @@ function LabDetail() {
                           activeSessionConflict.labId,
                           activeSessionConflict.sessionId,
                         )}
-                        className="inline-flex items-center rounded-md border border-amber-400/40 px-3 py-1.5 text-amber-100 hover:bg-amber-400/10 transition-colors"
+                        className="inline-flex items-center rounded-full border border-white/40 px-4 py-2 text-white transition-colors hover:bg-white hover:text-black"
                       >
                         진행 중인 실습 이어가기
                       </Link>
@@ -271,7 +275,7 @@ function LabDetail() {
                       type="button"
                       onClick={() => void replaceExistingSession(activeSessionConflict.sessionId)}
                       disabled={existingSessionAction !== null}
-                      className="inline-flex items-center rounded-md bg-amber-400/20 px-3 py-1.5 text-amber-50 hover:bg-amber-400/30 disabled:opacity-50 transition-colors"
+                      className="inline-flex items-center rounded-full bg-white px-4 py-2 font-semibold text-black transition-colors hover:bg-white/85 disabled:opacity-50"
                     >
                       {existingSessionAction === 'terminating'
                         ? '기존 세션 종료 중...'
@@ -281,7 +285,7 @@ function LabDetail() {
                 </div>
               )}
               {replaceError && !activeSessionConflict && (
-                <div className="mt-4 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200 max-w-2xl">
+                <div className="mt-5 max-w-2xl border border-red-500/40 bg-red-500/10 px-5 py-4 text-sm text-red-300">
                   {replaceError}
                 </div>
               )}
@@ -289,11 +293,11 @@ function LabDetail() {
                 existingSessionAction === null &&
                 !activeSessionConflict &&
                 !replaceError && (
-                  <span className="ml-3 text-red-400 text-xs">세션을 시작하지 못했습니다.</span>
+                  <span className="ml-3 text-xs text-red-400">세션을 시작하지 못했습니다.</span>
                 )}
             </>
           ) : (
-            <p className="text-slate-500 text-sm">
+            <p className="text-sm text-white/45">
               이 Lab은 아직 실습 콘텐츠가 준비되지 않았습니다.
             </p>
           )}
@@ -307,18 +311,25 @@ function LabHeader({ lab }: { lab: Lab }) {
   const diff = DIFFICULTY_CONFIG[lab.difficulty];
   return (
     <div>
-      <div className="flex items-center gap-2 mb-2">
-        <span className={`text-xs font-medium px-2 py-1 rounded-md border ${diff.classes}`}>
+      <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-2 font-jbmono text-xs tracking-[0.1em] text-white/50">
+        <span className={`rounded-full border px-2.5 py-1 tracking-[0.08em] ${diff.classes}`}>
           {diff.label}
         </span>
-        <span className="text-slate-500 text-xs">{lab.duration_min}분</span>
-        <span className="text-slate-500 text-xs">· {lab.step_count}단계</span>
+        <span>{lab.duration_min} MIN</span>
+        <span>· {lab.step_count} STEPS</span>
       </div>
-      <h1 className="text-2xl font-bold text-white">{lab.title}</h1>
-      <p className="text-slate-400 mt-1 text-sm">{lab.description}</p>
-      <div className="flex flex-wrap gap-1 mt-3">
+      <h1 className="break-keep font-chakra text-[clamp(28px,3.6vw,52px)] font-bold leading-[1.1] tracking-[-0.02em] text-white">
+        {lab.title}
+      </h1>
+      <p className="mt-4 max-w-[640px] break-keep text-[15px] leading-[1.7] tracking-[-0.015em] text-white/60">
+        {lab.description}
+      </p>
+      <div className="mt-5 flex flex-wrap gap-2">
         {lab.tags.map((tag) => (
-          <span key={tag} className="text-xs bg-slate-700 text-slate-300 px-2 py-0.5 rounded">
+          <span
+            key={tag}
+            className="rounded-full border border-white/25 px-3.5 py-1 font-jbmono text-xs tracking-[0.08em] text-white/60"
+          >
             {tag}
           </span>
         ))}
@@ -331,9 +342,9 @@ function BackLink({ className = '' }: { className?: string }) {
   return (
     <Link
       href="/labs"
-      className={`text-slate-400 hover:text-white text-sm transition-colors ${className}`}
+      className={`font-jbmono text-xs tracking-[0.1em] text-white/45 transition-colors hover:text-white ${className}`}
     >
-      ← Lab 카탈로그
+      ← BACK TO LABS
     </Link>
   );
 }
@@ -341,11 +352,11 @@ function BackLink({ className = '' }: { className?: string }) {
 function DetailSkeleton() {
   return (
     <div className="animate-pulse">
-      <div className="h-4 w-24 bg-slate-800 rounded mb-4" />
-      <div className="h-5 w-16 bg-slate-800 rounded mb-2" />
-      <div className="h-7 w-1/3 bg-slate-800 rounded mb-2" />
-      <div className="h-4 w-2/3 bg-slate-800 rounded mb-6" />
-      <div className="h-40 w-full bg-slate-800/50 rounded-xl" />
+      <div className="mb-6 h-4 w-28 rounded bg-white/10" />
+      <div className="mb-3 h-5 w-20 rounded bg-white/10" />
+      <div className="mb-3 h-10 w-1/2 rounded bg-white/10" />
+      <div className="mb-8 h-4 w-2/3 rounded bg-white/10" />
+      <div className="h-40 w-full border border-white/10 bg-white/[0.02]" />
     </div>
   );
 }
