@@ -39,8 +39,7 @@ export default function LoginPage() {
         </div>
 
         <div className="rounded-2xl border border-white/20 bg-white/[0.02] p-8 backdrop-blur-sm">
-          <p className="font-jbmono text-xs tracking-[0.12em] text-white/45">$ whoami</p>
-          <h2 className="mt-2 font-chakra text-2xl font-bold text-white">로그인</h2>
+          <h2 className="font-chakra text-2xl font-bold text-white">로그인</h2>
           <p className="mb-7 mt-1.5 text-sm text-white/50">
             진행 중이던 세션과 학습 기록이 계정에 보관됩니다
           </p>
@@ -102,20 +101,17 @@ export default function LoginPage() {
             </>
           )}
 
-          <p className="mt-6 border-t border-white/10 pt-5 text-center text-sm text-white/50">
-            처음이신가요? {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <div className="mt-6 flex items-center justify-between gap-3 border-t border-white/10 pt-5">
+            <span className="text-sm text-white/45">처음이신가요?</span>
+            {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
             <a
               href="/api/v1/auth/login?screen=register"
-              className="font-semibold text-white underline decoration-white/40 underline-offset-4 transition-colors hover:decoration-white"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-white/25 px-4 py-2 text-sm font-semibold text-white/85 transition-colors hover:border-white hover:bg-white hover:text-black"
             >
-              회원가입
+              회원가입 <span aria-hidden="true">→</span>
             </a>
-          </p>
+          </div>
         </div>
-
-        <p className="mt-6 text-center font-jbmono text-xs tracking-[0.06em] text-white/35">
-          가입 즉시 첫 Lab이 무료로 제공됩니다
-        </p>
       </div>
     </div>
   );
