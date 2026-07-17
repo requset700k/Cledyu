@@ -2,12 +2,14 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sort"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/requset700k/cledyu/api/internal/content"
+	"github.com/requset700k/cledyu/api/internal/session"
 	"github.com/requset700k/cledyu/api/internal/store"
 	"go.uber.org/zap"
 )
@@ -36,6 +38,13 @@ type dashboardLab struct {
 	Status      string     `json:"status"` // completed | in_progress | not_started
 	SessionID   string     `json:"session_id,omitempty"`
 	CompletedAt *time.Time `json:"completed_at"`
+}
+
+// labStatus는 카탈로그가 사용하는 최소 상태다. 랭킹·점수·선호 정보는 포함하지 않는다.
+type labStatus struct {
+	LabID     string `json:"lab_id"`
+	Status    string `json:"status"`
+	SessionID string `json:"session_id,omitempty"`
 }
 
 // buildDashboard는 카탈로그·완료·진행중을 대조해 요약과 랩별 상태를 만든다(순수 함수).
@@ -158,4 +167,88 @@ func (h *Handler) GetMyDashboard(c *gin.Context) {
 		"recent_completions": recent,
 		"leaderboard_hidden": hidden,
 	})
+}
+
+// GetMyLabStatuses는 카탈로그용 랩 상태만 반환한다. 전체 랭킹 집계는 실행하지 않는다.
+// GET /api/v1/me/lab-statuses
+func (h *Handler) GetMyLabStatuses(c *gin.Context) {
+	if h.db == nil {
+		h.err(c, http.StatusServiceUnavailable, "dashboard store not configured")
+		return
+	}
+	ctx := c.Request.Context()
+	uid := c.GetString("user_id")
+
+	completions, err := h.db.ListCompletionsByUser(ctx, uid)
+	if err != nil {
+		h.log.Error("list completions", zap.Error(err))
+		h.err(c, http.StatusInternalServerError, "load lab statuses failed")
+		return
+	}
+	inProgress, err := h.db.ListInProgressLabsByUser(ctx, uid)
+	if err != nil {
+		h.log.Error("list in-progress labs", zap.Error(err), zap.String("user_id", uid))
+		h.err(c, http.StatusInternalServerError, "load lab statuses failed")
+		return
+	}
+	if h.sessions != nil && len(inProgress) > 0 {
+		inProgressFromStore := inProgress
+		activeSessionID, err := h.sessions.FindActiveByUser(ctx, uid)
+		if err != nil {
+			h.log.Error("find active session", zap.Error(err), zap.String("user_id", uid))
+			h.err(c, http.StatusInternalServerError, "load lab statuses failed")
+			return
+		}
+		inProgress = nil
+		if activeSessionID != "" {
+			activeSession, getErr := h.sessions.Get(ctx, activeSessionID)
+			if getErr != nil && !errors.Is(getErr, session.ErrNotFound) {
+				h.log.Error("get active session", zap.Error(getErr), zap.String("session_id", activeSessionID))
+				h.err(c, http.StatusInternalServerError, "load lab statuses failed")
+				return
+			}
+			if getErr == nil && activeSession != nil && activeSession.ExpiresAt.After(time.Now()) &&
+				(activeSession.Status == "provisioning" || activeSession.Status == "ready") {
+				for _, progress := range inProgressFromStore {
+					if progress.SessionID == activeSessionID {
+						inProgress = append(inProgress, progress)
+					}
+				}
+			}
+		}
+	}
+
+	completedSessionByLab := make(map[string]string, len(completions))
+	for _, completion := range completions {
+		completedSessionByLab[completion.LabID] = completion.SessionID
+	}
+
+	activeProgress := make([]store.InProgressLab, 0, len(inProgress))
+	for _, progress := range inProgress {
+		_, completionRecorded := completedSessionByLab[progress.LabID]
+		if !progress.AllPassed || !completionRecorded {
+			activeProgress = append(activeProgress, progress)
+		}
+	}
+
+	_, dashboardRows := buildDashboard(h.labs, completions, activeProgress)
+	activeSessionByLab := make(map[string]string, len(activeProgress))
+	for _, progress := range activeProgress {
+		activeSessionByLab[progress.LabID] = progress.SessionID
+	}
+	rows := make([]labStatus, 0, len(dashboardRows))
+	for _, row := range dashboardRows {
+		status := labStatus{
+			LabID:     row.LabID,
+			Status:    row.Status,
+			SessionID: row.SessionID,
+		}
+		// 완료 세션과 다른 진행 기록이 있으면 재실행 중이므로 현재 세션을 우선한다.
+		if sessionID, ok := activeSessionByLab[row.LabID]; ok && completedSessionByLab[row.LabID] != sessionID {
+			status.Status = "in_progress"
+			status.SessionID = sessionID
+		}
+		rows = append(rows, status)
+	}
+	c.JSON(http.StatusOK, gin.H{"items": rows, "total": len(rows)})
 }

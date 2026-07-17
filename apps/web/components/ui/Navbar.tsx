@@ -5,7 +5,6 @@ import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '@/lib/api';
-import type { UserRole } from '@/lib/types';
 
 const NAV_LINKS = [
   { href: '/', label: 'Home' },
@@ -14,7 +13,6 @@ const NAV_LINKS = [
 ];
 
 const DASHBOARD_LINK = { href: '/dashboard', label: '내 학습' };
-const INSTRUCTOR_LINK = { href: '/instructor', label: '강사 모드' };
 
 function isActive(pathname: string, href: string) {
   return href === '/' ? pathname === '/' : pathname.startsWith(href);
@@ -36,11 +34,7 @@ export function Navbar() {
     retry: false,
   });
 
-  const links = [
-    ...NAV_LINKS,
-    ...(me ? [DASHBOARD_LINK] : []),
-    ...(canAccessInstructor(me?.role) ? [INSTRUCTOR_LINK] : []),
-  ];
+  const links = [...NAV_LINKS, ...(me ? [DASHBOARD_LINK] : [])];
 
   function handleLogout() {
     // 백엔드 GET /auth/logout 으로 전체 페이지 이동 → 쿠키 삭제 + Keycloak SSO 로그아웃.
@@ -135,10 +129,6 @@ export function Navbar() {
       )}
     </>
   );
-}
-
-function canAccessInstructor(role?: UserRole) {
-  return role === 'instructor' || role === 'admin';
 }
 
 function MenuIcon({ open }: { open: boolean }) {

@@ -387,10 +387,11 @@ type Completion struct {
 	CompletedAt time.Time `json:"completed_at"`
 }
 
-// InProgressLab는 사용자가 진행 중인 랩과 이어갈 세션 ID다.
+// InProgressLab는 사용자의 최신 랩 진행 기록과 이어갈 세션 ID다.
 type InProgressLab struct {
 	LabID     string `json:"lab_id"`
 	SessionID string `json:"session_id"`
+	AllPassed bool   `json:"-"`
 }
 
 // ListCompletionsByUser는 유저의 랩 완료 이력을 최신 순으로 반환한다(관리자 활동 조회).
@@ -414,15 +415,23 @@ func (s *Store) ListCompletionsByUser(ctx context.Context, userID string) ([]Com
 	return out, rows.Err()
 }
 
-// ListInProgressLabsByUser는 유저가 진행기록(session_progress)을 가진 lab_id/session_id 목록을 반환한다.
-// 완료된 랩도 진행기록이 남아 있을 수 있으므로, 호출부는 완료 여부를 먼저 판정한 뒤
-// 이 목록을 'in_progress' 후보로 사용한다.
+// ListInProgressLabsByUser는 유저가 진행기록(session_progress)을 가진 Lab별 최신 기록을 반환한다.
+// AllPassed는 해당 세션의 모든 step이 passed인지 나타낸다.
 func (s *Store) ListInProgressLabsByUser(ctx context.Context, userID string) ([]InProgressLab, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT DISTINCT ON (lab_id) lab_id, session_id
-		FROM session_progress
-		WHERE user_id = $1
-		ORDER BY lab_id, updated_at DESC`, userID)
+		SELECT DISTINCT ON (sp.lab_id)
+			sp.lab_id,
+			sp.session_id,
+			EXISTS (
+				SELECT 1 FROM session_steps ss
+				WHERE ss.session_id = sp.session_id
+			) AND NOT EXISTS (
+				SELECT 1 FROM session_steps ss
+				WHERE ss.session_id = sp.session_id AND ss.status <> 'passed'
+			) AS all_passed
+		FROM session_progress sp
+		WHERE sp.user_id = $1
+		ORDER BY sp.lab_id, sp.updated_at DESC`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list in-progress labs: %w", err)
 	}
@@ -431,7 +440,7 @@ func (s *Store) ListInProgressLabsByUser(ctx context.Context, userID string) ([]
 	out := make([]InProgressLab, 0)
 	for rows.Next() {
 		var row InProgressLab
-		if err := rows.Scan(&row.LabID, &row.SessionID); err != nil {
+		if err := rows.Scan(&row.LabID, &row.SessionID, &row.AllPassed); err != nil {
 			return nil, fmt.Errorf("scan in-progress lab: %w", err)
 		}
 		out = append(out, row)

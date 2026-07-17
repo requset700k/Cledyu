@@ -36,7 +36,8 @@ const dbTimeout = 5 * time.Second
 // 전략: in-memory 맵을 캐시로 유지하고
 //   - 변경(dirty) 시 스냅샷을 DB에 write-through (잠금 밖, 동기)
 //   - 캐시 미스 시 DB에서 적재(load-on-miss) — API 재시작 후 진행 상태 복원
-// DB 실패는 경고 로그만 남긴다 — 실행 중인 프로세스에서는 캐시가 진실의 원천이다.
+// 기존 세션 변경 저장 실패는 경고 로그만 남기지만, 새 세션 등록(put)은 DB 영속화가
+// 성공해야 캐시에 추가한다. 활성 VM보다 진행 인덱스를 먼저 만들어 카탈로그 복구 경로를 보장한다.
 
 // withSession은 세션 엔트리를 잠금 하에 fn 에 전달한다. 캐시 미스 시 DB 적재를 시도한다.
 // fn 이 true(dirty)를 반환하면 변경 스냅샷을 DB에 기록한다. 세션이 어디에도 없으면 false.
@@ -78,23 +79,34 @@ func (st *stepStore) withSession(sessionID string, fn func(ss *sessionSteps) boo
 	return true
 }
 
-// put은 새 세션 진행 상태를 등록하고 DB에 기록한다(CreateSession).
-func (st *stepStore) put(sessionID string, ss *sessionSteps) {
-	st.mu.Lock()
-	st.m[sessionID] = ss
-	var snap *store.SessionProgress
+// put은 새 세션 진행 상태를 DB에 기록한 뒤 캐시에 등록한다(CreateSession).
+// DB가 설정된 환경에서는 영속화가 성공해야 프로바이더 세션 생성을 시작할 수 있다.
+func (st *stepStore) put(sessionID string, ss *sessionSteps) error {
 	if st.db != nil {
-		snap = toStoreProgress(ss)
-	}
-	st.mu.Unlock()
-
-	if snap != nil {
+		snap := toStoreProgress(ss)
 		ctx, cancel := context.WithTimeout(context.Background(), dbTimeout)
 		defer cancel()
 		if err := st.db.SaveProgress(ctx, sessionID, *snap); err != nil {
 			st.logWarn("진행 상태 DB 저장 실패", sessionID, err)
+			return err
 		}
 	}
+
+	st.mu.Lock()
+	st.m[sessionID] = ss
+	st.mu.Unlock()
+	return nil
+}
+
+// completed는 캐시 또는 DB 진행 스냅샷에서 모든 단계가 통과됐는지 확인한다.
+// 조회 실패나 진행 기록 부재는 미완료로 취급해 실행 중인 세션을 실수로 교체하지 않는다.
+func (st *stepStore) completed(sessionID string) bool {
+	completed := false
+	found := st.withSession(sessionID, func(ss *sessionSteps) bool {
+		completed = ss.allPassed()
+		return false
+	})
+	return found && completed
 }
 
 // take는 세션 진행 상태를 캐시·DB 양쪽에서 제거하고 마지막 상태를 반환한다(DeleteSession).

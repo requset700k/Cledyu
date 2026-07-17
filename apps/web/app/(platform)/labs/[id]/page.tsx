@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api, ApiRequestError } from '@/lib/api';
 import {
   buildActiveSessionResumeHref,
@@ -23,6 +23,7 @@ function LabDetail() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const queryClient = useQueryClient();
   const requestedResumeId = readActiveSessionResumeId(searchParams);
 
   // 세션 시작 전 화면에서 관리하는 로컬 상태다. 실제 세션 진행/TTL 처리는 LabSession이 맡는다.
@@ -93,6 +94,8 @@ function LabDetail() {
     mutationFn: () => api.sessions.create(id),
     // terminal_url은 LabSession이 자체 polling으로 derive하므로 sessionId만 보관.
     onSuccess: (s) => {
+      void queryClient.invalidateQueries({ queryKey: ['my-lab-statuses'] });
+      void queryClient.invalidateQueries({ queryKey: ['my-dashboard'] });
       setResumedExisting(false);
       setSkipBootGrace(false);
       setActiveSessionConflict(null);
@@ -152,6 +155,10 @@ function LabDetail() {
         }
       }
       deleted = true;
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['my-lab-statuses'] }),
+        queryClient.invalidateQueries({ queryKey: ['my-dashboard'] }),
+      ]);
       const next = await api.sessions.create(id);
       // 교체가 성공하면 이후 화면은 새 세션의 TTL/진행 상태를 기준으로 다시 시작한다.
       setActiveSessionConflict(null);

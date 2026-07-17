@@ -7,8 +7,8 @@ import type {
   CheckoutSession,
   DashboardResponse,
   HintResponse,
-  InstructorAnalytics,
   Lab,
+  LabLearningStatus,
   LeaderboardResponse,
   MyProgress,
   Session,
@@ -109,7 +109,7 @@ async function request<T>(
     return new Promise<never>(() => {});
   }
 
-  // 인증은 됐지만 역할 권한 없음 (student → instructor 엔드포인트 등)
+  // 인증은 됐지만 역할 권한 없음.
   if (res.status === 403) {
     throw new ApiRequestError(res.status, await readErrorPayload(res), 'FORBIDDEN', false);
   }
@@ -186,15 +186,12 @@ export const api = {
   me: {
     progress: () => request<MyProgress>('/api/v1/me/progress'),
     dashboard: () => request<DashboardResponse>('/api/v1/me/dashboard'),
+    labStatuses: () => request<Paginated<LabLearningStatus>>('/api/v1/me/lab-statuses'),
     setPreferences: (leaderboardHidden: boolean) =>
       request<{ leaderboard_hidden: boolean }>('/api/v1/me/preferences', {
         method: 'PATCH',
         body: JSON.stringify({ leaderboard_hidden: leaderboardHidden }),
       }),
-  },
-
-  instructor: {
-    analytics: () => request<InstructorAnalytics>('/api/v1/instructor/analytics'),
   },
 
   auth: {

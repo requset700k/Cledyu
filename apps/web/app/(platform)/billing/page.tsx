@@ -20,7 +20,7 @@ function planAccessDescription(planID: string) {
     case 'pro-monthly':
       return '중급/고급 Lab, AI 힌트 확장, 수료 이력까지 개인 학습자에게 열리는 플랜입니다.';
     case 'team-monthly':
-      return '팀 단위 학습 현황과 강사 모드까지 포함하는 조직/교육 운영자용 플랜입니다.';
+      return '팀 단위 학습 현황과 운영 리포트를 제공하는 조직용 플랜입니다.';
     default:
       return '무료 공개 Lab과 기본 학습 현황을 확인할 수 있는 기본 플랜입니다.';
   }

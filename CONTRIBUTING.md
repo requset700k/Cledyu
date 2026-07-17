@@ -82,7 +82,7 @@ pre-commit run -a
 | 관측성 / SLO / 대시보드 | 조승연 | 김용균 |
 | Lab DSL · Validation Engine · Kafka · Airflow · dbt | 김찬영 | 양성호 (AI 소비 시) |
 | Gemini · RAG · ChromaDB · 임베딩 · 프롬프트 | 양성호 | 김찬영 |
-| Go/Gin API · Next.js · xterm.js · 강사 모드 · Kong | 한정현 | 조승연 (성능) |
+| Go/Gin API · Next.js · xterm.js · Kong | 한정현 | 조승연 (성능) |
 | 아키텍처 결정 (ADR) | 김용균 + 영향 담당자 | — |
 
 ## 6. 코드 스타일

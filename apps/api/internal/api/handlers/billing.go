@@ -76,7 +76,7 @@ var billingPlans = []billingPlan{
 		Interval: "month",
 		Features: []string{
 			"팀 단위 학습 현황",
-			"강사 모드",
+			"팀 학습 관리",
 			"운영 리포트 준비",
 		},
 	},

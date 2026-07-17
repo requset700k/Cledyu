@@ -14,17 +14,20 @@ import (
 
 // fakePersistence는 persistence 의 in-memory 테스트 더블이다.
 type fakePersistence struct {
-	mu            sync.Mutex
-	progress      map[string]store.SessionProgress
-	users         map[string]string // id → role
-	completions   map[string]string // user|lab → session
-	completionAt  map[string]string // "user|lab" → RFC3339, 비면 zero time
-	saves         int
-	leaderboard   []store.LeaderboardRow           // LeaderboardRows 가 돌려줄 행
-	hidden        map[string]bool                  // SetLeaderboardHidden 이 기록
-	inProgress    map[string][]store.InProgressLab // user_id → 진행기록 있는 랩
-	subscriptions map[string]store.Subscription
-	checkouts     map[string]store.CheckoutSession
+	mu               sync.Mutex
+	progress         map[string]store.SessionProgress
+	users            map[string]string // id → role
+	completions      map[string]string // user|lab → session
+	completionAt     map[string]string // "user|lab" → RFC3339, 비면 zero time
+	saves            int
+	saveErr          error
+	leaderboard      []store.LeaderboardRow // LeaderboardRows 가 돌려줄 행
+	leaderboardCalls int
+	hidden           map[string]bool                  // SetLeaderboardHidden 이 기록
+	inProgress       map[string][]store.InProgressLab // user_id → 진행기록 있는 랩
+	inProgressErr    error
+	subscriptions    map[string]store.Subscription
+	checkouts        map[string]store.CheckoutSession
 }
 
 func newFakePersistence() *fakePersistence {
@@ -42,6 +45,9 @@ func newFakePersistence() *fakePersistence {
 func (f *fakePersistence) SaveProgress(_ context.Context, sessionID string, p store.SessionProgress) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.saveErr != nil {
+		return f.saveErr
+	}
 	f.progress[sessionID] = p
 	f.saves++
 	return nil
@@ -126,6 +132,7 @@ func (f *fakePersistence) RecordCompletion(_ context.Context, userID, labID, ses
 func (f *fakePersistence) LeaderboardRows(_ context.Context, since *time.Time) ([]store.LeaderboardRow, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.leaderboardCalls++
 	out := make([]store.LeaderboardRow, 0, len(f.leaderboard))
 	for _, r := range f.leaderboard {
 		if since != nil && r.CompletedAt.Before(*since) {
@@ -152,7 +159,7 @@ func (f *fakePersistence) SetLeaderboardHidden(_ context.Context, userID string,
 func (f *fakePersistence) ListInProgressLabsByUser(_ context.Context, userID string) ([]store.InProgressLab, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.inProgress[userID], nil
+	return f.inProgress[userID], f.inProgressErr
 }
 
 func (f *fakePersistence) GetSubscription(_ context.Context, userID string) (*store.Subscription, error) {
@@ -225,7 +232,9 @@ func TestProgress_WriteThrough(t *testing.T) {
 	db := newFakePersistence()
 	st := newStepStore(db, zap.NewNop())
 
-	st.put("s1", twoStepSeed())
+	if err := st.put("s1", twoStepSeed()); err != nil {
+		t.Fatal(err)
+	}
 	if got := db.progress["s1"]; got.LabID != "lab-linux-basics" || len(got.Steps) != 2 {
 		t.Fatalf("put must persist snapshot, got %+v", got)
 	}
@@ -287,7 +296,9 @@ func TestProgress_RecordsCompletion(t *testing.T) {
 	h := &Handler{log: zap.NewNop(), steps: newStepStore(db, zap.NewNop()), db: db}
 	seed := twoStepSeed()
 	seed.Steps[0].Status = "passed" // 1번은 이미 통과
-	h.steps.put("s1", seed)
+	if err := h.steps.put("s1", seed); err != nil {
+		t.Fatal(err)
+	}
 
 	h.ApplyValidationResult(validation.ValidationResult{SessionID: "s1", StepID: 2, Passed: true})
 
@@ -303,7 +314,9 @@ func TestProgress_MockValidationRecordsCompletion(t *testing.T) {
 	h := &Handler{log: zap.NewNop(), steps: newStepStore(db, zap.NewNop()), db: db}
 	seed := twoStepSeed()
 	seed.Steps[0].Status = "passed"
-	h.steps.put("s1", seed)
+	if err := h.steps.put("s1", seed); err != nil {
+		t.Fatal(err)
+	}
 
 	completedUser, completedLab := h.markStepPassed("s1", 1)
 	h.recordLabCompletion("s1", completedUser, completedLab)
@@ -316,7 +329,9 @@ func TestProgress_MockValidationRecordsCompletion(t *testing.T) {
 // db 가 nil 이면(로컬/CI) 전 경로가 in-memory 로만 동작한다(회귀 가드).
 func TestProgress_NilDBInMemoryOnly(t *testing.T) {
 	st := newStepStore(nil, nil)
-	st.put("s1", twoStepSeed())
+	if err := st.put("s1", twoStepSeed()); err != nil {
+		t.Fatal(err)
+	}
 	if found := st.withSession("s1", func(*sessionSteps) bool { return true }); !found {
 		t.Fatal("in-memory put/get must work without db")
 	}
