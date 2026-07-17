@@ -20,7 +20,7 @@ export type VMProvider = 'kubevirt' | 'ec2';
  */
 export type StepStatus = 'pending' | 'active' | 'validating' | 'passed' | 'failed';
 
-/** instructor 역할은 /instructor 대시보드 접근 + 강사 API 사용 가능 */
+/** 인증 서버가 반환하는 사용자 역할 */
 export type UserRole = 'student' | 'instructor' | 'admin';
 
 /** 실습 상세/세션 페이지에서 표시하는 단계 콘텐츠. 백엔드 Lab DSL(content.Step)과 대응. */
@@ -185,13 +185,6 @@ export interface DashboardResponse {
   labs: DashboardLab[];
   recent_completions: { lab_id: string; session_id: string; completed_at: string }[];
   leaderboard_hidden: boolean;
-}
-
-/** GET /api/v1/instructor/analytics 응답 (강사 분석) */
-export interface InstructorAnalytics {
-  lab_completion: { lab_id: string; started: number; completed: number; completion_rate: number }[];
-  step_funnel: { lab_id: string; step_id: number; validation_failures: number }[];
-  hint_usage: { lab_id: string; step_id: number; hint_source: string; hint_count: number }[];
 }
 
 /** 결제 페이지 요금제 — GET /api/v1/billing/plans */
