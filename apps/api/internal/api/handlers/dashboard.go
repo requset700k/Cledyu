@@ -2,12 +2,14 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"sort"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/requset700k/cledyu/api/internal/content"
+	"github.com/requset700k/cledyu/api/internal/session"
 	"github.com/requset700k/cledyu/api/internal/store"
 	"go.uber.org/zap"
 )
@@ -188,6 +190,31 @@ func (h *Handler) GetMyLabStatuses(c *gin.Context) {
 		h.log.Error("list in-progress labs", zap.Error(err), zap.String("user_id", uid))
 		h.err(c, http.StatusInternalServerError, "load lab statuses failed")
 		return
+	}
+	if h.sessions != nil {
+		inProgressFromStore := inProgress
+		activeSessionID, err := h.sessions.FindActiveByUser(ctx, uid)
+		if err != nil {
+			h.log.Error("find active session", zap.Error(err), zap.String("user_id", uid))
+			h.err(c, http.StatusInternalServerError, "load lab statuses failed")
+			return
+		}
+		inProgress = nil
+		if activeSessionID != "" {
+			activeSession, getErr := h.sessions.Get(ctx, activeSessionID)
+			if getErr != nil && !errors.Is(getErr, session.ErrNotFound) {
+				h.log.Error("get active session", zap.Error(getErr), zap.String("session_id", activeSessionID))
+				h.err(c, http.StatusInternalServerError, "load lab statuses failed")
+				return
+			}
+			if getErr == nil && activeSession != nil && (activeSession.Status == "provisioning" || activeSession.Status == "ready") {
+				for _, progress := range inProgressFromStore {
+					if progress.SessionID == activeSessionID {
+						inProgress = append(inProgress, progress)
+					}
+				}
+			}
+		}
 	}
 
 	completedSessionByLab := make(map[string]string, len(completions))

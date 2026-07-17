@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -10,9 +11,26 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/requset700k/cledyu/api/internal/content"
+	"github.com/requset700k/cledyu/api/internal/session"
 	"github.com/requset700k/cledyu/api/internal/store"
 	"go.uber.org/zap"
 )
+
+type dashboardSessionProvider struct {
+	entitlementSessionProvider
+	activeID string
+	session  *session.Session
+	findErr  error
+	getErr   error
+}
+
+func (p *dashboardSessionProvider) FindActiveByUser(context.Context, string) (string, error) {
+	return p.activeID, p.findErr
+}
+
+func (p *dashboardSessionProvider) Get(context.Context, string) (*session.Session, error) {
+	return p.session, p.getErr
+}
 
 func TestBuildDashboard_StatusAndSummary(t *testing.T) {
 	at := time.Date(2026, 6, 25, 9, 0, 0, 0, time.UTC)
@@ -341,4 +359,51 @@ func TestGetMyLabStatuses_InProgressLookupErrorReturnsServerError(t *testing.T) 
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d: %s", w.Code, w.Body.String())
 	}
+}
+
+func TestGetMyLabStatuses_ExcludesFailedActiveSession(t *testing.T) {
+	fake := newFakePersistence()
+	fake.inProgress["u1"] = []store.InProgressLab{{
+		LabID:     "lab-docker-basics",
+		SessionID: "failed-session",
+	}}
+	h := dashboardTestHandler(t, fake)
+	h.sessions = &dashboardSessionProvider{
+		activeID: "failed-session",
+		session: &session.Session{
+			ID:     "failed-session",
+			LabID:  "lab-docker-basics",
+			UserID: "u1",
+			Status: "failed",
+		},
+	}
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/me/lab-statuses", func(c *gin.Context) {
+		c.Set("user_id", "u1")
+		h.GetMyLabStatuses(c)
+	})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/me/lab-statuses", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var body struct {
+		Items []labStatus `json:"items"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range body.Items {
+		if item.LabID != "lab-docker-basics" {
+			continue
+		}
+		if item.Status != "not_started" || item.SessionID != "" {
+			t.Fatalf("failed session status mismatch: %+v", item)
+		}
+		return
+	}
+	t.Fatal("lab-docker-basics status not found")
 }
