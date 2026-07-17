@@ -42,32 +42,32 @@ export function AiTutorPanel({
   const exhausted = lastLevel >= MAX_LEVEL;
 
   return (
-    <div className="rounded-xl border border-indigo-500/30 bg-indigo-500/5 p-4">
+    <div className="border border-white/20 bg-white/[0.02] p-5">
       <div className="flex items-center justify-between mb-1">
-        <p className="text-indigo-300 text-sm font-semibold">AI 학습 도우미</p>
+        <p className="font-jbmono text-xs tracking-[0.1em] text-white/70">AI TUTOR</p>
         {hints.length > 0 && (
-          <span className="text-indigo-400/70 text-[11px]">
+          <span className="font-jbmono text-[11px] text-white/60">
             힌트 {lastLevel}/{MAX_LEVEL} 단계
           </span>
         )}
       </div>
-      <p className="text-slate-400 text-xs mb-3">
+      <p className="mb-3 mt-1.5 text-xs leading-relaxed text-white/60">
         막혔을 때 단계별 힌트를 받아보세요. 정답 대신 스스로 풀 수 있게 유도합니다.
       </p>
 
       {hints.length > 0 && (
         <ul className="space-y-2 mb-3">
           {hints.map((h, i) => (
-            <li key={i} className="rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2">
+            <li key={i} className="border border-white/15 bg-black/50 px-3.5 py-2.5">
               <div className="flex items-center gap-2 mb-1">
-                <span className="text-indigo-300 text-[11px] font-semibold">
-                  레벨 {h.hint_level}
+                <span className="font-jbmono text-[11px] font-semibold text-white/80">
+                  LV.{h.hint_level}
                 </span>
-                <span className="text-slate-500 text-[11px]">
+                <span className="font-jbmono text-[11px] text-white/55">
                   {h.source === 'ai' ? h.model : '기본 힌트'}
                 </span>
               </div>
-              <p className="text-slate-200 text-sm whitespace-pre-line">{h.hint}</p>
+              <p className="whitespace-pre-line text-sm leading-relaxed text-white/85">{h.hint}</p>
               {h.sources && h.sources.length > 0 && (
                 <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
                   {h.sources.map((s, j) =>
@@ -77,12 +77,12 @@ export function AiTutorPanel({
                         href={s.url}
                         target="_blank"
                         rel="noreferrer"
-                        className="text-indigo-400 hover:text-indigo-300 text-[11px] underline underline-offset-2"
+                        className="text-[11px] text-white/60 underline underline-offset-2 transition-colors hover:text-white"
                       >
                         {s.title || s.url}
                       </a>
                     ) : (
-                      <span key={j} className="text-slate-500 text-[11px]">
+                      <span key={j} className="text-[11px] text-white/55">
                         {s.title}
                       </span>
                     ),
@@ -94,13 +94,13 @@ export function AiTutorPanel({
         </ul>
       )}
 
-      {limitMsg && <p className="text-amber-400 text-xs mb-2">{limitMsg}</p>}
+      {limitMsg && <p className="mb-2 text-xs text-amber-400">{limitMsg}</p>}
 
       <button
         type="button"
         onClick={() => fetchHint.mutate()}
         disabled={fetchHint.isPending || exhausted}
-        className="bg-indigo-500/80 hover:bg-indigo-500 disabled:opacity-50 disabled:hover:bg-indigo-500/80 text-white text-xs font-medium px-4 py-1.5 rounded-lg transition-colors"
+        className="rounded-full border border-white/40 px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-white hover:text-black disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-white"
       >
         {fetchHint.isPending
           ? '힌트 생성 중...'

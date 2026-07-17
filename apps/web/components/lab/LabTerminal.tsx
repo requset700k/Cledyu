@@ -244,21 +244,21 @@ export function LabTerminal({
   }, [terminalPath, onOutput, redrawOnConnect]);
 
   return (
-    <div className="rounded-lg border border-slate-700 bg-slate-950 overflow-hidden">
-      <div className="flex items-center gap-1.5 px-3 py-2 border-b border-slate-800 bg-slate-900">
+    <div className="overflow-hidden rounded-xl border border-white/25 bg-black">
+      <div className="flex items-center gap-1.5 border-b border-white/15 bg-white/[0.03] px-3 py-2">
         <span className="w-2.5 h-2.5 rounded-full bg-red-500/70" />
         <span className="w-2.5 h-2.5 rounded-full bg-amber-500/70" />
         <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/70" />
-        <span className="ml-2 text-slate-500 text-xs">terminal — Ubuntu (KubeVirt VM)</span>
+        <span className="ml-2 font-jbmono text-xs text-white/55">terminal — Ubuntu VM</span>
         <span
-          className={`ml-auto text-[11px] ${
+          className={`ml-auto font-jbmono text-[11px] ${
             connectionState === 'connected'
               ? 'text-emerald-400'
               : connectionState === 'reconnecting'
                 ? 'text-amber-400'
                 : connectionState === 'error'
                   ? 'text-red-400'
-                  : 'text-slate-500'
+                  : 'text-white/55'
           }`}
         >
           {connectionState === 'connected'

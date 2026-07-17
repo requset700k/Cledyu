@@ -153,7 +153,7 @@ export function LabSession({
   const currentStep = steps.find((s) => s.id === currentId) ?? steps[0];
 
   if (!currentStep) {
-    return <p className="text-slate-500 text-sm mt-6">표시할 단계가 없습니다.</p>;
+    return <p className="mt-6 text-sm text-white/60">표시할 단계가 없습니다.</p>;
   }
 
   const allPassed = steps.length > 0 && steps.every((s) => statusOf(s.id) === 'passed');
@@ -179,13 +179,15 @@ export function LabSession({
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(360px,420px)_1fr] gap-6 mt-4 items-start">
         <div className="space-y-4 xl:max-h-[calc(100vh-9rem)] xl:overflow-y-auto xl:pr-1">
           {allPassed && (
-            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-emerald-300 text-sm">
+            <div className="border border-white/30 bg-white/[0.05] px-4 py-3 text-sm text-white">
               🎉 모든 단계를 완료했습니다. 수고하셨습니다!
             </div>
           )}
 
           <div>
-            <h2 className="text-slate-400 text-xs font-medium mb-2 px-3">진행 단계</h2>
+            <h2 className="mb-2 px-3 font-jbmono text-[11px] tracking-[0.12em] text-white/60">
+              STEPS
+            </h2>
             <StepList
               steps={steps}
               statusOf={statusOf}
@@ -195,12 +197,16 @@ export function LabSession({
             />
           </div>
 
-          <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-6">
+          <div className="border border-white/20 bg-white/[0.02] p-6">
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-brand-400 text-xs font-semibold">STEP {currentStep.id}</span>
-              <h3 className="text-white font-semibold">{currentStep.title}</h3>
+              <span className="font-jbmono text-[11px] tracking-[0.1em] text-white/50">
+                STEP {currentStep.id}
+              </span>
+              <h3 className="font-chakra font-semibold tracking-[-0.02em] text-white">
+                {currentStep.title}
+              </h3>
             </div>
-            <p className="text-slate-300 text-sm whitespace-pre-line mb-4">
+            <p className="mb-4 whitespace-pre-line text-sm leading-relaxed text-white/70">
               {currentStep.description}
             </p>
 
@@ -209,11 +215,11 @@ export function LabSession({
                 type="button"
                 onClick={() => validate.mutate(currentStep.id)}
                 disabled={validating || currentStatus === 'passed'}
-                className="bg-brand-500 hover:bg-brand-600 disabled:opacity-50 disabled:hover:bg-brand-500 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors"
+                className="rounded-full bg-white px-6 py-2 text-sm font-bold text-black transition-colors hover:bg-white/85 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white"
               >
                 {currentStatus === 'passed' ? '완료됨' : validating ? '검증 중...' : '검증'}
               </button>
-              {currentStatus === 'passed' && <span className="text-emerald-400 text-xs">통과</span>}
+              {currentStatus === 'passed' && <span className="text-xs text-emerald-400">통과</span>}
               {validating && <span className="text-amber-400 text-xs">검증엔진 결과 대기 중…</span>}
               {currentStatus === 'failed' && failedChecks.length === 0 && (
                 <span className="text-red-400 text-xs">검증에 실패했습니다. 다시 시도하세요.</span>
@@ -281,7 +287,7 @@ export function LabSession({
 // SessionFailed는 VM 이 프로비저닝 타임아웃/실패 상태가 됐을 때 노출되는 안내 카드다.
 function SessionFailed({ labId }: { labId: string }) {
   return (
-    <div className="mt-6 bg-slate-800/50 border border-red-500/30 rounded-xl p-8 text-center">
+    <div className="mt-6 border border-red-500/40 bg-white/[0.02] p-10 text-center">
       <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-red-500/10 border border-red-500/30 mb-4">
         <svg className="w-7 h-7 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path
@@ -292,14 +298,14 @@ function SessionFailed({ labId }: { labId: string }) {
           />
         </svg>
       </div>
-      <h3 className="text-white font-semibold">실습 환경 준비에 실패했습니다</h3>
-      <p className="text-slate-400 text-sm mt-2">
+      <h3 className="font-chakra text-lg font-bold text-white">실습 환경 준비에 실패했습니다</h3>
+      <p className="mt-3 text-sm leading-relaxed text-white/50">
         VM 프로비저닝이 제한 시간 안에 완료되지 않았습니다. 새 세션을 시작하면 깨끗한 환경으로 다시
         준비합니다.
       </p>
       <a
         href={`/labs/${labId}`}
-        className="inline-block mt-5 bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors"
+        className="mt-6 inline-block rounded-full bg-white px-6 py-2.5 text-sm font-bold text-black transition-colors hover:bg-white/85"
       >
         실습 다시 시작하기
       </a>
@@ -310,7 +316,7 @@ function SessionFailed({ labId }: { labId: string }) {
 // SessionExpired는 TTL 만료(서버가 VM 회수) 시 터미널 대신 노출되는 안내 카드다.
 function SessionExpired({ labId }: { labId: string }) {
   return (
-    <div className="mt-6 bg-slate-800/50 border border-slate-700 rounded-xl p-8 text-center">
+    <div className="mt-6 border border-white/20 bg-white/[0.02] p-10 text-center">
       <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 mb-4">
         <svg
           className="w-7 h-7 text-amber-400"
@@ -322,14 +328,14 @@ function SessionExpired({ labId }: { labId: string }) {
           <path strokeLinecap="round" strokeWidth={1.6} d="M12 7v5l3 2" />
         </svg>
       </div>
-      <h3 className="text-white font-semibold">세션이 만료되었습니다</h3>
-      <p className="text-slate-400 text-sm mt-2">
+      <h3 className="font-chakra text-lg font-bold text-white">세션이 만료되었습니다</h3>
+      <p className="mt-3 text-sm leading-relaxed text-white/50">
         실습 세션의 최대 사용 시간이 지나 환경이 종료되었습니다. 새 세션을 시작하면 처음부터 다시
         실습할 수 있습니다.
       </p>
       <a
         href={`/labs/${labId}`}
-        className="inline-block mt-5 bg-brand-500 hover:bg-brand-600 text-white text-sm font-medium px-5 py-2 rounded-lg transition-colors"
+        className="mt-6 inline-block rounded-full bg-white px-6 py-2.5 text-sm font-bold text-black transition-colors hover:bg-white/85"
       >
         실습 다시 시작하기
       </a>
@@ -376,7 +382,7 @@ function SessionBoot({
     >
       <div className="grid gap-8 border-b border-white/15 px-6 py-7 sm:grid-cols-[1fr_auto] sm:px-8 sm:py-8">
         <div>
-          <div className="flex items-center gap-2 font-jbmono text-[11px] tracking-[0.14em] text-white/45">
+          <div className="flex items-center gap-2 font-jbmono text-[11px] tracking-[0.14em] text-white/60">
             <span aria-hidden="true" className="h-1.5 w-1.5 bg-white motion-safe:animate-pulse" />
             ENVIRONMENT BOOT
           </div>
@@ -386,16 +392,16 @@ function SessionBoot({
           >
             실습 환경을 준비하고 있습니다
           </h2>
-          <p className="mt-2 text-sm leading-relaxed text-white/45">
+          <p className="mt-2 text-sm leading-relaxed text-white/60">
             전용 VM과 터미널을 연결하고 있습니다. 보통 1~2분 안에 완료됩니다.
           </p>
         </div>
 
         <div className="self-end sm:min-w-32 sm:text-right">
-          <p className="font-jbmono text-[10px] tracking-[0.14em] text-white/35">PROGRESS</p>
+          <p className="font-jbmono text-[10px] tracking-[0.14em] text-white/60">PROGRESS</p>
           <p className="mt-1 font-michroma text-4xl leading-none tracking-[-0.06em] text-white sm:text-5xl">
             {progress}
-            <span className="ml-1 text-base tracking-normal text-white/45">%</span>
+            <span className="ml-1 text-base tracking-normal text-white/60">%</span>
           </p>
         </div>
       </div>
@@ -450,13 +456,13 @@ function BootStage({
     <li className="px-6 py-5 sm:min-h-32 sm:px-5" aria-current={inProgress ? 'step' : undefined}>
       <div className="flex items-center justify-between gap-3">
         <span
-          className={`font-michroma text-xs ${done || inProgress ? 'text-white/70' : 'text-white/25'}`}
+          className={`font-michroma text-xs ${done || inProgress ? 'text-white/70' : 'text-white/55'}`}
         >
           {String(index).padStart(2, '0')}
         </span>
         <span
           className={`font-jbmono text-[10px] tracking-[0.08em] ${
-            inProgress ? 'text-white' : done ? 'text-white/45' : 'text-white/25'
+            inProgress ? 'text-white' : done ? 'text-white/60' : 'text-white/55'
           }`}
         >
           {stateLabel}
@@ -475,7 +481,7 @@ function BootStage({
         />
         <span
           className={`text-sm font-medium ${
-            inProgress ? 'text-white' : done ? 'text-white/60' : 'text-white/30'
+            inProgress ? 'text-white' : done ? 'text-white/65' : 'text-white/55'
           }`}
         >
           {label}

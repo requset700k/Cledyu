@@ -25,7 +25,7 @@ export function LabWorkspace({
 
   return (
     <div>
-      <div className="flex gap-1 mb-2">
+      <div className="mb-2 flex w-max gap-1 rounded-full border border-white/25 p-1">
         <TabButton active={tab === 'terminal'} onClick={() => setTab('terminal')}>
           터미널
         </TabButton>
@@ -61,8 +61,8 @@ function TabButton({
     <button
       type="button"
       onClick={onClick}
-      className={`text-xs font-medium px-3 py-1.5 rounded-md transition-colors ${
-        active ? 'bg-slate-700 text-white' : 'bg-slate-800/60 text-slate-400 hover:text-slate-200'
+      className={`rounded-full px-4 py-1.5 text-xs font-semibold transition-colors ${
+        active ? 'bg-white text-black' : 'text-white/60 hover:text-white'
       }`}
     >
       {children}
@@ -120,11 +120,11 @@ function IdePane({
   if (!ready || !origin) {
     return (
       <div
-        className={`${heightClass} rounded-xl border border-slate-700 bg-slate-900/60 flex flex-col items-center justify-center gap-3`}
+        className={`${heightClass} flex flex-col items-center justify-center gap-3 rounded-xl border border-white/20 bg-white/[0.02]`}
       >
-        <div className="w-8 h-8 rounded-full border-2 border-slate-700 border-t-brand-400 animate-spin" />
-        <p className="text-slate-400 text-sm">IDE(VS Code)를 준비하고 있습니다…</p>
-        <p className="text-slate-500 text-xs">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+        <p className="text-sm text-white/60">IDE(VS Code)를 준비하고 있습니다…</p>
+        <p className="text-xs text-white/60">
           {waitedLong
             ? '평소보다 오래 걸리고 있습니다. 터미널 탭에서 실습을 먼저 진행하셔도 됩니다.'
             : '도구 설치에 1~2분 정도 걸릴 수 있습니다.'}
@@ -137,7 +137,7 @@ function IdePane({
     <iframe
       src={`${origin}${idePath}?folder=/home/lab/workspace`}
       title="Lab IDE (VS Code)"
-      className={`w-full ${heightClass} rounded-xl border border-slate-700 bg-slate-950`}
+      className={`w-full ${heightClass} rounded-xl border border-white/25 bg-black`}
     />
   );
 }

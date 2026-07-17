@@ -36,11 +36,11 @@ export function SessionTimer({
       ? 'text-red-300 border-red-500/40 bg-red-500/10'
       : mins < WARN_MIN
         ? 'text-amber-300 border-amber-500/40 bg-amber-500/10'
-        : 'text-slate-300 border-slate-700 bg-slate-800/60';
+        : 'border-white/25 bg-white/[0.04] text-white/75';
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium tabular-nums ${tone}`}
+      className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 font-jbmono text-xs tabular-nums ${tone}`}
       title="세션 만료까지 남은 시간"
     >
       <ClockIcon />
