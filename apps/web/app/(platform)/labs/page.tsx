@@ -51,11 +51,10 @@ function LabsCatalog() {
 
   const labs = data?.items ?? [];
   const filtered = filter === 'all' ? labs : labs.filter((l) => l.difficulty === filter);
-  const { isInitialLoading: isStatusInitialLoading, statusReady } =
-    getLabStatusAvailability({
-      hasData: labStatuses !== undefined,
-      isFetching: isStatusFetching,
-    });
+  const { isInitialLoading: isStatusInitialLoading, statusReady } = getLabStatusAvailability({
+    hasData: labStatuses !== undefined,
+    isFetching: isStatusFetching,
+  });
   const isStatusUnavailable = !statusReady && isStatusError;
   const progressByLab = new Map(labStatuses?.items.map((lab) => [lab.lab_id, lab]) ?? []);
 
