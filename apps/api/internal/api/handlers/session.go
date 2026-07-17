@@ -292,15 +292,47 @@ func (h *Handler) CreateSession(c *gin.Context) {
 		}
 	}
 
+	sessionID := newSessionID()
+
+	// 스텝 진행 상태를 프로바이더 생성 전에 영속화한다. 초기 저장에 실패한 상태로 VM을 만들면
+	// 카탈로그가 활성 세션을 복구할 DB 인덱스를 잃으므로 세션 생성 자체를 시작하지 않는다.
+	_, stepsSpan := startHandlerSpan(ctx, "api.session.initialize_steps",
+		attribute.String("lab.id", req.LabID),
+		attribute.String("session.id", sessionID),
+		attribute.Int("lab.step_count", len(lc.Steps)),
+	)
+	ss := &sessionSteps{LabID: req.LabID, UserID: uid}
+	for i, st := range lc.Steps {
+		status := "pending"
+		if i == 0 {
+			status = "active"
+		}
+		ss.Steps = append(ss.Steps, stepState{StepID: st.ID, Status: status})
+	}
+	if len(ss.Steps) > 0 {
+		ss.CurrentStep = ss.Steps[0].StepID
+	}
+	if err := h.steps.put(sessionID, ss); err != nil {
+		recordSpanError(stepsSpan, err)
+		stepsSpan.End()
+		recordSpanError(span, err)
+		span.SetAttributes(attribute.String("session.create.result", "progress_init_failed"))
+		h.log.Error("initialize session progress", zap.Error(err))
+		h.err(c, http.StatusInternalServerError, "initialize session progress failed")
+		return
+	}
+	stepsSpan.End()
+
 	// 랩별 초기화(init)는 cloud-init 으로 VM 부팅 시 실행된다(도구 설치 등).
 	createCtx, createSpan := startHandlerSpan(ctx, "api.session.create_provider_session", attribute.String("lab.id", req.LabID))
-	sess, err := h.sessions.Create(createCtx, newSessionID(), req.LabID, uid, session.BootInit{
+	sess, err := h.sessions.Create(createCtx, sessionID, req.LabID, uid, session.BootInit{
 		Packages: lc.Init.Packages,
 		Runcmd:   lc.Init.Runcmd,
 	})
 	recordSpanError(createSpan, err)
 	if err != nil {
 		createSpan.End()
+		h.steps.remove(sessionID)
 		recordSpanError(span, err)
 		h.log.Error("create session", zap.Error(err))
 		h.err(c, http.StatusInternalServerError, "create session failed")
@@ -315,26 +347,6 @@ func (h *Handler) CreateSession(c *gin.Context) {
 		attribute.String("session.id", sess.ID),
 		attribute.String("session.provider", sess.Provider),
 	)
-
-	// 스텝 진행 상태 초기화 — 첫 스텝 active, 나머지 pending.
-	_, stepsSpan := startHandlerSpan(ctx, "api.session.initialize_steps",
-		attribute.String("lab.id", req.LabID),
-		attribute.String("session.id", sess.ID),
-		attribute.Int("lab.step_count", len(lc.Steps)),
-	)
-	ss := &sessionSteps{LabID: req.LabID, UserID: uid}
-	for i, st := range lc.Steps {
-		status := "pending"
-		if i == 0 {
-			status = "active"
-		}
-		ss.Steps = append(ss.Steps, stepState{StepID: st.ID, Status: status})
-	}
-	if len(ss.Steps) > 0 {
-		ss.CurrentStep = ss.Steps[0].StepID
-	}
-	h.steps.put(sess.ID, ss)
-	stepsSpan.End()
 
 	// 학습 분석: vm_provisioned_source 로 온프렘/EC2 분포를 집계한다 — 실제 프로비저닝된 프로바이더를 채운다.
 	_, eventSpan := startHandlerSpan(ctx, "api.session.emit_lab_started",

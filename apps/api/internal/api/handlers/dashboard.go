@@ -207,7 +207,8 @@ func (h *Handler) GetMyLabStatuses(c *gin.Context) {
 				h.err(c, http.StatusInternalServerError, "load lab statuses failed")
 				return
 			}
-			if getErr == nil && activeSession != nil && (activeSession.Status == "provisioning" || activeSession.Status == "ready") {
+			if getErr == nil && activeSession != nil && activeSession.ExpiresAt.After(time.Now()) &&
+				(activeSession.Status == "provisioning" || activeSession.Status == "ready") {
 				for _, progress := range inProgressFromStore {
 					if progress.SessionID == activeSessionID {
 						inProgress = append(inProgress, progress)

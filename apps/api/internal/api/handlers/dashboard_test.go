@@ -434,3 +434,51 @@ func TestGetMyLabStatuses_ExcludesFailedActiveSession(t *testing.T) {
 	}
 	t.Fatal("lab-docker-basics status not found")
 }
+
+func TestGetMyLabStatuses_ExcludesExpiredActiveSession(t *testing.T) {
+	fake := newFakePersistence()
+	fake.inProgress["u1"] = []store.InProgressLab{{
+		LabID:     "lab-docker-basics",
+		SessionID: "expired-session",
+	}}
+	h := dashboardTestHandler(t, fake)
+	h.sessions = &dashboardSessionProvider{
+		activeID: "expired-session",
+		session: &session.Session{
+			ID:        "expired-session",
+			LabID:     "lab-docker-basics",
+			UserID:    "u1",
+			Status:    "ready",
+			ExpiresAt: time.Now().Add(-time.Hour),
+		},
+	}
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/me/lab-statuses", func(c *gin.Context) {
+		c.Set("user_id", "u1")
+		h.GetMyLabStatuses(c)
+	})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/me/lab-statuses", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var body struct {
+		Items []labStatus `json:"items"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range body.Items {
+		if item.LabID != "lab-docker-basics" {
+			continue
+		}
+		if item.Status != "not_started" || item.SessionID != "" {
+			t.Fatalf("expired session status mismatch: %+v", item)
+		}
+		return
+	}
+	t.Fatal("lab-docker-basics status not found")
+}

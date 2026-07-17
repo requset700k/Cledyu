@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -20,10 +21,14 @@ import (
 
 type entitlementSessionProvider struct {
 	createCount int
+	createErr   error
 }
 
 func (p *entitlementSessionProvider) Create(_ context.Context, sessionID, labID, userID string, _ session.BootInit) (*session.Session, error) {
 	p.createCount++
+	if p.createErr != nil {
+		return nil, p.createErr
+	}
 	return &session.Session{
 		ID:        sessionID,
 		LabID:     labID,
@@ -122,6 +127,35 @@ func TestCreateSessionAllowsBeginnerLabsWithoutSubscription(t *testing.T) {
 	}
 	if provider.createCount != 1 {
 		t.Fatalf("beginner lab should create VM session, createCount=%d", provider.createCount)
+	}
+}
+
+func TestCreateSessionDoesNotProvisionWhenInitialProgressSaveFails(t *testing.T) {
+	db := newFakePersistence()
+	db.saveErr = errors.New("database unavailable")
+	provider := &entitlementSessionProvider{}
+	r := newEntitlementRouter(t, "debug", db, provider)
+
+	w, body := postSession(t, r, "lab-docker-basics")
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d body=%v, want 500", w.Code, body)
+	}
+	if provider.createCount != 0 {
+		t.Fatalf("provider create count=%d, want 0", provider.createCount)
+	}
+}
+
+func TestCreateSessionRemovesInitialProgressWhenProviderCreateFails(t *testing.T) {
+	db := newFakePersistence()
+	provider := &entitlementSessionProvider{createErr: errors.New("provider unavailable")}
+	r := newEntitlementRouter(t, "debug", db, provider)
+
+	w, body := postSession(t, r, "lab-docker-basics")
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d body=%v, want 500", w.Code, body)
+	}
+	if len(db.progress) != 0 {
+		t.Fatalf("progress rows=%d, want 0", len(db.progress))
 	}
 }
 
