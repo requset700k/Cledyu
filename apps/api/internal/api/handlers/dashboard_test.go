@@ -245,6 +245,46 @@ func TestGetMyLabStatuses_CompletedSessionProgressRemainsCompleted(t *testing.T)
 	t.Fatal("lab-docker-basics status not found")
 }
 
+func TestGetMyLabStatuses_CompletedRerunProgressRemainsCompleted(t *testing.T) {
+	fake := newFakePersistence()
+	fake.completions["u1|lab-docker-basics"] = "first-completed-session"
+	fake.inProgress["u1"] = []store.InProgressLab{{
+		LabID:     "lab-docker-basics",
+		SessionID: "completed-rerun-session",
+		AllPassed: true,
+	}}
+	h := dashboardTestHandler(t, fake)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/me/lab-statuses", func(c *gin.Context) {
+		c.Set("user_id", "u1")
+		h.GetMyLabStatuses(c)
+	})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/me/lab-statuses", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var body struct {
+		Items []labStatus `json:"items"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range body.Items {
+		if item.LabID != "lab-docker-basics" {
+			continue
+		}
+		if item.Status != "completed" || item.SessionID != "" {
+			t.Fatalf("completed rerun status mismatch: %+v", item)
+		}
+		return
+	}
+	t.Fatal("lab-docker-basics status not found")
+}
+
 func TestGetMyLabStatuses_InProgressLookupErrorReturnsServerError(t *testing.T) {
 	fake := newFakePersistence()
 	fake.inProgressErr = errors.New("database unavailable")

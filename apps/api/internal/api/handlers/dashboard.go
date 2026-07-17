@@ -190,13 +190,20 @@ func (h *Handler) GetMyLabStatuses(c *gin.Context) {
 		return
 	}
 
-	_, dashboardRows := buildDashboard(h.labs, completions, inProgress)
+	activeProgress := make([]store.InProgressLab, 0, len(inProgress))
+	for _, progress := range inProgress {
+		if !progress.AllPassed {
+			activeProgress = append(activeProgress, progress)
+		}
+	}
+
+	_, dashboardRows := buildDashboard(h.labs, completions, activeProgress)
 	completedSessionByLab := make(map[string]string, len(completions))
 	for _, completion := range completions {
 		completedSessionByLab[completion.LabID] = completion.SessionID
 	}
-	activeSessionByLab := make(map[string]string, len(inProgress))
-	for _, progress := range inProgress {
+	activeSessionByLab := make(map[string]string, len(activeProgress))
+	for _, progress := range activeProgress {
 		activeSessionByLab[progress.LabID] = progress.SessionID
 	}
 	rows := make([]labStatus, 0, len(dashboardRows))
