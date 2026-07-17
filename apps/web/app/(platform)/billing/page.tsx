@@ -71,7 +71,9 @@ function PlanCard({
 
       <div className="mt-7 font-chakra text-4xl font-bold leading-none">{formatPrice(plan)}</div>
 
-      <ul className={`mt-9 flex-1 space-y-3 text-sm leading-[1.5] ${inverted ? '' : 'text-white/80'}`}>
+      <ul
+        className={`mt-9 flex-1 space-y-3 text-sm leading-[1.5] ${inverted ? '' : 'text-white/80'}`}
+      >
         {plan.features.map((feature) => (
           <li key={feature} className="flex gap-3">
             <span className="opacity-50">—</span>
@@ -125,9 +127,7 @@ function PaymentModal({
         <div className="border-b border-white/15 p-6">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="font-jbmono text-xs tracking-[0.12em] text-white/50">
-                CLEDYU CHECKOUT
-              </p>
+              <p className="font-jbmono text-xs tracking-[0.12em] text-white/50">CLEDYU CHECKOUT</p>
               <h2 className="mt-2 font-chakra text-xl font-bold text-white">
                 {plan.name} 플랜 결제
               </h2>

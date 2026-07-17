@@ -214,7 +214,9 @@ function LabDetail() {
         <div className="mt-10 border border-white/20 bg-white/[0.02] p-8">
           {hasContent ? (
             <>
-              <h2 className="mb-5 font-jbmono text-xs tracking-[0.12em] text-white/45">STEPS ({steps.length})</h2>
+              <h2 className="mb-5 font-jbmono text-xs tracking-[0.12em] text-white/45">
+                STEPS ({steps.length})
+              </h2>
               <ol className="mb-8 border-t border-white/15">
                 {steps.map((s) => (
                   <li key={s.id} className="flex gap-5 border-b border-white/15 px-2 py-4 text-sm">
@@ -295,7 +297,9 @@ function LabDetail() {
                 )}
             </>
           ) : (
-            <p className="text-sm text-white/45">이 Lab은 아직 실습 콘텐츠가 준비되지 않았습니다.</p>
+            <p className="text-sm text-white/45">
+              이 Lab은 아직 실습 콘텐츠가 준비되지 않았습니다.
+            </p>
           )}
         </div>
       )}
