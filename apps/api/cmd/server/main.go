@@ -13,7 +13,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/redis/go-redis/v9"
 	api "github.com/requset700k/cledyu/api/internal/api"
-	"github.com/requset700k/cledyu/api/internal/bq"
 	"github.com/requset700k/cledyu/api/internal/config"
 	"github.com/requset700k/cledyu/api/internal/ec2"
 	"github.com/requset700k/cledyu/api/internal/events"
@@ -234,18 +233,6 @@ func main() {
 			defer node.Close() //nolint:errcheck
 			h.SetEC2Dial(node.Dial)
 			logger.Info("tailnet 노드 가입 — EC2 라이브 터미널 활성")
-		}
-	}
-
-	// D3 강사 분석 — ProjectID 설정 시에만 BigQuery 조회기 주입(미설정 시 핸들러 503).
-	if cfg.Analytics.ProjectID != "" {
-		bqClient, bqErr := bq.NewClient(ctx, cfg.Analytics.ProjectID, cfg.Analytics.Dataset)
-		if bqErr != nil {
-			logger.Warn("BigQuery 분석 클라이언트 생성 실패 — 강사 분석 비활성", zap.Error(bqErr))
-		} else {
-			h.SetBQAnalytics(bqClient)
-			defer bqClient.Close()
-			logger.Info("BigQuery 분석 활성", zap.String("project", cfg.Analytics.ProjectID), zap.String("dataset", cfg.Analytics.Dataset))
 		}
 	}
 

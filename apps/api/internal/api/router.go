@@ -123,7 +123,7 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions session.Provider, v
 	}
 
 	// 관리자 전용 — JWT(v1) 이후 RequireMinRole 로 역할을 한 번 더 검사한다.
-	// admin 콘솔의 백엔드. 강사(instructor) 전용 그룹은 강사 모드 도입 시 같은 패턴으로 추가.
+	// admin 콘솔의 백엔드.
 	admin := v1.Group("/admin")
 	admin.Use(middleware.RequireMinRole("admin"))
 	{
@@ -131,13 +131,6 @@ func NewRouter(cfg *config.Config, log *zap.Logger, sessions session.Provider, v
 		admin.GET("/users/:uid/activity", h.GetUserActivity)        // 랩 완료 이력
 		admin.POST("/users/:uid/role", h.SetUserRole)               // 역할 승격(Keycloak)
 		admin.DELETE("/users/:uid/session", h.TerminateUserSession) // 활성 세션 강제 종료
-	}
-
-	// 강사 전용 — instructor 이상(admin 포함) 접근. 강사 분석 대시보드 백엔드.
-	instructor := v1.Group("/instructor")
-	instructor.Use(middleware.RequireMinRole("instructor"))
-	{
-		instructor.GET("/analytics", h.GetInstructorAnalytics)
 	}
 
 	return r, h

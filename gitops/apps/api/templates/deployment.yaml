@@ -158,16 +158,6 @@ spec:
             - name: CLEDYU_AWS_API_TAILNET_STATE_DIR
               value: /var/lib/tsnet
             {{- end }}
-            {{- if .Values.analytics.enabled }}
-            # D3 강사 분석 — BigQuery 뷰 읽기전용. projectId 설정 시 /api/v1/instructor/analytics 활성(미설정 시 503).
-            - name: CLEDYU_ANALYTICS_PROJECT_ID
-              value: {{ .Values.analytics.projectId | quote }}
-            - name: CLEDYU_ANALYTICS_DATASET
-              value: {{ .Values.analytics.dataset | quote }}
-            # 읽기전용 SA 키(아래 bq-reader 볼륨) — Google client ADC 표준 env.
-            - name: GOOGLE_APPLICATION_CREDENTIALS
-              value: {{ printf "%s/%s" .Values.analytics.credentialsMountPath .Values.analytics.secretKey | quote }}
-            {{- end }}
           volumeMounts:
             {{- if .Values.kafka.enabled }}
             - name: kafka-certs
@@ -185,11 +175,6 @@ spec:
             - name: vm-file-ssh
               mountPath: {{ .Values.kubevirt.fileListSSH.mountPath | quote }}
               readOnly: true
-            {{- if .Values.analytics.enabled }}
-            - name: bq-reader
-              mountPath: {{ .Values.analytics.credentialsMountPath | quote }}
-              readOnly: true
-            {{- end }}
           resources:
             requests:
               cpu: {{ .Values.resources.requests.cpu }}
@@ -237,11 +222,3 @@ spec:
                 path: public_key
               - key: {{ .Values.kubevirt.fileListSSH.privateKey | quote }}
                 path: id_ed25519
-        {{- if .Values.analytics.enabled }}
-        # 읽기전용 BigQuery SA 키. Vault key 미등록이어도 Pod 는 뜨고 분석만 비활성(optional).
-        - name: bq-reader
-          secret:
-            secretName: {{ .Values.analytics.secretName | quote }}
-            optional: true
-            defaultMode: 288 # 0o440 — root와 fsGroup(65532)만 읽기 가능
-        {{- end }}

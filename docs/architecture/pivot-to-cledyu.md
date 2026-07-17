@@ -17,7 +17,7 @@ KT Tech-Up Labs 계획서에 **"WikiPulse 프로젝트와 동일 인프라 베�
 - Kafka 토픽: `wiki-edits·reddit-comments·sentiment-results·briefings` → `learning-events·validation-requests/results·security-logs`
 - 앱 스택: `FastAPI+Next.js 대시보드` → `Go/Gin Session API · xterm.js · Validation Engine · AI BFF`
 - AI: `DistilBERT + Gemini 2.0 Flash` → `Gemini 3 Pro (Google AI Pro 크레딧) + Flash fallback · RAG`
-- 데모 시나리오: `편집 폭증 감지` → `Lab 프로비저닝 + AI 힌트 + Validation + 강사 모드`
+- 데모 시나리오: `편집 폭증 감지` → `Lab 프로비저닝 + AI 힌트 + Validation`
 
 ## 운영 식별자 통일 (Phase 12 투입 전 완료)
 

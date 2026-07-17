@@ -12,24 +12,16 @@ import (
 )
 
 type Config struct {
-	Server      ServerConfig    `mapstructure:"server"`
-	Redis       RedisConfig     `mapstructure:"redis"`
-	Keycloak    KeycloakConfig  `mapstructure:"keycloak"`
-	KubeVirt    KubeVirtConfig  `mapstructure:"kubevirt"`
-	AWS         AWSConfig       `mapstructure:"aws"`
-	Kafka       KafkaConfig     `mapstructure:"kafka"`
-	AI          AIConfig        `mapstructure:"ai"`
-	DB          DBConfig        `mapstructure:"db"`
-	Analytics   AnalyticsConfig `mapstructure:"analytics"`
-	OTel        OTelConfig      `mapstructure:"otel"`
-	FrontendURL string          `mapstructure:"frontend_url"`
-}
-
-// AnalyticsConfig는 D3 강사 분석용 BigQuery 설정이다.
-// ProjectID 가 비면 비활성 — 강사 분석 핸들러가 503 을 반환한다.
-type AnalyticsConfig struct {
-	ProjectID string `mapstructure:"project_id"` // env: CLEDYU_ANALYTICS_PROJECT_ID
-	Dataset   string `mapstructure:"dataset"`    // env: CLEDYU_ANALYTICS_DATASET
+	Server      ServerConfig   `mapstructure:"server"`
+	Redis       RedisConfig    `mapstructure:"redis"`
+	Keycloak    KeycloakConfig `mapstructure:"keycloak"`
+	KubeVirt    KubeVirtConfig `mapstructure:"kubevirt"`
+	AWS         AWSConfig      `mapstructure:"aws"`
+	Kafka       KafkaConfig    `mapstructure:"kafka"`
+	AI          AIConfig       `mapstructure:"ai"`
+	DB          DBConfig       `mapstructure:"db"`
+	OTel        OTelConfig     `mapstructure:"otel"`
+	FrontendURL string         `mapstructure:"frontend_url"`
 }
 
 // DBConfig는 PostgreSQL 영속 계층 설정이다.
@@ -247,10 +239,7 @@ func Load() (*Config, error) {
 	v.SetDefault("kafka.events_topic", "lab-events")
 	v.SetDefault("ai.base_url", "") // 빈 기본값 — env CLEDYU_AI_BASE_URL 로 주입(미설정 시 정적 힌트 폴백)
 	v.SetDefault("ai.timeout_seconds", 15)
-	v.SetDefault("db.dsn", "") // 빈 기본값 — env CLEDYU_DB_DSN(Secret)으로 주입. 미설정 시 in-memory 전용
-	// BigQuery 분석 — 빈 기본값. env CLEDYU_ANALYTICS_PROJECT_ID 설정 시 강사 분석 활성.
-	v.SetDefault("analytics.project_id", "") // env CLEDYU_ANALYTICS_PROJECT_ID 로 주입
-	v.SetDefault("analytics.dataset", "cledyu_analytics")
+	v.SetDefault("db.dsn", "")                                         // 빈 기본값 — env CLEDYU_DB_DSN(Secret)으로 주입. 미설정 시 in-memory 전용
 	v.SetDefault("otel.endpoint", "alloy.loki.svc.cluster.local:4317") // env CLEDYU_OTEL_ENDPOINT 로 오버라이드
 
 	if err := v.ReadInConfig(); err != nil {

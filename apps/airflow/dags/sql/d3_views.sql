@@ -1,4 +1,4 @@
--- D3 강사 분석용 BigQuery 뷰. raw lab_events 위 집계 + dedup.
+-- 학습 이벤트 분석용 BigQuery 뷰. raw lab_events 위 집계 + dedup.
 -- dedup: append 적재라 동일 이벤트가 중복될 수 있어 (user,session,event_type,step,ts) 기준 1건만.
 
 CREATE OR REPLACE VIEW `cledyu_analytics.v_dedup_events` AS

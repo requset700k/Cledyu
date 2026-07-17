@@ -310,7 +310,6 @@ instructor > student)로 정규화해 컨텍스트에 주입하고, `RequireMinR
 - 역할 변경(강사 승격)은 Keycloak 에서 하고, 다음 로그인/`/auth/refresh` 시 새 토큰에
   반영된다. 즉시 적용이 필요하면 해당 사용자에게 재로그인을 요청한다(토큰 수명 ~15m 내 자동 반영).
 - 권한 부족 응답은 `403 {code: forbidden}` — 프론트(`lib/api.ts`)는 이를 `FORBIDDEN` 으로 처리한다.
-- 강사(instructor) 전용 그룹은 강사 모드 도입 시 `RequireMinRole("instructor")` 로 같은 패턴 추가.
 
 > **realm 분리 주의:** 여기 `admin`/`instructor`/`student` 는 **학습 앱(cledyu-learn realm)
 > 내부 역할**이다. 팀 내부 개발자가 쓰는 운영 realm(`cledyu`)의 `admin`(ArgoCD·Kafka-UI 등

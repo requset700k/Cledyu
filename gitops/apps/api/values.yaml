@@ -115,17 +115,3 @@ aws:
   # 같은 Vault 경로지만 별도 Secret(cledyu-api-tailscale, deployment 에 직접 명시)로 분리 — 미시드가
   # 필수 AWS 키 동기화·api 기동을 막지 않게(Codex P1·P2).
   secretName: "cledyu-api-aws"
-
-# D3 강사 분석 — API 가 D2의 cledyu_analytics BigQuery 뷰를 읽어 /api/v1/instructor/analytics 로 제공.
-# enabled=false 가 기본 — env/Secret 미주입이고 핸들러는 503(기능 비활성). 활성화 절차:
-#   1) GCP 읽기전용 SA 키를 Vault(cledyu/gcp/api-analytics-reader: key.json) 등록 → ESO 가 Secret 동기화
-#   2) enabled=true, projectId 설정 — 빈 값이면 서버가 BigQuery 조회기를 주입하지 않아 여전히 503
-analytics:
-  enabled: false
-  projectId: ""               # CLEDYU_ANALYTICS_PROJECT_ID — GCP 프로젝트(예: cledyu-project)
-  dataset: "cledyu_analytics" # CLEDYU_ANALYTICS_DATASET
-  # 읽기전용 SA 키 — Vault(gcp/api-analytics-reader)→ESO(externalsecret-bq-reader.yaml).
-  secretName: "api-bq-reader"
-  secretKey: "key.json"
-  # GOOGLE_APPLICATION_CREDENTIALS = <credentialsMountPath>/<secretKey> (Google client ADC 표준).
-  credentialsMountPath: "/etc/gcp/api-bq-reader"
