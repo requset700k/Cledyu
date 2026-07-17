@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/lib/api';
 import { buildActiveSessionResumeHref } from '@/lib/active-session-resume.mjs';
+import { getLabStatusAvailability } from '@/lib/lab-status-availability.mjs';
 import { DIFFICULTY_CONFIG } from '@/components/lab/difficulty';
 import { ParticleFx } from '@/components/ui/ParticleFx';
 import type { Difficulty } from '@/lib/types';
@@ -50,10 +51,13 @@ function LabsCatalog() {
 
   const labs = data?.items ?? [];
   const filtered = filter === 'all' ? labs : labs.filter((l) => l.difficulty === filter);
-  const statusReady = !isStatusFetching && !isStatusError && labStatuses !== undefined;
-  const progressByLab = new Map(
-    statusReady ? labStatuses.items.map((lab) => [lab.lab_id, lab]) : [],
-  );
+  const { isInitialLoading: isStatusInitialLoading, statusReady } =
+    getLabStatusAvailability({
+      hasData: labStatuses !== undefined,
+      isFetching: isStatusFetching,
+    });
+  const isStatusUnavailable = !statusReady && isStatusError;
+  const progressByLab = new Map(labStatuses?.items.map((lab) => [lab.lab_id, lab]) ?? []);
 
   return (
     <>
@@ -108,9 +112,9 @@ function LabsCatalog() {
                 statusReady && progress?.status === 'in_progress' && progress.session_id
                   ? buildActiveSessionResumeHref(lab.id, progress.session_id)
                   : detailHref;
-              const actionLabel = isStatusFetching
+              const actionLabel = isStatusInitialLoading
                 ? '상태 확인 중'
-                : isStatusError
+                : isStatusUnavailable
                   ? '상세 보기'
                   : progress?.status === 'in_progress'
                     ? '이어가기'
@@ -122,14 +126,14 @@ function LabsCatalog() {
               return (
                 <Link
                   key={lab.id}
-                  href={isStatusFetching ? '#' : href}
-                  aria-disabled={isStatusFetching || undefined}
-                  tabIndex={isStatusFetching ? -1 : undefined}
+                  href={isStatusInitialLoading ? '#' : href}
+                  aria-disabled={isStatusInitialLoading || undefined}
+                  tabIndex={isStatusInitialLoading ? -1 : undefined}
                   onClick={(event) => {
-                    if (isStatusFetching) event.preventDefault();
+                    if (isStatusInitialLoading) event.preventDefault();
                   }}
                   className={`grid grid-cols-[44px_minmax(0,1fr)] gap-x-4 gap-y-5 border-b border-l-2 border-b-white/20 border-l-transparent px-3 py-7 transition-colors sm:grid-cols-[72px_minmax(0,1fr)_auto] sm:items-center sm:gap-8 sm:px-6 sm:py-9 ${
-                    isStatusFetching
+                    isStatusInitialLoading
                       ? 'cursor-wait'
                       : 'group hover:border-l-[#E8E8E3] hover:bg-[#E8E8E3] focus-visible:bg-[#E8E8E3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-3px] focus-visible:outline-black'
                   }`}

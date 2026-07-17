@@ -285,6 +285,45 @@ func TestGetMyLabStatuses_CompletedRerunProgressRemainsCompleted(t *testing.T) {
 	t.Fatal("lab-docker-basics status not found")
 }
 
+func TestGetMyLabStatuses_AllPassedProgressWithoutCompletionRemainsResumable(t *testing.T) {
+	fake := newFakePersistence()
+	fake.inProgress["u1"] = []store.InProgressLab{{
+		LabID:     "lab-docker-basics",
+		SessionID: "completion-write-failed-session",
+		AllPassed: true,
+	}}
+	h := dashboardTestHandler(t, fake)
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/me/lab-statuses", func(c *gin.Context) {
+		c.Set("user_id", "u1")
+		h.GetMyLabStatuses(c)
+	})
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/me/lab-statuses", nil))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	var body struct {
+		Items []labStatus `json:"items"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range body.Items {
+		if item.LabID != "lab-docker-basics" {
+			continue
+		}
+		if item.Status != "in_progress" || item.SessionID != "completion-write-failed-session" {
+			t.Fatalf("orphaned completion progress mismatch: %+v", item)
+		}
+		return
+	}
+	t.Fatal("lab-docker-basics status not found")
+}
+
 func TestGetMyLabStatuses_InProgressLookupErrorReturnsServerError(t *testing.T) {
 	fake := newFakePersistence()
 	fake.inProgressErr = errors.New("database unavailable")
