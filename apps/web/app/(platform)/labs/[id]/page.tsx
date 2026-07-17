@@ -229,54 +229,51 @@ function LabDetail() {
           <LabSession sessionId={sessionId} lab={lab} skipBootGrace={skipBootGrace} />
         </>
       ) : (
-        <div className="mt-10 max-w-[960px] border-t border-white/20">
+        <div className="mt-10 max-w-[1040px] border-t border-white/20">
           {hasContent ? (
-            <div className="grid gap-10 py-9 lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-14">
+            <div className="grid gap-10 py-10 lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-16">
               <div>
-                <p className="font-jbmono text-[10px] tracking-[0.14em] text-white/40">
-                  HANDS-ON LAB
-                </p>
-                <h2 className="mt-3 break-keep font-chakra text-2xl font-semibold leading-tight tracking-[-0.025em] text-white sm:text-3xl">
-                  직접 실행하고
-                  <br />
-                  끝까지 해결하세요
+                <h2 className="font-chakra text-2xl font-semibold tracking-[-0.025em] text-white">
+                  실습 환경
                 </h2>
-                <p className="mt-4 break-keep text-sm leading-[1.7] text-white/55">
-                  {steps.length}개 작업을 순서대로 진행합니다. 각 단계가 끝나면 현재 환경을 바로
-                  검증합니다.
+                <p className="mt-3 break-keep text-sm leading-[1.7] text-white/55">
+                  준비된 전용 VM에서 명령을 실행하고 단계마다 결과를 확인합니다.
                 </p>
+                <dl className="mt-6 border-y border-white/15 font-jbmono text-[11px]">
+                  <div className="flex items-center justify-between border-b border-white/10 py-3">
+                    <dt className="text-white/35">환경</dt>
+                    <dd className="text-white/75">전용 VM</dd>
+                  </div>
+                  <div className="flex items-center justify-between border-b border-white/10 py-3">
+                    <dt className="text-white/35">검증</dt>
+                    <dd className="text-white/75">단계별 자동</dd>
+                  </div>
+                  <div className="flex items-center justify-between py-3">
+                    <dt className="text-white/35">도움</dt>
+                    <dd className="text-white/75">AI 힌트</dd>
+                  </div>
+                </dl>
                 <button
                   type="button"
                   onClick={() => start.mutate()}
                   disabled={
                     start.isPending || existingSessionAction !== null || requestedResumeId !== null
                   }
-                  className="mt-5 inline-flex min-h-12 items-center justify-center rounded-full bg-white px-7 text-sm font-bold text-black transition-colors hover:bg-white/85 disabled:cursor-not-allowed disabled:bg-white/30"
+                  className="mt-6 flex min-h-14 w-full items-center justify-between rounded-full bg-white px-6 text-sm font-bold text-black transition-colors hover:bg-white/85 disabled:cursor-not-allowed disabled:bg-white/30"
                 >
-                  {existingSessionAction === 'checking'
-                    ? requestedResumeId
-                      ? '진행 중인 세션 확인 중...'
-                      : '세션 확인 중...'
-                    : start.isPending
-                      ? '세션 확인 중...'
-                      : existingSessionAction === 'terminating'
-                        ? '기존 세션 종료 중...'
-                        : '실습 시작하기 →'}
+                  <span>
+                    {existingSessionAction === 'checking'
+                      ? requestedResumeId
+                        ? '진행 중인 세션 확인 중...'
+                        : '세션 확인 중...'
+                      : start.isPending
+                        ? '세션 확인 중...'
+                        : existingSessionAction === 'terminating'
+                          ? '기존 세션 종료 중...'
+                          : '실습 시작하기'}
+                  </span>
+                  <span aria-hidden="true">→</span>
                 </button>
-                <ul className="mt-6 space-y-2 font-jbmono text-[11px] text-white/45">
-                  <li className="flex items-center gap-2">
-                    <span aria-hidden="true" className="h-1 w-1 bg-white/40" />
-                    전용 실습 VM
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <span aria-hidden="true" className="h-1 w-1 bg-white/40" />
-                    단계별 자동 검증
-                  </li>
-                  <li className="flex items-center gap-2">
-                    <span aria-hidden="true" className="h-1 w-1 bg-white/40" />
-                    막힐 때 AI 힌트
-                  </li>
-                </ul>
               </div>
 
               <div className="min-w-0">
@@ -328,22 +325,32 @@ function LabDetail() {
                     <p className="mb-6 text-xs text-red-400">세션을 시작하지 못했습니다.</p>
                   )}
 
-                <div className="flex items-center justify-between border-b border-white/15 pb-3">
-                  <h3 className="font-chakra text-lg font-semibold text-white">진행 순서</h3>
+                <div className="flex items-end justify-between border-b border-white/20 pb-4">
+                  <h3 className="font-chakra text-2xl font-semibold text-white">진행 순서</h3>
                   <span className="font-jbmono text-[10px] tracking-[0.12em] text-white/35">
                     {String(steps.length).padStart(2, '0')} TASKS
                   </span>
                 </div>
                 <ol>
-                  {steps.map((s) => (
-                    <li key={s.id} className="border-b border-white/15 py-4">
-                      <div className="grid grid-cols-[48px_minmax(0,1fr)] items-baseline gap-3">
-                        <span className="font-michroma text-[11px] text-white/30">
+                  {steps.map((s, index) => (
+                    <li
+                      key={s.id}
+                      className={`border-b border-white/15 px-3 py-4 ${index === 0 ? 'bg-white/[0.035]' : ''}`}
+                    >
+                      <div className="grid grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-3">
+                        <span
+                          className={`font-michroma text-[11px] ${index === 0 ? 'text-white/70' : 'text-white/30'}`}
+                        >
                           {String(s.id).padStart(2, '0')}
                         </span>
-                        <h4 className="font-chakra text-lg font-semibold tracking-[-0.02em] text-white">
+                        <h4 className="font-chakra text-xl font-semibold tracking-[-0.02em] text-white">
                           {s.title}
                         </h4>
+                        {index === 0 && (
+                          <span className="font-jbmono text-[9px] tracking-[0.12em] text-white/45">
+                            START
+                          </span>
+                        )}
                       </div>
                     </li>
                   ))}
