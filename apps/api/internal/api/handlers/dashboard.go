@@ -185,18 +185,33 @@ func (h *Handler) GetMyLabStatuses(c *gin.Context) {
 	}
 	inProgress, err := h.db.ListInProgressLabsByUser(ctx, uid)
 	if err != nil {
-		h.log.Warn("list in-progress labs", zap.Error(err), zap.String("user_id", uid))
-		inProgress = nil
+		h.log.Error("list in-progress labs", zap.Error(err), zap.String("user_id", uid))
+		h.err(c, http.StatusInternalServerError, "load lab statuses failed")
+		return
 	}
 
 	_, dashboardRows := buildDashboard(h.labs, completions, inProgress)
+	completedSessionByLab := make(map[string]string, len(completions))
+	for _, completion := range completions {
+		completedSessionByLab[completion.LabID] = completion.SessionID
+	}
+	activeSessionByLab := make(map[string]string, len(inProgress))
+	for _, progress := range inProgress {
+		activeSessionByLab[progress.LabID] = progress.SessionID
+	}
 	rows := make([]labStatus, 0, len(dashboardRows))
 	for _, row := range dashboardRows {
-		rows = append(rows, labStatus{
+		status := labStatus{
 			LabID:     row.LabID,
 			Status:    row.Status,
 			SessionID: row.SessionID,
-		})
+		}
+		// 완료 세션과 다른 진행 기록이 있으면 재실행 중이므로 현재 세션을 우선한다.
+		if sessionID, ok := activeSessionByLab[row.LabID]; ok && completedSessionByLab[row.LabID] != sessionID {
+			status.Status = "in_progress"
+			status.SessionID = sessionID
+		}
+		rows = append(rows, status)
 	}
 	c.JSON(http.StatusOK, gin.H{"items": rows, "total": len(rows)})
 }

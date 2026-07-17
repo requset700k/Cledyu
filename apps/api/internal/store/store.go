@@ -415,8 +415,8 @@ func (s *Store) ListCompletionsByUser(ctx context.Context, userID string) ([]Com
 }
 
 // ListInProgressLabsByUser는 유저가 진행기록(session_progress)을 가진 lab_id/session_id 목록을 반환한다.
-// 완료된 랩도 진행기록이 남아 있을 수 있으므로, 호출부는 완료 여부를 먼저 판정한 뒤
-// 이 목록을 'in_progress' 후보로 사용한다.
+// 완료된 랩도 진행기록이 남아 있을 수 있으므로, 호출부는 완료 이력의 session_id와
+// 진행 기록의 session_id를 대조해 재실행 여부를 판정한다.
 func (s *Store) ListInProgressLabsByUser(ctx context.Context, userID string) ([]InProgressLab, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT DISTINCT ON (lab_id) lab_id, session_id

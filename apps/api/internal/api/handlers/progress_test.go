@@ -24,6 +24,7 @@ type fakePersistence struct {
 	leaderboardCalls int
 	hidden           map[string]bool                  // SetLeaderboardHidden 이 기록
 	inProgress       map[string][]store.InProgressLab // user_id → 진행기록 있는 랩
+	inProgressErr    error
 	subscriptions    map[string]store.Subscription
 	checkouts        map[string]store.CheckoutSession
 }
@@ -154,7 +155,7 @@ func (f *fakePersistence) SetLeaderboardHidden(_ context.Context, userID string,
 func (f *fakePersistence) ListInProgressLabsByUser(_ context.Context, userID string) ([]store.InProgressLab, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.inProgress[userID], nil
+	return f.inProgress[userID], f.inProgressErr
 }
 
 func (f *fakePersistence) GetSubscription(_ context.Context, userID string) (*store.Subscription, error) {
