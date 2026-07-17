@@ -1,6 +1,6 @@
 image:
   repository: ghcr.io/requset700k/ai-tutor
-  tag: sha-07db9b9
+  tag: sha-59c3884
   # api/validation-engine 과 동일 정책 — tag 고정 전까지 항상 새 :latest pull.
   pullPolicy: Always
 
