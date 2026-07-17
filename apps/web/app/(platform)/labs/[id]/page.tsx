@@ -229,45 +229,42 @@ function LabDetail() {
           <LabSession sessionId={sessionId} lab={lab} skipBootGrace={skipBootGrace} />
         </>
       ) : (
-        <div className="mt-10 border border-white/20 bg-white/[0.02] p-8">
+        <div className="mt-10 border-t border-white/20">
           {hasContent ? (
             <>
-              <h2 className="mb-5 font-jbmono text-xs tracking-[0.12em] text-white/45">
-                STEPS ({steps.length})
-              </h2>
-              <ol className="mb-8 border-t border-white/15">
-                {steps.map((s) => (
-                  <li key={s.id} className="flex gap-5 border-b border-white/15 px-2 py-4 text-sm">
-                    <span className="flex-shrink-0 pt-0.5 font-michroma text-[13px] text-white/35">
-                      {String(s.id).padStart(2, '0')}
-                    </span>
-                    <div>
-                      <p className="font-semibold tracking-[-0.02em] text-white">{s.title}</p>
-                      <p className="mt-1 leading-relaxed text-white/50">{s.description}</p>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-              <button
-                type="button"
-                onClick={() => start.mutate()}
-                disabled={
-                  start.isPending || existingSessionAction !== null || requestedResumeId !== null
-                }
-                className="rounded-full bg-white px-8 py-3 text-sm font-bold text-black transition-colors hover:bg-white/85 disabled:cursor-not-allowed disabled:bg-white/30"
-              >
-                {existingSessionAction === 'checking'
-                  ? requestedResumeId
-                    ? '진행 중인 세션 확인 중...'
-                    : '세션 확인 중...'
-                  : start.isPending
-                    ? '세션 확인 중...'
-                    : existingSessionAction === 'terminating'
-                      ? '기존 세션 종료 중...'
-                      : '실습 시작'}
-              </button>
+              <div className="flex flex-col gap-6 py-7 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <p className="font-jbmono text-[11px] tracking-[0.14em] text-white/45">
+                    STEP PREVIEW
+                  </p>
+                  <h2 className="mt-2 font-chakra text-2xl font-semibold tracking-[-0.025em] text-white sm:text-3xl">
+                    {steps.length}단계로 완성하는 실습
+                  </h2>
+                  <p className="mt-2 text-sm leading-relaxed text-white/55">
+                    각 단계에서 직접 명령을 실행하고 결과를 바로 확인합니다.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => start.mutate()}
+                  disabled={
+                    start.isPending || existingSessionAction !== null || requestedResumeId !== null
+                  }
+                  className="inline-flex min-h-12 items-center justify-center self-start rounded-full bg-white px-7 text-sm font-bold text-black transition-colors hover:bg-white/85 disabled:cursor-not-allowed disabled:bg-white/30 sm:self-auto"
+                >
+                  {existingSessionAction === 'checking'
+                    ? requestedResumeId
+                      ? '진행 중인 세션 확인 중...'
+                      : '세션 확인 중...'
+                    : start.isPending
+                      ? '세션 확인 중...'
+                      : existingSessionAction === 'terminating'
+                        ? '기존 세션 종료 중...'
+                        : '실습 환경 시작하기 →'}
+                </button>
+              </div>
               {activeSessionConflict && (
-                <div className="mt-5 max-w-2xl border border-white/30 bg-white/[0.04] px-5 py-4 text-sm">
+                <div className="mb-6 max-w-2xl border border-white/30 bg-white/[0.04] px-5 py-4 text-sm">
                   {/* 다른 Lab 세션은 사용자가 이어가기나 종료를 명시적으로 선택해야 한다. */}
                   <p className="font-semibold text-white">
                     이미 진행 중인 다른 실습 세션이 있습니다.
@@ -303,7 +300,7 @@ function LabDetail() {
                 </div>
               )}
               {replaceError && !activeSessionConflict && (
-                <div className="mt-5 max-w-2xl border border-red-500/40 bg-red-500/10 px-5 py-4 text-sm text-red-300">
+                <div className="mb-6 max-w-2xl border border-red-500/40 bg-red-500/10 px-5 py-4 text-sm text-red-300">
                   {replaceError}
                 </div>
               )}
@@ -311,11 +308,34 @@ function LabDetail() {
                 existingSessionAction === null &&
                 !activeSessionConflict &&
                 !replaceError && (
-                  <span className="ml-3 text-xs text-red-400">세션을 시작하지 못했습니다.</span>
+                  <p className="mb-6 text-xs text-red-400">세션을 시작하지 못했습니다.</p>
                 )}
+
+              <ol className="grid border-t border-white/15 md:grid-cols-2">
+                {steps.map((s) => (
+                  <li
+                    key={s.id}
+                    className="group border-b border-white/15 py-6 md:odd:border-r md:odd:pr-7 md:even:pl-7"
+                  >
+                    <div className="flex gap-4">
+                      <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center border border-white/20 font-michroma text-[11px] text-white/40 transition-colors group-hover:border-white/40 group-hover:text-white/70">
+                        {String(s.id).padStart(2, '0')}
+                      </span>
+                      <div className="min-w-0 pt-0.5">
+                        <h3 className="font-chakra text-lg font-semibold tracking-[-0.02em] text-white">
+                          {s.title}
+                        </h3>
+                        <p className="mt-2 line-clamp-2 break-keep text-sm leading-[1.65] text-white/50">
+                          {s.description}
+                        </p>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ol>
             </>
           ) : (
-            <p className="text-sm text-white/45">
+            <p className="py-8 text-sm text-white/45">
               이 Lab은 아직 실습 콘텐츠가 준비되지 않았습니다.
             </p>
           )}
