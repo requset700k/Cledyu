@@ -13,7 +13,6 @@ const NAV_LINKS = [
 ];
 
 const DASHBOARD_LINK = { href: '/dashboard', label: '내 학습' };
-const authEnabled = process.env.AUTH_ENABLED === 'true';
 
 function isActive(pathname: string, href: string) {
   return href === '/' ? pathname === '/' : pathname.startsWith(href);
@@ -25,7 +24,7 @@ function pillClass(active: boolean) {
   }`;
 }
 
-export function Navbar() {
+export function Navbar({ authEnabled }: { authEnabled: boolean }) {
   const pathname = usePathname();
   // 모바일(xs) 햄버거 메뉴 토글 상태. sm 이상에서는 항상 데스크톱 필 네비를 노출.
   const [mobileOpen, setMobileOpen] = useState(false);

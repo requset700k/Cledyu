@@ -5,6 +5,8 @@ import { Navbar } from '@/components/ui/Navbar';
 import { ParticleFx } from '@/components/ui/ParticleFx';
 import { TerminalDemo } from '@/components/ui/TerminalDemo';
 
+export const dynamic = 'force-dynamic';
+
 const TECH_STACK = ['LINUX', 'DOCKER', 'KUBERNETES', 'TERRAFORM', 'ANSIBLE', 'HELM', 'CILIUM'];
 
 const HOW_IT_WORKS = [
@@ -38,7 +40,7 @@ const FEATURES = [
 export default function LandingPage() {
   return (
     <div className="relative isolate min-h-screen overflow-x-hidden bg-black text-[#F2F2F2]">
-      <Navbar />
+      <Navbar authEnabled={process.env.AUTH_ENABLED === 'true'} />
 
       {/* 전역 배경: 은은한 성운 + 별 */}
       <ParticleFx kind="stars" className="pointer-events-none fixed inset-0 -z-10 opacity-95" />

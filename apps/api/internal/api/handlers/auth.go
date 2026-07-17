@@ -231,12 +231,6 @@ func (h *Handler) Logout(c *gin.Context) {
 	h.clearSessionCookies(c)
 
 	postLogout := h.logoutRedirectURL(c)
-	// 로컬 개발 서버는 Keycloak client의 운영 post-logout allowlist와 분리한다.
-	// 앱 쿠키를 지운 뒤 localhost로 직접 복귀해 현재 작업 트리의 화면을 계속 검증할 수 있게 한다.
-	if postLogout == localFrontendURL+"/" {
-		c.Redirect(http.StatusFound, postLogout)
-		return
-	}
 	if h.auth != nil {
 		if u := h.auth.LogoutURL(idTokenHint, postLogout); u != "" {
 			c.Redirect(http.StatusFound, u)
