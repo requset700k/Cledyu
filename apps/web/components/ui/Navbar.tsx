@@ -13,6 +13,7 @@ const NAV_LINKS = [
 ];
 
 const DASHBOARD_LINK = { href: '/dashboard', label: '내 학습' };
+const authEnabled = process.env.AUTH_ENABLED === 'true';
 
 function isActive(pathname: string, href: string) {
   return href === '/' ? pathname === '/' : pathname.startsWith(href);
@@ -31,6 +32,7 @@ export function Navbar() {
   const { data: me } = useQuery({
     queryKey: ['me'],
     queryFn: () => api.auth.optionalMe(),
+    enabled: authEnabled,
     retry: false,
   });
 
