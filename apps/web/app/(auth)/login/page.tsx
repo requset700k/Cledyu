@@ -19,7 +19,7 @@ export default function LoginPage() {
   );
   const anySocial = socialProviders.size > 0;
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-black p-4 text-[#F2F2F2]">
+    <div className="relative flex min-h-screen justify-center overflow-x-hidden bg-black px-4 py-8 text-[#F2F2F2]">
       {/* 은은한 그리드 배경 */}
       <div
         aria-hidden
@@ -28,7 +28,7 @@ export default function LoginPage() {
       <Suspense fallback={null}>
         <LoginReturnTarget />
       </Suspense>
-      <div className="relative w-full max-w-md">
+      <div className="relative my-auto w-full max-w-md">
         <div className="mb-8 text-center">
           <Link href="/" className="font-michroma text-xl tracking-[0.08em] text-white">
             CLEDYU
