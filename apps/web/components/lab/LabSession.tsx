@@ -190,7 +190,10 @@ export function LabSession({
                 <p className="font-jbmono text-[10px] tracking-[0.14em] text-white/50">
                   LAB PROGRESS
                 </p>
-                <h2 id="lab-progress-title" className="mt-1 font-chakra text-lg font-semibold text-white">
+                <h2
+                  id="lab-progress-title"
+                  className="mt-1 font-chakra text-lg font-semibold text-white"
+                >
                   하나씩 직접 해결하세요
                 </h2>
               </div>
@@ -215,7 +218,8 @@ export function LabSession({
               <div className="flex items-center justify-between gap-3 font-jbmono text-[10px] tracking-[0.12em] text-white/50">
                 <span>CURRENT TASK</span>
                 <span>
-                  {String(currentStep.id).padStart(2, '0')} / {String(steps.length).padStart(2, '0')}
+                  {String(currentStep.id).padStart(2, '0')} /{' '}
+                  {String(steps.length).padStart(2, '0')}
                 </span>
               </div>
               <h3
@@ -250,7 +254,9 @@ export function LabSession({
             <footer className="flex flex-wrap items-center justify-between gap-4 border-t border-white/15 px-6 py-5">
               <div>
                 <p className="text-sm font-medium text-white/85">터미널 작업을 마쳤나요?</p>
-                <p className="mt-0.5 text-xs text-white/50">현재 환경을 확인해 다음 단계로 안내합니다.</p>
+                <p className="mt-0.5 text-xs text-white/50">
+                  현재 환경을 확인해 다음 단계로 안내합니다.
+                </p>
               </div>
               <button
                 type="button"
@@ -266,11 +272,15 @@ export function LabSession({
               </button>
               <div className="w-full text-xs sm:w-auto">
                 {currentStatus === 'passed' && <span className="text-emerald-400">검증 완료</span>}
-                {validating && <span className="text-amber-400">검증 결과를 기다리고 있습니다.</span>}
+                {validating && (
+                  <span className="text-amber-400">검증 결과를 기다리고 있습니다.</span>
+                )}
                 {currentStatus === 'failed' && failedChecks.length === 0 && (
                   <span className="text-red-400">조건을 다시 확인한 뒤 재시도해 주세요.</span>
                 )}
-                {validate.isError && <span className="text-red-400">검증을 요청하지 못했습니다.</span>}
+                {validate.isError && (
+                  <span className="text-red-400">검증을 요청하지 못했습니다.</span>
+                )}
               </div>
             </footer>
           </section>

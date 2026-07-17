@@ -69,7 +69,9 @@ export function AiTutorPanel({
                   {h.source === 'ai' ? h.model : '기본 힌트'}
                 </span>
               </div>
-              <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-white/85">{h.hint}</p>
+              <p className="mt-1 whitespace-pre-line text-sm leading-relaxed text-white/85">
+                {h.hint}
+              </p>
               {h.sources && h.sources.length > 0 && (
                 <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1">
                   {h.sources.map((s, j) =>
