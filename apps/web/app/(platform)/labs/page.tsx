@@ -148,7 +148,10 @@ function LabsCatalog() {
                     </span>
                     <span className="flex items-center gap-2 whitespace-nowrap text-[15px] font-semibold text-white/75 transition-colors group-hover:text-black group-focus-visible:text-black">
                       {actionLabel}
-                      <span aria-hidden="true" className="transition-transform group-hover:translate-x-1">
+                      <span
+                        aria-hidden="true"
+                        className="transition-transform group-hover:translate-x-1"
+                      >
                         →
                       </span>
                     </span>
