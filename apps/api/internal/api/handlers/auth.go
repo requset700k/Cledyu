@@ -4,12 +4,16 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 	"golang.org/x/oauth2"
 )
+
+const localFrontendURL = "http://localhost:3000"
 
 // 인증 흐름에서 쓰는 쿠키 이름.
 const (
@@ -226,7 +230,13 @@ func (h *Handler) Logout(c *gin.Context) {
 
 	h.clearSessionCookies(c)
 
-	postLogout := h.cfg.FrontendURL + "/"
+	postLogout := h.logoutRedirectURL(c)
+	// 로컬 개발 서버는 Keycloak client의 운영 post-logout allowlist와 분리한다.
+	// 앱 쿠키를 지운 뒤 localhost로 직접 복귀해 현재 작업 트리의 화면을 계속 검증할 수 있게 한다.
+	if postLogout == localFrontendURL+"/" {
+		c.Redirect(http.StatusFound, postLogout)
+		return
+	}
 	if h.auth != nil {
 		if u := h.auth.LogoutURL(idTokenHint, postLogout); u != "" {
 			c.Redirect(http.StatusFound, u)
@@ -234,4 +244,16 @@ func (h *Handler) Logout(c *gin.Context) {
 		}
 	}
 	c.Redirect(http.StatusFound, postLogout)
+}
+
+func (h *Handler) logoutRedirectURL(c *gin.Context) string {
+	fallback := strings.TrimRight(h.cfg.FrontendURL, "/") + "/"
+	referer, err := url.Parse(c.GetHeader("Referer"))
+	if err != nil {
+		return fallback
+	}
+	if referer.Scheme+"://"+referer.Host == localFrontendURL {
+		return localFrontendURL + "/"
+	}
+	return fallback
 }
