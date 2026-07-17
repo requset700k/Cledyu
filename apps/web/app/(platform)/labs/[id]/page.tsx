@@ -229,28 +229,23 @@ function LabDetail() {
           <LabSession sessionId={sessionId} lab={lab} skipBootGrace={skipBootGrace} />
         </>
       ) : (
-        <div className="mt-10 border-t border-white/20">
+        <div className="mt-10 max-w-[960px] border-t border-white/20">
           {hasContent ? (
             <>
-              <div className="flex flex-col gap-6 py-7 sm:flex-row sm:items-end sm:justify-between">
-                <div>
-                  <p className="font-jbmono text-[11px] tracking-[0.14em] text-white/45">
-                    STEP PREVIEW
-                  </p>
-                  <h2 className="mt-2 font-chakra text-2xl font-semibold tracking-[-0.025em] text-white sm:text-3xl">
-                    {steps.length}단계로 완성하는 실습
-                  </h2>
-                  <p className="mt-2 text-sm leading-relaxed text-white/55">
-                    각 단계에서 직접 명령을 실행하고 결과를 바로 확인합니다.
-                  </p>
-                </div>
+              <div className="py-8">
+                <h2 className="font-chakra text-2xl font-semibold tracking-[-0.025em] text-white sm:text-3xl">
+                  실습 순서
+                </h2>
+                <p className="mt-2 text-sm leading-relaxed text-white/55">
+                  {steps.length}개 단계를 순서대로 수행하고 결과를 바로 검증합니다.
+                </p>
                 <button
                   type="button"
                   onClick={() => start.mutate()}
                   disabled={
                     start.isPending || existingSessionAction !== null || requestedResumeId !== null
                   }
-                  className="inline-flex min-h-12 items-center justify-center self-start rounded-full bg-white px-7 text-sm font-bold text-black transition-colors hover:bg-white/85 disabled:cursor-not-allowed disabled:bg-white/30 sm:self-auto"
+                  className="mt-5 inline-flex min-h-12 items-center justify-center rounded-full bg-white px-7 text-sm font-bold text-black transition-colors hover:bg-white/85 disabled:cursor-not-allowed disabled:bg-white/30"
                 >
                   {existingSessionAction === 'checking'
                     ? requestedResumeId
@@ -260,7 +255,7 @@ function LabDetail() {
                       ? '세션 확인 중...'
                       : existingSessionAction === 'terminating'
                         ? '기존 세션 종료 중...'
-                        : '실습 환경 시작하기 →'}
+                        : '실습 시작하기 →'}
                 </button>
               </div>
               {activeSessionConflict && (
@@ -315,20 +310,15 @@ function LabDetail() {
                 {steps.map((s) => (
                   <li
                     key={s.id}
-                    className="group border-b border-white/15 py-6 md:odd:border-r md:odd:pr-7 md:even:pl-7"
+                    className="border-b border-white/15 py-5 md:odd:border-r md:odd:pr-7 md:even:pl-7"
                   >
-                    <div className="flex gap-4">
-                      <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center border border-white/20 font-michroma text-[11px] text-white/40 transition-colors group-hover:border-white/40 group-hover:text-white/70">
+                    <div className="flex items-baseline gap-4">
+                      <span className="w-7 flex-shrink-0 font-michroma text-[11px] text-white/35">
                         {String(s.id).padStart(2, '0')}
                       </span>
-                      <div className="min-w-0 pt-0.5">
-                        <h3 className="font-chakra text-lg font-semibold tracking-[-0.02em] text-white">
-                          {s.title}
-                        </h3>
-                        <p className="mt-2 line-clamp-2 break-keep text-sm leading-[1.65] text-white/50">
-                          {s.description}
-                        </p>
-                      </div>
+                      <h3 className="font-chakra text-lg font-semibold tracking-[-0.02em] text-white">
+                        {s.title}
+                      </h3>
                     </div>
                   </li>
                 ))}
