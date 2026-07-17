@@ -176,8 +176,8 @@ export function LabSession({
           <SessionTimer expiresAt={session.expires_at} onExpire={() => setExpired(true)} />
         </div>
       )}
-      <div className="mt-4 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(380px,420px)_1fr]">
-        <div className="space-y-4 lg:max-h-[calc(100vh-9rem)] lg:overflow-y-auto lg:pr-1">
+      <div className="mt-4 grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(380px,420px)_1fr]">
+        <div className="space-y-4 xl:max-h-[calc(100vh-9rem)] xl:overflow-y-auto xl:pr-1">
           {allPassed && (
             <div className="border border-white/30 bg-white/[0.05] px-4 py-3 text-sm text-white">
               🎉 모든 단계를 완료했습니다. 수고하셨습니다!
@@ -294,8 +294,8 @@ export function LabSession({
           />
         </div>
 
-        {/* 우측 — 작업 영역(터미널/IDE). lg 미만에서는 문제 아래로 쌓인다. */}
-        <div className="lg:sticky lg:top-24">
+        {/* 우측 — 작업 영역(터미널/IDE). xl 미만에서는 문제 아래로 쌓인다. */}
+        <div className="xl:sticky xl:top-24">
           {terminalUrl ? (
             session?.ide_url ? (
               <LabWorkspace
