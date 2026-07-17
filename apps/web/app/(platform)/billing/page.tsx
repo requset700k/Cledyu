@@ -47,31 +47,34 @@ function PlanCard({
   const isPaid = plan.price_krw > 0;
   const canPay = paymentEnabled && isPaid && !isCurrent;
   const buttonLabel = isCurrent ? '현재 이용 중' : isPaid ? '결제하기' : '기능 보기';
+  // 추천 플랜은 흰 배경 반전 카드로 강조 (v2 디자인의 PRO 카드)
+  const inverted = plan.recommended;
 
   return (
     <div
-      className={`rounded-lg border bg-slate-900/50 p-5 ${
-        selected
-          ? 'border-brand-400 ring-1 ring-brand-500/40'
-          : plan.recommended
-            ? 'border-brand-500/70'
-            : 'border-slate-800'
+      className={`flex flex-col p-9 ${
+        inverted
+          ? 'border border-white bg-white text-black'
+          : `border bg-white/[0.02] text-[#F2F2F2] ${
+              selected ? 'border-white/70' : 'border-white/20'
+            }`
       }`}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="text-white text-lg font-semibold">{plan.name}</h2>
-          <p className="mt-1 text-slate-400 text-sm">{formatPrice(plan)}</p>
-        </div>
+      <div className="flex items-center justify-between gap-3">
+        <div className="font-michroma text-lg tracking-[0.08em]">{plan.name}</div>
         {plan.recommended && (
-          <span className="rounded-md bg-brand-500/15 px-2 py-1 text-brand-300 text-xs">추천</span>
+          <span className="whitespace-nowrap rounded-full border border-current px-3 py-1 font-jbmono text-[11px] tracking-[0.12em]">
+            RECOMMENDED
+          </span>
         )}
       </div>
 
-      <ul className="mt-5 space-y-2 text-sm text-slate-300">
+      <div className="mt-7 font-chakra text-4xl font-bold leading-none">{formatPrice(plan)}</div>
+
+      <ul className={`mt-9 flex-1 space-y-3 text-sm leading-[1.5] ${inverted ? '' : 'text-white/80'}`}>
         {plan.features.map((feature) => (
-          <li key={feature} className="flex gap-2">
-            <span className="text-brand-300">✓</span>
+          <li key={feature} className="flex gap-3">
+            <span className="opacity-50">—</span>
             <span>{feature}</span>
           </li>
         ))}
@@ -86,7 +89,11 @@ function PlanCard({
           }
         }}
         disabled={isCurrent || (isPaid && !paymentEnabled)}
-        className="mt-6 w-full rounded-md bg-brand-500 px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-400 disabled:cursor-not-allowed disabled:bg-slate-800 disabled:text-slate-500"
+        className={`mt-9 rounded-full py-3.5 text-sm font-bold tracking-[-0.01em] transition-colors disabled:cursor-not-allowed ${
+          inverted
+            ? 'bg-black text-white hover:bg-black/80 disabled:bg-black/30 disabled:text-white/70'
+            : 'border border-white/50 text-white hover:bg-white hover:text-black disabled:border-white/20 disabled:text-white/35 disabled:hover:bg-transparent'
+        }`}
       >
         {selected && !isPaid ? '선택됨' : buttonLabel}
       </button>
@@ -113,50 +120,54 @@ function PaymentModal({
   ] as const;
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/75 p-4">
-      <div className="w-full max-w-lg rounded-xl border border-slate-700 bg-slate-950 shadow-2xl">
-        <div className="border-slate-800 border-b p-5">
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-lg border border-white/25 bg-black shadow-2xl">
+        <div className="border-b border-white/15 p-6">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-brand-300 text-sm font-semibold">Cledyu 결제</p>
-              <h2 className="mt-1 text-xl font-bold text-white">{plan.name} 플랜 결제</h2>
+              <p className="font-jbmono text-xs tracking-[0.12em] text-white/50">
+                CLEDYU CHECKOUT
+              </p>
+              <h2 className="mt-2 font-chakra text-xl font-bold text-white">
+                {plan.name} 플랜 결제
+              </h2>
             </div>
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md px-2 py-1 text-slate-400 text-sm hover:bg-slate-800 hover:text-white"
+              className="rounded-full px-3 py-1 text-sm text-white/55 transition-colors hover:text-white"
             >
               닫기
             </button>
           </div>
         </div>
 
-        <div className="space-y-5 p-5">
-          <section className="rounded-lg border border-slate-800 bg-slate-900/70 p-4">
+        <div className="space-y-6 p-6">
+          <section className="border border-white/15 bg-white/[0.03] p-5">
             <div className="flex items-center justify-between text-sm">
-              <span className="text-slate-400">상품</span>
+              <span className="text-white/50">상품</span>
               <span className="font-medium text-white">{plan.name} 월간 구독</span>
             </div>
             <div className="mt-3 flex items-center justify-between text-sm">
-              <span className="text-slate-400">결제 금액</span>
-              <span className="font-bold text-brand-300 text-lg">
+              <span className="text-white/50">결제 금액</span>
+              <span className="font-chakra text-lg font-bold text-white">
                 {formatAmount(plan.price_krw)}
               </span>
             </div>
           </section>
 
           <section>
-            <p className="text-slate-300 text-sm font-medium">결제수단</p>
+            <p className="text-sm font-medium text-white/80">결제수단</p>
             <div className="mt-3 grid grid-cols-3 gap-2">
               {methodLabels.map((item) => (
                 <button
                   key={item.id}
                   type="button"
                   onClick={() => setMethod(item.id)}
-                  className={`rounded-md border px-3 py-2 text-sm ${
+                  className={`border px-3 py-2.5 text-sm transition-colors ${
                     method === item.id
-                      ? 'border-brand-400 bg-brand-500/20 text-brand-200'
-                      : 'border-slate-700 bg-slate-900 text-slate-400 hover:border-slate-500'
+                      ? 'border-white bg-white text-black'
+                      : 'border-white/25 text-white/55 hover:border-white/60 hover:text-white'
                   }`}
                 >
                   {item.label}
@@ -165,17 +176,17 @@ function PaymentModal({
             </div>
           </section>
 
-          <section className="rounded-lg border border-slate-800 bg-slate-900/70 p-4">
+          <section className="border border-white/15 bg-white/[0.03] p-5">
             {method === 'card' && (
               <div className="space-y-3 text-sm">
-                <div className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-300">
+                <div className="border border-white/20 bg-black px-3 py-2.5 font-jbmono text-white/80">
                   1234 · 5678 · **** · ****
                 </div>
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-500">
+                  <div className="border border-white/20 bg-black px-3 py-2.5 font-jbmono text-white/40">
                     MM / YY
                   </div>
-                  <div className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-500">
+                  <div className="border border-white/20 bg-black px-3 py-2.5 font-jbmono text-white/40">
                     CVC
                   </div>
                 </div>
@@ -186,7 +197,7 @@ function PaymentModal({
                 {['Toss Pay', 'Kakao Pay', 'Naver Pay'].map((label) => (
                   <div
                     key={label}
-                    className="rounded-md border border-slate-700 bg-slate-950 px-3 py-3 text-center text-slate-300"
+                    className="border border-white/20 bg-black px-3 py-3 text-center text-white/80"
                   >
                     {label}
                   </div>
@@ -194,7 +205,7 @@ function PaymentModal({
               </div>
             )}
             {method === 'transfer' && (
-              <div className="rounded-md border border-slate-700 bg-slate-950 px-3 py-3 text-slate-300 text-sm">
+              <div className="border border-white/20 bg-black px-3 py-3 text-sm text-white/80">
                 은행 선택 후 계좌 인증을 진행합니다.
               </div>
             )}
@@ -204,7 +215,7 @@ function PaymentModal({
             type="button"
             disabled={pending}
             onClick={onConfirm}
-            className="w-full rounded-md bg-brand-500 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-brand-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+            className="w-full rounded-full bg-white px-4 py-3.5 text-sm font-bold text-black transition-colors hover:bg-white/85 disabled:cursor-not-allowed disabled:bg-white/30 disabled:text-black/50"
           >
             {pending ? '결제 처리 중...' : `${formatAmount(plan.price_krw)} 결제하기`}
           </button>
@@ -216,7 +227,7 @@ function PaymentModal({
 
 export default function BillingPage() {
   return (
-    <Suspense fallback={<p className="text-slate-400">불러오는 중...</p>}>
+    <Suspense fallback={<p className="text-white/50">불러오는 중...</p>}>
       <BillingPageContent />
     </Suspense>
   );
@@ -290,7 +301,7 @@ function BillingPageContent() {
   }, [completeReturnedCheckout, paymentSimulationEnabled, returnedCheckoutID, returnedProvider]);
 
   if (plans.isLoading || subscription.isLoading) {
-    return <p className="text-slate-400">불러오는 중...</p>;
+    return <p className="text-white/50">불러오는 중...</p>;
   }
   if (plans.isError || subscription.isError || !plans.data || !subscription.data) {
     return <p className="text-red-400">결제 정보를 불러오지 못했습니다.</p>;
@@ -309,75 +320,83 @@ function BillingPageContent() {
     paymentPlan?.id === subscription.data.plan_id && subscription.data.status === 'active';
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-bold text-white">요금제</h1>
-        <p className="mt-1 text-slate-400 text-sm">
-          플랜을 선택하고 결제하면 해당 기능 권한이 바로 활성화됩니다.
-        </p>
+    <div>
+      <h1 className="font-michroma text-[clamp(34px,4.2vw,60px)] leading-none tracking-[0.05em] text-white">
+        PLANS
+      </h1>
+      <p className="mt-5 text-base tracking-[-0.02em] text-white/55">
+        플랜을 선택하고 결제하면 해당 기능 권한이 바로 활성화됩니다
+      </p>
+
+      {/* 현재 구독 밴드 */}
+      <div className="mt-12 flex flex-wrap items-baseline gap-x-6 gap-y-2 border-y border-white/25 px-3 py-7">
+        <span className="font-jbmono text-xs tracking-[0.12em] text-white/45">
+          CURRENT SUBSCRIPTION
+        </span>
+        <span className="font-chakra text-2xl font-bold uppercase text-white">
+          {subscription.data.plan_id}
+        </span>
+        <span className="font-jbmono text-xs uppercase tracking-[0.1em] text-white/45">
+          [ {subscription.data.status} ]
+        </span>
       </div>
 
-      <section className="rounded-lg border border-slate-800 bg-slate-900/50 p-5">
-        <div className="text-slate-400 text-sm">현재 구독</div>
-        <div className="mt-1 text-white text-xl font-bold">{subscription.data.plan_id}</div>
-        <p className="mt-1 text-slate-500 text-xs">상태: {subscription.data.status}</p>
-      </section>
-
-      <section className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-5">
+      {/* 선택한 요금제 상세 */}
+      <section className="mt-10 border border-white/20 bg-white/[0.02] p-8">
         <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
-            <p className="text-sky-200 text-sm font-semibold">선택한 요금제</p>
-            <h2 className="mt-1 text-xl font-bold text-white">{selectedPlan.name}</h2>
-            <p className="mt-2 max-w-2xl text-slate-300 text-sm">
+            <p className="font-jbmono text-xs tracking-[0.12em] text-white/50">SELECTED PLAN</p>
+            <h2 className="mt-2 font-chakra text-2xl font-bold text-white">{selectedPlan.name}</h2>
+            <p className="mt-3 max-w-2xl break-keep text-sm leading-[1.7] text-white/60">
               {planAccessDescription(selectedPlan.id)}
             </p>
           </div>
-          <span className="rounded-md bg-slate-950/60 px-3 py-2 text-slate-300 text-sm">
+          <span className="whitespace-nowrap rounded-full border border-white/25 px-4 py-2 text-sm text-white/80">
             {formatPrice(selectedPlan)}
           </span>
         </div>
 
-        <div className="mt-5 grid gap-3 md:grid-cols-2">
+        <div className="mt-6 grid gap-2.5 md:grid-cols-2">
           {selectedPlan.features.map((feature) => (
-            <div key={feature} className="rounded-md border border-slate-700 bg-slate-950/40 p-3">
-              <p className="text-white text-sm font-medium">{feature}</p>
+            <div key={feature} className="border border-white/15 bg-black/40 p-3.5">
+              <p className="text-sm font-medium text-white/90">{feature}</p>
             </div>
           ))}
         </div>
 
-        <p className="mt-5 text-slate-500 text-xs">
+        <p className="mt-6 text-xs leading-relaxed text-white/35">
           운영 결제와 정산은 PG 상점 계약, 사업자/정산 계좌 등록, 라이브 키 발급 이후 실제 승인
           흐름으로 전환합니다.
         </p>
 
         {paymentSimulationEnabled && selectedPlan.price_krw > 0 && !isSelectedPlanCurrent && (
-          <div className="mt-5">
+          <div className="mt-6">
             <button
               type="button"
               disabled={activatePlan.isPending}
               onClick={() => setPaymentPlanID(selectedPlan.id)}
-              className="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-400 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+              className="rounded-full bg-white px-7 py-3 text-sm font-bold text-black transition-colors hover:bg-white/85 disabled:cursor-not-allowed disabled:bg-white/30"
             >
               선택한 요금제 결제하기
             </button>
-            <p className="mt-2 text-slate-500 text-xs">
+            <p className="mt-3 text-xs text-white/40">
               결제가 완료되면 선택한 요금제 권한이 계정에 반영됩니다.
             </p>
           </div>
         )}
 
         {isSelectedPlanCurrent && (
-          <p className="mt-5 text-emerald-300 text-sm">현재 이용 중인 요금제입니다.</p>
+          <p className="mt-6 text-sm text-white/80">✔ 현재 이용 중인 요금제입니다.</p>
         )}
 
-        {activationMessage && <p className="mt-3 text-emerald-300 text-sm">{activationMessage}</p>}
-        {activationError && <p className="mt-3 text-red-300 text-sm">{activationError}</p>}
+        {activationMessage && <p className="mt-4 text-sm text-white/80">✔ {activationMessage}</p>}
+        {activationError && <p className="mt-4 text-sm text-red-400">{activationError}</p>}
         {completeReturnedCheckout.isPending && (
-          <p className="mt-3 text-brand-300 text-sm">결제 결과를 반영하는 중입니다...</p>
+          <p className="mt-4 text-sm text-white/60">결제 결과를 반영하는 중입니다...</p>
         )}
       </section>
 
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      <section className="mt-10 grid grid-cols-1 gap-3.5 md:grid-cols-3">
         {plans.data.items.map((plan) => (
           <PlanCard
             key={plan.id}

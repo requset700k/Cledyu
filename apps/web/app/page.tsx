@@ -173,7 +173,7 @@ export default function LandingPage() {
           className="mx-auto w-full max-w-[1280px] scroll-mt-24 px-6 py-24 sm:px-10"
         >
           <h2 className="font-chakra text-[clamp(24px,3vw,40px)] font-bold tracking-[-0.02em] text-white">
-            어떻게 진행되나요
+            진행과정
           </h2>
           <div className="mt-10 grid grid-cols-1 border border-white/15 sm:grid-cols-4">
             {HOW_IT_WORKS.map((step, i) => (
