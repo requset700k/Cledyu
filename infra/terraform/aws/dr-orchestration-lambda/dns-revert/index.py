@@ -8,11 +8,14 @@ dns-switch 의 대칭. 다른 점:
 """
 
 import http.client
+import logging
 import os
 import socket
 import ssl
 
 import boto3
+
+_log = logging.getLogger()
 
 _elb = boto3.client("elbv2")
 _r53 = boto3.client("route53")
@@ -104,6 +107,11 @@ def handler(event, context):
     ok, why = _onprem_serving(lb["DNSName"])
     if not ok:
         raise RuntimeError(f"온프렘 백엔드 미서빙({why}) — 실 체인 도달 실패, DNS 원복 중단")
+    if why != "ok":
+        # 도달 불가로 딥체크를 건너뛴 경우(예: ALB SG 가 좁혀짐) — 안전체크 우회를 CloudWatch 에 남긴다.
+        _log.warning(
+            "딥체크 보류(도달 불가) — %s. _proxy_healthy+승인 게이트에 의존해 원복 진행.", why
+        )
 
     zone = _find_zone()
     changes = [
