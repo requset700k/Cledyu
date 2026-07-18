@@ -178,7 +178,7 @@ export function LabSession({
         </div>
       )}
       <div className="mt-4 grid grid-cols-1 items-start gap-6 xl:grid-cols-[minmax(380px,420px)_1fr]">
-        <div className="space-y-4 xl:max-h-[calc(100vh-9rem)] xl:overflow-y-auto xl:pr-1">
+        <div className="space-y-4">
           {allPassed && (
             <div className="border border-white/30 bg-white/[0.05] px-4 py-3 text-sm text-white">
               🎉 모든 단계를 완료했습니다. 수고하셨습니다!

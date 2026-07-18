@@ -33,13 +33,15 @@ export function StepList({
   isSelectable?: (id: number) => boolean;
 }) {
   return (
-    <ol className="border-y border-white/15">
+    <ol className="grid grid-flow-col auto-cols-fr border-y border-white/15" aria-label="실습 단계">
       {steps.map((s) => {
         const status = statusOf(s.id);
         const active = s.id === currentId;
         const selectable = isSelectable(s.id);
+        const stepNumber = String(s.id).padStart(2, '0');
+        const accessibleLabel = `${stepNumber}. ${s.title}, ${STATUS_LABEL[status]}`;
         return (
-          <li key={s.id} className="border-b border-white/10 last:border-b-0">
+          <li key={s.id} className="border-r border-white/10 last:border-r-0">
             <button
               type="button"
               onClick={() => {
@@ -47,9 +49,14 @@ export function StepList({
                 if (selectable) onSelect(s.id);
               }}
               disabled={!selectable}
-              title={selectable ? undefined : '이전 단계를 먼저 통과해야 열 수 있습니다.'}
+              title={
+                selectable
+                  ? `${stepNumber}. ${s.title} · ${STATUS_LABEL[status]}`
+                  : `${s.title} · 이전 단계를 먼저 통과해야 열 수 있습니다.`
+              }
+              aria-label={accessibleLabel}
               aria-current={active ? 'step' : undefined}
-              className={`group grid min-h-14 w-full grid-cols-[36px_minmax(0,1fr)_auto] items-center gap-3 px-3 py-2.5 text-left transition-colors ${
+              className={`flex min-h-14 w-full flex-col items-center justify-center gap-1.5 px-1 py-2 transition-colors ${
                 active
                   ? 'bg-white text-black'
                   : selectable
@@ -58,38 +65,23 @@ export function StepList({
               }`}
             >
               <span
-                className={`flex h-7 w-7 items-center justify-center border font-jbmono text-[10px] ${
-                  active ? 'border-black/25 text-black/70' : 'border-white/20 text-white/55'
+                aria-hidden="true"
+                className={`font-jbmono text-[11px] tracking-[0.08em] ${
+                  active
+                    ? 'font-semibold text-black'
+                    : status === 'passed'
+                      ? 'text-white/75'
+                      : selectable
+                        ? 'text-white/55'
+                        : 'text-white/30'
                 }`}
               >
-                {String(s.id).padStart(2, '0')}
+                {stepNumber}
               </span>
               <span
-                className={`min-w-0 text-sm ${
-                  status === 'passed'
-                    ? active
-                      ? 'text-black/55 line-through'
-                      : 'text-white/60 line-through'
-                    : selectable
-                      ? active
-                        ? 'font-semibold text-black'
-                        : 'text-white'
-                      : 'text-white/55'
-                }`}
-              >
-                {s.title}
-              </span>
-              <span
-                className={`flex items-center gap-1.5 whitespace-nowrap font-jbmono text-[10px] ${
-                  active ? 'text-black/55' : status === 'failed' ? 'text-red-400' : 'text-white/45'
-                }`}
-              >
-                <span
-                  aria-hidden="true"
-                  className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-black' : STATUS_DOT[status]}`}
-                />
-                {STATUS_LABEL[status]}
-              </span>
+                aria-hidden="true"
+                className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-black' : STATUS_DOT[status]}`}
+              />
             </button>
           </li>
         );
