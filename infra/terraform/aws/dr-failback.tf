@@ -336,9 +336,14 @@ resource "aws_sfn_state_machine" "dr_failback" {
         Parameters     = { Name = "/cledyu-dr/failover/active" }
         ResultSelector = { "current.$" = "$.Parameter.Value" }
         ResultPath     = "$.gen"
-        # ParameterNotFound(수동 failback 이 클리어) = 세대 없음 → 이 승인은 stale → 스킵(무해 종료).
-        Catch = [{ ErrorEquals = ["States.ALL"], ResultPath = "$.genError", Next = "StaleSkipped" }]
-        Next  = "GenerationPresent"
+        # ParameterNotFound(수동 failback 이 클리어=세대 없음)만 stale 로 스킵. AccessDenied·SSM throttling 등
+        # **실제** 조회 실패는 실패 경로로 — 안 그러면 원복·teardown 안 하고 "스킵" 성공 종료되고, push 는 이미
+        # OK 라 새 자동 트리거도 안 온다(리뷰 P2). (aws-sdk 에러명 스펠링 불확실성 대비 두 형태 모두 매칭.)
+        Catch = [
+          { ErrorEquals = ["Ssm.ParameterNotFound", "Ssm.ParameterNotFoundException"], ResultPath = "$.genError", Next = "StaleSkipped" },
+          { ErrorEquals = ["States.ALL"], ResultPath = "$.error", Next = "Mark_CheckGeneration_Failed" },
+        ]
+        Next = "GenerationPresent"
       }
       # 입력에 $.active 가 없는(이 수정 전 트리거된) 옛 실행 방어 — StringEqualsPath 는 비교경로 부재 시
       # States.Runtime 을 낼 수 있어, 값 비교 전에 IsPresent 로 먼저 거른다. ($.gen.current 는 위에서 항상 채워짐.)
@@ -380,8 +385,10 @@ resource "aws_sfn_state_machine" "dr_failback" {
 
       # [2.5] DNS drain — Route53 변경이 INSYNC 되고 옛 EKS ALB 캐시(alias TTL ~60s)가 만료된 뒤 teardown
       # 하도록 대기한다(2026-07-18 리뷰 P2). 안 그러면 resolver 가 아직 EKS 를 가리키는 창에 파드·ALB 를
-      # 회수해 그 사용자들이 단절된다. INSYNC 폴링 후 고정 drain. 폴 카운터로 상한(~3분)을 둬 무한루프를
-      # 막는다 — INSYNC 는 보장(≤60s)돼 상한 초과는 사실상 없지만, 도달하면 그냥 DrainTtl 로 진행한다.
+      # 회수해 그 사용자들이 단절된다. INSYNC 폴링 후 고정 drain. 폴 카운터로 상한(~5분)을 둬 무한루프를
+      # 막되, **상한 초과는 DrainTtl 로 진행하지 않고 Fail** 한다 — stuck DNS 에 EKS 를 회수하면 authoritative
+      # DNS 가 아직 EKS 를 가리키는 창의 사용자가 끊긴다. EKS 는 유지된 채 실패로 멈춰 사람이 조사(INSYNC 는
+      # 보통 ≤60s 라 상한은 여유).
       InitDnsPoll = {
         Type       = "Pass"
         Result     = { count = 0 }
@@ -406,7 +413,7 @@ resource "aws_sfn_state_machine" "dr_failback" {
         Type = "Choice"
         Choices = [
           { Variable = "$.dnsChange.status", StringEquals = "INSYNC", Next = "DrainTtl" },
-          { Variable = "$.dnsPoll.count", NumericGreaterThanEquals = 18, Next = "DrainTtl" }, # ~3분 상한(무한루프 방지)
+          { Variable = "$.dnsPoll.count", NumericGreaterThanEquals = 30, Next = "Mark_PollDnsChange_Failed" }, # ~5분 초과 → 실패(stuck DNS 로 teardown 진행 금지)
         ]
         Default = "IncrDnsPoll"
       }
@@ -630,10 +637,10 @@ resource "aws_sfn_state_machine" "dr_failback" {
       # dnsReverted 는 상태 이름으로 **정적** 판정한다 — RevertDNS 이후 단계가 실패했으면 DNS 는 이미
       # 온프렘(true), RequestApproval/RevertDNS 자체 실패면 아직 EKS(false). (States.IsPresent 는
       # intrinsic 이 아니라 Choice 연산자라 Parameters 에서 쓰면 AWS 가 SCHEMA_VALIDATION_FAILED 로 거부한다.)
-      { for s in ["RequestApproval", "RevertDNS", "PollDnsChange", "ListNodegroup", "ScaleToZero", "PollScaleUpdate", "CleanupOrphans", "TeardownHot", "VerifyNoOrphans", "ClearFlags"] :
+      { for s in ["RequestApproval", "CheckGeneration", "RevertDNS", "PollDnsChange", "ListNodegroup", "ScaleToZero", "PollScaleUpdate", "CleanupOrphans", "TeardownHot", "VerifyNoOrphans", "ClearFlags"] :
         "Mark_${s}_Failed" => {
           Type       = "Pass"
-          Result     = { failedState = s, dnsReverted = !contains(["RequestApproval", "RevertDNS"], s) }
+          Result     = { failedState = s, dnsReverted = !contains(["RequestApproval", "CheckGeneration", "RevertDNS"], s) }
           ResultPath = "$.failed"
           Next       = "NotifyFailbackFailed"
         }

@@ -1641,10 +1641,12 @@ resource "aws_sfn_state_machine" "dr_failover" {
       # 보고, 여기선 full ARN 으로 크로스리전 invoke 한다. failover 는 이미 성공이므로 이 단계가 실패해도 완료
       # 알림은 나간다(Retry 후 Catch→NotifyComplete).
       PostFailoverRecoveryCheck = {
-        Type     = "Task"
-        Resource = "arn:aws:states:::lambda:invoke"
+        Type = "Task"
+        # 크로스리전(us-east-1) 호출 — 최적화 통합(arn:aws:states:::lambda:invoke)은 same-region 만 되므로
+        # **리전 명시 aws-sdk 통합**을 쓴다(arn:aws:states:us-east-1:::aws-sdk:...). failback-trigger 가 us-east-1.
+        Resource = "arn:aws:states:us-east-1:::aws-sdk:lambda:invoke"
         Parameters = {
-          FunctionName = aws_lambda_function.dr_failback_trigger.arn # us-east-1 (크로스리전)
+          FunctionName = aws_lambda_function.dr_failback_trigger.arn
           Payload      = { post_failover = true }
         }
         ResultPath = null
