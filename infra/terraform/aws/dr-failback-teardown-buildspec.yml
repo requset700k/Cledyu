@@ -1,0 +1,33 @@
+version: 0.2
+
+# DR failback hot 회수 — dr_failback SFN 의 TeardownHot 이 codebuild:startBuild.sync +
+# BuildspecOverride 로 dr_failover_tf 프로젝트에서 실행. failover buildspec 의 정반대(eks_dr_active=false).
+#
+# ⚠️ -target 17개 필수(dr-eks-bootstrap.md §failback 드릴-검증 목록과 동일). tfvars 가 .gitignore 라
+#    CodeBuild 체크아웃에 없어 -target 없으면 enable_public_ingress 기본 false 로 proxy·public ALB·Route53
+#    destroy. enable_eks_dr=true 생략 시 warm 컨트롤플레인까지 destroy.
+# ⚠️ 노드 desired 는 모듈 ignore_changes → 여기 아님. SFN DrainNodes(aws-sdk)가 0 + 강제종료.
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+    commands:
+      - curl -fsSL --retry 5 https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip -o /tmp/tf.zip
+      - unzip -q /tmp/tf.zip -d /usr/local/bin && terraform version
+  build:
+    commands:
+      - cd infra/terraform/aws
+      - terraform init -input=false -lock-timeout=5m
+      - |
+        terraform apply -input=false -auto-approve -lock-timeout=5m \
+          -var enable_eks_dr=true -var eks_dr_active=false -var eks_dr_node_desired=0 \
+          -var enable_public_ingress=true \
+          -target=module.eks_dr_vpc -target=module.eks_dr -target=module.eks_dr_ebs_csi_irsa \
+          -target=module.eks_dr_alb_irsa -target=aws_security_group.eks_dr_endpoints \
+          -target=aws_security_group.eks_dr_bastion -target=module.eks_dr_endpoints \
+          -target=module.eks_dr_vault_unseal_irsa -target=aws_iam_policy.eks_dr_vault_unseal \
+          -target=aws_iam_policy.eks_dr_cnpg_restore -target=module.eks_dr_cnpg_restore_irsa \
+          -target=aws_iam_role.eks_dr_bastion -target=aws_iam_role_policy_attachment.eks_dr_bastion_ssm \
+          -target=aws_iam_role_policy.eks_dr_bastion_describe -target=aws_iam_role_policy.eks_dr_bastion_vault_restore \
+          -target=aws_iam_instance_profile.eks_dr_bastion -target=aws_instance.eks_dr_bastion
