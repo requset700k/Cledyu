@@ -72,12 +72,12 @@ def handler(event, context):
     if not should_trigger(active):
         return {"started": False, "reason": "not-failed-over"}
 
-    # verify_alarm(=EventBridge OK 이벤트가 아니라 **직접 호출**: ①failover SFN 의 회복 재확인 ②주기 reconcile):
-    # push 알람을 다시 보고 **OK 일 때만** 시작한다. 정규 EventBridge 경로는 이 플래그가 없어 건너뛴다(이벤트
-    # 자체가 이미 OK 전이라). 두 직접호출이 필요한 이유 — dr_recovery 는 push→OK **전이**에만 울리므로:
+    # verify_alarm(=EventBridge OK 이벤트가 아니라 **주기 reconcile 규칙의 직접 호출**): push 알람을 다시 보고
+    # **OK 일 때만** 시작한다. 정규 EventBridge 경로는 이 플래그가 없어 건너뛴다(이벤트 자체가 이미 OK 전이).
+    # dr_recovery 는 push→OK **전이**에만 울리므로 reconcile 이 두 사각을 커버한다:
     #  ① failover 중 온프렘이 이미 회복하면 OK 이벤트가 active 설정 전에 지나가 자동 failback 을 놓친다.
     #  ② failback 이 실패/타임아웃한 뒤 push 가 steady OK 면 새 전이가 없어 재시도가 안 걸린다(실패 경로가
-    #     active 를 보존해도). 주기 reconcile 이 active+OK+RUNNING없음을 보고 재개한다. (2026-07-18 리뷰 P2)
+    #     active 를 보존해도). reconcile 이 active+push OK+RUNNING없음을 보고 재개한다. (2026-07-18 리뷰 P2)
     if event.get("verify_alarm") and not _push_ok():
         return {"started": False, "reason": "onprem-still-down"}
 
