@@ -48,8 +48,44 @@ def _vpc_id():
     return _eks.describe_cluster(name=CLUSTER)["cluster"]["resourcesVpcConfig"]["vpcId"]
 
 
+def _leftover_target_groups(vpc):
+    """DR VPC 에 남은 타깃그룹 이름 — CleanupOrphans 가 다 지웠어야 정상.
+
+    LB 연결 여부와 무관하게 **VpcId 로** 스캔한다(LB 삭제 후 삭제 실패로 고아가 된 TG 도 잡는다). §1 의 TG
+    삭제는 ResourceInUse 재시도(6회)가 소진돼도 예외 없이 넘어가 조용히 누수될 수 있어(handler 참조), EBS 만
+    보던 VerifyNoOrphans 로는 이를 못 잡았다(2026-07-18 리뷰 P2). 잔존 TG 는 다음 failover 정리 신호이자
+    LB 컨트롤러 reconcile 잠재 방해 요인이다.
+    """
+    out = []
+    for page in _elb.get_paginator("describe_target_groups").paginate():
+        out += [tg["TargetGroupName"] for tg in page["TargetGroups"] if tg.get("VpcId") == vpc]
+    return out
+
+
+def _leftover_volumes():
+    """남은 cluster 태그 EBS(있으면 EKS 데이터 폐기 미완 또는 삭제 실패) — 기존 VerifyNoOrphans 검사 보존."""
+    return [
+        v["VolumeId"]
+        for v in _ec2.describe_volumes(
+            Filters=[{"Name": f"tag:kubernetes.io/cluster/{CLUSTER}", "Values": ["owned"]}]
+        )["Volumes"]
+    ]
+
+
 def handler(event, context):
     vpc = _vpc_id()
+
+    # verify-only(SFN VerifyNoOrphans 가 호출) — 삭제 없이 DR VPC 잔존 TargetGroup·EBS 만 스캔해 반환한다.
+    # CleanupOrphans 의 삭제가 detach 지연으로 재시도 소진돼도 조용히 넘어갈 수 있으므로, 정리 후 **독립적으로**
+    # 다시 확인해 남으면 failback 알림에 경고로 싣는다(active 플래그를 무증상 삭제하지 않게).
+    if event.get("verify_only"):
+        return {
+            "verifyOnly": True,
+            "vpc": vpc,
+            "leftoverTargetGroups": _leftover_target_groups(vpc),
+            "leftoverVolumes": _leftover_volumes(),
+        }
+
     deleted = {"ec2": [], "alb": [], "tg": [], "ebs": [], "eni": [], "sg": [], "vpce": []}
 
     # 0) 노드 강제 종료 (desired=0 은 SFN ScaleToZero 가 이미 함 → ASG 재생성 없음).

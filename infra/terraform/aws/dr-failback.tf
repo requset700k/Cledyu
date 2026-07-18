@@ -381,27 +381,39 @@ resource "aws_sfn_state_machine" "dr_failback" {
         Next       = "VerifyNoOrphans"
       }
 
-      # [7] [R8] 고아 검증 — 잔존 cluster-태그 EBS 확인(있으면 경고 첨부)
+      # [7] [R8] 고아 검증 — teardown-cleanup 을 verify-only 로 재호출해 DR VPC 잔존 **TargetGroup**·EBS 확인.
+      # 구: aws-sdk describeVolumes 로 EBS 만 봤다 → CleanupOrphans 의 TG 삭제가 detach 지연 재시도 소진으로
+      # 조용히 누수되면(2026-07-18 리뷰 P2) 잔존 TG 를 못 잡고 SUCCESS+active삭제로 넘어갔다. 이제 TG 도 본다.
       VerifyNoOrphans = {
         Type     = "Task"
-        Resource = "arn:aws:states:::aws-sdk:ec2:describeVolumes"
+        Resource = "arn:aws:states:::lambda:invoke"
         Parameters = {
-          Filters = [{ Name = "tag:kubernetes.io/cluster/${local.eks_dr_name}", Values = ["owned"] }]
+          FunctionName = aws_lambda_function.dr_teardown_cleanup.arn
+          Payload      = { verify_only = true }
         }
-        ResultSelector = { "volumes.$" = "$.Volumes" }
-        ResultPath     = "$.verify"
-        Catch          = local.fb_catch["VerifyNoOrphans"]
-        Next           = "OrphanCheck"
+        ResultSelector = {
+          "leftoverTargetGroups.$" = "$.Payload.leftoverTargetGroups"
+          "leftoverVolumes.$"      = "$.Payload.leftoverVolumes"
+        }
+        ResultPath = "$.verify"
+        Catch      = local.fb_catch["VerifyNoOrphans"]
+        Next       = "OrphanCheck"
       }
       OrphanCheck = {
-        Type    = "Choice"
-        Choices = [{ Variable = "$.verify.volumes[0]", IsPresent = true, Next = "MarkOrphanWarning" }]
+        Type = "Choice"
+        Choices = [{
+          Or = [
+            { Variable = "$.verify.leftoverTargetGroups[0]", IsPresent = true },
+            { Variable = "$.verify.leftoverVolumes[0]", IsPresent = true },
+          ]
+          Next = "MarkOrphanWarning"
+        }]
         Default = "MarkClean"
       }
       # 두 분기 모두 $.warn.orphanWarning 을 세팅(notify payload JSONPath 가 항상 존재하도록 — 없으면 States.Runtime).
       MarkOrphanWarning = {
         Type       = "Pass"
-        Result     = { orphanWarning = "⚠️ 고아 의심: cluster 태그 EBS 잔존 — 콘솔 확인 필요" }
+        Result     = { orphanWarning = "⚠️ 고아 잔존 — DR VPC 에 TargetGroup 또는 cluster태그 EBS 남음. 실행이력 $.verify 확인 후 수동 정리(잔존 TG 는 다음 failover LB reconcile 방해 가능)." }
         ResultPath = "$.warn"
         Next       = "ClearFlags"
       }
