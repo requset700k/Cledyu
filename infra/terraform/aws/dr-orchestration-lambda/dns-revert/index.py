@@ -22,9 +22,17 @@ _r53 = boto3.client("route53")
 
 HOSTS = ["api", "app", "auth"]
 DOMAIN = "cledyu.com"
-# 온프렘 서빙 딥체크 경로 — Host 헤더로 Caddy @public 라우팅을 강제해 ALB→Caddy→tailnet→Traefik→백엔드
-# 전 체인을 실제로 태운다. /healthz(정적 200)로는 못 잡는 "프록시만 살고 백엔드 죽음"을 5xx/연결실패로 판별.
-DEEP_CHECKS = [("auth", "/realms/master"), ("api", "/ready"), ("app", "/")]
+# 온프렘 서빙 딥체크 — Host 헤더로 Caddy @public 라우팅을 강제해 ALB→Caddy→tailnet→Traefik→백엔드 전
+# 체인을 실제로 태운다. /healthz(정적 200)로는 못 잡는 "프록시만 살고 백엔드 죽음"을 판별. 각 항은
+# (Host, path, 본문에_있어야_하는_문자열|None); 기대 status 는 **2xx/3xx**.
+DEEP_CHECKS = [
+    # auth 는 실 학습자 realm 복원까지 확인 — /realms/master 는 Keycloak 프로세스만 살아도 200 이라
+    # OAuth 가 깨진 온프렘을 통과시킨다. 실 realm(cledyu-learn, config.go)+본문 확인 = failover 게이트
+    # (12-verify-serving.sh)와 동일. keycloak 실서빙은 이 체크가 커버하므로 api /ready 는 200 만 본다.
+    ("auth", "/realms/cledyu-learn", "cledyu-learn"),
+    ("api", "/ready", None),  # labs 로드=ready(200)
+    ("app", "/", None),  # web 서빙(2xx/3xx)
+]
 # 온프렘 공개 ALB 의 **정확한** 이름(TF 가 "${name_prefix}-public" 를 주입). ALB 이름은 리전 내 유일하므로
 # 접미(-public) 매칭 대신 정확 일치로 오-선택을 원천 차단한다(다른 *-public ALB 가 생겨도 안전).
 PUBLIC_ALB_NAME = os.environ["PUBLIC_ALB_NAME"]
@@ -54,12 +62,12 @@ def _proxy_healthy(lb):
     return False
 
 
-def _probe_status(alb_dns, host, path):
-    """공개 ALB(alb_dns)에 TCP 접속하되 **SNI·검증 hostname 은 실제 공개 Host**로 준다.
+def _probe(alb_dns, host, path):
+    """공개 ALB(alb_dns)에 TCP 접속하되 **SNI·검증 hostname 은 실제 공개 Host**로 준다. (status, body) 반환.
 
     그러면 ALB 가 그 Host 의 cert(*.cledyu.com)를 내주고 정식 TLS 검증이 성립한다 — ALB DNS 로 접속하면서도
     검증을 끄지 않는다(미검증 컨텍스트는 S323 + MITM 이 200 을 위조해 잘못 원복시킬 여지). cert 검증 실패는
-    ssl.SSLError(=OSError) 로 올라와 호출부에서 '미서빙'으로 처리된다(fail-closed).
+    ssl.SSLError(=OSError) 로 올라와 호출부에서 '미서빙'으로 처리된다(fail-closed). body 는 realm 등 본문 확인용 앞부분만.
     """
     ctx = ssl.create_default_context()
     with (
@@ -69,36 +77,43 @@ def _probe_status(alb_dns, host, path):
         conn = http.client.HTTPConnection(host, timeout=5)
         conn.sock = tls  # 이미 TLS 로 감싼 소켓 주입 → conn 은 재접속 없이 HTTP 만 태운다
         conn.request("GET", path, headers={"Host": host})
-        return conn.getresponse().status
+        resp = conn.getresponse()
+        body = resp.read(4096).decode("utf-8", "replace")
+        return resp.status, body
 
 
 def _onprem_serving(alb_dns):
     """공개 ALB 에 **실제 공개 Host + 라우팅 경로**로 요청해 백엔드 체인 서빙을 확인한다.
 
     ALB listener 는 host 무조건 default forward → Caddy 가 Host 로 @public 라우팅(keycloak-proxy.yaml.tftpl).
-    그래서 Host 헤더를 실어 보내면 프록시 너머 Traefik/Keycloak/API 까지 실제로 태운다. 백엔드가 죽어
-    있으면 Caddy reverse_proxy 가 5xx(502/503/504)를 뱉는다 → **미서빙**으로 판정(차단).
+    그래서 Host 헤더를 실어 보내면 프록시 너머 Traefik/Keycloak/API 까지 실제로 태운다.
 
-    ⚠️ 도달 가능성과 서빙을 구분한다(리뷰 P2). public_ingress_allowed_cidrs 를 사무실 IP 등으로 좁히면
-    public ALB SG 가 non-VPC Lambda 의 **비고정 egress** 를 막아, 온프렘이 정상이어도 연결이 timeout 난다.
-    그때 하드블록하면 승인된 failback 이 RevertDNS 에서 영영 멈춘다 → **도달 불가(연결 실패)는 '미서빙'과
-    구분해 판정 보류(통과)** 하고, 게이트는 1차 _proxy_healthy(ELB API, SG 무관)+사람 승인에 맡긴다.
-    막는 건 **도달했는데 5xx** 인 경우뿐(프록시만 살고 백엔드 죽음).
+    ⚠️ **도달 가능성과 서빙을 엄격히 구분한다(리뷰 P2).** 통과(inconclusive)로 삼키는 건 **연결 자체 실패
+    (OSError: timeout/refused)** 뿐이다 — public_ingress_allowed_cidrs 를 좁히면 non-VPC Lambda 의 비고정
+    egress 가 막혀 온프렘이 정상이어도 timeout 나는데, 이때 하드블록하면 승인된 failback 이 영영 멈춘다.
+    그 외는 전부 **fail-closed(차단)**:
+      · ssl.SSLError(도달했으나 TLS 깨짐 — cert 만료/호스트 불일치, 사용자가 실제로 보는 오류)
+      · http.client.HTTPException(도달했으나 HTTP 프로토콜 오류 — '도달 불가' 아님)
+      · **2xx/3xx 아닌 응답**(4xx=Host 라우팅 404/403, 5xx=백엔드 다운)
+      · 본문 요구 불충족(auth 는 실 realm 복원 확인 — /realms/cledyu-learn 이 realm 데이터를 실제로 반환하는지)
+    도달 불가만 보류하고 나머지는 막으면, 깨진 공개 엔드포인트로 api/app/auth 를 돌리는 상황을 차단한다.
     """
-    for sub, path in DEEP_CHECKS:
+    for sub, path, want in DEEP_CHECKS:
         host = f"{sub}.{DOMAIN}"
         try:
-            status = _probe_status(alb_dns, host, path)
-        except ssl.SSLError as e:
-            # ⚠️ ssl.SSLError 도 OSError 하위지만 **먼저** 잡는다 — ALB 엔 도달했으나 TLS 실패
-            # (cert 만료/호스트 불일치)는 사용자가 실제로 보는 오류다 → 보류 아니라 **fail-closed(차단)**.
-            # 이걸 안 나누면 깨진 공개 TLS 엔드포인트로 api/app/auth 를 돌리게 된다(리뷰 P2).
+            status, body = _probe(alb_dns, host, path)
+        except ssl.SSLError as e:  # ssl.SSLError 는 OSError 하위 → **먼저** 잡는다
             return False, f"{host}{path}: TLS {type(e).__name__}"
-        except (OSError, http.client.HTTPException) as e:
-            # 연결 자체 실패(timeout/refused = SG 제한/네트워크) = 도달 불가 → inconclusive(통과, 다른 게이트 의존).
+        except http.client.HTTPException as e:  # 도달했으나 HTTP 오류 → 차단(도달불가 아님)
+            return False, f"{host}{path}: HTTP {type(e).__name__}"
+        except OSError as e:  # 연결 자체 실패(도달 불가)만 보류 → 통과
             return True, f"unreachable({host}{path}:{type(e).__name__}) — 딥체크 보류"
-        if status >= 500:
+        # 기대 2xx/3xx 만 서빙 — 4xx(라우팅 404/403)·5xx(백엔드 다운) 는 차단.
+        if not (200 <= status < 400):
             return False, f"{host}{path}: {status}"
+        # 본문 요구(auth 는 실 realm 복원 확인) 불충족 → 차단.
+        if want and want not in body:
+            return False, f"{host}{path}: 본문에 '{want}' 없음(realm 미복원 의심)"
     return True, "ok"
 
 
