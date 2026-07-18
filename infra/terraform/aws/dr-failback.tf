@@ -464,7 +464,16 @@ resource "aws_sfn_state_machine" "dr_failback" {
             }
           }
           Retry = [{ ErrorEquals = ["States.ALL"], IntervalSeconds = 5, MaxAttempts = 3, BackoffRate = 2.0 }]
-          End   = true
+          # 알림 후 Fail 로 종료 — End=true 면 알림 Lambda 성공 시 실행이 SUCCEEDED 로 기록돼 RevertDNS/
+          # TeardownHot 실패가 콘솔·알람·운영자에게 안 보인다(무음 실패). failover 대칭으로 Fail 종단 추가.
+          # notify 자체가 재시도 소진돼도 Catch 로 Fail 에 도달시킨다(이미 실패 경로라 Catch 안전).
+          Catch = [{ ErrorEquals = ["States.ALL"], ResultPath = null, Next = "FailbackFailed" }]
+          Next  = "FailbackFailed"
+        }
+        FailbackFailed = {
+          Type  = "Fail"
+          Error = "DrFailbackFailed"
+          Cause = "failback 실패 — Discord 알림과 실행 이력 참조. DNS 원복 여부는 알림의 dnsReverted 참조."
         }
     })
   })
