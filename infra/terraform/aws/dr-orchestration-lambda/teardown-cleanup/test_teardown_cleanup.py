@@ -1,5 +1,9 @@
 import importlib.util
+import os
 import pathlib
+
+# 모듈 최상단이 os.environ["CLUSTER_NAME"] 을 읽으므로 import 전에 채운다(안 하면 수집 단계 KeyError).
+os.environ.setdefault("CLUSTER_NAME", "cledyu-dr")
 
 _spec = importlib.util.spec_from_file_location(
     "cleanup", pathlib.Path(__file__).parent / "index.py"
