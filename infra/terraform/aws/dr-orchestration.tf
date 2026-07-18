@@ -256,6 +256,31 @@ output "dr_interaction_url" {
   value       = aws_lambda_function_url.dr_interaction.function_url
 }
 
+# ── interaction Lambda 웜 유지 ──
+# Discord 는 버튼 인터랙션에 3초 내 응답을 요구한다. 콜드스타트면(init+SecretsManager pubkey+DDB+SFN)
+# 3초를 넘겨 "애플리케이션이 적시에 응답하지 않음"이 뜨고, 승인자가 다시 눌러 두 번째 클릭이
+# TaskTimedOut(토큰 이미 소비)으로 에러난다(2026-07-18 실측). warm 은 ~140ms 라 여유. 5분 핑으로 상시 warm.
+resource "aws_cloudwatch_event_rule" "dr_interaction_warm" {
+  name                = "${var.name_prefix}-dr-interaction-warm"
+  description         = "interaction Lambda 웜 유지(Discord 3s 인터랙션 타임아웃 방지)"
+  schedule_expression = "rate(5 minutes)"
+}
+
+resource "aws_cloudwatch_event_target" "dr_interaction_warm" {
+  rule      = aws_cloudwatch_event_rule.dr_interaction_warm.name
+  target_id = "interaction-warm"
+  arn       = aws_lambda_function.dr_interaction.arn
+  input     = jsonencode({ warmup = true })
+}
+
+resource "aws_lambda_permission" "dr_interaction_warm" {
+  statement_id  = "AllowWarmPing"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.dr_interaction.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.dr_interaction_warm.arn
+}
+
 # ── Step Functions 실행 롤 (테스트 SM + Plan 2 의 메인 SM 공용) ──
 data "aws_iam_policy_document" "dr_sfn_assume" {
   statement {

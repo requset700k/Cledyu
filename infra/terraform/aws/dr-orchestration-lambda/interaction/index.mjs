@@ -52,6 +52,10 @@ function disabledMessage(original, who) {
 }
 
 export const handler = async (event) => {
+  // 웜 유지 핑(EventBridge rate 5m). Discord 는 인터랙션(버튼)에 3초 내 응답을 요구하는데, 콜드스타트면
+  // init+SecretsManager+DDB+SFN 이 3초를 넘겨 "응답하지 않음"이 뜬다(warm 은 ~140ms). 핑으로 상시 warm 유지.
+  if (event?.warmup) return { statusCode: 200, body: 'warm' };
+
   const sig = event.headers?.['x-signature-ed25519'];
   const ts = event.headers?.['x-signature-timestamp'];
   const raw = event.body || '';
