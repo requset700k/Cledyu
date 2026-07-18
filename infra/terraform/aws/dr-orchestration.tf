@@ -377,6 +377,7 @@ data "aws_iam_policy_document" "dr_sfn" {
       aws_lambda_function.dr_addon_install.arn,
       aws_lambda_function.dr_dns_switch.arn,
       aws_lambda_function.dr_notify.arn,
+      aws_lambda_function.dr_failback_trigger.arn, # us-east-1 — PostFailoverRecoveryCheck 크로스리전 invoke
     ]
   }
 }
@@ -1627,8 +1628,29 @@ resource "aws_sfn_state_machine" "dr_failover" {
         }
         ResultPath = null
         # 플래그 세팅 실패로 완료 알림을 막지 않는다 — failover 는 이미 성공. 로깅만.
+        # 세팅 실패면 active 가 없어 아래 재확인도 무의미 → 바로 NotifyComplete.
         Catch = [{ ErrorEquals = ["States.ALL"], ResultPath = null, Next = "NotifyComplete" }]
-        Next  = "NotifyComplete"
+        Next  = "PostFailoverRecoveryCheck"
+      }
+
+      # ── [12.5] 회복 레이스 보정 (2026-07-18 리뷰 P2) ──
+      # failover 진행 중 온프렘이 이미 회복(push OK)했으면 dr_recovery 의 push→OK 이벤트는 active 설정 **전에**
+      # 한 번 왔다 사라진다(steady OK 엔 새 이벤트 없음) → 자동 failback 이 영영 안 걸린다. failback-trigger 를
+      # post_failover 로 재호출해, 그쪽이 push 알람을 다시 보고 **OK 면 지금 failback 을 시작**한다(아직 다운이면
+      # no-op — 실제 회복 시 EventBridge 가 건다). failback-trigger 는 push 알람과 같은 us-east-1 이라 알람을 로컬로
+      # 보고, 여기선 full ARN 으로 크로스리전 invoke 한다. failover 는 이미 성공이므로 이 단계가 실패해도 완료
+      # 알림은 나간다(Retry 후 Catch→NotifyComplete).
+      PostFailoverRecoveryCheck = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::lambda:invoke"
+        Parameters = {
+          FunctionName = aws_lambda_function.dr_failback_trigger.arn # us-east-1 (크로스리전)
+          Payload      = { post_failover = true }
+        }
+        ResultPath = null
+        Retry      = [{ ErrorEquals = ["States.ALL"], IntervalSeconds = 5, MaxAttempts = 2, BackoffRate = 2.0 }]
+        Catch      = [{ ErrorEquals = ["States.ALL"], ResultPath = null, Next = "NotifyComplete" }]
+        Next       = "NotifyComplete"
       }
 
       # ── [13] 완료 알림 ──

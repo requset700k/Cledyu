@@ -28,6 +28,11 @@ data "aws_iam_policy_document" "dr_failback_trigger" {
     resources = [aws_sfn_state_machine.dr_failback.arn]
   }
   statement {
+    sid       = "ReadPushAlarm" # post_failover 재확인 — push 알람 OK 여부(DescribeAlarms 는 리소스 한정 미지원)
+    actions   = ["cloudwatch:DescribeAlarms"]
+    resources = ["*"]
+  }
+  statement {
     sid     = "Logs"
     actions = ["logs:CreateLogStream", "logs:PutLogEvents"]
     resources = [
@@ -64,6 +69,7 @@ resource "aws_lambda_function" "dr_failback_trigger" {
       SFN_REGION        = var.region
       STATE_MACHINE_ARN = aws_sfn_state_machine.dr_failback.arn
       ACTIVE_PARAM      = "/cledyu-dr/failover/active"
+      PUSH_ALARM_NAME   = aws_cloudwatch_metric_alarm.push.alarm_name # post_failover 재확인용
     }
   }
 }

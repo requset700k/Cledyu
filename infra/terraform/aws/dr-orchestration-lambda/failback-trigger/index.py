@@ -23,8 +23,12 @@ _sfn = boto3.client("stepfunctions", region_name=os.environ["SFN_REGION"])
 _ssm = boto3.client(
     "ssm", region_name=os.environ["SFN_REGION"]
 )  # 활성 파라미터는 dr_failover SM(ap-northeast-2)이 쓴다 → 이 Lambda 는 us-east-1 이지만 SFN_REGION 으로 읽는다
+_cw = boto3.client(
+    "cloudwatch"
+)  # push 알람은 이 Lambda 와 같은 us-east-1 → 로컬 조회(크로스리전 불요)
 
 SM_ARN = os.environ["STATE_MACHINE_ARN"]
+PUSH_ALARM = os.environ["PUSH_ALARM_NAME"]
 
 
 def should_trigger(active_value):
@@ -57,10 +61,24 @@ def _active_value():
         return None
 
 
+def _push_ok():
+    """push 하트비트 알람이 현재 OK(온프렘 회복)인가 — post_failover 재확인용."""
+    alarms = _cw.describe_alarms(AlarmNames=[PUSH_ALARM])["MetricAlarms"]
+    return bool(alarms) and alarms[0]["StateValue"] == "OK"
+
+
 def handler(event, context):
     active = _active_value()
     if not should_trigger(active):
         return {"started": False, "reason": "not-failed-over"}
+
+    # post_failover(=failover SFN 이 MarkFailoverActive 직후 호출): 온프렘이 failover 진행 중 이미 회복하면
+    # dr_recovery 의 push→OK 이벤트는 active 설정 전에 한 번 왔다 사라져(steady OK 엔 새 이벤트 없음) 자동
+    # failback 이 영영 안 시작된다. 그래서 여기서 push 알람을 다시 보고 **OK 일 때만** 시작한다. 아직 다운이면
+    # no-op(정상 — 실제 회복 시 EventBridge 가 건다). EventBridge 정규 경로는 이 플래그가 없어 이 검사를 건너뛴다
+    # (이벤트 자체가 이미 OK 전이라). (2026-07-18 리뷰 P2)
+    if event.get("post_failover") and not _push_ok():
+        return {"started": False, "reason": "onprem-still-down"}
 
     prefix = name_prefix(active)
     # ⚠️ RUNNING 체크와 start_execution 사이엔 좁은 레이스가 있다(두 push OK 가 첫 실행이 RUNNING 으로

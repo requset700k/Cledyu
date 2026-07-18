@@ -8,6 +8,7 @@ os.environ.setdefault(
     "STATE_MACHINE_ARN", "arn:aws:states:ap-northeast-2:0:stateMachine:cledyu-lab-dr-failback"
 )
 os.environ.setdefault("ACTIVE_PARAM", "/cledyu-dr/failover/active")
+os.environ.setdefault("PUSH_ALARM_NAME", "cledyu-lab-dr-push")
 
 _spec = importlib.util.spec_from_file_location(
     "fb_trigger", pathlib.Path(__file__).parent / "index.py"
@@ -58,3 +59,36 @@ def test_not_failed_over_is_noop(monkeypatch):
     monkeypatch.setattr(t, "_active_value", lambda: None)
     out = t.handler({"detail": {}}, None)
     assert out["started"] is False and out["reason"] == "not-failed-over"
+
+
+def test_post_failover_skips_when_onprem_still_down(monkeypatch):
+    # failover SFN 이 MarkFailoverActive 직후 호출했는데 push 아직 ALARM → 시작 안 함(정상 회복은 EventBridge).
+    monkeypatch.setattr(t, "_active_value", lambda: _E1)
+    monkeypatch.setattr(t, "_push_ok", lambda: False)
+    out = t.handler({"post_failover": True}, None)
+    assert out["started"] is False and out["reason"] == "onprem-still-down"
+
+
+def test_post_failover_starts_when_onprem_recovered(monkeypatch):
+    # failover 중 온프렘이 이미 회복(push OK) → 놓친 자동 failback 을 여기서 시작(레이스 보정).
+    captured = {}
+    monkeypatch.setattr(t, "_active_value", lambda: _E1)
+    monkeypatch.setattr(t, "_push_ok", lambda: True)
+    monkeypatch.setattr(t, "_running_exists", lambda prefix: False)
+    monkeypatch.setattr(t._sfn, "start_execution", lambda **kw: captured.update(kw))
+    out = t.handler({"post_failover": True}, None)
+    assert out["started"] is True and captured["name"].startswith(t.name_prefix(_E1))
+
+
+def test_normal_eventbridge_path_skips_push_recheck(monkeypatch):
+    # post_failover 아니면(정규 EventBridge OK 이벤트) _push_ok 를 부르지 않는다(이벤트가 이미 OK 전이).
+    monkeypatch.setattr(t, "_active_value", lambda: _E1)
+    monkeypatch.setattr(t, "_running_exists", lambda prefix: False)
+    monkeypatch.setattr(t._sfn, "start_execution", lambda **kw: None)
+
+    def _boom():
+        raise AssertionError("정규 경로에서 _push_ok 를 부르면 안 된다")
+
+    monkeypatch.setattr(t, "_push_ok", _boom)
+    out = t.handler({"detail": {}}, None)
+    assert out["started"] is True
