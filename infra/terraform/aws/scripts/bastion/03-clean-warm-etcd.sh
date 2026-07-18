@@ -236,19 +236,26 @@ if kubectl get crd targetgroupbindings.elbv2.k8s.aws > /dev/null 2>&1; then
       echo "P1g: stale TGB 제거 ${ns}/${name}"
     done
 
-  # 게이트: 실제로 다 사라졌나. 하나라도 남으면 fresh 생성이 "already exists" 로 막혀 WAF 가 안 붙는다.
+  # 게이트: **총 개수가 아니라 deletionTimestamp(Terminating 고착)만 본다**(P1e/P1f 와 동일, 리뷰 P1).
+  # 🔴 구 게이트(개수 0 대기)는 **부분 failover 재실행에서 오탐으로 죽었다**: 노드·LB 컨트롤러가 살아있는
+  #    상태(앱 sync 이후 실패→재실행)면 삭제 직후 컨트롤러가 기존 Ingress 를 보고 **fresh TGB 를 즉시 재생성**
+  #    한다(fresh TG 를 물음 = stale 아님, 정상). 개수 0 을 기다리면 건강한 재실행이 2분 뒤 죽어 DR 재시도를 막는다.
+  # finalizer 를 떼고 지웠으므로 정상이면 Terminating 이 안 남는다; 컨트롤러 재생성분은 deletionTimestamp 가
+  # 없어 여기 안 걸린다. 남는 건 **finalizer 고착(진짜 stale)** 뿐 — 그것만 실패시킨다.
   for i in $(seq 1 24); do
-    REMAIN=$(kubectl get targetgroupbinding -A -o name 2> /dev/null | grep -c . || true)
-    [ "${REMAIN:-0}" -eq 0 ] && break
-    echo "TGB 삭제 대기 ${REMAIN}개 ($i/24)"
+    STUCK=$(kubectl get targetgroupbinding -A \
+      -o jsonpath='{range .items[*]}{.metadata.deletionTimestamp}{"\n"}{end}' 2> /dev/null |
+      grep -c . || true)
+    [ "${STUCK:-0}" -eq 0 ] && break
+    echo "TGB Terminating 고착 대기 ${STUCK}개 ($i/24)"
     sleep 5
   done
-  [ "${REMAIN:-0}" -eq 0 ] || {
-    echo "❌ TargetGroupBinding 이 2분째 ${REMAIN}개 남음 — finalizer 고착 의심."
+  [ "${STUCK:-0}" -eq 0 ] || {
+    echo "❌ TargetGroupBinding 이 2분째 Terminating 고착 ${STUCK}개 — finalizer 안 떨어짐."
     echo "   kubectl get targetgroupbinding -A 로 확인 후 finalizer 를 수동으로 떼라."
     exit 1
   }
-  echo "P1g: stale TargetGroupBinding 정리 완료 — 컨트롤러가 fresh TG 로 재생성 → WAF 자동 연결"
+  echo "P1g: stale TargetGroupBinding 정리 완료(컨트롤러 재생성분은 fresh 라 허용)"
 else
   echo "P1g: TargetGroupBinding CRD 없음 — 첫 failover(LB 컨트롤러 미설치) no-op"
 fi
