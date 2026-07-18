@@ -327,7 +327,7 @@ data "aws_iam_policy_document" "dr_sfn" {
   statement {
     # [2.4] ClearAlbParam — stale ALB 파라미터 방어(설계 §5.1.2). [9] 가 쓰기 전에 항상 비운다.
     sid       = "ClearAlbParam"
-    actions   = ["ssm:DeleteParameter"]
+    actions   = ["ssm:DeleteParameter", "ssm:PutParameter"]
     resources = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/cledyu-dr/failover/*"]
   }
 
@@ -1584,7 +1584,26 @@ resource "aws_sfn_state_machine" "dr_failover" {
         }
         ResultPath = null
         Catch      = local.dr_catch["VerifyServing"]
-        Next       = "NotifyComplete"
+        Next       = "MarkFailoverActive"
+      }
+
+      # ── [12.5] failover 활성 플래그 — failback 트리거의 게이트 ──
+      # VerifyServing 통과(= failover 정상 완료) 후에만 세팅. failback-trigger 가 이 파라미터가
+      # 있을 때만 발화 → 부분 실패·평상시 하트비트 깜빡임이 failback 을 유발하지 않는다.
+      # dr_failback SFN 의 ClearFlags 가 failback 완료 시 삭제한다.
+      MarkFailoverActive = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::aws-sdk:ssm:putParameter"
+        Parameters = {
+          Name      = "/cledyu-dr/failover/active"
+          "Value.$" = "$$.Execution.Id"
+          Type      = "String"
+          Overwrite = true
+        }
+        ResultPath = null
+        # 플래그 세팅 실패로 완료 알림을 막지 않는다 — failover 는 이미 성공. 로깅만.
+        Catch = [{ ErrorEquals = ["States.ALL"], ResultPath = null, Next = "NotifyComplete" }]
+        Next  = "NotifyComplete"
       }
 
       # ── [13] 완료 알림 ──
