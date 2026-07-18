@@ -90,6 +90,17 @@ def _render(event):
             f"ALB: {event.get('alb', '?')}"
         )
 
+    if outcome == "failover-unarmed":
+        # failover 는 성공(EKS 서빙)했으나 active 플래그 기록 실패 → 자동 failback 미무장. 수동 조치 안내.
+        arn = event.get("executionArn", "?")
+        return (
+            "⚠️ **DR 페일오버 완료 · 그러나 failback 미무장**\n"
+            "EKS 는 서빙 중이나 `/cledyu-dr/failover/active` 기록에 실패 → 자동 페일백이 안 걸립니다.\n"
+            "**active 플래그를 수동 설정**하세요(값=이 실행 ARN):\n"
+            f"`aws ssm put-parameter --region ap-northeast-2 --name /cledyu-dr/failover/active "
+            f"--type String --overwrite --value {arn}`"
+        )
+
     if outcome == "failback-success":
         # [R7] failback 은 재해가 아니라 계획된 복귀 → RTO/RPO 라벨 안 붙인다(재해복구 지표 아님).
         orphan = event.get("orphanWarning")  # VerifyNoOrphans 가 채우면 경고 첨부

@@ -1626,15 +1626,36 @@ resource "aws_sfn_state_machine" "dr_failover" {
           Overwrite = true
         }
         ResultPath = null
-        # 플래그 세팅 실패로 완료 알림을 막지 않는다 — failover 는 이미 성공. 로깅만.
-        # ⚠️ 회복 레이스(failover 중 온프렘이 이미 OK 복귀 → dr_recovery 의 OK 이벤트가 active 설정 전에
-        #   지나가 자동 failback 을 놓침)는 **여기서 크로스리전 재확인하지 않는다** — Step Functions 는
-        #   크로스리전 리소스 접근을 지원하지 않아(us-east-1 failback-trigger 를 ap-northeast-2 SFN 에서
-        #   직접 invoke 불가) 어떤 ARN 형식이든 실패한다(2026-07-18 리뷰 P2 재지적). 대신 us-east-1 **로컬**
-        #   주기 reconcile 규칙(dr_failback_reconcile, dr-failback.tf)이 active+push OK+RUNNING없음을 보고
-        #   재개하며, 이 회복-레이스 케이스도 그 경로가 커버한다(즉시 대신 최대 reconcile 주기 내).
-        Catch = [{ ErrorEquals = ["States.ALL"], ResultPath = null, Next = "NotifyComplete" }]
+        # active 는 **자동 failback 의 유일한 게이트**다. throttling/일시 장애로 세팅 실패 시 조용히
+        # NotifyComplete 로 넘기면 운영자는 성공으로 보지만 dr_recovery·reconcile 이 모두 not-failed-over 로
+        # no-op → failback 이 영영 안 무장된다(리뷰 P2). → 먼저 재시도하고, 소진 시 실패를 **드러낸다**:
+        # 완료 알림과 별도로 "failback 미무장" 경고를 보내고 실행을 Fail 로 끝내 콘솔에도 남긴다(failover 자체는
+        # 서빙 중이므로 메시지가 그 점을 명시). ⚠️ 회복 레이스(failover 중 온프렘 OK 복귀)는 크로스리전 미지원이라
+        # 여기서 재확인하지 않고 us-east-1 로컬 주기 reconcile(dr_failback_reconcile)이 커버한다.
+        Retry = [{ ErrorEquals = ["States.ALL"], IntervalSeconds = 3, MaxAttempts = 4, BackoffRate = 2.0 }]
+        Catch = [{ ErrorEquals = ["States.ALL"], ResultPath = "$.activeError", Next = "NotifyActiveFailed" }]
         Next  = "NotifyComplete"
+      }
+
+      # active 세팅 재시도 소진 — failover 는 성공(서빙)했으나 failback 미무장. 별도 알림 후 Fail 로 종료.
+      NotifyActiveFailed = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::lambda:invoke"
+        Parameters = {
+          FunctionName = aws_lambda_function.dr_notify.arn
+          Payload = {
+            outcome          = "failover-unarmed"
+            "executionArn.$" = "$$.Execution.Id"
+          }
+        }
+        Retry = [{ ErrorEquals = ["States.ALL"], IntervalSeconds = 5, MaxAttempts = 3, BackoffRate = 2.0 }]
+        Catch = [{ ErrorEquals = ["States.ALL"], ResultPath = null, Next = "ActiveFailed" }]
+        Next  = "ActiveFailed"
+      }
+      ActiveFailed = {
+        Type  = "Fail"
+        Error = "DrFailoverActiveFlagFailed"
+        Cause = "페일오버는 완료(EKS 서빙)했으나 /cledyu-dr/failover/active 기록 실패 — 자동 failback 미무장. active 를 수동 설정하라(Discord 알림 참조)."
       }
 
       # ── [13] 완료 알림 ──
