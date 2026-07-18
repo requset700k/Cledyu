@@ -12,8 +12,6 @@ from datetime import UTC, datetime
 
 import boto3
 
-RUNBOOK = "https://github.com/requset700k/Cledyu/blob/main/docs/RUNBOOK/dr-failback.md"
-
 
 def _webhook_url():
     arn = os.environ["WEBHOOK_SECRET_ARN"]
@@ -79,51 +77,79 @@ def _diagnosis(raw):
     return "\n".join(parts) if parts else raw
 
 
-def handler(event, context):
+def _render(event):
     now = datetime.now(UTC).isoformat()
-    if event.get("outcome") == "success":
-        text = (
+    outcome = event.get("outcome")
+
+    if outcome == "success":
+        return (
             "✅ **DR 페일오버 완료**\n"
             # 두 구간을 나눈다 — 감지→승인은 사람 지연, 승인→서빙이 자동화 RTO 다.
             f"감지→승인: {_mins(event.get('detectedAt'), event.get('approvedAt'))} (사람 지연)\n"
             f"**승인→서빙: {_mins(event.get('approvedAt'), now)} ← 자동화 RTO**\n"
-            f"ALB: {event.get('alb', '?')}\n\n"
-            "**다음 할 일 — failback 준비:**\n"
-            "`postgres-cnpg-dr/values.yaml`·`keycloak-pg-dr/values.yaml` 의 `backupEnabled: false → true` PR.\n"
-            "안 켜면 DR-창 쓰기가 S3 에 안 남아 **failback 이 anchor 없이 실패**합니다.\n"
-            f"런북: {RUNBOOK}"
+            f"ALB: {event.get('alb', '?')}"
         )
-    else:
-        # ⚠️ failedState 는 메인 SM 의 **$.failedStep** 이다 — 각 Task 의 Catch 가 자기 이름을 static 으로
-        #   주입한 값이라 진짜 상태 이름(예: "RestoreVault")이 온다.
-        #   🔴 **$.error.Error 를 쓰면 안 된다** — .sync:2 가 자식 Error 를 감싸 **"States.TaskFailed"** 가
-        #   오고, `.sync` 를 쓰는 모든 상태가 같은 값이다(스펙 §11.18 (b) 실측).
-        failed = event.get("failedState", "?")
 
-        # ⚠️ DNS 안내는 **이름 추론이 아니라 페이로드 실물**로 판정한다(스펙 §11.18 (c)).
-        #   이전 구현은 allowlist(`failed in ("RestartApps","VerifyServing","NotifyComplete")`)로 분기했는데
-        #   **셋 다 영원히 안 맞는 dead code** 였다(위 §11.18 (b) — 실제로 오는 값은 States.TaskFailed).
-        #   그래서 [11]·[12] 실패 = **DNS 가 이미 EKS 인데** "온프렘 — 트래픽은 안전합니다" 를 보냈다.
-        #   무조건 "온프렘"이던 수정 전보다 나빴다: 틀린 내용에 근거 없는 안심이 붙었다.
-        #   → 메인 SM 의 `DnsSwitched?` Choice 가 **$.dns.alb 의 IsPresent**(= [10] SwitchDNS 통과 여부의
-        #     지상 진실)로 판정해 이 불리언을 넣어준다. 이름이 아니라 실물이라 상태가 끼어들어도 안 틀린다.
-        #   없으면 보수적으로 False("온프렘") — 안전한 쪽이다.
-        dns_switched = bool(event.get("dnsSwitched"))
-        dns_line = (
-            "⚠️ **DNS 는 이미 EKS 로 전환됐습니다**(SwitchDNS 통과 후 실패) — 사용자는 EKS ALB 로 향합니다.\n"
-            "롤백하려면 Route53 을 온프렘으로 되돌리는 것부터(런북 §복귀)."
-            if dns_switched
-            else "DNS 는 아직 온프렘을 가리킵니다 — 트래픽은 안전합니다."
+    if outcome == "failback-success":
+        # [R7] failback 은 재해가 아니라 계획된 복귀 → RTO/RPO 라벨 안 붙인다(재해복구 지표 아님).
+        orphan = event.get("orphanWarning")  # VerifyNoOrphans 가 채우면 경고 첨부
+        return (
+            "✅ **DR failback 완료**\n"
+            "DNS: 온프렘(`*-public` ALB)\n"
+            "EKS: pilot-light warm 으로 회수 · DR 데이터 폐기\n"
+            f"소요: {_mins(event.get('approvedAt'), now)}" + (f"\n{orphan}" if orphan else "")
         )
-        text = (
-            "❌ **DR 페일오버 실패**\n"
+
+    if outcome == "failback-failed":
+        failed = event.get("failedState", "?")
+        reverted = bool(event.get("dnsReverted"))
+        dns_line = (
+            "DNS 는 온프렘으로 원복됐습니다 — 트래픽은 온프렘으로 갑니다."
+            if reverted
+            else "⚠️ **DNS 가 아직 EKS 를 가리킵니다**(RevertDNS 실패) — 온프렘 서빙 안 됨. 런북 §원복 먼저."
+        )
+        return (
+            "❌ **DR failback 실패**\n"
             f"실패 단계: `{failed}`\n"
             f"실행: {event.get('executionArn', '?')}\n\n"
-            f"```\n{_diagnosis(event.get('stdoutTail'))[-1200:]}\n```\n"
-            "**롤백하지 않았습니다** — 여기까지 뜬 것은 그대로 있으니 런북으로 이어받으세요.\n"
+            # failback SFN 은 stdoutTail 을 안 채운다(CodeBuild/bastion 로그 tail 이 없음) → 빈 진단 블록 생략.
+            "**롤백하지 않았습니다** — 여기까지는 그대로 있습니다.\n"
             f"{dns_line}"
         )
 
+    # ⚠️ failedState 는 메인 SM 의 **$.failedStep** 이다 — 각 Task 의 Catch 가 자기 이름을 static 으로
+    #   주입한 값이라 진짜 상태 이름(예: "RestoreVault")이 온다.
+    #   🔴 **$.error.Error 를 쓰면 안 된다** — .sync:2 가 자식 Error 를 감싸 **"States.TaskFailed"** 가
+    #   오고, `.sync` 를 쓰는 모든 상태가 같은 값이다(스펙 §11.18 (b) 실측).
+    failed = event.get("failedState", "?")
+
+    # ⚠️ DNS 안내는 **이름 추론이 아니라 페이로드 실물**로 판정한다(스펙 §11.18 (c)).
+    #   이전 구현은 allowlist(`failed in ("RestartApps","VerifyServing","NotifyComplete")`)로 분기했는데
+    #   **셋 다 영원히 안 맞는 dead code** 였다(위 §11.18 (b) — 실제로 오는 값은 States.TaskFailed).
+    #   그래서 [11]·[12] 실패 = **DNS 가 이미 EKS 인데** "온프렘 — 트래픽은 안전합니다" 를 보냈다.
+    #   무조건 "온프렘"이던 수정 전보다 나빴다: 틀린 내용에 근거 없는 안심이 붙었다.
+    #   → 메인 SM 의 `DnsSwitched?` Choice 가 **$.dns.alb 의 IsPresent**(= [10] SwitchDNS 통과 여부의
+    #     지상 진실)로 판정해 이 불리언을 넣어준다. 이름이 아니라 실물이라 상태가 끼어들어도 안 틀린다.
+    #   없으면 보수적으로 False("온프렘") — 안전한 쪽이다.
+    dns_switched = bool(event.get("dnsSwitched"))
+    dns_line = (
+        "⚠️ **DNS 는 이미 EKS 로 전환됐습니다**(SwitchDNS 통과 후 실패) — 사용자는 EKS ALB 로 향합니다.\n"
+        "롤백하려면 Route53 을 온프렘으로 되돌리는 것부터(런북 §복귀)."
+        if dns_switched
+        else "DNS 는 아직 온프렘을 가리킵니다 — 트래픽은 안전합니다."
+    )
+    return (
+        "❌ **DR 페일오버 실패**\n"
+        f"실패 단계: `{failed}`\n"
+        f"실행: {event.get('executionArn', '?')}\n\n"
+        f"```\n{_diagnosis(event.get('stdoutTail'))[-1200:]}\n```\n"
+        "**롤백하지 않았습니다** — 여기까지 뜬 것은 그대로 있으니 런북으로 이어받으세요.\n"
+        f"{dns_line}"
+    )
+
+
+def handler(event, context):
+    text = _render(event)
     req = urllib.request.Request(  # noqa: S310
         _webhook_url(),
         data=json.dumps({"content": text[:1900]}).encode("utf-8"),
