@@ -100,6 +100,14 @@ def _render(event):
             f"소요: {_mins(event.get('approvedAt'), now)}" + (f"\n{orphan}" if orphan else "")
         )
 
+    if outcome == "failback-skipped":
+        # 승인 시점의 active 세대가 현재와 달라 teardown 을 건너뛴 정상 no-op(최신 세대의 failback 이 소유).
+        return (
+            "⏭️ **DR failback 스킵 — 세대 불일치**\n"
+            "승인 대기 중 active(failover 세대)가 바뀌어 이 실행은 teardown 을 건너뛰었습니다.\n"
+            "(옛 승인으로 최신 hot 레이어를 회수하지 않도록 한 정상 동작 — 최신 세대의 failback 이 처리)"
+        )
+
     if outcome == "failback-failed":
         failed = event.get("failedState", "?")
         reverted = bool(event.get("dnsReverted"))

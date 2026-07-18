@@ -78,6 +78,11 @@ def handler(event, context):
             input=json.dumps(
                 {
                     "mode": "failback",
+                    # 트리거 시점의 active(=failover 세대)를 실행에 고정한다. 승인이 24h 대기하는 동안
+                    # 수동 failback 이 active 를 지우고 새 failover 가 다른 세대를 세팅할 수 있는데, SFN 이
+                    # 승인 직후 이 값과 현재 SSM active 를 대조해 세대가 바뀌었으면 teardown 을 건너뛴다
+                    # (옛 승인으로 최신 hot 레이어를 회수하는 것 방지, 2026-07-18 리뷰 P2).
+                    "active": active,
                     "alarmName": detail.get("alarmName"),
                     "recoveredAt": (detail.get("state") or {}).get("timestamp"),
                 }

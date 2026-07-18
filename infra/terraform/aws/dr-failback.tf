@@ -238,6 +238,16 @@ data "aws_iam_policy_document" "dr_failback_sfn" {
     actions   = ["ssm:DeleteParameter", "ssm:DeleteParameters"]
     resources = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/cledyu-dr/failover/*"]
   }
+  statement {
+    sid       = "ReadGeneration" # CheckGeneration — 승인 후 현재 active 세대 대조
+    actions   = ["ssm:GetParameter"]
+    resources = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/cledyu-dr/failover/active"]
+  }
+  statement {
+    sid       = "DnsChangeStatus" # PollDnsChange — Route53 변경 INSYNC 폴링(GetChange 는 리소스 한정 미지원)
+    actions   = ["route53:GetChange"]
+    resources = ["*"]
+  }
   # .sync(codebuild) 통합용 EventBridge 관리형 규칙
   statement {
     sid       = "SyncRules"
