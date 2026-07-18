@@ -203,4 +203,46 @@ if kubectl get ns kafka > /dev/null 2>&1; then
   echo "P1f: Kafka PVC 정리 완료 — 브로커가 fresh EBS 를 프로비저닝한다"
 fi
 
+# ── [P1g] stale TargetGroupBinding CR (2026-07-18 드릴 실측) ─────────────────
+# P1e·P1f 와 **같은 계열의 warm-etcd 잔존물**이다. failback teardown(approach B)은 ALB·타겟그룹을
+# AWS 레벨로 지우지만(CleanupOrphans), 그 타겟그룹을 참조하던 **TargetGroupBinding CR 은 warm etcd 에
+# 남는다** — Kafka 가 EBS 만 지우고 PVC 를 남기는 것과 정확히 같은 구조(deleteClaim:false 격).
+#
+# TGB 이름(k8s-<ns>-<svc>-<hash>)은 ns/service/port 로부터 **결정적**이라, 다음 failover 에 LB 컨트롤러가
+# 만들려는 이름과 그대로 충돌한다: `targetgroupbindings "k8s-api-api-*" already exists` → **Ingress
+# deploy model 이 실패** → 컨트롤러가 그 사이클의 fresh 타겟그룹 생성·**WAF 연결·Ingress status 갱신을
+# 전부 완료하지 못한다.** 그 최종 증상이 [10] SwitchDNS 의 `WAF 미연결`(2026-07-18 exec b2f12033 실측).
+# 게다가 stale TGB 는 이미 삭제된 TG(TargetGroupNotFound)를 계속 물어 reconcile 에러를 무한 반복한다.
+#
+# ⚠️ **왜 07-16 최초 failover 는 통과했나:** 그땐 이 CR 이 애초에 없었다(첫 사이클). teardown 이 이 CR 을
+#    남긴 것이 회귀의 근원 — 즉 이 정리 블록의 부재가 곧 버그다.
+# [3] 시점엔 앱이 아직 sync 전([9] 이 나중)이라 **여기 존재하는 TGB 는 전부 이전 사이클 stale** 이다.
+# 지우면 컨트롤러가 앱 sync 때 fresh TG ARN 으로 재생성한다.
+# ⚠️ stale TGB 는 이미 없는 TG 를 물어 finalizer(elbv2.k8s.aws/resources)의 cleanup(DeregisterTargets)이
+#    할 일이 없다 → 그냥 두면 finalizer 가 Terminating 에 고착할 수 있다. cleanup 이 무의미하므로
+#    **finalizer 를 떼고** 지운다. 남은 Terminating(같은 이름)도 fresh 생성엔 "already exists" 라 똑같이 막는다.
+kubectl get targetgroupbinding -A \
+  -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2> /dev/null |
+  while read -r ns name; do
+    [ -z "$ns" ] && continue
+    kubectl -n "$ns" patch targetgroupbinding "$name" --type merge \
+      -p '{"metadata":{"finalizers":[]}}' 2> /dev/null || true
+    kubectl -n "$ns" delete targetgroupbinding "$name" --ignore-not-found --wait=false
+    echo "P1g: stale TGB 제거 ${ns}/${name}"
+  done
+
+# 게이트: 실제로 다 사라졌나. 하나라도 남으면 fresh 생성이 "already exists" 로 막혀 WAF 가 안 붙는다.
+for i in $(seq 1 24); do
+  REMAIN=$(kubectl get targetgroupbinding -A -o name 2> /dev/null | grep -c . || true)
+  [ "${REMAIN:-0}" -eq 0 ] && break
+  echo "TGB 삭제 대기 ${REMAIN}개 ($i/24)"
+  sleep 5
+done
+[ "${REMAIN:-0}" -eq 0 ] || {
+  echo "❌ TargetGroupBinding 이 2분째 ${REMAIN}개 남음 — finalizer 고착 의심."
+  echo "   kubectl get targetgroupbinding -A 로 확인 후 finalizer 를 수동으로 떼라."
+  exit 1
+}
+echo "P1g: stale TargetGroupBinding 정리 완료 — 컨트롤러가 fresh TG 로 재생성 → WAF 자동 연결"
+
 echo "✅ warm etcd 정리 완료"
