@@ -108,6 +108,15 @@ def _render(event):
             "(옛 승인으로 최신 hot 레이어를 회수하지 않도록 한 정상 동작 — 최신 세대의 페일백 이 처리)"
         )
 
+    if outcome == "failback-orphans":
+        # DNS 는 원복됐지만 teardown 미완(TG/EBS 잔존) → active 보존한 채 Fail. 수동 정리 후 재-failback.
+        return (
+            "⚠️ **DR 페일백 미완 — 고아 잔존**\n"
+            "DNS 는 온프렘으로 원복돼 서빙됩니다. 다만 DR VPC 에 TargetGroup/EBS 가 남아 teardown 이 미완이라\n"
+            "**active 플래그를 보존**했습니다 — 수동 정리 후 재-failback 하세요.\n"
+            f"{event.get('orphanWarning', '')}"
+        )
+
     if outcome == "failback-failed":
         failed = event.get("failedState", "?")
         reverted = bool(event.get("dnsReverted"))

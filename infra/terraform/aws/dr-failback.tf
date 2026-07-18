@@ -512,13 +512,36 @@ resource "aws_sfn_state_machine" "dr_failback" {
         }]
         Default = "MarkClean"
       }
-      # 두 분기 모두 $.warn.orphanWarning 을 세팅(notify payload JSONPath 가 항상 존재하도록 — 없으면 States.Runtime).
+      # 고아 잔존 = teardown 미완 → **active 를 지우지 않고 Fail 로 끝낸다**(수동 정리·재-failback 가능하게).
+      # 경고만 세팅 후 ClearFlags 로 가면 잔존 TG/EBS 가 있어도 성공+active삭제라 재시도가 막힌다(리뷰 P2).
       MarkOrphanWarning = {
         Type       = "Pass"
-        Result     = { orphanWarning = "⚠️ 고아 잔존 — DR VPC 에 TargetGroup 또는 cluster태그 EBS 남음. 실행이력 $.verify 확인 후 수동 정리(잔존 TG 는 다음 failover LB reconcile 방해 가능)." }
+        Result     = { orphanWarning = "⚠️ 고아 잔존 — DR VPC 에 TargetGroup 또는 cluster태그 EBS 남음. 수동 정리 후 재-failback 필요(active 보존됨)." }
         ResultPath = "$.warn"
-        Next       = "ClearFlags"
+        Next       = "NotifyOrphansRemain"
       }
+      # active 를 보존한 채 알림 후 Fail — ClearFlags 를 건너뛰어 /cledyu-dr/failover/active 가 남는다.
+      NotifyOrphansRemain = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::lambda:invoke"
+        Parameters = {
+          FunctionName = aws_lambda_function.dr_notify.arn
+          Payload = {
+            outcome           = "failback-orphans"
+            "orphanWarning.$" = "$.warn.orphanWarning"
+            "executionArn.$"  = "$$.Execution.Id"
+          }
+        }
+        Retry = [{ ErrorEquals = ["States.ALL"], IntervalSeconds = 5, MaxAttempts = 3, BackoffRate = 2.0 }]
+        Catch = [{ ErrorEquals = ["States.ALL"], ResultPath = null, Next = "OrphansRemain" }]
+        Next  = "OrphansRemain"
+      }
+      OrphansRemain = {
+        Type  = "Fail"
+        Error = "DrFailbackOrphansRemain"
+        Cause = "failback 후 DR VPC 에 TargetGroup/EBS 잔존 — active 보존(수동 정리·재-failback 위해). Discord 알림·실행이력 $.verify 참조."
+      }
+      # 클린일 때만 $.warn.orphanWarning="" 세팅(NotifyFailbackComplete 의 JSONPath 가 항상 존재하도록).
       MarkClean = {
         Type       = "Pass"
         Result     = { orphanWarning = "" }
