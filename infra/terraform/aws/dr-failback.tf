@@ -228,11 +228,8 @@ data "aws_iam_policy_document" "dr_failback_sfn" {
     actions   = ["eks:ListNodegroups", "eks:UpdateNodegroupConfig", "eks:DescribeNodegroup", "eks:DescribeUpdate"]
     resources = ["*"]
   }
-  statement {
-    sid       = "VerifyOrphans" # [R8] 잔존 ALB/EBS 확인
-    actions   = ["elasticloadbalancing:DescribeLoadBalancers", "ec2:DescribeVolumes"]
-    resources = ["*"]
-  }
+  # (VerifyNoOrphans 를 teardown-cleanup Lambda verify_only 로 바꿔 SFN 직접 describe 는 없어졌다 →
+  #  elasticloadbalancing:DescribeLoadBalancers·ec2:DescribeVolumes statement 제거. 스캔은 Lambda IAM 이 함.)
   statement {
     sid       = "ClearFlags"
     actions   = ["ssm:DeleteParameter", "ssm:DeleteParameters"]
@@ -372,12 +369,19 @@ resource "aws_sfn_state_machine" "dr_failback" {
         ResultSelector = { "alb.$" = "$.Payload.alb", "changeId.$" = "$.Payload.changeId" }
         ResultPath     = "$.dns"
         Catch          = local.fb_catch["RevertDNS"]
-        Next           = "WaitDnsInsync"
+        Next           = "InitDnsPoll"
       }
 
       # [2.5] DNS drain — Route53 변경이 INSYNC 되고 옛 EKS ALB 캐시(alias TTL ~60s)가 만료된 뒤 teardown
       # 하도록 대기한다(2026-07-18 리뷰 P2). 안 그러면 resolver 가 아직 EKS 를 가리키는 창에 파드·ALB 를
-      # 회수해 그 사용자들이 단절된다. INSYNC 폴링 후 고정 drain.
+      # 회수해 그 사용자들이 단절된다. INSYNC 폴링 후 고정 drain. 폴 카운터로 상한(~3분)을 둬 무한루프를
+      # 막는다 — INSYNC 는 보장(≤60s)돼 상한 초과는 사실상 없지만, 도달하면 그냥 DrainTtl 로 진행한다.
+      InitDnsPoll = {
+        Type       = "Pass"
+        Result     = { count = 0 }
+        ResultPath = "$.dnsPoll"
+        Next       = "WaitDnsInsync"
+      }
       WaitDnsInsync = {
         Type    = "Wait"
         Seconds = 10
@@ -393,9 +397,18 @@ resource "aws_sfn_state_machine" "dr_failback" {
         Next           = "DnsInsync"
       }
       DnsInsync = {
-        Type    = "Choice"
-        Choices = [{ Variable = "$.dnsChange.status", StringEquals = "INSYNC", Next = "DrainTtl" }]
-        Default = "WaitDnsInsync"
+        Type = "Choice"
+        Choices = [
+          { Variable = "$.dnsChange.status", StringEquals = "INSYNC", Next = "DrainTtl" },
+          { Variable = "$.dnsPoll.count", NumericGreaterThanEquals = 18, Next = "DrainTtl" }, # ~3분 상한(무한루프 방지)
+        ]
+        Default = "IncrDnsPoll"
+      }
+      IncrDnsPoll = {
+        Type       = "Pass"
+        Parameters = { "count.$" = "States.MathAdd($.dnsPoll.count, 1)" }
+        ResultPath = "$.dnsPoll"
+        Next       = "WaitDnsInsync"
       }
       DrainTtl = {
         Type    = "Wait"
@@ -411,7 +424,25 @@ resource "aws_sfn_state_machine" "dr_failback" {
         ResultSelector = { "name.$" = "$.Nodegroups[0]" }
         ResultPath     = "$.ng"
         Catch          = local.fb_catch["ListNodegroup"]
-        Next           = "ScaleToZero"
+        Next           = "DescribeNg"
+      }
+
+      # [3.5] 멱등성(리뷰 P2) — 재시도(고아잔존 Fail 후 등)로 노드가 이미 desired=0 이면 updateNodegroupConfig
+      # 가 "No changes needed" 로 에러 날 수 있다 → desired 를 먼저 조회해 0 이면 ScaleToZero 를 건너뛰고
+      # CleanupOrphans 로 간다(강제종료 backstop 은 CleanupOrphans 가 함).
+      DescribeNg = {
+        Type           = "Task"
+        Resource       = "arn:aws:states:::aws-sdk:eks:describeNodegroup"
+        Parameters     = { Name = local.eks_dr_name, "NodegroupName.$" = "$.ng.name" }
+        ResultSelector = { "desired.$" = "$.Nodegroup.ScalingConfig.DesiredSize" }
+        ResultPath     = "$.ngInfo"
+        Catch          = local.fb_catch["ListNodegroup"]
+        Next           = "ScaledDownAlready"
+      }
+      ScaledDownAlready = {
+        Type    = "Choice"
+        Choices = [{ Variable = "$.ngInfo.desired", NumericEquals = 0, Next = "CleanupOrphans" }]
+        Default = "ScaleToZero"
       }
 
       # [4] 노드그룹 desired 0 (강제종료는 CleanupOrphans Lambda 가 함 → ASG 재생성 방지 위해 먼저)
@@ -426,12 +457,19 @@ resource "aws_sfn_state_machine" "dr_failback" {
         ResultSelector = { "updateId.$" = "$.Update.Id" }
         ResultPath     = "$.scaleUpdate"
         Catch          = local.fb_catch["ScaleToZero"]
-        Next           = "WaitScaleApplied"
+        Next           = "InitScalePoll"
       }
 
       # [4.5] [NEW-2 개정 2026-07-18] updateNodegroupConfig 는 비동기 → 고정 대기가 아니라 describeUpdate 로
       # Successful 을 폴링한 뒤 cleanup 한다. 고정 30s 로는 ASG desired=0 반영을 보장 못 해, 진행 중에
       # CleanupOrphans 가 강제종료하면 관리형 노드그룹이 대체 노드를 재생성한다(EC2/EBS 누수, 리뷰 P2).
+      # 폴 카운터로 상한(~5분)을 둬 무한루프를 막는다 — 초과 시 Fail(멈춘 update = 실제 문제).
+      InitScalePoll = {
+        Type       = "Pass"
+        Result     = { count = 0 }
+        ResultPath = "$.scalePoll"
+        Next       = "WaitScaleApplied"
+      }
       WaitScaleApplied = {
         Type    = "Wait"
         Seconds = 15
@@ -456,8 +494,15 @@ resource "aws_sfn_state_machine" "dr_failback" {
           { Variable = "$.scaleStatus.status", StringEquals = "Successful", Next = "CleanupOrphans" },
           { Variable = "$.scaleStatus.status", StringEquals = "Failed", Next = "Mark_ScaleToZero_Failed" },
           { Variable = "$.scaleStatus.status", StringEquals = "Cancelled", Next = "Mark_ScaleToZero_Failed" },
+          { Variable = "$.scalePoll.count", NumericGreaterThanEquals = 20, Next = "Mark_ScaleToZero_Failed" }, # ~5분 상한
         ]
-        Default = "WaitScaleApplied" # InProgress → 계속 폴링
+        Default = "IncrScalePoll" # InProgress → 카운트 올리고 계속 폴링
+      }
+      IncrScalePoll = {
+        Type       = "Pass"
+        Parameters = { "count.$" = "States.MathAdd($.scalePoll.count, 1)" }
+        ResultPath = "$.scalePoll"
+        Next       = "WaitScaleApplied"
       }
 
       # [5] AWS 레벨 고아 정리(approach B): 노드 강제종료 + 볼륨 available 대기 + ALB·EBS·ENI·SG·GuardDuty 삭제
