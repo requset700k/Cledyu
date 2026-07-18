@@ -236,21 +236,21 @@ function LabDetail() {
                 <h2 className="font-chakra text-2xl font-semibold tracking-[-0.025em] text-white">
                   실습 환경
                 </h2>
-                <p className="mt-3 break-keep text-sm leading-[1.7] text-white/55">
+                <p className="mt-3 break-keep text-sm leading-[1.7] text-white/65">
                   준비된 전용 VM에서 명령을 실행하고 단계마다 결과를 확인합니다.
                 </p>
-                <dl className="mt-6 border-y border-white/15 font-jbmono text-[11px]">
+                <dl className="mt-6 border-y border-white/15 font-jbmono text-xs">
                   <div className="flex items-center justify-between border-b border-white/10 py-3">
-                    <dt className="text-white/35">환경</dt>
-                    <dd className="text-white/75">전용 VM</dd>
+                    <dt className="text-white/45">환경</dt>
+                    <dd className="text-white/80">전용 VM</dd>
                   </div>
                   <div className="flex items-center justify-between border-b border-white/10 py-3">
-                    <dt className="text-white/35">검증</dt>
-                    <dd className="text-white/75">단계별 자동</dd>
+                    <dt className="text-white/45">검증</dt>
+                    <dd className="text-white/80">자동 채점</dd>
                   </div>
                   <div className="flex items-center justify-between py-3">
-                    <dt className="text-white/35">도움</dt>
-                    <dd className="text-white/75">AI 힌트</dd>
+                    <dt className="text-white/45">도움</dt>
+                    <dd className="text-white/80">AI 힌트</dd>
                   </div>
                 </dl>
                 <button
@@ -325,11 +325,8 @@ function LabDetail() {
                     <p className="mb-6 text-xs text-red-400">세션을 시작하지 못했습니다.</p>
                   )}
 
-                <div className="flex items-end justify-between border-b border-white/20 pb-4">
+                <div className="border-b border-white/20 pb-4">
                   <h3 className="font-chakra text-2xl font-semibold text-white">진행 순서</h3>
-                  <span className="font-jbmono text-[10px] tracking-[0.12em] text-white/35">
-                    {String(steps.length).padStart(2, '0')} TASKS
-                  </span>
                 </div>
                 <ol>
                   {steps.map((s, index) => (
@@ -339,18 +336,14 @@ function LabDetail() {
                     >
                       <div className="grid grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-3">
                         <span
-                          className={`font-michroma text-[11px] ${index === 0 ? 'text-white/70' : 'text-white/30'}`}
+                          className={`font-michroma text-[11px] ${index === 0 ? 'text-white/75' : 'text-white/40'}`}
                         >
                           {String(s.id).padStart(2, '0')}
                         </span>
                         <h4 className="font-chakra text-xl font-semibold tracking-[-0.02em] text-white">
                           {s.title}
                         </h4>
-                        {index === 0 && (
-                          <span className="font-jbmono text-[9px] tracking-[0.12em] text-white/45">
-                            START
-                          </span>
-                        )}
+                        {index === 0 && <span className="text-xs text-white/50">첫 단계</span>}
                       </div>
                     </li>
                   ))}
