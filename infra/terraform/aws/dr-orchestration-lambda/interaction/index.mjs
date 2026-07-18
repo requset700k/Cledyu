@@ -129,8 +129,9 @@ export const handler = async (event) => {
     });
   }
 
-  // 드롭다운을 건드리지 않고 바로 승인했으면 최신 스냅샷으로 폴백.
-  const snapshot = got.Item.snapshot?.S ?? got.Item.latestSnapshot.S;
+  // failover 는 latestSnapshot(또는 드롭다운 snapshot)을 담지만, failback 항목엔 스냅샷이 없다.
+  // 없으면 null — failback SFN 은 output.snapshot 을 쓰지 않는다.
+  const snapshot = got.Item.snapshot?.S ?? got.Item.latestSnapshot?.S ?? null;
 
   await sfn.send(
     new SendTaskSuccessCommand({
