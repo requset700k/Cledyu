@@ -433,7 +433,7 @@ resource "aws_sfn_state_machine" "dr_failback" {
       DescribeNg = {
         Type           = "Task"
         Resource       = "arn:aws:states:::aws-sdk:eks:describeNodegroup"
-        Parameters     = { Name = local.eks_dr_name, "NodegroupName.$" = "$.ng.name" }
+        Parameters     = { ClusterName = local.eks_dr_name, "NodegroupName.$" = "$.ng.name" } # describeNodegroup 은 ClusterName(≠describeUpdate 의 Name)
         ResultSelector = { "desired.$" = "$.Nodegroup.ScalingConfig.DesiredSize" }
         ResultPath     = "$.ngInfo"
         Catch          = local.fb_catch["ListNodegroup"]
