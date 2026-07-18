@@ -28,7 +28,7 @@ data "aws_iam_policy_document" "dr_failback_trigger" {
     resources = [aws_sfn_state_machine.dr_failback.arn]
   }
   statement {
-    sid       = "ReadPushAlarm" # post_failover 재확인 — push 알람 OK 여부(DescribeAlarms 는 리소스 한정 미지원)
+    sid       = "ReadPushAlarm" # verify_alarm 재확인 — push 알람 OK 여부(DescribeAlarms 는 리소스 한정 미지원)
     actions   = ["cloudwatch:DescribeAlarms"]
     resources = ["*"]
   }
@@ -69,7 +69,7 @@ resource "aws_lambda_function" "dr_failback_trigger" {
       SFN_REGION        = var.region
       STATE_MACHINE_ARN = aws_sfn_state_machine.dr_failback.arn
       ACTIVE_PARAM      = "/cledyu-dr/failover/active"
-      PUSH_ALARM_NAME   = aws_cloudwatch_metric_alarm.push.alarm_name # post_failover 재확인용
+      PUSH_ALARM_NAME   = aws_cloudwatch_metric_alarm.push.alarm_name # verify_alarm 재확인용
     }
   }
 }
@@ -708,4 +708,36 @@ resource "aws_lambda_permission" "dr_recovery" {
   function_name = aws_lambda_function.dr_failback_trigger.function_name
   principal     = "events.amazonaws.com"
   source_arn    = aws_cloudwatch_event_rule.dr_recovery[0].arn
+}
+
+# ── 주기 reconcile — 실패/타임아웃한 failback 재개 + 놓친 회복 보정 (2026-07-18 리뷰 P2) ──
+# dr_recovery 는 push→OK **전이**에만 울린다. 승인 24h 타임아웃·TeardownHot/SSM 오류로 failback 이 실패한 뒤
+# push 가 steady OK 면 새 전이가 없어(실패 경로가 active 를 보존해도) 자동 재시도가 안 걸린다. 주기적으로
+# failback-trigger 를 verify_alarm 로 호출 — active+push OK+RUNNING 없음이면 재개(각 조건은 trigger 가 판정,
+# active 없으면 no-op 이라 평상시 무해). 지속 실패면 30분마다 실패 알림이 와 운영자에게 계속 신호를 준다.
+resource "aws_cloudwatch_event_rule" "dr_failback_reconcile" {
+  count               = (local.pub == 1 && var.dr_detection_armed && var.dr_orchestration_armed) ? 1 : 0
+  provider            = aws.use1
+  name                = "${var.name_prefix}-dr-failback-reconcile"
+  description         = "주기 reconcile — active+push OK+RUNNING 없음이면 failback 재개(실패/놓침 self-heal)"
+  schedule_expression = "rate(30 minutes)"
+}
+
+resource "aws_cloudwatch_event_target" "dr_failback_reconcile" {
+  count     = (local.pub == 1 && var.dr_detection_armed && var.dr_orchestration_armed) ? 1 : 0
+  provider  = aws.use1
+  rule      = aws_cloudwatch_event_rule.dr_failback_reconcile[0].name
+  target_id = "failback-trigger"
+  arn       = aws_lambda_function.dr_failback_trigger.arn
+  input     = jsonencode({ verify_alarm = true }) # 스케줄 호출은 이벤트가 아니므로 trigger 가 push 알람을 재확인
+}
+
+resource "aws_lambda_permission" "dr_failback_reconcile" {
+  count         = (local.pub == 1 && var.dr_detection_armed && var.dr_orchestration_armed) ? 1 : 0
+  provider      = aws.use1
+  statement_id  = "AllowReconcileInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.dr_failback_trigger.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.dr_failback_reconcile[0].arn
 }

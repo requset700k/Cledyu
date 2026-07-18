@@ -62,7 +62,7 @@ def _active_value():
 
 
 def _push_ok():
-    """push 하트비트 알람이 현재 OK(온프렘 회복)인가 — post_failover 재확인용."""
+    """push 하트비트 알람이 현재 OK(온프렘 회복)인가 — verify_alarm 재확인용."""
     alarms = _cw.describe_alarms(AlarmNames=[PUSH_ALARM])["MetricAlarms"]
     return bool(alarms) and alarms[0]["StateValue"] == "OK"
 
@@ -72,12 +72,13 @@ def handler(event, context):
     if not should_trigger(active):
         return {"started": False, "reason": "not-failed-over"}
 
-    # post_failover(=failover SFN 이 MarkFailoverActive 직후 호출): 온프렘이 failover 진행 중 이미 회복하면
-    # dr_recovery 의 push→OK 이벤트는 active 설정 전에 한 번 왔다 사라져(steady OK 엔 새 이벤트 없음) 자동
-    # failback 이 영영 안 시작된다. 그래서 여기서 push 알람을 다시 보고 **OK 일 때만** 시작한다. 아직 다운이면
-    # no-op(정상 — 실제 회복 시 EventBridge 가 건다). EventBridge 정규 경로는 이 플래그가 없어 이 검사를 건너뛴다
-    # (이벤트 자체가 이미 OK 전이라). (2026-07-18 리뷰 P2)
-    if event.get("post_failover") and not _push_ok():
+    # verify_alarm(=EventBridge OK 이벤트가 아니라 **직접 호출**: ①failover SFN 의 회복 재확인 ②주기 reconcile):
+    # push 알람을 다시 보고 **OK 일 때만** 시작한다. 정규 EventBridge 경로는 이 플래그가 없어 건너뛴다(이벤트
+    # 자체가 이미 OK 전이라). 두 직접호출이 필요한 이유 — dr_recovery 는 push→OK **전이**에만 울리므로:
+    #  ① failover 중 온프렘이 이미 회복하면 OK 이벤트가 active 설정 전에 지나가 자동 failback 을 놓친다.
+    #  ② failback 이 실패/타임아웃한 뒤 push 가 steady OK 면 새 전이가 없어 재시도가 안 걸린다(실패 경로가
+    #     active 를 보존해도). 주기 reconcile 이 active+OK+RUNNING없음을 보고 재개한다. (2026-07-18 리뷰 P2)
+    if event.get("verify_alarm") and not _push_ok():
         return {"started": False, "reason": "onprem-still-down"}
 
     prefix = name_prefix(active)

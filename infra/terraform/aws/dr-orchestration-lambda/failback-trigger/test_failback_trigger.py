@@ -61,27 +61,27 @@ def test_not_failed_over_is_noop(monkeypatch):
     assert out["started"] is False and out["reason"] == "not-failed-over"
 
 
-def test_post_failover_skips_when_onprem_still_down(monkeypatch):
-    # failover SFN 이 MarkFailoverActive 직후 호출했는데 push 아직 ALARM → 시작 안 함(정상 회복은 EventBridge).
+def test_verify_alarm_skips_when_onprem_still_down(monkeypatch):
+    # 직접 호출(failover 재확인/주기 reconcile)인데 push 아직 ALARM → 시작 안 함(정상 회복은 EventBridge).
     monkeypatch.setattr(t, "_active_value", lambda: _E1)
     monkeypatch.setattr(t, "_push_ok", lambda: False)
-    out = t.handler({"post_failover": True}, None)
+    out = t.handler({"verify_alarm": True}, None)
     assert out["started"] is False and out["reason"] == "onprem-still-down"
 
 
-def test_post_failover_starts_when_onprem_recovered(monkeypatch):
-    # failover 중 온프렘이 이미 회복(push OK) → 놓친 자동 failback 을 여기서 시작(레이스 보정).
+def test_verify_alarm_starts_when_onprem_recovered(monkeypatch):
+    # active+push OK+RUNNING없음 → 놓친/실패한 자동 failback 을 여기서 재개(레이스·재시도 보정).
     captured = {}
     monkeypatch.setattr(t, "_active_value", lambda: _E1)
     monkeypatch.setattr(t, "_push_ok", lambda: True)
     monkeypatch.setattr(t, "_running_exists", lambda prefix: False)
     monkeypatch.setattr(t._sfn, "start_execution", lambda **kw: captured.update(kw))
-    out = t.handler({"post_failover": True}, None)
+    out = t.handler({"verify_alarm": True}, None)
     assert out["started"] is True and captured["name"].startswith(t.name_prefix(_E1))
 
 
 def test_normal_eventbridge_path_skips_push_recheck(monkeypatch):
-    # post_failover 아니면(정규 EventBridge OK 이벤트) _push_ok 를 부르지 않는다(이벤트가 이미 OK 전이).
+    # verify_alarm 아니면(정규 EventBridge OK 이벤트) _push_ok 를 부르지 않는다(이벤트가 이미 OK 전이).
     monkeypatch.setattr(t, "_active_value", lambda: _E1)
     monkeypatch.setattr(t, "_running_exists", lambda prefix: False)
     monkeypatch.setattr(t._sfn, "start_execution", lambda **kw: None)
