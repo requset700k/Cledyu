@@ -369,7 +369,11 @@ resource "aws_sfn_state_machine" "dr_failback" {
         Type     = "Task"
         Resource = "arn:aws:states:::codebuild:startBuild.sync"
         Parameters = {
-          ProjectName       = aws_codebuild_project.dr_failover_tf.name
+          ProjectName = aws_codebuild_project.dr_failover_tf.name
+          # ⚠️ 드릴 임시 — 머지 전 revert. CodeBuild 는 SourceVersion(기본 main)을 clone 해 buildspec 을
+          # 찾는데, 이 teardown buildspec 은 아직 브랜치에만 있어 main clone 시 not-found 다. 머지되면
+          # 이 줄 삭제(기본 main 이 buildspec 을 가짐).
+          SourceVersion     = "feat/dr-failback-orchestration"
           BuildspecOverride = "infra/terraform/aws/dr-failback-teardown-buildspec.yml"
         }
         ResultPath = null
