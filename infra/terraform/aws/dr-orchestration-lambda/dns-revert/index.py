@@ -74,16 +74,21 @@ def _onprem_serving(alb_dns):
 
     ALB listener 는 host 무조건 default forward → Caddy 가 Host 로 @public 라우팅(keycloak-proxy.yaml.tftpl).
     그래서 Host 헤더를 실어 보내면 프록시 너머 Traefik/Keycloak/API 까지 실제로 태운다. 백엔드가 죽어
-    있으면 Caddy reverse_proxy 가 5xx(502/503/504)를 뱉거나 연결이 끊긴다 → **미준비**로 판정(fail-closed).
-    Lambda 는 non-VPC(공개망)라 공개 ALB 에 직접 도달한다.
+    있으면 Caddy reverse_proxy 가 5xx(502/503/504)를 뱉는다 → **미서빙**으로 판정(차단).
+
+    ⚠️ 도달 가능성과 서빙을 구분한다(리뷰 P2). public_ingress_allowed_cidrs 를 사무실 IP 등으로 좁히면
+    public ALB SG 가 non-VPC Lambda 의 **비고정 egress** 를 막아, 온프렘이 정상이어도 연결이 timeout 난다.
+    그때 하드블록하면 승인된 failback 이 RevertDNS 에서 영영 멈춘다 → **도달 불가(연결 실패)는 '미서빙'과
+    구분해 판정 보류(통과)** 하고, 게이트는 1차 _proxy_healthy(ELB API, SG 무관)+사람 승인에 맡긴다.
+    막는 건 **도달했는데 5xx** 인 경우뿐(프록시만 살고 백엔드 죽음).
     """
     for sub, path in DEEP_CHECKS:
         host = f"{sub}.{DOMAIN}"
         try:
             status = _probe_status(alb_dns, host, path)
         except (OSError, http.client.HTTPException) as e:
-            return False, f"{host}{path}: {type(e).__name__}"
-        # 5xx = 프록시가 upstream 에 못 닿음(프록시만 살고 백엔드 죽음). <500 = 앱이 실제 응답(라우팅 성립).
+            # 연결 자체 실패 = 도달 불가(SG 제한/네트워크) → inconclusive. 막지 않고 통과(다른 게이트 의존).
+            return True, f"unreachable({host}{path}:{type(e).__name__}) — 딥체크 보류"
         if status >= 500:
             return False, f"{host}{path}: {status}"
     return True, "ok"
