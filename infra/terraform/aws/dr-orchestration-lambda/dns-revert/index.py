@@ -33,6 +33,10 @@ DEEP_CHECKS = [
     ("api", "/ready", None),  # labs 로드=ready(200)
     ("app", "/", None),  # web 서빙(2xx/3xx)
 ]
+# ⚠️ User-Agent 필수 — 온프렘 public ALB 의 WAF(cledyu-lab-public)에 AWSManagedRulesCommonRuleSet 이 있어
+# **UA 없는 요청을 NoUserAgent 규칙으로 403 차단**한다(2026-07-18 E2E 드릴 실측). http.client 는 기본 UA 가
+# 없어 딥체크가 403→fail-closed 로 잘못 막혔다. failover 게이트(12-verify)의 curl 은 UA 를 보내 200 이었다.
+UA = "cledyu-dr-failback-healthcheck/1.0"
 # 온프렘 공개 ALB 의 **정확한** 이름(TF 가 "${name_prefix}-public" 를 주입). ALB 이름은 리전 내 유일하므로
 # 접미(-public) 매칭 대신 정확 일치로 오-선택을 원천 차단한다(다른 *-public ALB 가 생겨도 안전).
 PUBLIC_ALB_NAME = os.environ["PUBLIC_ALB_NAME"]
@@ -76,7 +80,7 @@ def _probe(alb_dns, host, path):
     ):
         conn = http.client.HTTPConnection(host, timeout=5)
         conn.sock = tls  # 이미 TLS 로 감싼 소켓 주입 → conn 은 재접속 없이 HTTP 만 태운다
-        conn.request("GET", path, headers={"Host": host})
+        conn.request("GET", path, headers={"Host": host, "User-Agent": UA})
         resp = conn.getresponse()
         body = resp.read(4096).decode("utf-8", "replace")
         return resp.status, body
