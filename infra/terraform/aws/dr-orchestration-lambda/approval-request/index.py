@@ -57,57 +57,52 @@ def _list_snapshots():
     return [k for _, k in keys[:MAX_OPTIONS]]
 
 
-def handler(event, context):
-    task_token = event["taskToken"]
-    # SFN 이 실행 입력 전체를 event["input"] 으로 넘긴다("input.$": "$").
-    # ⚠️ ASL 에서 "mode.$": "$.mode" 로 직접 뽑으면 안 된다 — 실재해 경로(failover-trigger)는
-    # 입력에 mode 를 넣지 않으므로 그 JSONPath 가 없어 States.Runtime 으로 즉시 죽는다.
-    # 입력 전체를 받아 여기서 꺼내면 mode 유무와 무관하게 동작한다.
-    payload = event.get("input") or {}
-    # mode 는 메시지의 긴급도를 바꾸는 스위치라 fail-safe 로 판정한다 — 정확히 "test" 일 때만
-    # 테스트 렌더, 그 외(필드 없음·null·오타·타입 불일치)는 전부 실재해다(설계 §7.2 H3).
-    is_test = payload.get("mode") == "test" if isinstance(payload, dict) else False
+def _build_message(approval_id, is_test, mode, snapshots):
+    if mode == "failback":
+        body = (
+            "♻️ **DR failback 승인 요청**\n"
+            "push 하트비트 복귀 — **온프렘 회복 감지**\n\n"
+            "⚠️ **승인 전 직접 확인**: 온프렘 CNPG/Keycloak 이 실제 복원·서빙되는지\n"
+            "승인하면 DNS 가 온프렘으로 원복되고 EKS hot 이 회수되며 **DR 데이터는 폐기**됩니다."
+        )
+        return {
+            "content": body,
+            "components": [
+                {
+                    "type": 1,
+                    "components": [
+                        {
+                            "type": 2,  # Button
+                            "style": 1,  # Primary(파랑) — failover 의 Danger 와 구분
+                            "label": "♻️ DR failback 승인",
+                            "custom_id": f"dr-approve:{approval_id}",
+                        }
+                    ],
+                }
+            ],
+        }
 
-    snapshots = _list_snapshots()
+    # ── failover(실재해/테스트) — 기존 로직 보존 ──
     latest = snapshots[0]
-    approval_id = uuid.uuid4().hex[:16]  # custom_id 100자 상한 여유
-
-    _ddb.put_item(
-        TableName=os.environ["APPROVALS_TABLE"],
-        Item={
-            "approvalId": {"S": approval_id},
-            "taskToken": {"S": task_token},
-            "latestSnapshot": {"S": latest},
-            "ttl": {"N": str(int(time.time()) + TTL_SECONDS)},
-        },
-    )
-
     prefix = "🧪 [테스트] " if is_test else "🚨 "
-    title = f"{prefix}**DR 페일오버 승인 요청**"
     body = (
-        f"{title}\n"
+        f"{prefix}**DR 페일오버 승인 요청**\n"
         "pull(Route53) + push(하트비트) 복합알람 ALARM — 온프렘 상실 감지\n\n"
         "⚠️ **승인 전 직접 확인**: 사이트 접속 · 온프렘 콘솔 · 일시적 네트워크 장애 여부\n"
         "승인하면 EKS 기동 → 복원 → **공개 DNS 전환**까지 자동 진행됩니다."
     )
-
     options = [
-        {
-            "label": s.split("/")[-1][:100],
-            "value": s[:100],
-            "default": s == latest,
-        }
+        {"label": s.split("/")[-1][:100], "value": s[:100], "default": s == latest}
         for s in snapshots
     ]
-
-    message = {
+    return {
         "content": body,
         "components": [
             {
-                "type": 1,  # ActionRow
+                "type": 1,
                 "components": [
                     {
-                        "type": 3,  # String Select
+                        "type": 3,
                         "custom_id": f"dr-snap:{approval_id}",
                         "placeholder": "Vault 스냅샷 시점",
                         "options": options,
@@ -118,8 +113,8 @@ def handler(event, context):
                 "type": 1,
                 "components": [
                     {
-                        "type": 2,  # Button
-                        "style": 4 if not is_test else 2,  # Danger / Secondary
+                        "type": 2,
+                        "style": 4 if not is_test else 2,
                         "label": "🧪 테스트 승인" if is_test else "🔴 DR 페일오버 승인",
                         "custom_id": f"dr-approve:{approval_id}",
                     }
@@ -127,6 +122,36 @@ def handler(event, context):
             },
         ],
     }
+
+
+def handler(event, context):
+    task_token = event["taskToken"]
+    # SFN 이 실행 입력 전체를 event["input"] 으로 넘긴다("input.$": "$").
+    # ⚠️ ASL 에서 "mode.$": "$.mode" 로 직접 뽑으면 안 된다 — 실재해 경로(failover-trigger)는
+    # 입력에 mode 를 넣지 않으므로 그 JSONPath 가 없어 States.Runtime 으로 즉시 죽는다.
+    # 입력 전체를 받아 여기서 꺼내면 mode 유무와 무관하게 동작한다.
+    payload = event.get("input") or {}
+    mode = payload.get("mode") if isinstance(payload, dict) else None
+    # mode 는 메시지의 긴급도를 바꾸는 스위치라 fail-safe 로 판정한다 — 정확히 "test" 일 때만
+    # 테스트 렌더, 그 외(필드 없음·null·오타·타입 불일치)는 전부 실재해다(설계 §7.2 H3).
+    is_test = mode == "test"
+    is_failback = mode == "failback"
+
+    approval_id = uuid.uuid4().hex[:16]  # custom_id 100자 상한 여유
+
+    item = {
+        "approvalId": {"S": approval_id},
+        "taskToken": {"S": task_token},
+        "ttl": {"N": str(int(time.time()) + TTL_SECONDS)},
+    }
+    snapshots = None
+    if not is_failback:
+        snapshots = _list_snapshots()
+        item["latestSnapshot"] = {"S": snapshots[0]}  # failback 은 스냅샷 개념 없음
+
+    _ddb.put_item(TableName=os.environ["APPROVALS_TABLE"], Item=item)
+
+    message = _build_message(approval_id, is_test, mode, snapshots)
 
     # Bot API 로 게시 — 웹훅은 components 를 조용히 버린다(모듈 docstring 참조).
     # 봇은 이 채널에 Send Messages 권한이 있어야 한다(없으면 403 Missing Permissions).
