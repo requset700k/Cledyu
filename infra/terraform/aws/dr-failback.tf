@@ -242,8 +242,8 @@ data "aws_iam_policy_document" "dr_failback_sfn" {
     resources = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/cledyu-dr/failover/*"]
   }
   statement {
-    sid       = "ReadGeneration" # CheckGeneration — 승인 후 현재 active 세대 대조
-    actions   = ["ssm:GetParameter"]
+    sid       = "ReadGeneration" # CheckGeneration — 승인 후 현재 active 세대 대조(getParameters 복수 API)
+    actions   = ["ssm:GetParameters"]
     resources = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/cledyu-dr/failover/active"]
   }
   statement {
@@ -332,29 +332,29 @@ resource "aws_sfn_state_machine" "dr_failback" {
       # 최신 hot 레이어를 회수하게 된다 → 트리거가 입력에 고정한 $.active 와 현재 SSM active 를 대조한다.
       CheckGeneration = {
         Type           = "Task"
-        Resource       = "arn:aws:states:::aws-sdk:ssm:getParameter"
-        Parameters     = { Name = "/cledyu-dr/failover/active" }
-        ResultSelector = { "current.$" = "$.Parameter.Value" }
+        Resource       = "arn:aws:states:::aws-sdk:ssm:getParameters"
+        Parameters     = { Names = ["/cledyu-dr/failover/active"] }
+        ResultSelector = { "params.$" = "$.Parameters", "invalid.$" = "$.InvalidParameters" }
         ResultPath     = "$.gen"
-        # ParameterNotFound(수동 failback 이 클리어=세대 없음)만 stale 로 스킵. AccessDenied·SSM throttling 등
-        # **실제** 조회 실패는 실패 경로로 — 안 그러면 원복·teardown 안 하고 "스킵" 성공 종료되고, push 는 이미
-        # OK 라 새 자동 트리거도 안 온다(리뷰 P2). (aws-sdk 에러명 스펠링 불확실성 대비 두 형태 모두 매칭.)
-        Catch = [
-          { ErrorEquals = ["Ssm.ParameterNotFound", "Ssm.ParameterNotFoundException"], ResultPath = "$.genError", Next = "StaleSkipped" },
-          { ErrorEquals = ["States.ALL"], ResultPath = "$.error", Next = "Mark_CheckGeneration_Failed" },
-        ]
-        Next = "GenerationPresent"
+        # getParameters(복수)는 파라미터 **부재를 예외 대신 InvalidParameters** 로 돌려준다 → aws-sdk 에러명
+        # 스펠링에 의존하지 않고, 부재(수동 failback 이 클리어=stale)와 실제 오류(AccessDenied/throttling)를
+        # 확실히 구분한다. Catch(States.ALL)엔 **실제 조회 오류만** 온다 → 실패 경로로(스킵 오판 방지, 리뷰 P2).
+        Catch = [{ ErrorEquals = ["States.ALL"], ResultPath = "$.error", Next = "Mark_CheckGeneration_Failed" }]
+        Next  = "GenerationResolve"
       }
-      # 입력에 $.active 가 없는(이 수정 전 트리거된) 옛 실행 방어 — StringEqualsPath 는 비교경로 부재 시
-      # States.Runtime 을 낼 수 있어, 값 비교 전에 IsPresent 로 먼저 거른다. ($.gen.current 는 위에서 항상 채워짐.)
-      GenerationPresent = {
-        Type    = "Choice"
-        Choices = [{ Variable = "$.active", IsPresent = true, Next = "GenerationMatch" }]
-        Default = "StaleSkipped"
+      # 부재(InvalidParameters 존재) 또는 입력에 $.active 없음(수정 전 옛 실행 방어) = stale 스킵.
+      # 둘 다 아니면 파라미터 존재($.gen.params[0])+$.active 존재가 보장돼 아래 GenerationMatch 가 안전히 값 비교.
+      GenerationResolve = {
+        Type = "Choice"
+        Choices = [
+          { Variable = "$.gen.invalid[0]", IsPresent = true, Next = "StaleSkipped" },
+          { Not = { Variable = "$.active", IsPresent = true }, Next = "StaleSkipped" },
+        ]
+        Default = "GenerationMatch"
       }
       GenerationMatch = {
         Type    = "Choice"
-        Choices = [{ Variable = "$.gen.current", StringEqualsPath = "$.active", Next = "RevertDNS" }]
+        Choices = [{ Variable = "$.gen.params[0].Value", StringEqualsPath = "$.active", Next = "RevertDNS" }]
         Default = "StaleSkipped"
       }
       # 세대 불일치 = 정상 no-op(최신 세대의 failback 이 소유). 실패 아님 → 알림 후 Succeed 로 종료.
