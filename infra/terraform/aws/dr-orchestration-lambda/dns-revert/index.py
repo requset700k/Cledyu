@@ -89,8 +89,13 @@ def _onprem_serving(alb_dns):
         host = f"{sub}.{DOMAIN}"
         try:
             status = _probe_status(alb_dns, host, path)
+        except ssl.SSLError as e:
+            # ⚠️ ssl.SSLError 도 OSError 하위지만 **먼저** 잡는다 — ALB 엔 도달했으나 TLS 실패
+            # (cert 만료/호스트 불일치)는 사용자가 실제로 보는 오류다 → 보류 아니라 **fail-closed(차단)**.
+            # 이걸 안 나누면 깨진 공개 TLS 엔드포인트로 api/app/auth 를 돌리게 된다(리뷰 P2).
+            return False, f"{host}{path}: TLS {type(e).__name__}"
         except (OSError, http.client.HTTPException) as e:
-            # 연결 자체 실패 = 도달 불가(SG 제한/네트워크) → inconclusive. 막지 않고 통과(다른 게이트 의존).
+            # 연결 자체 실패(timeout/refused = SG 제한/네트워크) = 도달 불가 → inconclusive(통과, 다른 게이트 의존).
             return True, f"unreachable({host}{path}:{type(e).__name__}) — 딥체크 보류"
         if status >= 500:
             return False, f"{host}{path}: {status}"
