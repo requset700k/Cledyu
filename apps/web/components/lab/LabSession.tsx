@@ -158,6 +158,7 @@ export function LabSession({
 
   const allPassed = steps.length > 0 && steps.every((s) => statusOf(s.id) === 'passed');
   const currentStatus = statusOf(currentStep.id);
+  const [taskDescription, completionCriteria] = currentStep.description.split('\n\n완료 조건\n', 2);
   // 검증 진행 중: 요청이 날아가는 중이거나(isPending) 결과 대기 중(validating).
   const validating = currentStatus === 'validating' || validate.isPending;
   // 실패한 체크의 상세(사유)는 결과 수신 시 진행 상태에 함께 담겨 온다.
@@ -187,9 +188,7 @@ export function LabSession({
           <section aria-labelledby="lab-progress-title">
             <div className="mb-3 flex items-end justify-between gap-3 px-1">
               <div>
-                <p className="font-jbmono text-[10px] tracking-[0.14em] text-white/50">
-                  LAB PROGRESS
-                </p>
+                <p className="font-jbmono text-[10px] tracking-[0.14em] text-white/50">진행 단계</p>
                 <h2
                   id="lab-progress-title"
                   className="mt-1 font-chakra text-lg font-semibold text-white"
@@ -216,7 +215,7 @@ export function LabSession({
           >
             <header className="border-b border-white/15 px-6 py-5">
               <div className="flex items-center justify-between gap-3 font-jbmono text-[10px] tracking-[0.12em] text-white/50">
-                <span>CURRENT TASK</span>
+                <span>현재 작업</span>
                 <span>
                   {String(currentStep.id).padStart(2, '0')} /{' '}
                   {String(steps.length).padStart(2, '0')}
@@ -231,8 +230,19 @@ export function LabSession({
             </header>
             <div className="p-6">
               <p className="whitespace-pre-line text-[15px] leading-[1.75] text-white/75">
-                {currentStep.description}
+                {taskDescription}
               </p>
+
+              {completionCriteria && (
+                <div className="mt-5 border-t border-white/15 pt-5">
+                  <p className="font-jbmono text-[10px] tracking-[0.12em] text-white/45">
+                    완료 조건
+                  </p>
+                  <p className="mt-3 whitespace-pre-line text-sm leading-[1.75] text-white/65">
+                    {completionCriteria.trim()}
+                  </p>
+                </div>
+              )}
 
               {currentStatus === 'failed' && failedChecks.length > 0 && (
                 <div className="mt-5 border border-red-500/30 bg-red-500/10 px-4 py-3">

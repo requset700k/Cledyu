@@ -45,7 +45,7 @@ export function AiTutorPanel({
     <aside className="border border-white/15 bg-white/[0.015] p-5" aria-labelledby="ai-tutor-title">
       <div className="mb-1 flex items-center justify-between gap-3">
         <p id="ai-tutor-title" className="font-jbmono text-xs tracking-[0.1em] text-white/70">
-          AI COACH
+          AI 힌트
         </p>
         {hints.length > 0 && (
           <span className="font-jbmono text-[11px] text-white/60">
