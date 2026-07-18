@@ -423,11 +423,14 @@ resource "aws_sfn_state_machine" "dr_failback" {
         End   = true
       }
       },
-      # 각 단계 실패 마커 상태(dnsReverted 지상진실 = $.dns.alb 존재) → NotifyFailbackFailed
+      # 각 단계 실패 마커 상태 → NotifyFailbackFailed.
+      # dnsReverted 는 상태 이름으로 **정적** 판정한다 — RevertDNS 이후 단계가 실패했으면 DNS 는 이미
+      # 온프렘(true), RequestApproval/RevertDNS 자체 실패면 아직 EKS(false). (States.IsPresent 는
+      # intrinsic 이 아니라 Choice 연산자라 Parameters 에서 쓰면 AWS 가 SCHEMA_VALIDATION_FAILED 로 거부한다.)
       { for s in ["RequestApproval", "RevertDNS", "ListNodegroup", "ScaleToZero", "CleanupOrphans", "TeardownHot", "VerifyNoOrphans", "ClearFlags"] :
         "Mark_${s}_Failed" => {
           Type       = "Pass"
-          Result     = { failedState = s }
+          Result     = { failedState = s, dnsReverted = !contains(["RequestApproval", "RevertDNS"], s) }
           ResultPath = "$.failed"
           Next       = "NotifyFailbackFailed"
         }
@@ -441,7 +444,7 @@ resource "aws_sfn_state_machine" "dr_failback" {
             Payload = {
               outcome          = "failback-failed"
               "failedState.$"  = "$.failed.failedState"
-              "dnsReverted.$"  = "States.IsPresent($.dns.alb)" # RevertDNS 통과 여부 지상진실
+              "dnsReverted.$"  = "$.failed.dnsReverted" # 정적 판정(위 Mark_ 생성) — intrinsic 아님
               "executionArn.$" = "$$.Execution.Id"
             }
           }
