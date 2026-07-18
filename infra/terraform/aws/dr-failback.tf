@@ -24,7 +24,7 @@ data "aws_iam_policy_document" "dr_failback_trigger" {
   }
   statement {
     sid       = "StartFailback"
-    actions   = ["states:StartExecution"]
+    actions   = ["states:StartExecution", "states:ListExecutions"] # ListExecutions=RUNNING 중복 판정
     resources = [aws_sfn_state_machine.dr_failback.arn]
   }
   statement {
