@@ -305,9 +305,13 @@ resource "aws_sfn_state_machine" "dr_failback" {
             "input.$"     = "$"
           }
         }
-        ResultPath = "$.approval"
-        Catch      = [{ ErrorEquals = ["States.ALL"], ResultPath = "$.error", Next = "Mark_RequestApproval_Failed" }]
-        Next       = "RevertDNS"
+        # 승인 대기 24h(= approval-request/DynamoDB TTL 과 일치). 없으면 waitForTaskToken 이 최대 1년
+        # callback 을 기다려 active 플래그가 영구 점유되고 자동복귀가 멈춘다(failover RequestApproval 대칭).
+        # States.Timeout 은 아래 States.ALL Catch 가 잡아 Mark_RequestApproval_Failed → 실패 알림으로 간다.
+        TimeoutSeconds = 86400
+        ResultPath     = "$.approval"
+        Catch          = [{ ErrorEquals = ["States.ALL"], ResultPath = "$.error", Next = "Mark_RequestApproval_Failed" }]
+        Next           = "RevertDNS"
       }
 
       # [2] DNS 원복(→온프렘 *-public ALB) — 맨 앞. 트래픽부터 온프렘으로.
