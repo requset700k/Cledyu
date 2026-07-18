@@ -33,15 +33,15 @@ export function StepList({
   isSelectable?: (id: number) => boolean;
 }) {
   return (
-    <ol className="grid grid-flow-col auto-cols-fr border-y border-white/15" aria-label="실습 단계">
-      {steps.map((s) => {
+    <ol className="grid grid-cols-2 border-l border-t border-white/15" aria-label="실습 단계">
+      {steps.map((s, index) => {
         const status = statusOf(s.id);
         const active = s.id === currentId;
         const selectable = isSelectable(s.id);
-        const stepNumber = String(s.id).padStart(2, '0');
+        const stepNumber = String(index + 1).padStart(2, '0');
         const accessibleLabel = `${stepNumber}. ${s.title}, ${STATUS_LABEL[status]}`;
         return (
-          <li key={s.id} className="border-r border-white/10 last:border-r-0">
+          <li key={s.id} className="min-w-0 border-b border-r border-white/10">
             <button
               type="button"
               onClick={() => {
@@ -56,7 +56,7 @@ export function StepList({
               }
               aria-label={accessibleLabel}
               aria-current={active ? 'step' : undefined}
-              className={`flex min-h-14 w-full flex-col items-center justify-center gap-1.5 px-1 py-2 transition-colors ${
+              className={`flex min-h-14 w-full items-center gap-2.5 px-3 py-2 text-left transition-colors ${
                 active
                   ? 'bg-white text-black'
                   : selectable
@@ -66,7 +66,7 @@ export function StepList({
             >
               <span
                 aria-hidden="true"
-                className={`font-jbmono text-[11px] tracking-[0.08em] ${
+                className={`shrink-0 font-jbmono text-[10px] tracking-[0.08em] ${
                   active
                     ? 'font-semibold text-black'
                     : status === 'passed'
@@ -79,8 +79,21 @@ export function StepList({
                 {stepNumber}
               </span>
               <span
+                className={`min-w-0 flex-1 truncate font-chakra text-xs font-semibold ${
+                  active
+                    ? 'text-black'
+                    : selectable
+                      ? status === 'passed'
+                        ? 'text-white/75'
+                        : 'text-white/90'
+                      : 'text-white/35'
+                }`}
+              >
+                {s.title}
+              </span>
+              <span
                 aria-hidden="true"
-                className={`h-1.5 w-1.5 rounded-full ${active ? 'bg-black' : STATUS_DOT[status]}`}
+                className={`h-1.5 w-1.5 shrink-0 rounded-full ${active ? 'bg-black' : STATUS_DOT[status]}`}
               />
             </button>
           </li>

@@ -15,7 +15,7 @@ import {
   bootStageViewStates,
   shouldShowSessionBoot,
 } from '@/lib/lab-session-boot.mjs';
-import { isStepSelectable } from '@/lib/lab-step-access.mjs';
+import { isStepSelectable, stepPosition } from '@/lib/lab-step-access.mjs';
 import { appendTerminalTail } from '@/lib/terminal-tail.mjs';
 
 // VM이 Running으로 보고된 이후에도 cloud-init final stage(랩 init + getty 재시작 + autologin 활성)
@@ -158,6 +158,7 @@ export function LabSession({
 
   const allPassed = steps.length > 0 && steps.every((s) => statusOf(s.id) === 'passed');
   const currentStatus = statusOf(currentStep.id);
+  const currentStepPosition = stepPosition(steps, currentStep.id) ?? 1;
   const [taskDescription, completionCriteria] = currentStep.description.split('\n\n완료 조건\n', 2);
   // 검증 진행 중: 요청이 날아가는 중이거나(isPending) 결과 대기 중(validating).
   const validating = currentStatus === 'validating' || validate.isPending;
@@ -217,7 +218,7 @@ export function LabSession({
               <div className="flex items-center justify-between gap-3 font-jbmono text-[10px] tracking-[0.12em] text-white/50">
                 <span>현재 작업</span>
                 <span>
-                  {String(currentStep.id).padStart(2, '0')} /{' '}
+                  {String(currentStepPosition).padStart(2, '0')} /{' '}
                   {String(steps.length).padStart(2, '0')}
                 </span>
               </div>

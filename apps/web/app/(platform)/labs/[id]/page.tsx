@@ -338,7 +338,7 @@ function LabDetail() {
                         <span
                           className={`font-michroma text-[11px] ${index === 0 ? 'text-white/75' : 'text-white/40'}`}
                         >
-                          {String(s.id).padStart(2, '0')}
+                          {String(index + 1).padStart(2, '0')}
                         </span>
                         <h4 className="font-chakra text-xl font-semibold tracking-[-0.02em] text-white">
                           {s.title}

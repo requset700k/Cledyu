@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { firstSelectableFutureIndex, isStepSelectable } from './lab-step-access.mjs';
+import { firstSelectableFutureIndex, isStepSelectable, stepPosition } from './lab-step-access.mjs';
 
 // Lab DSL의 실제 step id는 1부터 시작하지만, 접근 제어는 화면 표시 순서 기준으로 판단한다.
 // 테스트에서는 id와 index가 헷갈리지 않도록 4단계 고정 fixture를 사용한다.
@@ -60,5 +60,14 @@ describe('isStepSelectable', () => {
   it('does not allow unknown step ids', () => {
     // URL/state 오염으로 존재하지 않는 step id가 들어와도 선택 가능 처리하지 않는다.
     assert.equal(isStepSelectable(steps, 99, statusOf({})), false);
+  });
+});
+
+describe('stepPosition', () => {
+  it('uses display order when Lab step ids are not contiguous', () => {
+    const nonContiguousSteps = [{ id: 1 }, { id: 2 }, { id: 4 }];
+
+    assert.equal(stepPosition(nonContiguousSteps, 4), 3);
+    assert.equal(stepPosition(nonContiguousSteps, 99), null);
   });
 });
