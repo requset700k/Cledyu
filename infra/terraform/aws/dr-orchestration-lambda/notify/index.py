@@ -94,7 +94,7 @@ def _render(event):
         # [R7] failback 은 재해가 아니라 계획된 복귀 → RTO/RPO 라벨 안 붙인다(재해복구 지표 아님).
         orphan = event.get("orphanWarning")  # VerifyNoOrphans 가 채우면 경고 첨부
         return (
-            "✅ **DR failback 완료**\n"
+            "✅ **DR 페일백 완료**\n"
             "DNS: 온프렘(`*-public` ALB)\n"
             "EKS: pilot-light warm 으로 회수 · DR 데이터 폐기\n"
             f"소요: {_mins(event.get('approvedAt'), now)}" + (f"\n{orphan}" if orphan else "")
@@ -103,9 +103,9 @@ def _render(event):
     if outcome == "failback-skipped":
         # 승인 시점의 active 세대가 현재와 달라 teardown 을 건너뛴 정상 no-op(최신 세대의 failback 이 소유).
         return (
-            "⏭️ **DR failback 스킵 — 세대 불일치**\n"
-            "승인 대기 중 active(failover 세대)가 바뀌어 이 실행은 teardown 을 건너뛰었습니다.\n"
-            "(옛 승인으로 최신 hot 레이어를 회수하지 않도록 한 정상 동작 — 최신 세대의 failback 이 처리)"
+            "⏭️ **DR 페일백 스킵 — 세대 불일치**\n"
+            "승인 대기 중 active(페일오버 세대)가 바뀌어 이 실행은 teardown 을 건너뛰었습니다.\n"
+            "(옛 승인으로 최신 hot 레이어를 회수하지 않도록 한 정상 동작 — 최신 세대의 페일백 이 처리)"
         )
 
     if outcome == "failback-failed":
@@ -117,7 +117,7 @@ def _render(event):
             else "⚠️ **DNS 가 아직 EKS 를 가리킵니다**(RevertDNS 실패) — 온프렘 서빙 안 됨. 런북 §원복 먼저."
         )
         return (
-            "❌ **DR failback 실패**\n"
+            "❌ **DR 페일백 실패**\n"
             f"실패 단계: `{failed}`\n"
             f"실행: {event.get('executionArn', '?')}\n\n"
             # failback SFN 은 stdoutTail 을 안 채운다(CodeBuild/bastion 로그 tail 이 없음) → 빈 진단 블록 생략.

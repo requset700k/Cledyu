@@ -60,7 +60,7 @@ def _list_snapshots():
 def _build_message(approval_id, is_test, mode, snapshots):
     if mode == "failback":
         body = (
-            "♻️ **DR failback 승인 요청**\n"
+            "♻️ **DR 페일백 승인 요청**\n"
             "push 하트비트 복귀 — **온프렘 회복 감지**\n\n"
             "⚠️ **승인 전 직접 확인**: 온프렘 CNPG/Keycloak 이 실제 복원·서빙되는지\n"
             "승인하면 DNS 가 온프렘으로 원복되고 EKS hot 이 회수되며 **DR 데이터는 폐기**됩니다."
@@ -74,7 +74,7 @@ def _build_message(approval_id, is_test, mode, snapshots):
                         {
                             "type": 2,  # Button
                             "style": 1,  # Primary(파랑) — failover 의 Danger 와 구분
-                            "label": "♻️ DR failback 승인",
+                            "label": "♻️ DR 페일백 승인",
                             "custom_id": f"dr-approve:{approval_id}",
                         }
                     ],

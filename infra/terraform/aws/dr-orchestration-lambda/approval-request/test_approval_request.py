@@ -27,4 +27,4 @@ def test_failback_message_single_button_no_select():
     assert _button_types(msg) == [2]
     btn = msg["components"][0]["components"][0]
     assert btn["custom_id"] == "dr-approve:fb01"
-    assert "failback" in msg["content"].lower() or "온프렘" in msg["content"]
+    assert "페일백" in msg["content"] or "온프렘" in msg["content"]

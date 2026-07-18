@@ -19,7 +19,7 @@ def test_failover_success_has_no_failback_prep_tail():
         }
     )
     assert "✅" in text and "페일오버 완료" in text
-    assert "failback 준비" not in text
+    assert "페일백" not in text
     assert "backupEnabled" not in text
 
 
@@ -31,7 +31,7 @@ def test_failback_success_message():
             "detectedAt": "2026-07-17T00:00:00Z",
         }
     )
-    assert "failback 완료" in text
+    assert "페일백 완료" in text
     assert "온프렘" in text
 
 
