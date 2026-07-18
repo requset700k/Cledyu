@@ -172,4 +172,35 @@ done
 }
 echo "P1e: Vault raft PVC 정리 완료 — [7] 의 init 이 fresh Vault 를 만난다"
 
+# [P1f] stale Kafka PVC — Vault(P1e)와 같은 warm-etcd 잔존물(2026-07-18 드릴 실측).
+# Kafka 는 deleteClaim:false 라 teardown 이 EBS 만 지우고(우리 failback CleanupOrphans 는 AWS 레벨로
+# EBS 만 삭제) PVC/PV 객체는 warm etcd 에 남는다 → 다음 failover 에 stale PVC 가 이미 삭제된 EBS(vol-...)
+# 를 물어 FailedAttachVolume → 브로커가 영영 ContainerCreating → [9] WaitAppsReady 가
+# kafka/cledyu-kafka Ready 를 못 봐 타임아웃(실측: 브로커 3개 전부 vol-... NotFound).
+# DR Kafka 는 매 failover 새로 뜨는 일회성이라 PVC 를 지워 ebs-csi 가 fresh EBS 를 프로비저닝하게 한다.
+# ⚠️ kafka ns 엔 이 PVC(data-cledyu-kafka-*) 말고 PVC 를 만드는 게 없다 → --all 이 셀렉터 오타 불가.
+# ⚠️ 브로커가 PVC 를 붙들면(재실행·노드 살아있음) pvc-protection 으로 Terminating 고착 → 브로커도 지운다.
+#    실재해(노드 0)엔 파드가 없어 pod delete 는 no-op 이다.
+if kubectl get ns kafka > /dev/null 2>&1; then
+  kubectl -n kafka delete pvc --all --wait=false
+  kubectl -n kafka delete pod -l strimzi.io/name=cledyu-kafka-kafka --ignore-not-found
+
+  # 게이트: 실제로 사라졌나. Terminating 고착이면 Kafka 가 그 PVC 를 재사용 → 위 FailedAttachVolume 재현.
+  # 새 PVC 는 deletionTimestamp 가 없으므로 "timestamp 있는 게 하나라도 있으면 아직"으로 판정(P1e 와 동일).
+  for i in $(seq 1 24); do
+    STUCK=$(kubectl -n kafka get pvc \
+      -o jsonpath='{range .items[*]}{.metadata.deletionTimestamp}{"\n"}{end}' 2> /dev/null |
+      grep -c . || true)
+    [ "${STUCK:-0}" -eq 0 ] && break
+    echo "Kafka PVC Terminating 대기 ${STUCK}개 ($i/24)"
+    sleep 5
+  done
+  [ "${STUCK:-0}" -eq 0 ] || {
+    echo "❌ Kafka PVC 가 2분째 Terminating — 브로커가 아직 붙들고 있다(노드 살아있는 채 [3] 실행?)."
+    echo "   kubectl -n kafka get pod -o wide 확인 후 노드 0 으로 내리고 재실행하라."
+    exit 1
+  }
+  echo "P1f: Kafka PVC 정리 완료 — 브로커가 fresh EBS 를 프로비저닝한다"
+fi
+
 echo "✅ warm etcd 정리 완료"
