@@ -96,7 +96,7 @@ def _render(event):
         return (
             "✅ **DR 페일백 완료**\n"
             "DNS: 온프렘(`*-public` ALB)\n"
-            "EKS: pilot-light warm 으로 회수 · DR 데이터 폐기\n"
+            "EKS: pilot-light warm 으로 회수\n"
             f"소요: {_mins(event.get('approvedAt'), now)}" + (f"\n{orphan}" if orphan else "")
         )
 
