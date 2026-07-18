@@ -221,28 +221,36 @@ fi
 # ⚠️ stale TGB 는 이미 없는 TG 를 물어 finalizer(elbv2.k8s.aws/resources)의 cleanup(DeregisterTargets)이
 #    할 일이 없다 → 그냥 두면 finalizer 가 Terminating 에 고착할 수 있다. cleanup 이 무의미하므로
 #    **finalizer 를 떼고** 지운다. 남은 Terminating(같은 이름)도 fresh 생성엔 "already exists" 라 똑같이 막는다.
-kubectl get targetgroupbinding -A \
-  -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2> /dev/null |
-  while read -r ns name; do
-    [ -z "$ns" ] && continue
-    kubectl -n "$ns" patch targetgroupbinding "$name" --type merge \
-      -p '{"metadata":{"finalizers":[]}}' 2> /dev/null || true
-    kubectl -n "$ns" delete targetgroupbinding "$name" --ignore-not-found --wait=false
-    echo "P1g: stale TGB 제거 ${ns}/${name}"
-  done
+# ⚠️ CRD 게이트(P1f 의 ns 게이트와 같은 취지) — 첫 failover/fresh 클러스터엔 AWS LB Controller 가 아직
+#    없어([6] GitOps 이후 설치) TargetGroupBinding CRD 가 없다. 그 상태에서 `kubectl get targetgroupbinding`
+#    은 exit 1 이고 set -euo pipefail 이 이를 전파해 [3] 을 죽인다(2>/dev/null 은 stderr 만 가림, exit code 는
+#    그대로). CRD 존재를 먼저 확인해 **CRD 없음(=정상 no-op)** 과 실제 삭제 실패를 구분한다.
+if kubectl get crd targetgroupbindings.elbv2.k8s.aws > /dev/null 2>&1; then
+  kubectl get targetgroupbinding -A \
+    -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2> /dev/null |
+    while read -r ns name; do
+      [ -z "$ns" ] && continue
+      kubectl -n "$ns" patch targetgroupbinding "$name" --type merge \
+        -p '{"metadata":{"finalizers":[]}}' 2> /dev/null || true
+      kubectl -n "$ns" delete targetgroupbinding "$name" --ignore-not-found --wait=false
+      echo "P1g: stale TGB 제거 ${ns}/${name}"
+    done
 
-# 게이트: 실제로 다 사라졌나. 하나라도 남으면 fresh 생성이 "already exists" 로 막혀 WAF 가 안 붙는다.
-for i in $(seq 1 24); do
-  REMAIN=$(kubectl get targetgroupbinding -A -o name 2> /dev/null | grep -c . || true)
-  [ "${REMAIN:-0}" -eq 0 ] && break
-  echo "TGB 삭제 대기 ${REMAIN}개 ($i/24)"
-  sleep 5
-done
-[ "${REMAIN:-0}" -eq 0 ] || {
-  echo "❌ TargetGroupBinding 이 2분째 ${REMAIN}개 남음 — finalizer 고착 의심."
-  echo "   kubectl get targetgroupbinding -A 로 확인 후 finalizer 를 수동으로 떼라."
-  exit 1
-}
-echo "P1g: stale TargetGroupBinding 정리 완료 — 컨트롤러가 fresh TG 로 재생성 → WAF 자동 연결"
+  # 게이트: 실제로 다 사라졌나. 하나라도 남으면 fresh 생성이 "already exists" 로 막혀 WAF 가 안 붙는다.
+  for i in $(seq 1 24); do
+    REMAIN=$(kubectl get targetgroupbinding -A -o name 2> /dev/null | grep -c . || true)
+    [ "${REMAIN:-0}" -eq 0 ] && break
+    echo "TGB 삭제 대기 ${REMAIN}개 ($i/24)"
+    sleep 5
+  done
+  [ "${REMAIN:-0}" -eq 0 ] || {
+    echo "❌ TargetGroupBinding 이 2분째 ${REMAIN}개 남음 — finalizer 고착 의심."
+    echo "   kubectl get targetgroupbinding -A 로 확인 후 finalizer 를 수동으로 떼라."
+    exit 1
+  }
+  echo "P1g: stale TargetGroupBinding 정리 완료 — 컨트롤러가 fresh TG 로 재생성 → WAF 자동 연결"
+else
+  echo "P1g: TargetGroupBinding CRD 없음 — 첫 failover(LB 컨트롤러 미설치) no-op"
+fi
 
 echo "✅ warm etcd 정리 완료"
