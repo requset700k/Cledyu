@@ -256,6 +256,31 @@ output "dr_interaction_url" {
   value       = aws_lambda_function_url.dr_interaction.function_url
 }
 
+# ── interaction Lambda 웜 유지 ──
+# Discord 는 버튼 인터랙션에 3초 내 응답을 요구한다. 콜드스타트면(init+SecretsManager pubkey+DDB+SFN)
+# 3초를 넘겨 "애플리케이션이 적시에 응답하지 않음"이 뜨고, 승인자가 다시 눌러 두 번째 클릭이
+# TaskTimedOut(토큰 이미 소비)으로 에러난다(2026-07-18 실측). warm 은 ~140ms 라 여유. 5분 핑으로 상시 warm.
+resource "aws_cloudwatch_event_rule" "dr_interaction_warm" {
+  name                = "${var.name_prefix}-dr-interaction-warm"
+  description         = "interaction Lambda 웜 유지(Discord 3s 인터랙션 타임아웃 방지)"
+  schedule_expression = "rate(5 minutes)"
+}
+
+resource "aws_cloudwatch_event_target" "dr_interaction_warm" {
+  rule      = aws_cloudwatch_event_rule.dr_interaction_warm.name
+  target_id = "interaction-warm"
+  arn       = aws_lambda_function.dr_interaction.arn
+  input     = jsonencode({ warmup = true })
+}
+
+resource "aws_lambda_permission" "dr_interaction_warm" {
+  statement_id  = "AllowWarmPing"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.dr_interaction.function_name
+  principal     = "events.amazonaws.com"
+  source_arn    = aws_cloudwatch_event_rule.dr_interaction_warm.arn
+}
+
 # ── Step Functions 실행 롤 (테스트 SM + Plan 2 의 메인 SM 공용) ──
 data "aws_iam_policy_document" "dr_sfn_assume" {
   statement {
@@ -327,7 +352,7 @@ data "aws_iam_policy_document" "dr_sfn" {
   statement {
     # [2.4] ClearAlbParam — stale ALB 파라미터 방어(설계 §5.1.2). [9] 가 쓰기 전에 항상 비운다.
     sid       = "ClearAlbParam"
-    actions   = ["ssm:DeleteParameter"]
+    actions   = ["ssm:DeleteParameter", "ssm:PutParameter"]
     resources = ["arn:aws:ssm:${var.region}:${data.aws_caller_identity.current.account_id}:parameter/cledyu-dr/failover/*"]
   }
 
@@ -1584,7 +1609,53 @@ resource "aws_sfn_state_machine" "dr_failover" {
         }
         ResultPath = null
         Catch      = local.dr_catch["VerifyServing"]
-        Next       = "NotifyComplete"
+        Next       = "MarkFailoverActive"
+      }
+
+      # ── [12.5] failover 활성 플래그 — failback 트리거의 게이트 ──
+      # VerifyServing 통과(= failover 정상 완료) 후에만 세팅. failback-trigger 가 이 파라미터가
+      # 있을 때만 발화 → 부분 실패·평상시 하트비트 깜빡임이 failback 을 유발하지 않는다.
+      # dr_failback SFN 의 ClearFlags 가 failback 완료 시 삭제한다.
+      MarkFailoverActive = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::aws-sdk:ssm:putParameter"
+        Parameters = {
+          Name      = "/cledyu-dr/failover/active"
+          "Value.$" = "$$.Execution.Id"
+          Type      = "String"
+          Overwrite = true
+        }
+        ResultPath = null
+        # active 는 **자동 failback 의 유일한 게이트**다. throttling/일시 장애로 세팅 실패 시 조용히
+        # NotifyComplete 로 넘기면 운영자는 성공으로 보지만 dr_recovery·reconcile 이 모두 not-failed-over 로
+        # no-op → failback 이 영영 안 무장된다(리뷰 P2). → 먼저 재시도하고, 소진 시 실패를 **드러낸다**:
+        # 완료 알림과 별도로 "failback 미무장" 경고를 보내고 실행을 Fail 로 끝내 콘솔에도 남긴다(failover 자체는
+        # 서빙 중이므로 메시지가 그 점을 명시). ⚠️ 회복 레이스(failover 중 온프렘 OK 복귀)는 크로스리전 미지원이라
+        # 여기서 재확인하지 않고 us-east-1 로컬 주기 reconcile(dr_failback_reconcile)이 커버한다.
+        Retry = [{ ErrorEquals = ["States.ALL"], IntervalSeconds = 3, MaxAttempts = 4, BackoffRate = 2.0 }]
+        Catch = [{ ErrorEquals = ["States.ALL"], ResultPath = "$.activeError", Next = "NotifyActiveFailed" }]
+        Next  = "NotifyComplete"
+      }
+
+      # active 세팅 재시도 소진 — failover 는 성공(서빙)했으나 failback 미무장. 별도 알림 후 Fail 로 종료.
+      NotifyActiveFailed = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::lambda:invoke"
+        Parameters = {
+          FunctionName = aws_lambda_function.dr_notify.arn
+          Payload = {
+            outcome          = "failover-unarmed"
+            "executionArn.$" = "$$.Execution.Id"
+          }
+        }
+        Retry = [{ ErrorEquals = ["States.ALL"], IntervalSeconds = 5, MaxAttempts = 3, BackoffRate = 2.0 }]
+        Catch = [{ ErrorEquals = ["States.ALL"], ResultPath = null, Next = "ActiveFailed" }]
+        Next  = "ActiveFailed"
+      }
+      ActiveFailed = {
+        Type  = "Fail"
+        Error = "DrFailoverActiveFlagFailed"
+        Cause = "페일오버는 완료(EKS 서빙)했으나 /cledyu-dr/failover/active 기록 실패 — 자동 failback 미무장. active 를 수동 설정하라(Discord 알림 참조)."
       }
 
       # ── [13] 완료 알림 ──
