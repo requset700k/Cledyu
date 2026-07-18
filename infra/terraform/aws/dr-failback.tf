@@ -244,6 +244,17 @@ data "aws_iam_policy_document" "dr_failback_sfn" {
     actions   = ["events:PutTargets", "events:PutRule", "events:DescribeRule"]
     resources = ["arn:aws:events:${var.region}:${data.aws_caller_identity.current.account_id}:rule/StepFunctions*"]
   }
+  # logging_configuration(vended logs) 필수 — 없으면 CreateStateMachine 이 AccessDenied
+  # "not authorized to access the Log Destination" 로 실패한다(dr_sfn 롤과 동일). 리소스 한정 미지원.
+  statement {
+    sid = "Logs"
+    actions = [
+      "logs:CreateLogDelivery", "logs:GetLogDelivery", "logs:UpdateLogDelivery",
+      "logs:DeleteLogDelivery", "logs:ListLogDeliveries", "logs:PutResourcePolicy",
+      "logs:DescribeResourcePolicies", "logs:DescribeLogGroups",
+    ]
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_role_policy" "dr_failback_sfn" {
