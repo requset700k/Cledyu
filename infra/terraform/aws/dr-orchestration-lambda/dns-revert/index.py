@@ -116,5 +116,9 @@ def handler(event, context):
         }
         for h in HOSTS
     ]
-    _r53.change_resource_record_sets(HostedZoneId=zone, ChangeBatch={"Changes": changes})
-    return {"alb": lb["DNSName"], "records": HOSTS}
+    resp = _r53.change_resource_record_sets(HostedZoneId=zone, ChangeBatch={"Changes": changes})
+    # ChangeId 를 돌려준다 — SFN 이 getChange 로 INSYNC 를 폴링하고 TTL drain 뒤 teardown 하게(resolver 가
+    # 옛 EKS ALB 를 캐시한 창에 EKS 를 회수해 단절되는 것 방지, 2026-07-18 리뷰 P2). Id 는 "/change/C..." 라
+    # 접두를 떼어 getChange 가 바로 쓰게 한다.
+    change_id = resp["ChangeInfo"]["Id"].rsplit("/", 1)[-1]
+    return {"alb": lb["DNSName"], "records": HOSTS, "changeId": change_id}

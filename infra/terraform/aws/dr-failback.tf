@@ -280,7 +280,7 @@ resource "aws_cloudwatch_log_group" "dr_failback_sfn" {
 
 locals {
   # 각 상태 Catch → NotifyFailbackFailed. failedState 를 static 주입(failover dr_catch 패턴).
-  fb_catch = { for s in ["RevertDNS", "ListNodegroup", "ScaleToZero", "CleanupOrphans", "TeardownHot", "VerifyNoOrphans", "ClearFlags"] :
+  fb_catch = { for s in ["RevertDNS", "PollDnsChange", "ListNodegroup", "ScaleToZero", "PollScaleUpdate", "CleanupOrphans", "TeardownHot", "VerifyNoOrphans", "ClearFlags"] :
     s => [{
       ErrorEquals = ["States.ALL"]
       ResultPath  = "$.error"
@@ -321,7 +321,47 @@ resource "aws_sfn_state_machine" "dr_failback" {
         TimeoutSeconds = 86400
         ResultPath     = "$.approval"
         Catch          = [{ ErrorEquals = ["States.ALL"], ResultPath = "$.error", Next = "Mark_RequestApproval_Failed" }]
-        Next           = "RevertDNS"
+        Next           = "CheckGeneration"
+      }
+
+      # [1.5] 세대 검증 — 승인 대기(24h) 중 active(failover 세대)가 바뀌었는지 확인(2026-07-18 리뷰 P2).
+      # 수동 failback 이 active 를 지우고 새 failover 가 다른 세대를 세팅한 뒤 옛 승인을 누르면 그 승인으로
+      # 최신 hot 레이어를 회수하게 된다 → 트리거가 입력에 고정한 $.active 와 현재 SSM active 를 대조한다.
+      CheckGeneration = {
+        Type           = "Task"
+        Resource       = "arn:aws:states:::aws-sdk:ssm:getParameter"
+        Parameters     = { Name = "/cledyu-dr/failover/active" }
+        ResultSelector = { "current.$" = "$.Parameter.Value" }
+        ResultPath     = "$.gen"
+        # ParameterNotFound(수동 failback 이 클리어) = 세대 없음 → 이 승인은 stale → 스킵(무해 종료).
+        Catch = [{ ErrorEquals = ["States.ALL"], ResultPath = "$.genError", Next = "StaleSkipped" }]
+        Next  = "GenerationPresent"
+      }
+      # 입력에 $.active 가 없는(이 수정 전 트리거된) 옛 실행 방어 — StringEqualsPath 는 비교경로 부재 시
+      # States.Runtime 을 낼 수 있어, 값 비교 전에 IsPresent 로 먼저 거른다. ($.gen.current 는 위에서 항상 채워짐.)
+      GenerationPresent = {
+        Type    = "Choice"
+        Choices = [{ Variable = "$.active", IsPresent = true, Next = "GenerationMatch" }]
+        Default = "StaleSkipped"
+      }
+      GenerationMatch = {
+        Type    = "Choice"
+        Choices = [{ Variable = "$.gen.current", StringEqualsPath = "$.active", Next = "RevertDNS" }]
+        Default = "StaleSkipped"
+      }
+      # 세대 불일치 = 정상 no-op(최신 세대의 failback 이 소유). 실패 아님 → 알림 후 Succeed 로 종료.
+      StaleSkipped = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::lambda:invoke"
+        Parameters = {
+          FunctionName = aws_lambda_function.dr_notify.arn
+          Payload = {
+            outcome          = "failback-skipped"
+            "executionArn.$" = "$$.Execution.Id"
+          }
+        }
+        Retry = [{ ErrorEquals = ["States.ALL"], IntervalSeconds = 5, MaxAttempts = 3, BackoffRate = 2.0 }]
+        End   = true
       }
 
       # [2] DNS 원복(→온프렘 *-public ALB) — 맨 앞. 트래픽부터 온프렘으로.
@@ -329,10 +369,38 @@ resource "aws_sfn_state_machine" "dr_failback" {
         Type           = "Task"
         Resource       = "arn:aws:states:::lambda:invoke"
         Parameters     = { FunctionName = aws_lambda_function.dr_dns_revert.arn }
-        ResultSelector = { "alb.$" = "$.Payload.alb" }
+        ResultSelector = { "alb.$" = "$.Payload.alb", "changeId.$" = "$.Payload.changeId" }
         ResultPath     = "$.dns"
         Catch          = local.fb_catch["RevertDNS"]
-        Next           = "ListNodegroup"
+        Next           = "WaitDnsInsync"
+      }
+
+      # [2.5] DNS drain — Route53 변경이 INSYNC 되고 옛 EKS ALB 캐시(alias TTL ~60s)가 만료된 뒤 teardown
+      # 하도록 대기한다(2026-07-18 리뷰 P2). 안 그러면 resolver 가 아직 EKS 를 가리키는 창에 파드·ALB 를
+      # 회수해 그 사용자들이 단절된다. INSYNC 폴링 후 고정 drain.
+      WaitDnsInsync = {
+        Type    = "Wait"
+        Seconds = 10
+        Next    = "PollDnsChange"
+      }
+      PollDnsChange = {
+        Type           = "Task"
+        Resource       = "arn:aws:states:::aws-sdk:route53:getChange"
+        Parameters     = { "Id.$" = "$.dns.changeId" }
+        ResultSelector = { "status.$" = "$.ChangeInfo.Status" }
+        ResultPath     = "$.dnsChange"
+        Catch          = local.fb_catch["PollDnsChange"]
+        Next           = "DnsInsync"
+      }
+      DnsInsync = {
+        Type    = "Choice"
+        Choices = [{ Variable = "$.dnsChange.status", StringEquals = "INSYNC", Next = "DrainTtl" }]
+        Default = "WaitDnsInsync"
+      }
+      DrainTtl = {
+        Type    = "Wait"
+        Seconds = 60 # alias 레코드 TTL(타깃 ALB ~60s) drain — resolver 캐시 만료 대기 후 teardown 진입
+        Next    = "ListNodegroup"
       }
 
       # [3] 노드그룹 이름 발견(모듈이 이름 변형 가능 → 하드코딩 금지, failover ScaleNodes 미러)
@@ -355,17 +423,41 @@ resource "aws_sfn_state_machine" "dr_failback" {
           "NodegroupName.$" = "$.ng.name"
           ScalingConfig     = { MinSize = 0, MaxSize = var.eks_dr_node_max, DesiredSize = 0 }
         }
-        ResultPath = null
-        Catch      = local.fb_catch["ScaleToZero"]
-        Next       = "WaitScaleApplied"
+        ResultSelector = { "updateId.$" = "$.Update.Id" }
+        ResultPath     = "$.scaleUpdate"
+        Catch          = local.fb_catch["ScaleToZero"]
+        Next           = "WaitScaleApplied"
       }
 
-      # [4.5] [NEW-2] ASG desired=0 이 반영될 짧은 대기 — 그 전에 CleanupOrphans 가 강제종료하면
-      # ASG 가 종료한 노드를 재생성할 수 있다(desired 가 아직 N). Wait 는 실패 불가라 Catch 불요.
+      # [4.5] [NEW-2 개정 2026-07-18] updateNodegroupConfig 는 비동기 → 고정 대기가 아니라 describeUpdate 로
+      # Successful 을 폴링한 뒤 cleanup 한다. 고정 30s 로는 ASG desired=0 반영을 보장 못 해, 진행 중에
+      # CleanupOrphans 가 강제종료하면 관리형 노드그룹이 대체 노드를 재생성한다(EC2/EBS 누수, 리뷰 P2).
       WaitScaleApplied = {
         Type    = "Wait"
-        Seconds = 30
-        Next    = "CleanupOrphans"
+        Seconds = 15
+        Next    = "PollScaleUpdate"
+      }
+      PollScaleUpdate = {
+        Type     = "Task"
+        Resource = "arn:aws:states:::aws-sdk:eks:describeUpdate"
+        Parameters = {
+          Name              = local.eks_dr_name
+          "NodegroupName.$" = "$.ng.name"
+          "UpdateId.$"      = "$.scaleUpdate.updateId"
+        }
+        ResultSelector = { "status.$" = "$.Update.Status" }
+        ResultPath     = "$.scaleStatus"
+        Catch          = local.fb_catch["PollScaleUpdate"]
+        Next           = "ScaleUpdateDone"
+      }
+      ScaleUpdateDone = {
+        Type = "Choice"
+        Choices = [
+          { Variable = "$.scaleStatus.status", StringEquals = "Successful", Next = "CleanupOrphans" },
+          { Variable = "$.scaleStatus.status", StringEquals = "Failed", Next = "Mark_ScaleToZero_Failed" },
+          { Variable = "$.scaleStatus.status", StringEquals = "Cancelled", Next = "Mark_ScaleToZero_Failed" },
+        ]
+        Default = "WaitScaleApplied" # InProgress → 계속 폴링
       }
 
       # [5] AWS 레벨 고아 정리(approach B): 노드 강제종료 + 볼륨 available 대기 + ALB·EBS·ENI·SG·GuardDuty 삭제
@@ -464,7 +556,7 @@ resource "aws_sfn_state_machine" "dr_failback" {
       # dnsReverted 는 상태 이름으로 **정적** 판정한다 — RevertDNS 이후 단계가 실패했으면 DNS 는 이미
       # 온프렘(true), RequestApproval/RevertDNS 자체 실패면 아직 EKS(false). (States.IsPresent 는
       # intrinsic 이 아니라 Choice 연산자라 Parameters 에서 쓰면 AWS 가 SCHEMA_VALIDATION_FAILED 로 거부한다.)
-      { for s in ["RequestApproval", "RevertDNS", "ListNodegroup", "ScaleToZero", "CleanupOrphans", "TeardownHot", "VerifyNoOrphans", "ClearFlags"] :
+      { for s in ["RequestApproval", "RevertDNS", "PollDnsChange", "ListNodegroup", "ScaleToZero", "PollScaleUpdate", "CleanupOrphans", "TeardownHot", "VerifyNoOrphans", "ClearFlags"] :
         "Mark_${s}_Failed" => {
           Type       = "Pass"
           Result     = { failedState = s, dnsReverted = !contains(["RequestApproval", "RevertDNS"], s) }
