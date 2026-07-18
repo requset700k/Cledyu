@@ -31,7 +31,7 @@ export function AiTutorPanel({
     onError: (e: Error) => {
       // 429(힌트 한도)는 백엔드가 한국어 메시지를 내려준다. 그 외에는 일반 오류 문구.
       setLimitMsg(
-        e.message === 'SERVER_ERROR' || e.message === 'NETWORK_ERROR'
+        e.message === 'SERVER_ERROR' || e.message === 'NETWORK_ERROR' || e.message === 'NOT_FOUND'
           ? '힌트를 가져오지 못했습니다. 잠시 후 다시 시도하세요.'
           : e.message,
       );
