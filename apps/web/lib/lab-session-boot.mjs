@@ -6,17 +6,30 @@
  * @param {number | null} startedAt
  * @param {number} now
  * @param {number} graceMs
+ * @param {string | undefined} provisioningStage
  * @returns {{ progress: number, complete: boolean }}
  */
-export function bootGraceViewState(status, startedAt, now, graceMs) {
+export function bootGraceViewState(status, startedAt, now, graceMs, provisioningStage) {
   if (startedAt === null) {
-    return { progress: status === 'provisioning' ? 15 : 0, complete: false };
+    if (status === 'ready' || status === 'active') {
+      return { progress: 75, complete: false };
+    }
+
+    const progress =
+      provisioningStage === 'vm_starting'
+        ? 65
+        : provisioningStage === 'disk_cloning'
+          ? 35
+          : status === 'provisioning'
+            ? 15
+            : 0;
+    return { progress, complete: false };
   }
 
   const elapsed = Math.max(0, now - startedAt);
   const complete = graceMs <= 0 || elapsed >= graceMs;
   const ratio = graceMs <= 0 ? 1 : Math.min(1, elapsed / graceMs);
-  return { progress: 30 + ratio * 70, complete };
+  return { progress: 75 + ratio * 25, complete };
 }
 
 /**

@@ -7,6 +7,21 @@ import {
 } from './lab-session-boot.mjs';
 
 describe('bootGraceViewState', () => {
+  it('advances provisioning progress with the backend stage', () => {
+    assert.equal(
+      bootGraceViewState('provisioning', null, 1_000, 120_000, 'disk_cloning').progress,
+      35,
+    );
+    assert.equal(
+      bootGraceViewState('provisioning', null, 1_000, 120_000, 'vm_starting').progress,
+      65,
+    );
+  });
+
+  it('does not move backwards when ready grace begins', () => {
+    assert.equal(bootGraceViewState('ready', 1_000, 1_000, 120_000).progress, 75);
+  });
+
   it('marks grace complete at the same boundary that fills progress to 100 percent', () => {
     const beforeBoundary = bootGraceViewState('ready', 1_000, 120_999, 120_000);
     assert.equal(beforeBoundary.complete, false);
