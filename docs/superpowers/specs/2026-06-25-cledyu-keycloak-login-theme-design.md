@@ -2,23 +2,25 @@
 
 작성일 2026-06-25. 학습자(`cledyu-learn` realm)가 마주치는 Keycloak 호스팅 인증
 페이지를 cledyu 브랜드로 통일하고 더 인터랙티브하게 만든다. PR #175 까지 social 로그인이
-동작하지만 로그인/회원가입 폼이 Keycloak 기본 테마라 밋밋하다는 피드백에서 출발.
+동작하지만 로그인/회원가입 폼이 Keycloak 기본 테마라 밋밋하다는 피드백에서 출발했다.
+PR #324에서 web 로그인 화면이 monochrome/grid 디자인으로 변경된 뒤에는 인증 전환 시
+시각적 단절이 생기지 않도록 Keycloak 테마도 같은 디자인 시스템으로 맞춘다.
 
 ## 목표 / 비목표
 
-- **목표**: cledyu-learn 자가가입 플로우 전 화면을 다크 slate/sky 톤 + 네온 워드마크 +
-  절제된 마이크로인터랙션(스타일 A)으로 통일. web 앱 로그인 랜딩과 톤 일치.
+- **목표**: cledyu-learn 자가가입 플로우 전 화면을 검정 monochrome/grid 톤 + CLEDYU
+  워드마크 + 절제된 마이크로인터랙션으로 통일. web 앱 로그인 랜딩과 톤 일치.
 - **비목표(이번 범위 밖)**: 이메일 본문 템플릿(별도 theme 타입), 운영 `cledyu` realm
   (ArgoCD/Grafana SSO) 테마, web 앱 자체 리디자인. Kakao/Naver 버튼은 게이트 켜질 때
   같은 스타일로 자연히 포함.
 
 ## 비주얼 방향 (브레인스토밍 확정)
 
-- 스타일 **A — 절제된 마이크로인터랙션**: 버튼 hover 시 `translateY(-2px)` + 글로우,
-  입력창 포커스 시 brand 링 글로우, 부드러운 트랜지션. 무거운 JS·배경 애니메이션 없음.
-- 로고 **V1 — 네온 워드마크**: 대문자 자간 `CLEDYU`, sky 네온 글로우(text-shadow 다단).
-- 토큰: 배경 그라데이션 `#0f172a→#0c1e3a→#172554`, brand `#0ea5e9`(hover `#0284c7`),
-  카드 `rgba(17,28,46,.92)` + border `#1e293b`, 텍스트 `#e2e8f0`/`#94a3b8`.
+- 절제된 마이크로인터랙션: 버튼 hover 시 `translateY(-1px)`, 입력창 포커스 시 흰색 링,
+  부드러운 트랜지션. 무거운 JS·배경 애니메이션 없음.
+- 로고: 대문자 자간 `CLEDYU`, 글로우 없이 web과 같은 얇은 흰색 워드마크.
+- 토큰: 배경 `#030303` + 56px grid, 카드 `rgba(255,255,255,.025)`, 흰색 primary CTA,
+  텍스트 `#f2f2f2`와 반투명 보조색. Kakao/Naver는 각 공식 브랜드 색을 유지.
 
 ## 범위 페이지 (login 테마 타입)
 
@@ -30,12 +32,9 @@
 ### 테마 구조 — `infra/keycloak-theme/cledyu/login/`
 - `theme.properties`: `parent=keycloak`(base 상속, override 최소화), `styles=css/cledyu.css`,
   `locales` 한국어 우선.
-- `resources/css/cledyu.css`: 디자인 토큰 + 스타일 A 인터랙션 + 네온 워드마크 + 카드/폼/
-  소셜버튼(`kc-social-*`) 스타일.
-- `template.ftl`: 공통 레이아웃 오버라이드(그라데이션 배경 + 네온 `CLEDYU` 헤더 + 카드 셸).
-- 페이지별 `.ftl`: 기본 상속, 구조 변경이 필요한 것만 오버라이드.
+- `resources/css/cledyu.css`: monochrome 디자인 토큰 + grid 배경 + 카드/폼/소셜버튼
+  (`kc-social-*`) 스타일. Keycloak 기본 템플릿 구조는 그대로 사용한다.
 - `messages/messages_ko.properties`: 태그라인·커스텀 라벨.
-- `resources/img/`: favicon(네온 마크).
 
 ### 배포 (구현: ConfigMap 마운트 — 커스텀 이미지 대신)
 테마가 CSS+properties뿐(바이너리 에셋 없음)이라 커스텀 이미지/CI 없이 ConfigMap 으로
@@ -58,7 +57,7 @@
 
 ## 테스트 / 검증
 
-- 로컬: 테마 이미지 빌드+실행 → 각 페이지 렌더(네온 로고·다크·스타일 A) 육안 확인.
+- 로컬: Keycloak DOM 미리보기로 데스크톱·모바일·낮은 화면의 렌더와 스크롤 접근성 확인.
 - 라이브: `login_theme` 적용 후 `auth.cledyu.com` 에서 login/register/reset/verify/otp/
   error 페이지 렌더 + 색 대비(접근성) 확인. social 로그인 왕복 회귀 확인.
 - 회귀: 운영 `cledyu` realm 은 `login_theme` 미설정 유지(학습자 realm 만 영향).
@@ -71,4 +70,5 @@
 
 ## 후속(선택)
 
-web 앱 로그인 랜딩 로고를 동일 네온 워드마크로 교체해 Keycloak↔web 완전 통일.
+Keycloak 업그레이드 시 로그인·회원가입·비밀번호 재설정 화면의 classic selector 호환성을
+함께 점검한다.
