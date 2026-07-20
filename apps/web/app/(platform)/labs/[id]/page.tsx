@@ -38,6 +38,12 @@ function LabDetail() {
   >(null);
   const [replaceError, setReplaceError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (!resumedExisting) return;
+    const timer = window.setTimeout(() => setResumedExisting(false), 5000);
+    return () => window.clearTimeout(timer);
+  }, [resumedExisting]);
+
   const {
     data: lab,
     isLoading,
@@ -204,100 +210,148 @@ function LabDetail() {
       {sessionId ? (
         <>
           {resumedExisting && (
-            <div className="mt-6 border border-white/25 bg-white/[0.04] px-4 py-3 text-sm text-white/80">
-              ✔ 이미 진행 중인 실습 세션이 있어 기존 세션으로 이어서 열었습니다.
+            <div
+              role="status"
+              className="mt-6 inline-flex items-center gap-3 border border-white/25 bg-white/[0.04] px-4 py-2.5 text-sm text-white/80"
+            >
+              <span aria-hidden="true" className="h-1.5 w-1.5 bg-emerald-400" />
+              <span>진행 중이던 세션을 이어서 열었습니다.</span>
+              <button
+                type="button"
+                onClick={() => setResumedExisting(false)}
+                aria-label="이어보기 안내 닫기"
+                className="ml-1 text-white/45 transition-colors hover:text-white"
+              >
+                ×
+              </button>
             </div>
           )}
           <LabSession sessionId={sessionId} lab={lab} skipBootGrace={skipBootGrace} />
         </>
       ) : (
-        <div className="mt-10 border border-white/20 bg-white/[0.02] p-8">
+        <div className="mt-10 max-w-[1040px] border-t border-white/20">
           {hasContent ? (
-            <>
-              <h2 className="mb-5 font-jbmono text-xs tracking-[0.12em] text-white/45">
-                STEPS ({steps.length})
-              </h2>
-              <ol className="mb-8 border-t border-white/15">
-                {steps.map((s) => (
-                  <li key={s.id} className="flex gap-5 border-b border-white/15 px-2 py-4 text-sm">
-                    <span className="flex-shrink-0 pt-0.5 font-michroma text-[13px] text-white/35">
-                      {String(s.id).padStart(2, '0')}
-                    </span>
-                    <div>
-                      <p className="font-semibold tracking-[-0.02em] text-white">{s.title}</p>
-                      <p className="mt-1 leading-relaxed text-white/50">{s.description}</p>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-              <button
-                type="button"
-                onClick={() => start.mutate()}
-                disabled={
-                  start.isPending || existingSessionAction !== null || requestedResumeId !== null
-                }
-                className="rounded-full bg-white px-8 py-3 text-sm font-bold text-black transition-colors hover:bg-white/85 disabled:cursor-not-allowed disabled:bg-white/30"
-              >
-                {existingSessionAction === 'checking'
-                  ? requestedResumeId
-                    ? '진행 중인 세션 확인 중...'
-                    : '세션 확인 중...'
-                  : start.isPending
-                    ? '세션 확인 중...'
-                    : existingSessionAction === 'terminating'
-                      ? '기존 세션 종료 중...'
-                      : '실습 시작'}
-              </button>
-              {activeSessionConflict && (
-                <div className="mt-5 max-w-2xl border border-white/30 bg-white/[0.04] px-5 py-4 text-sm">
-                  {/* 다른 Lab 세션은 사용자가 이어가기나 종료를 명시적으로 선택해야 한다. */}
-                  <p className="font-semibold text-white">
-                    이미 진행 중인 다른 실습 세션이 있습니다.
-                  </p>
-                  <p className="mt-1.5 leading-relaxed text-white/60">
-                    한 계정은 동시에 하나의 실습 세션만 사용할 수 있습니다. 기존 실습으로
-                    돌아가거나, 기존 세션을 종료하고 이 실습을 새로 시작할 수 있습니다.
-                  </p>
-                  {replaceError && <p className="mt-2 text-xs text-red-400">{replaceError}</p>}
-                  <div className="flex flex-wrap gap-2 mt-3">
-                    {activeSessionConflict.labId && (
-                      <Link
-                        href={buildActiveSessionResumeHref(
-                          activeSessionConflict.labId,
-                          activeSessionConflict.sessionId,
-                        )}
-                        className="inline-flex items-center rounded-full border border-white/40 px-4 py-2 text-white transition-colors hover:bg-white hover:text-black"
-                      >
-                        진행 중인 실습 이어가기
-                      </Link>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => void replaceExistingSession(activeSessionConflict.sessionId)}
-                      disabled={existingSessionAction !== null}
-                      className="inline-flex items-center rounded-full bg-white px-4 py-2 font-semibold text-black transition-colors hover:bg-white/85 disabled:opacity-50"
-                    >
-                      {existingSessionAction === 'terminating'
-                        ? '기존 세션 종료 중...'
-                        : '기존 세션 종료 후 이 실습 시작'}
-                    </button>
+            <div className="grid gap-10 py-10 lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-16">
+              <div>
+                <h2 className="font-chakra text-2xl font-semibold tracking-[-0.025em] text-white">
+                  실습 환경
+                </h2>
+                <p className="mt-3 break-keep text-sm leading-[1.7] text-white/65">
+                  준비된 전용 VM에서 명령을 실행하고 단계마다 결과를 확인합니다.
+                </p>
+                <dl className="mt-6 border-y border-white/15 font-jbmono text-xs">
+                  <div className="flex items-center justify-between border-b border-white/10 py-3">
+                    <dt className="text-white/45">환경</dt>
+                    <dd className="text-white/80">전용 VM</dd>
                   </div>
-                </div>
-              )}
-              {replaceError && !activeSessionConflict && (
-                <div className="mt-5 max-w-2xl border border-red-500/40 bg-red-500/10 px-5 py-4 text-sm text-red-300">
-                  {replaceError}
-                </div>
-              )}
-              {start.isError &&
-                existingSessionAction === null &&
-                !activeSessionConflict &&
-                !replaceError && (
-                  <span className="ml-3 text-xs text-red-400">세션을 시작하지 못했습니다.</span>
+                  <div className="flex items-center justify-between border-b border-white/10 py-3">
+                    <dt className="text-white/45">검증</dt>
+                    <dd className="text-white/80">자동 채점</dd>
+                  </div>
+                  <div className="flex items-center justify-between py-3">
+                    <dt className="text-white/45">도움</dt>
+                    <dd className="text-white/80">AI 힌트</dd>
+                  </div>
+                </dl>
+                <button
+                  type="button"
+                  onClick={() => start.mutate()}
+                  disabled={
+                    start.isPending || existingSessionAction !== null || requestedResumeId !== null
+                  }
+                  className="mt-6 flex min-h-14 w-full items-center justify-between rounded-full bg-white px-6 text-sm font-bold text-black transition-colors hover:bg-white/85 disabled:cursor-not-allowed disabled:bg-white/30"
+                >
+                  <span>
+                    {existingSessionAction === 'checking'
+                      ? requestedResumeId
+                        ? '진행 중인 세션 확인 중...'
+                        : '세션 확인 중...'
+                      : start.isPending
+                        ? '세션 확인 중...'
+                        : existingSessionAction === 'terminating'
+                          ? '기존 세션 종료 중...'
+                          : '실습 시작하기'}
+                  </span>
+                  <span aria-hidden="true">→</span>
+                </button>
+              </div>
+
+              <div className="min-w-0">
+                {activeSessionConflict && (
+                  <div className="mb-6 border border-white/30 bg-white/[0.04] px-5 py-4 text-sm">
+                    {/* 다른 Lab 세션은 사용자가 이어가기나 종료를 명시적으로 선택해야 한다. */}
+                    <p className="font-semibold text-white">
+                      이미 진행 중인 다른 실습 세션이 있습니다.
+                    </p>
+                    <p className="mt-1.5 leading-relaxed text-white/60">
+                      한 계정은 동시에 하나의 실습 세션만 사용할 수 있습니다. 기존 실습으로
+                      돌아가거나, 기존 세션을 종료하고 이 실습을 새로 시작할 수 있습니다.
+                    </p>
+                    {replaceError && <p className="mt-2 text-xs text-red-400">{replaceError}</p>}
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {activeSessionConflict.labId && (
+                        <Link
+                          href={buildActiveSessionResumeHref(
+                            activeSessionConflict.labId,
+                            activeSessionConflict.sessionId,
+                          )}
+                          className="inline-flex items-center rounded-full border border-white/40 px-4 py-2 text-white transition-colors hover:bg-white hover:text-black"
+                        >
+                          진행 중인 실습 이어가기
+                        </Link>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => void replaceExistingSession(activeSessionConflict.sessionId)}
+                        disabled={existingSessionAction !== null}
+                        className="inline-flex items-center rounded-full bg-white px-4 py-2 font-semibold text-black transition-colors hover:bg-white/85 disabled:opacity-50"
+                      >
+                        {existingSessionAction === 'terminating'
+                          ? '기존 세션 종료 중...'
+                          : '기존 세션 종료 후 이 실습 시작'}
+                      </button>
+                    </div>
+                  </div>
                 )}
-            </>
+                {replaceError && !activeSessionConflict && (
+                  <div className="mb-6 border border-red-500/40 bg-red-500/10 px-5 py-4 text-sm text-red-300">
+                    {replaceError}
+                  </div>
+                )}
+                {start.isError &&
+                  existingSessionAction === null &&
+                  !activeSessionConflict &&
+                  !replaceError && (
+                    <p className="mb-6 text-xs text-red-400">세션을 시작하지 못했습니다.</p>
+                  )}
+
+                <div className="border-b border-white/20 pb-4">
+                  <h3 className="font-chakra text-2xl font-semibold text-white">진행 순서</h3>
+                </div>
+                <ol>
+                  {steps.map((s, index) => (
+                    <li
+                      key={s.id}
+                      className={`border-b border-white/15 px-3 py-4 ${index === 0 ? 'bg-white/[0.035]' : ''}`}
+                    >
+                      <div className="grid grid-cols-[52px_minmax(0,1fr)_auto] items-center gap-3">
+                        <span
+                          className={`font-michroma text-[11px] ${index === 0 ? 'text-white/75' : 'text-white/40'}`}
+                        >
+                          {String(index + 1).padStart(2, '0')}
+                        </span>
+                        <h4 className="font-chakra text-xl font-semibold tracking-[-0.02em] text-white">
+                          {s.title}
+                        </h4>
+                        {index === 0 && <span className="text-xs text-white/50">첫 단계</span>}
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            </div>
           ) : (
-            <p className="text-sm text-white/45">
+            <p className="py-8 text-sm text-white/45">
               이 Lab은 아직 실습 콘텐츠가 준비되지 않았습니다.
             </p>
           )}

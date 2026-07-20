@@ -501,6 +501,9 @@ func (h *Handler) ReapExpiredSessions(ctx context.Context) {
 // GetSessionSteps는 세션의 단계별 진행 상태 목록을 반환한다(프론트 StepProgress[]).
 // GET /api/v1/sessions/:id/steps
 func (h *Handler) GetSessionSteps(c *gin.Context) {
+	if !h.ensureStepSession(c, c.Param("id")) {
+		return
+	}
 	if h.denyIfNotStoreOwner(c, c.Param("id")) {
 		return
 	}
@@ -549,6 +552,10 @@ func (h *Handler) ValidateStep(c *gin.Context) {
 	)
 	defer span.End()
 
+	if !h.ensureStepSession(c, sessionID) {
+		span.SetAttributes(attribute.String("validation.request.result", "session_not_found"))
+		return
+	}
 	if h.denyIfNotStoreOwner(c, sessionID) {
 		span.SetAttributes(attribute.String("validation.request.result", "forbidden"))
 		return

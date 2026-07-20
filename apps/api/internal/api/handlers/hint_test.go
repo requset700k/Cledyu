@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/requset700k/cledyu/api/internal/ai"
 	"github.com/requset700k/cledyu/api/internal/content"
+	"github.com/requset700k/cledyu/api/internal/session"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -112,6 +113,42 @@ func TestRequestHint_SessionNotFound(t *testing.T) {
 	r := hintRouter(h)
 	if w := postHint(r, "unknown", map[string]any{"step_id": 1}); w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+// DB 없는 로컬 API를 재시작하면 in-memory 진행 상태는 사라져도 프로바이더의 VM 세션은
+// 계속 살아 있을 수 있다. 재접속한 세션은 프로바이더 메타데이터로 진행 상태를 복구해
+// 힌트·검증 API를 계속 사용할 수 있어야 한다.
+func TestRequestHint_RecoversActiveProviderSessionAfterStoreReset(t *testing.T) {
+	h := hintTestHandler(t, "")
+	delete(h.steps.m, "s1")
+	h.sessions = &ideSessionProvider{sess: &session.Session{
+		ID: "s1", LabID: "lab-linux-basics", UserID: "test-user", Status: "ready",
+	}}
+
+	w := postHint(hintRouter(h), "s1", map[string]any{"step_id": 1})
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected recovered session hint 200, got %d: %s", w.Code, w.Body.String())
+	}
+	body := decode(t, w)
+	if body["source"] != "static" || body["hint_level"].(float64) != 1 {
+		t.Fatalf("expected recovered static level 1 hint, got %v", body)
+	}
+}
+
+func TestRequestHint_DoesNotRecoverAnotherUsersProviderSession(t *testing.T) {
+	h := hintTestHandler(t, "")
+	delete(h.steps.m, "s1")
+	h.sessions = &ideSessionProvider{sess: &session.Session{
+		ID: "s1", LabID: "lab-linux-basics", UserID: "another-user", Status: "ready",
+	}}
+
+	w := postHint(hintRouter(h), "s1", map[string]any{"step_id": 1})
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected owner-mismatch 404, got %d: %s", w.Code, w.Body.String())
+	}
+	if _, ok := h.steps.m["s1"]; ok {
+		t.Fatal("another user's session must not be restored into the step store")
 	}
 }
 

@@ -67,10 +67,16 @@ export function LabTerminal({
       if (disposed || !containerRef.current) return;
 
       const term = new Terminal({
-        fontSize: 13,
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        fontSize: 14,
+        lineHeight: 1.25,
+        fontFamily: 'JetBrains Mono, ui-monospace, SFMono-Regular, Menlo, monospace',
         cursorBlink: true,
-        theme: { background: '#020617', foreground: '#e2e8f0' },
+        theme: {
+          background: '#000000',
+          foreground: '#f2f2f2',
+          cursor: '#f2f2f2',
+          selectionBackground: '#353535',
+        },
       });
       const fit = new FitAddon();
       term.loadAddon(fit);
@@ -244,21 +250,21 @@ export function LabTerminal({
   }, [terminalPath, onOutput, redrawOnConnect]);
 
   return (
-    <div className="rounded-lg border border-slate-700 bg-slate-950 overflow-hidden">
-      <div className="flex items-center gap-1.5 px-3 py-2 border-b border-slate-800 bg-slate-900">
+    <div className="overflow-hidden rounded-lg border border-white/25 bg-black shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
+      <div className="flex items-center gap-1.5 border-b border-white/15 bg-[#111] px-3.5 py-2.5">
         <span className="w-2.5 h-2.5 rounded-full bg-red-500/70" />
         <span className="w-2.5 h-2.5 rounded-full bg-amber-500/70" />
         <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/70" />
-        <span className="ml-2 text-slate-500 text-xs">terminal — Ubuntu (KubeVirt VM)</span>
+        <span className="ml-2 font-jbmono text-xs text-white/55">lab — ubuntu — bash</span>
         <span
-          className={`ml-auto text-[11px] ${
+          className={`ml-auto font-jbmono text-[11px] ${
             connectionState === 'connected'
               ? 'text-emerald-400'
               : connectionState === 'reconnecting'
                 ? 'text-amber-400'
                 : connectionState === 'error'
                   ? 'text-red-400'
-                  : 'text-slate-500'
+                  : 'text-white/55'
           }`}
         >
           {connectionState === 'connected'
@@ -270,7 +276,7 @@ export function LabTerminal({
                 : '연결 중…'}
         </span>
       </div>
-      <div ref={containerRef} className={`${heightClass} w-full p-2`} />
+      <div ref={containerRef} className={`${heightClass} w-full bg-black p-3`} />
     </div>
   );
 }

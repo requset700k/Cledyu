@@ -15,15 +15,14 @@ tags:
   - filesystem
 steps:
   - id: 1
-    title: 작업 트리 구성
+    title: 작업 디렉터리와 파일 만들기
     description: |
-      홈 아래에 다음 구조를 만들고 로그 파일들을 준비하세요. 중간 경로까지 한 번에
-      만드는 옵션과 brace 확장( {a,b,c} )을 활용하면 명령 수를 줄일 수 있습니다.
+      ~/work 아래에 logs, backup, scripts 디렉터리를 만드세요.
+      logs에는 app1.log, app2.log, debug.txt 파일을 준비하세요.
 
-      ~/work/
-        ├── logs/      ← app1.log, app2.log, debug.txt 생성
-        ├── backup/
-        └── scripts/
+      완료 조건
+      • 디렉터리 3개가 모두 존재합니다.
+      • logs 안에 로그 파일 3개가 모두 존재합니다.
     commands:
       - mkdir -p ~/work/{logs,backup,scripts}
       - touch ~/work/logs/app1.log ~/work/logs/app2.log ~/work/logs/debug.txt
@@ -45,11 +44,15 @@ steps:
       - type: file_exists
         path: /home/lab/work/logs/debug.txt
   - id: 2
-    title: find로 검색하고 복사
-    description: >
-      find 로 ~/work/logs 에서 이름이 .log 로 끝나는 파일만 찾아 ~/work/backup 으로
-      복사하세요. -name 패턴과 -exec(또는 xargs)를 조합합니다. debug.txt 는 복사되면
-      안 됩니다.
+    title: find로 로그 파일 찾아 복사하기
+    description: |
+      find를 사용해 ~/work/logs에서 .log 파일만 찾아 ~/work/backup으로 복사하세요.
+      원본 파일은 logs에 그대로 남아 있어야 합니다.
+
+      완료 조건
+      • backup 안에 app1.log와 app2.log가 존재합니다.
+      • debug.txt는 backup에 복사되지 않습니다.
+      • logs의 원본 파일 3개가 그대로 존재합니다.
     commands:
       - find ~/work/logs -name "*.log" -exec cp {} ~/work/backup/ \;
       - ls ~/work/backup
@@ -75,11 +78,14 @@ steps:
       - type: file_exists
         path: /home/lab/work/logs/debug.txt
   - id: 3
-    title: 권한 설계
-    description: >
-      scripts 디렉터리는 소유자 전체/그룹 읽기·실행만(750), 로그 파일 app1.log 는
-      소유자 읽기·쓰기/그룹 읽기만(640)으로 권한을 설계하세요. 8진수 표기에서 각 자리가
-      소유자/그룹/기타의 rwx 합(4+2+1)이라는 점을 이용합니다.
+    title: 파일과 디렉터리 권한 설정하기
+    description: |
+      scripts 디렉터리의 권한을 750으로 설정하세요.
+      app1.log 파일의 권한은 640으로 설정하세요.
+
+      완료 조건
+      • scripts는 소유자 rwx, 그룹 r-x, 기타 권한 없음으로 설정됩니다.
+      • app1.log는 소유자 rw-, 그룹 r--, 기타 권한 없음으로 설정됩니다.
     commands:
       - chmod 750 ~/work/scripts
       - chmod 640 ~/work/logs/app1.log
@@ -96,11 +102,14 @@ steps:
         command: stat -c %a /home/lab/work/logs/app1.log
         expect: "640"
   - id: 4
-    title: 텍스트 처리 — grep과 리다이렉션
-    description: >
-      /etc/passwd 에서 로그인 셸이 /bin/bash 인 계정 행만 추려 ~/work/bash-users.txt 로
-      저장하세요. grep 의 패턴 매칭과 출력 리다이렉션(>)을 조합합니다. lab 계정이
-      포함되어 있는지 cat 으로 확인해 보세요.
+    title: grep 결과를 파일로 저장하기
+    description: |
+      /etc/passwd에서 로그인 셸이 /bin/bash인 계정만 찾으세요.
+      결과는 ~/work/bash-users.txt에 저장하세요.
+
+      완료 조건
+      • 결과 파일에 lab 계정과 /bin/bash가 포함됩니다.
+      • nologin 계정은 포함되지 않습니다.
     commands:
       - grep /bin/bash /etc/passwd > ~/work/bash-users.txt
       - cat ~/work/bash-users.txt
@@ -119,11 +128,14 @@ steps:
         path: /home/lab/work/bash-users.txt
         expect: nologin
   - id: 5
-    title: tar 아카이브
-    description: >
-      logs 디렉터리 전체를 gzip 압축 아카이브 ~/work/backup/logs.tar.gz 로 묶으세요.
-      -C 옵션으로 기준 디렉터리를 ~/work 로 두면 아카이브 내부 경로가 logs/... 로
-      깔끔해집니다. 만들고 나서 목록(-t)으로 내용을 확인하세요.
+    title: tar로 로그 디렉터리 압축하기
+    description: |
+      ~/work/logs 전체를 gzip 형식의 ~/work/backup/logs.tar.gz로 압축하세요.
+      아카이브 내부 경로는 logs/에서 시작해야 합니다.
+
+      완료 조건
+      • logs.tar.gz 파일이 backup 안에 존재합니다.
+      • 아카이브에 app1.log, app2.log, debug.txt가 모두 포함됩니다.
     commands:
       - tar czf ~/work/backup/logs.tar.gz -C ~/work logs
       - tar tzf ~/work/backup/logs.tar.gz
@@ -144,11 +156,13 @@ steps:
         command: tar tzf /home/lab/work/backup/logs.tar.gz
         expect: logs/debug.txt
   - id: 6
-    title: 심볼릭 링크
-    description: >
-      자주 여는 로그에 빠르게 접근하도록 ~/latest-log 라는 심볼릭 링크를
-      ~/work/logs/app1.log 로 만들어 보세요. ls -l 로 링크가 가리키는 대상을,
-      stat 으로 파일 유형을 확인합니다.
+    title: 심볼릭 링크 만들기
+    description: |
+      ~/latest-log가 ~/work/logs/app1.log를 가리키는 심볼릭 링크가 되도록 만드세요.
+
+      완료 조건
+      • latest-log의 파일 유형이 심볼릭 링크입니다.
+      • 링크의 최종 대상이 ~/work/logs/app1.log입니다.
     commands:
       - ln -s ~/work/logs/app1.log ~/latest-log
       - ls -l ~/latest-log

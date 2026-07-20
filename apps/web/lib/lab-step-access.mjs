@@ -27,3 +27,16 @@ export function isStepSelectable(steps, stepId, statusOf) {
 
   return targetIndex <= firstSelectableFutureIndex(steps, statusOf);
 }
+
+/**
+ * Lab DSL의 step id가 연속이라는 보장은 없으므로 사용자에게 보여주는 진행 순서는
+ * id 자체가 아니라 정렬된 steps 배열에서의 위치를 기준으로 계산한다.
+ *
+ * @param {{ id: number }[]} steps
+ * @param {number} stepId
+ * @returns {number | null}
+ */
+export function stepPosition(steps, stepId) {
+  const index = steps.findIndex((step) => step.id === stepId);
+  return index === -1 ? null : index + 1;
+}

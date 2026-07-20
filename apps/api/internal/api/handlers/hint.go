@@ -36,6 +36,9 @@ func (h *Handler) RequestHint(c *gin.Context) {
 	}
 
 	sessionID := c.Param("id")
+	if !h.ensureStepSession(c, sessionID) {
+		return
+	}
 	if h.denyIfNotStoreOwner(c, sessionID) {
 		return
 	}
