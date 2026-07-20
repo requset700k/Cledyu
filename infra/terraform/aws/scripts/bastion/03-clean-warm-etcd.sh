@@ -172,4 +172,92 @@ done
 }
 echo "P1e: Vault raft PVC 정리 완료 — [7] 의 init 이 fresh Vault 를 만난다"
 
+# [P1f] stale Kafka PVC — Vault(P1e)와 같은 warm-etcd 잔존물(2026-07-18 드릴 실측).
+# Kafka 는 deleteClaim:false 라 teardown 이 EBS 만 지우고(우리 failback CleanupOrphans 는 AWS 레벨로
+# EBS 만 삭제) PVC/PV 객체는 warm etcd 에 남는다 → 다음 failover 에 stale PVC 가 이미 삭제된 EBS(vol-...)
+# 를 물어 FailedAttachVolume → 브로커가 영영 ContainerCreating → [9] WaitAppsReady 가
+# kafka/cledyu-kafka Ready 를 못 봐 타임아웃(실측: 브로커 3개 전부 vol-... NotFound).
+# DR Kafka 는 매 failover 새로 뜨는 일회성이라 PVC 를 지워 ebs-csi 가 fresh EBS 를 프로비저닝하게 한다.
+# ⚠️ kafka ns 엔 이 PVC(data-cledyu-kafka-*) 말고 PVC 를 만드는 게 없다 → --all 이 셀렉터 오타 불가.
+# ⚠️ 브로커가 PVC 를 붙들면(재실행·노드 살아있음) pvc-protection 으로 Terminating 고착 → 브로커도 지운다.
+#    실재해(노드 0)엔 파드가 없어 pod delete 는 no-op 이다.
+if kubectl get ns kafka > /dev/null 2>&1; then
+  kubectl -n kafka delete pvc --all --wait=false
+  kubectl -n kafka delete pod -l strimzi.io/name=cledyu-kafka-kafka --ignore-not-found
+
+  # 게이트: 실제로 사라졌나. Terminating 고착이면 Kafka 가 그 PVC 를 재사용 → 위 FailedAttachVolume 재현.
+  # 새 PVC 는 deletionTimestamp 가 없으므로 "timestamp 있는 게 하나라도 있으면 아직"으로 판정(P1e 와 동일).
+  for i in $(seq 1 24); do
+    STUCK=$(kubectl -n kafka get pvc \
+      -o jsonpath='{range .items[*]}{.metadata.deletionTimestamp}{"\n"}{end}' 2> /dev/null |
+      grep -c . || true)
+    [ "${STUCK:-0}" -eq 0 ] && break
+    echo "Kafka PVC Terminating 대기 ${STUCK}개 ($i/24)"
+    sleep 5
+  done
+  [ "${STUCK:-0}" -eq 0 ] || {
+    echo "❌ Kafka PVC 가 2분째 Terminating — 브로커가 아직 붙들고 있다(노드 살아있는 채 [3] 실행?)."
+    echo "   kubectl -n kafka get pod -o wide 확인 후 노드 0 으로 내리고 재실행하라."
+    exit 1
+  }
+  echo "P1f: Kafka PVC 정리 완료 — 브로커가 fresh EBS 를 프로비저닝한다"
+fi
+
+# ── [P1g] stale TargetGroupBinding CR (2026-07-18 드릴 실측) ─────────────────
+# P1e·P1f 와 **같은 계열의 warm-etcd 잔존물**이다. failback teardown(approach B)은 ALB·타겟그룹을
+# AWS 레벨로 지우지만(CleanupOrphans), 그 타겟그룹을 참조하던 **TargetGroupBinding CR 은 warm etcd 에
+# 남는다** — Kafka 가 EBS 만 지우고 PVC 를 남기는 것과 정확히 같은 구조(deleteClaim:false 격).
+#
+# TGB 이름(k8s-<ns>-<svc>-<hash>)은 ns/service/port 로부터 **결정적**이라, 다음 failover 에 LB 컨트롤러가
+# 만들려는 이름과 그대로 충돌한다: `targetgroupbindings "k8s-api-api-*" already exists` → **Ingress
+# deploy model 이 실패** → 컨트롤러가 그 사이클의 fresh 타겟그룹 생성·**WAF 연결·Ingress status 갱신을
+# 전부 완료하지 못한다.** 그 최종 증상이 [10] SwitchDNS 의 `WAF 미연결`(2026-07-18 exec b2f12033 실측).
+# 게다가 stale TGB 는 이미 삭제된 TG(TargetGroupNotFound)를 계속 물어 reconcile 에러를 무한 반복한다.
+#
+# ⚠️ **왜 07-16 최초 failover 는 통과했나:** 그땐 이 CR 이 애초에 없었다(첫 사이클). teardown 이 이 CR 을
+#    남긴 것이 회귀의 근원 — 즉 이 정리 블록의 부재가 곧 버그다.
+# [3] 시점엔 앱이 아직 sync 전([9] 이 나중)이라 **여기 존재하는 TGB 는 전부 이전 사이클 stale** 이다.
+# 지우면 컨트롤러가 앱 sync 때 fresh TG ARN 으로 재생성한다.
+# ⚠️ stale TGB 는 이미 없는 TG 를 물어 finalizer(elbv2.k8s.aws/resources)의 cleanup(DeregisterTargets)이
+#    할 일이 없다 → 그냥 두면 finalizer 가 Terminating 에 고착할 수 있다. cleanup 이 무의미하므로
+#    **finalizer 를 떼고** 지운다. 남은 Terminating(같은 이름)도 fresh 생성엔 "already exists" 라 똑같이 막는다.
+# ⚠️ CRD 게이트(P1f 의 ns 게이트와 같은 취지) — 첫 failover/fresh 클러스터엔 AWS LB Controller 가 아직
+#    없어([6] GitOps 이후 설치) TargetGroupBinding CRD 가 없다. 그 상태에서 `kubectl get targetgroupbinding`
+#    은 exit 1 이고 set -euo pipefail 이 이를 전파해 [3] 을 죽인다(2>/dev/null 은 stderr 만 가림, exit code 는
+#    그대로). CRD 존재를 먼저 확인해 **CRD 없음(=정상 no-op)** 과 실제 삭제 실패를 구분한다.
+if kubectl get crd targetgroupbindings.elbv2.k8s.aws > /dev/null 2>&1; then
+  kubectl get targetgroupbinding -A \
+    -o jsonpath='{range .items[*]}{.metadata.namespace}{" "}{.metadata.name}{"\n"}{end}' 2> /dev/null |
+    while read -r ns name; do
+      [ -z "$ns" ] && continue
+      kubectl -n "$ns" patch targetgroupbinding "$name" --type merge \
+        -p '{"metadata":{"finalizers":[]}}' 2> /dev/null || true
+      kubectl -n "$ns" delete targetgroupbinding "$name" --ignore-not-found --wait=false
+      echo "P1g: stale TGB 제거 ${ns}/${name}"
+    done
+
+  # 게이트: **총 개수가 아니라 deletionTimestamp(Terminating 고착)만 본다**(P1e/P1f 와 동일, 리뷰 P1).
+  # 🔴 구 게이트(개수 0 대기)는 **부분 failover 재실행에서 오탐으로 죽었다**: 노드·LB 컨트롤러가 살아있는
+  #    상태(앱 sync 이후 실패→재실행)면 삭제 직후 컨트롤러가 기존 Ingress 를 보고 **fresh TGB 를 즉시 재생성**
+  #    한다(fresh TG 를 물음 = stale 아님, 정상). 개수 0 을 기다리면 건강한 재실행이 2분 뒤 죽어 DR 재시도를 막는다.
+  # finalizer 를 떼고 지웠으므로 정상이면 Terminating 이 안 남는다; 컨트롤러 재생성분은 deletionTimestamp 가
+  # 없어 여기 안 걸린다. 남는 건 **finalizer 고착(진짜 stale)** 뿐 — 그것만 실패시킨다.
+  for i in $(seq 1 24); do
+    STUCK=$(kubectl get targetgroupbinding -A \
+      -o jsonpath='{range .items[*]}{.metadata.deletionTimestamp}{"\n"}{end}' 2> /dev/null |
+      grep -c . || true)
+    [ "${STUCK:-0}" -eq 0 ] && break
+    echo "TGB Terminating 고착 대기 ${STUCK}개 ($i/24)"
+    sleep 5
+  done
+  [ "${STUCK:-0}" -eq 0 ] || {
+    echo "❌ TargetGroupBinding 이 2분째 Terminating 고착 ${STUCK}개 — finalizer 안 떨어짐."
+    echo "   kubectl get targetgroupbinding -A 로 확인 후 finalizer 를 수동으로 떼라."
+    exit 1
+  }
+  echo "P1g: stale TargetGroupBinding 정리 완료(컨트롤러 재생성분은 fresh 라 허용)"
+else
+  echo "P1g: TargetGroupBinding CRD 없음 — 첫 failover(LB 컨트롤러 미설치) no-op"
+fi
+
 echo "✅ warm etcd 정리 완료"
