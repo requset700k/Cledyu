@@ -305,7 +305,7 @@ input:focus-visible {
 
 #kc-social-providers h2 {
   margin: 0 0 14px !important;
-  color: var(--cledyu-subtle) !important;
+  color: var(--cledyu-muted) !important;
   font-size: 12px !important;
   font-weight: 400 !important;
   text-align: center;
