@@ -410,14 +410,14 @@ function SessionBoot({
   graceMs: number;
   onGraceComplete: () => void;
 }) {
-  // 진행률 표시(0~100%). provisioning 단계는 첫 30%까지만 채워 시각적 진행 인상을 준다.
+  // 진행률 표시(0~100%). API provisioning_stage와 ready 이후 grace 시간을 함께 반영한다.
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 500);
     return () => clearInterval(t);
   }, []);
 
-  const graceState = bootGraceViewState(status, graceStartedAt, now, graceMs);
+  const graceState = bootGraceViewState(status, graceStartedAt, now, graceMs, provisioningStage);
   useEffect(() => {
     if (graceState.complete) onGraceComplete();
   }, [graceState.complete, onGraceComplete]);
