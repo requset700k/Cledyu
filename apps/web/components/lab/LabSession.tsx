@@ -417,13 +417,7 @@ function SessionBoot({
     return () => clearInterval(t);
   }, []);
 
-  const graceState = bootGraceViewState(
-    status,
-    graceStartedAt,
-    now,
-    graceMs,
-    provisioningStage,
-  );
+  const graceState = bootGraceViewState(status, graceStartedAt, now, graceMs, provisioningStage);
   useEffect(() => {
     if (graceState.complete) onGraceComplete();
   }, [graceState.complete, onGraceComplete]);
